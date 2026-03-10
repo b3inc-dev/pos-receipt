@@ -1,0 +1,256 @@
+// POS Receipt アプリ DB スキーマ（MVP）
+// 要件書 第20章・第11章に基づく
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========== Shopify セッション（アプリ認証用） ==========
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+// ========== 20.1 ショップ（アプリ用メタデータ） ==========
+model Shop {
+  id               String   @id @default(cuid())
+  shopifyShopGid   String   @unique // Shopify Shop GID
+  shopDomain       String
+  planCode         String?  // standard | pro、自社用時は無制限
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  locations        Location[]
+  appSettings      AppSetting[]
+  settlements      Settlement[]
+  specialRefundEvents SpecialRefundEvent[]
+  receiptTemplates ReceiptTemplate[]
+  receiptIssues    ReceiptIssue[]
+  budgets          Budget[]
+  footfallReports  FootfallReport[]
+  salesSummaryCacheDaily   SalesSummaryCacheDaily[]
+  salesSummaryCachePeriod  SalesSummaryCachePeriod[]
+}
+
+// ========== 20.2 ロケーション（印字方式・サマリー設定） ==========
+model Location {
+  id                      String   @id @default(cuid())
+  shopId                  String
+  shop                    Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shopifyLocationGid      String   // Shopify Location GID
+  name                    String
+  code                    String?
+  printMode               String   @default("order_based") // cloudprnt_direct | order_based
+  salesSummaryEnabled     Boolean  @default(false)
+  footfallReportingEnabled Boolean @default(false)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([shopId, shopifyLocationGid])
+  @@index([shopId])
+}
+
+// ========== 20.3 アプリ設定（キー・値） ==========
+model AppSetting {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  key       String
+  valueJson String   // JSON 文字列
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shopId, key])
+  @@index([shopId])
+}
+
+// ========== 20.4 精算 ==========
+model Settlement {
+  id                   String    @id @default(cuid())
+  shopId               String
+  shop                 Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  locationId           String    // Shopify Location GID
+  sourceOrderId        String?   // CloudPRNT 非対応時のみ精算注文 ID
+  sourceOrderName      String?
+  targetDate           String    // YYYY-MM-DD
+  periodLabel          String?
+  currency             String?
+  total                Decimal   @db.Decimal(18, 2)
+  netSales             Decimal   @db.Decimal(18, 2)
+  tax                  Decimal   @db.Decimal(18, 2)
+  discounts            Decimal   @db.Decimal(18, 2)
+  vipPointsUsed        Decimal   @db.Decimal(18, 2)
+  refundTotal          Decimal   @db.Decimal(18, 2)
+  orderCount           Int
+  refundCount          Int
+  itemCount            Int
+  voucherChangeAmount  Decimal   @db.Decimal(18, 2)
+  paymentSectionsJson  String    // 支払方法別内訳の JSON
+  printMode            String    // cloudprnt_direct | order_based
+  printedAt            DateTime?
+  status               String    @default("draft") // draft | completed | printed | failed
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([shopId, targetDate])
+  @@index([locationId, targetDate])
+}
+
+// ========== 20.5 特殊返金・商品券調整イベント ==========
+model SpecialRefundEvent {
+  id                      String   @id @default(cuid())
+  shopId                  String
+  shop                    Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  sourceOrderId           String
+  sourceOrderName         String?
+  locationId              String
+  eventType               String   // cash_refund | payment_method_override | voucher_change_adjustment | receipt_cash_adjustment
+  originalPaymentMethod   String?
+  actualRefundMethod      String?
+  amount                  Decimal  @db.Decimal(18, 2)
+  currency                String?
+  voucherFaceValue        Decimal? @db.Decimal(18, 2)
+  voucherAppliedAmount    Decimal? @db.Decimal(18, 2)
+  voucherChangeAmount     Decimal? @db.Decimal(18, 2)
+  adjustKind              String?  // undo | extra（receipt_cash_adjustment 用）
+  note                    String?
+  createdBy               String?
+  status                  String   @default("active") // active | voided
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([shopId, sourceOrderId])
+  @@index([locationId, createdAt])
+  @@index([eventType, createdAt])
+}
+
+// ========== 20.6 領収書テンプレート（MVP は 1 件のみ active） ==========
+model ReceiptTemplate {
+  id          String   @id @default(cuid())
+  shopId      String
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name        String
+  isActive    Boolean  @default(false)
+  templateJson String  // レイアウト等の JSON
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([shopId])
+}
+
+// ========== 20.7 領収書発行履歴 ==========
+model ReceiptIssue {
+  id              String   @id @default(cuid())
+  shopId          String
+  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  orderId         String
+  orderName       String?
+  locationId      String
+  recipientName   String?
+  proviso         String?  // 但し書き
+  amount          Decimal  @db.Decimal(18, 2)
+  currency        String?
+  templateId      String?
+  templateVersion Int?
+  isReissue       Boolean  @default(false)
+  createdBy       String?
+  createdAt       DateTime @default(now())
+
+  @@index([shopId, orderId])
+  @@index([locationId, createdAt])
+}
+
+// ========== 20.8 予算 ==========
+model Budget {
+  id          String   @id @default(cuid())
+  shopId      String
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  locationId  String
+  targetDate  String   // YYYY-MM-DD
+  amount      Decimal  @db.Decimal(18, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([shopId, locationId, targetDate])
+  @@index([shopId])
+}
+
+// ========== 20.9 入店数報告 ==========
+model FootfallReport {
+  id         String   @id @default(cuid())
+  shopId     String
+  shop       Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  locationId String
+  targetDate String   // YYYY-MM-DD
+  visitors   Int
+  createdBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([shopId, locationId, targetDate])
+  @@index([shopId])
+}
+
+// ========== 20.10 売上サマリー日次キャッシュ ==========
+model SalesSummaryCacheDaily {
+  id           String   @id @default(cuid())
+  shopId       String
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  locationId   String
+  targetDate   String   // YYYY-MM-DD
+  actual       Decimal  @db.Decimal(18, 2)
+  orders       Int
+  items        Int
+  visitors     Int?
+  conv         Decimal? @db.Decimal(10, 4)  // 購買率
+  atv          Decimal? @db.Decimal(18, 2) // 客単価
+  setRate      Decimal? @db.Decimal(10, 4) // セット率
+  unit         Decimal? @db.Decimal(18, 2) // 一品単価
+  budget       Decimal? @db.Decimal(18, 2)
+  budgetRatio  Decimal? @db.Decimal(10, 4)  // 予算比
+  updatedAt    DateTime @updatedAt
+
+  @@unique([shopId, locationId, targetDate])
+  @@index([shopId])
+}
+
+// ========== 20.11 売上サマリー期間キャッシュ ==========
+model SalesSummaryCachePeriod {
+  id                    String   @id @default(cuid())
+  shopId                String
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  locationId            String
+  periodType            String   // month | custom_range
+  periodKey             String   // 例: 2025-03
+  startDate             String?
+  endDate               String?
+  budgetTotal           Decimal? @db.Decimal(18, 2)
+  actualTotal           Decimal? @db.Decimal(18, 2)
+  progressBudgetToday   Decimal? @db.Decimal(18, 2)
+  progressBudgetPrev    Decimal? @db.Decimal(18, 2)
+  updatedAt             DateTime @updatedAt
+
+  @@unique([shopId, locationId, periodType, periodKey])
+  @@index([shopId])
+}

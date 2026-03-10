@@ -1,0 +1,8 @@
+{
+  "name": "pos-smart-grid",
+  "tile_heading": "POS smart grid",
+  "tile_subheading": "{{flavor}} Extension",
+  "modal_heading": "POS modal",
+  "welcome": "Welcome to the {{flavor}} extension"
+}
+

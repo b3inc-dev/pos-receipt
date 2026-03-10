@@ -1,0 +1,24 @@
+api_version = "2026-01"
+
+[[extensions]]
+type = "ui_extension"
+# Change the merchant-facing name of the extension in locales/en.default.json
+name = "t:name"
+uid = "149c1d23-b280-f51c-42ee-3a558fd9cf8a2b8ba0cd"
+handle = "pos-smart-grid"
+description = "A preact POS UI extension"
+
+# module: file that contains your extension’s source code
+# target: location where your extension appears in POS
+[[extensions.targeting]]
+module = "./src/Tile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/Modal.jsx"
+target = "pos.home.modal.render"
+
+# 取引詳細画面から「この取引で開く」でモーダル起動
+[[extensions.targeting]]
+module = "./src/OrderAction.jsx"
+target = "pos.order-details.action.menu-item.render"
