@@ -1,25 +1,11 @@
 api_version = "2026-01"
 
 # ============================================================
-# 1. 精算タイル
-# ============================================================
-[[extensions]]
-type = "ui_extension"
-name = "精算"
-uid = "c4d5e6f7-a8b9-4abc-def0-123456789001"
-handle = "pos-settlement"
-description = "商業施設向け精算レシート出力"
-
-[[extensions.targeting]]
-module = "./src/SettlementTile.jsx"
-target = "pos.home.tile.render"
-
-[[extensions.targeting]]
-module = "./src/SettlementModal.jsx"
-target = "pos.home.modal.render"
-
-# ============================================================
-# 2. 特殊返金・商品券調整タイル
+# 特殊返金・商品券調整タイル（登録済み UID）
+#
+# 他3タイル（精算 / 領収書 / 売上サマリー）は
+# `shopify app generate extension` で UID を発行してから追加する
+# ソースファイルは src/ に作成済み（Phase 5–7 で接続）
 # ============================================================
 [[extensions]]
 type = "ui_extension"
@@ -39,43 +25,3 @@ target = "pos.home.modal.render"
 [[extensions.targeting]]
 module = "./src/SpecialRefundOrderAction.jsx"
 target = "pos.order-details.action.menu-item.render"
-
-# ============================================================
-# 3. 領収書タイル
-# ============================================================
-[[extensions]]
-type = "ui_extension"
-name = "領収書"
-uid = "d5e6f7a8-b9c0-4bcd-ef01-234567890002"
-handle = "pos-receipt-tile"
-description = "日本向け領収書発行・再発行"
-
-[[extensions.targeting]]
-module = "./src/ReceiptTile.jsx"
-target = "pos.home.tile.render"
-
-[[extensions.targeting]]
-module = "./src/ReceiptModal.jsx"
-target = "pos.home.modal.render"
-
-[[extensions.targeting]]
-module = "./src/ReceiptOrderAction.jsx"
-target = "pos.order-details.action.menu-item.render"
-
-# ============================================================
-# 4. 売上サマリータイル
-# ============================================================
-[[extensions]]
-type = "ui_extension"
-name = "売上サマリー"
-uid = "e6f7a8b9-c0d1-4cde-f012-345678900003"
-handle = "pos-sales-summary"
-description = "全ロケーション横断の売上・予算・KPI確認"
-
-[[extensions.targeting]]
-module = "./src/SalesSummaryTile.jsx"
-target = "pos.home.tile.render"
-
-[[extensions.targeting]]
-module = "./src/SalesSummaryModal.jsx"
-target = "pos.home.modal.render"
