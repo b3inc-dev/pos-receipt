@@ -1734,16 +1734,21 @@ Responsibility:
 | **公開用・自社用の分離** | `shopify.app.public.toml`（公開用・`https://pos-receipt.onrender.com`）を新規作成。`shopify.app.toml` は自社用（POS Receipt - Ciara）用に整理。`extensions/common/appUrl.js` で `APP_MODE`（public / inhouse）と `getAppUrl()` を定義。 |
 | **Prompt 3（注文検索・取引選択）** | 注文検索 API（`GET /api/orders/search`：q, locationId, dateFrom, dateTo, cursor, limit）と注文詳細 API（`GET /api/orders/:orderId`）を実装。POS 共通の `extensions/common/orderPickerApi.js`（searchOrders, getOrder）を用意。POS タイル用モーダル（`extensions/pos-smart-grid/src/Modal.jsx`）で検索・一覧・選択 UI を実装。注文詳細画面から「この取引で開く」で起動する `OrderAction.jsx`（target: pos.order-details.action.menu-item.render）を追加。 |
 | **Render・URL 設定** | Render 用の手順を `docs/RENDER_SETUP.md`、`docs/RENDER_DATABASE_URL.md`、`docs/NEXT_STEPS_AFTER_RENDER.md` に記載。公開用の Shopify URL を Render に合わせて `shopify.app.public.toml` に設定（application_url / redirect_urls）。 |
+| **Prompt 4（特殊返金・商品券調整）** | Backend: `app/utils/shopResolver.server.ts`、`api.special-refunds.tsx`（GET list / POST create）、`api.special-refunds.$id.void.tsx`（POST void）、`api.voucher-adjustments.tsx`（POST create）を実装。POS 拡張: 4タイル構成へ分割（`shopify.extension.toml` に精算・特殊返金・領収書・売上サマリーの 4 `[[extensions]]` ブロック）。`extensions/common/specialRefundApi.js`、`SpecialRefundTile.jsx`、`SpecialRefundModal.jsx`（多ステップウィザード）、`SpecialRefundOrderAction.jsx` を実装。他3タイルはスタブ（Phase 5–7 で実装）。 |
 
 ### 30.2 主要ファイル一覧（実装済み）
 
-- **Backend**: `app/shopify.server.ts`, `app/db.server.ts`, `app/routes/api.orders.search.tsx`, `app/routes/api.orders.$orderId.tsx`, `app/routes/app.tsx`, `app/routes/auth.$.tsx` 他
-- **POS 拡張**: `extensions/common/appUrl.js`, `extensions/common/orderPickerApi.js`, `extensions/pos-smart-grid/src/Modal.jsx`, `extensions/pos-smart-grid/src/OrderAction.jsx`
+- **Backend**: `app/shopify.server.ts`, `app/db.server.ts`, `app/routes/api.orders.search.tsx`, `app/routes/api.orders.$orderId.tsx`, `app/routes/api.special-refunds.tsx`, `app/routes/api.special-refunds.$id.void.tsx`, `app/routes/api.voucher-adjustments.tsx`, `app/utils/shopResolver.server.ts`
+- **POS 拡張**: `extensions/common/appUrl.js`, `extensions/common/orderPickerApi.js`, `extensions/common/specialRefundApi.js`
+  - 精算: `SettlementTile.jsx`, `SettlementModal.jsx`（スタブ）
+  - 特殊返金: `SpecialRefundTile.jsx`, `SpecialRefundModal.jsx`, `SpecialRefundOrderAction.jsx`
+  - 領収書: `ReceiptTile.jsx`, `ReceiptModal.jsx`, `ReceiptOrderAction.jsx`（スタブ）
+  - 売上サマリー: `SalesSummaryTile.jsx`, `SalesSummaryModal.jsx`（スタブ）
 - **設定**: `shopify.app.toml`（自社用）, `shopify.app.public.toml`（公開用）, `prisma/schema.prisma`
 - **ドキュメント**: `docs/PROJECT_STRUCTURE_PROPOSAL.md`, `docs/DB_MIGRATION.md`, `docs/PUBLIC_INHOUSE_APP_DEFINITION.md`, `docs/CLI_SETUP_AND_USAGE.md`, `docs/RENDER_SETUP.md`, `docs/NEXT_STEPS_AFTER_RENDER.md` 他
 
 ### 30.3 次のステップ
 
-- **Prompt 4**: 特殊返金・商品券調整イベントの create / list / void API と POS UI（event_type 4種対応）。
-- 上記のあと、Prompt 5（精算）→ Prompt 6（領収書）→ Prompt 7（売上サマリー）の順で実装を進める。
+- **Prompt 5（精算）**: Settlement Engine、印字分岐（CloudPRNT / order-based）、点検レシート、精算履歴。
+- 上記のあと、Prompt 6（領収書）→ Prompt 7（売上サマリー）→ Prompt 8（Billing）の順で実装を進める。
 

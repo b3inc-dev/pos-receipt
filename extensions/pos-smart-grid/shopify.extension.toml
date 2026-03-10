@@ -1,24 +1,81 @@
 api_version = "2026-01"
 
+# ============================================================
+# 1. 精算タイル
+# ============================================================
 [[extensions]]
 type = "ui_extension"
-# Change the merchant-facing name of the extension in locales/en.default.json
-name = "t:name"
-uid = "149c1d23-b280-f51c-42ee-3a558fd9cf8a2b8ba0cd"
-handle = "pos-smart-grid"
-description = "A preact POS UI extension"
+name = "精算"
+uid = "c4d5e6f7-a8b9-4abc-def0-123456789001"
+handle = "pos-settlement"
+description = "商業施設向け精算レシート出力"
 
-# module: file that contains your extension’s source code
-# target: location where your extension appears in POS
 [[extensions.targeting]]
-module = "./src/Tile.jsx"
+module = "./src/SettlementTile.jsx"
 target = "pos.home.tile.render"
 
 [[extensions.targeting]]
-module = "./src/Modal.jsx"
+module = "./src/SettlementModal.jsx"
 target = "pos.home.modal.render"
 
-# 取引詳細画面から「この取引で開く」でモーダル起動
+# ============================================================
+# 2. 特殊返金・商品券調整タイル
+# ============================================================
+[[extensions]]
+type = "ui_extension"
+name = "特殊返金・商品券調整"
+uid = "149c1d23-b280-f51c-42ee-3a558fd9cf8a2b8ba0cd"
+handle = "pos-special-refund"
+description = "返金手段変更・商品券釣有り差額の後処理"
+
 [[extensions.targeting]]
-module = "./src/OrderAction.jsx"
+module = "./src/SpecialRefundTile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/SpecialRefundModal.jsx"
+target = "pos.home.modal.render"
+
+[[extensions.targeting]]
+module = "./src/SpecialRefundOrderAction.jsx"
 target = "pos.order-details.action.menu-item.render"
+
+# ============================================================
+# 3. 領収書タイル
+# ============================================================
+[[extensions]]
+type = "ui_extension"
+name = "領収書"
+uid = "d5e6f7a8-b9c0-4bcd-ef01-234567890002"
+handle = "pos-receipt-tile"
+description = "日本向け領収書発行・再発行"
+
+[[extensions.targeting]]
+module = "./src/ReceiptTile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/ReceiptModal.jsx"
+target = "pos.home.modal.render"
+
+[[extensions.targeting]]
+module = "./src/ReceiptOrderAction.jsx"
+target = "pos.order-details.action.menu-item.render"
+
+# ============================================================
+# 4. 売上サマリータイル
+# ============================================================
+[[extensions]]
+type = "ui_extension"
+name = "売上サマリー"
+uid = "e6f7a8b9-c0d1-4cde-f012-345678900003"
+handle = "pos-sales-summary"
+description = "全ロケーション横断の売上・予算・KPI確認"
+
+[[extensions.targeting]]
+module = "./src/SalesSummaryTile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/SalesSummaryModal.jsx"
+target = "pos.home.modal.render"
