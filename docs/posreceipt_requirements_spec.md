@@ -1718,3 +1718,32 @@ Responsibility:
 ### Prompt 7
 売上サマリー API、予算管理、入店数報告、日次 / 期間キャッシュ、管理画面設定を実装してください。
 
+---
+
+## 30. 実装済み内容（進捗メモ）
+
+本書の実装指示に沿って作業した結果を記録する。日付は完了した時点の目安。
+
+### 30.1 完了した作業
+
+| 項目 | 内容 |
+|------|------|
+| **Prompt 1** | プロジェクト構成案を作成。`docs/PROJECT_STRUCTURE_PROPOSAL.md` に Admin App / POS Extensions / Backend API / DB / Jobs のディレクトリ構成と責務を記載。 |
+| **Prompt 2** | Prisma schema を要件書の DB スキーマ（11章・20章）に基づき作成。`prisma/schema.prisma`、`docs/DB_MIGRATION.md` を整備。 |
+| **Phase 1（App scaffold）** | React Router v7 ベースの Shopify App を構築。`app/shopify.server.ts`（認証・PrismaSessionStorage）、`app/db.server.ts`、認証ルート（auth.$, auth.login）、管理画面レイアウト（app.tsx, app._index）、`shopify.app.toml` のスコープ（read_orders, read_locations）を設定。 |
+| **公開用・自社用の分離** | `shopify.app.public.toml`（公開用・`https://pos-receipt.onrender.com`）を新規作成。`shopify.app.toml` は自社用（POS Receipt - Ciara）用に整理。`extensions/common/appUrl.js` で `APP_MODE`（public / inhouse）と `getAppUrl()` を定義。 |
+| **Prompt 3（注文検索・取引選択）** | 注文検索 API（`GET /api/orders/search`：q, locationId, dateFrom, dateTo, cursor, limit）と注文詳細 API（`GET /api/orders/:orderId`）を実装。POS 共通の `extensions/common/orderPickerApi.js`（searchOrders, getOrder）を用意。POS タイル用モーダル（`extensions/pos-smart-grid/src/Modal.jsx`）で検索・一覧・選択 UI を実装。注文詳細画面から「この取引で開く」で起動する `OrderAction.jsx`（target: pos.order-details.action.menu-item.render）を追加。 |
+| **Render・URL 設定** | Render 用の手順を `docs/RENDER_SETUP.md`、`docs/RENDER_DATABASE_URL.md`、`docs/NEXT_STEPS_AFTER_RENDER.md` に記載。公開用の Shopify URL を Render に合わせて `shopify.app.public.toml` に設定（application_url / redirect_urls）。 |
+
+### 30.2 主要ファイル一覧（実装済み）
+
+- **Backend**: `app/shopify.server.ts`, `app/db.server.ts`, `app/routes/api.orders.search.tsx`, `app/routes/api.orders.$orderId.tsx`, `app/routes/app.tsx`, `app/routes/auth.$.tsx` 他
+- **POS 拡張**: `extensions/common/appUrl.js`, `extensions/common/orderPickerApi.js`, `extensions/pos-smart-grid/src/Modal.jsx`, `extensions/pos-smart-grid/src/OrderAction.jsx`
+- **設定**: `shopify.app.toml`（自社用）, `shopify.app.public.toml`（公開用）, `prisma/schema.prisma`
+- **ドキュメント**: `docs/PROJECT_STRUCTURE_PROPOSAL.md`, `docs/DB_MIGRATION.md`, `docs/PUBLIC_INHOUSE_APP_DEFINITION.md`, `docs/CLI_SETUP_AND_USAGE.md`, `docs/RENDER_SETUP.md`, `docs/NEXT_STEPS_AFTER_RENDER.md` 他
+
+### 30.3 次のステップ
+
+- **Prompt 4**: 特殊返金・商品券調整イベントの create / list / void API と POS UI（event_type 4種対応）。
+- 上記のあと、Prompt 5（精算）→ Prompt 6（領収書）→ Prompt 7（売上サマリー）の順で実装を進める。
+

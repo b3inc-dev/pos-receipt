@@ -1,0 +1,21 @@
+# 公開用アプリ（App Store 販売用）
+# デプロイ先: https://pos-receipt.onrender.com
+# 使い方: shopify app config use shopify.app.public.toml のあと shopify app deploy
+
+client_id = "5c0909e598067f0376e701295c9a938d"
+name = "POS Receipt"
+application_url = "https://pos-receipt.onrender.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2026-04"
+
+[access_scopes]
+scopes = "read_orders,read_locations"
+
+[auth]
+redirect_urls = [ "https://pos-receipt.onrender.com" ]

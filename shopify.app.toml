@@ -1,8 +1,10 @@
-# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+# 自社用アプリ（POS Receipt - Ciara など）
+# デプロイ先: 自社用 Render の URL（例: https://pos-receipt-ciara.onrender.com）
+# client_id はパートナーで作成した「自社用」アプリの Client ID に差し替える（公開用とは別の値）
 
 client_id = "5c0909e598067f0376e701295c9a938d"
-name = "POS Receipt"
-application_url = "https://shopify.dev/apps/default-app-home"
+name = "POS Receipt - Ciara"
+application_url = "https://pos-receipt-ciara.onrender.com"
 embedded = true
 
 [build]
@@ -13,8 +15,7 @@ include_config_on_deploy = true
 api_version = "2026-04"
 
 [access_scopes]
-# 注文検索・精算・領収書用
 scopes = "read_orders,read_locations"
 
 [auth]
-redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
+redirect_urls = [ "https://pos-receipt-ciara.onrender.com" ]
