@@ -4,29 +4,27 @@
  * Body: { locationId, targetDate, amount }
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 import { checkPlanAccess } from "../utils/planFeatures.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+    return corsJson({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const access = checkPlanAccess(shop.planCode, "budget_management");
     if (!access.allowed) {
-      return Response.json({ ok: false, error: access.message }, { status: 403 });
+      return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
 
     const body = (await request.json()) as Record<string, unknown>;
     const { locationId, targetDate, amount } = body;
 
     if (!locationId || !targetDate || amount === undefined) {
-      return Response.json(
+      return corsJson(
         { ok: false, error: "locationId, targetDate, amount are required" },
         { status: 400 }
       );
@@ -80,9 +78,9 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    return Response.json({ ok: true, budget: { ...saved, amount: saved.amount.toString() } });
+    return corsJson({ ok: true, budget: { ...saved, amount: saved.amount.toString() } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }

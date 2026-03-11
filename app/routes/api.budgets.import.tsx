@@ -5,9 +5,8 @@
  * ※ CSVインポートは管理画面側機能。POS/API向けは JSON 配列で受付。
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 import { checkPlanAccess } from "../utils/planFeatures.server";
 
 interface BudgetRow {
@@ -18,15 +17,14 @@ interface BudgetRow {
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+    return corsJson({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const access = checkPlanAccess(shop.planCode, "budget_management");
     if (!access.allowed) {
-      return Response.json({ ok: false, error: access.message }, { status: 403 });
+      return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
 
     const contentType = request.headers.get("content-type") ?? "";
@@ -52,7 +50,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (rows.length === 0) {
-      return Response.json({ ok: false, error: "No rows to import" }, { status: 400 });
+      return corsJson({ ok: false, error: "No rows to import" }, { status: 400 });
     }
 
     let inserted = 0;
@@ -108,9 +106,9 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
 
-    return Response.json({ ok: true, inserted, updated, errors });
+    return corsJson({ ok: true, inserted, updated, errors });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }

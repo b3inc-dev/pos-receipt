@@ -3,7 +3,7 @@
  * 要件書 21.2: 注文検索（部分一致・日付・ロケーション・ページング）
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 
 const ORDERS_SEARCH_QUERY = `#graphql
   query OrdersSearch($first: Int!, $after: String, $query: String) {
@@ -64,7 +64,7 @@ function buildSearchQuery(params: {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin } = await authenticate.public(request);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
     const url = new URL(request.url);
     const q = url.searchParams.get("q");
     const locationId = url.searchParams.get("locationId");
@@ -81,7 +81,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const json = await response.json();
     if (json.errors?.length) {
-      return Response.json(
+      return corsJson(
         { ok: false, error: "GraphQL error", details: json.errors },
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
@@ -111,7 +111,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       };
     });
 
-    return Response.json(
+    return corsJson(
       {
         items,
         nextCursor: pageInfo.hasNextPage ? pageInfo.endCursor : null,
@@ -120,7 +120,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json(
+    return corsJson(
       { ok: false, error: message },
       { status: 500, headers: { "Content-Type": "application/json" } }
     );

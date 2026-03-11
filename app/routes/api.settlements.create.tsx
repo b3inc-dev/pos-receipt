@@ -7,24 +7,22 @@
  * - isInspection=true: 点検レシート（DB保存するが periodLabel に "点検_" プレフィックス）
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 import { buildSettlementPreview, type SettlementPreviewDTO } from "../services/settlementEngine.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+    return corsJson({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const body = await request.json() as Record<string, unknown>;
     const { locationId, locationName, targetDate, printMode, isInspection } = body;
 
     if (!locationId || !targetDate || !printMode) {
-      return Response.json(
+      return corsJson(
         { ok: false, error: "locationId, targetDate, printMode are required" },
         { status: 400 }
       );
@@ -73,7 +71,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
-    return Response.json(
+    return corsJson(
       {
         ok: true,
         settlementId: settlement.id,
@@ -87,7 +85,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }
 

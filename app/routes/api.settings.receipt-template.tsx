@@ -4,9 +4,8 @@
  * 要件書 §8.3, §21.7, §24.1
  */
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 
 const TEMPLATE_KEY = "receipt_template";
 
@@ -42,8 +41,7 @@ async function getOrCreateTemplate(shopId: string) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const template = await getOrCreateTemplate(shop.id);
     const data: ReceiptTemplateData = {
@@ -51,24 +49,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...(JSON.parse(template.templateJson) as Partial<ReceiptTemplateData>),
     };
 
-    return Response.json({
+    return corsJson({
       templateId: template.id,
       version: template.version,
       data,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+    return corsJson({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const body = await request.json() as Partial<ReceiptTemplateData>;
 
@@ -87,7 +84,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
-    return Response.json({
+    return corsJson({
       ok: true,
       templateId: updated.id,
       version: updated.version,
@@ -95,6 +92,6 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }

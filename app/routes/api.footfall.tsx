@@ -4,29 +4,27 @@
  * Body: { locationId, targetDate, visitors, createdBy? }
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 import { checkPlanAccess } from "../utils/planFeatures.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+    return corsJson({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const access = checkPlanAccess(shop.planCode, "footfall_reporting");
     if (!access.allowed) {
-      return Response.json({ ok: false, error: access.message }, { status: 403 });
+      return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
 
     const body = (await request.json()) as Record<string, unknown>;
     const { locationId, targetDate, visitors, createdBy } = body;
 
     if (!locationId || !targetDate || visitors === undefined) {
-      return Response.json(
+      return corsJson(
         { ok: false, error: "locationId, targetDate, visitors are required" },
         { status: 400 }
       );
@@ -41,7 +39,7 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { shopId: shop.id, shopifyLocationGid: locationGid },
     });
     if (!loc?.footfallReportingEnabled) {
-      return Response.json(
+      return corsJson(
         { ok: false, error: "Footfall reporting is not enabled for this location" },
         { status: 403 }
       );
@@ -92,9 +90,9 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    return Response.json({ ok: true, saved: { ...saved } });
+    return corsJson({ ok: true, saved: { ...saved } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }

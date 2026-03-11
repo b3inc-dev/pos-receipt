@@ -1,9 +1,11 @@
 /**
  * /app/settings/billing — プラン・課金管理ページ
  * 要件書 §3 / §Epic G
+ *
+ * 「アップグレード」ボタン → action → Shopify 課金承認 URL へリダイレクト
  */
-import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { redirect, useLoaderData, useFetcher } from "react-router";
 import {
   Page,
   Layout,
@@ -19,6 +21,7 @@ import {
   Divider,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
   isInhouseMode,
@@ -37,6 +40,23 @@ const SUBSCRIPTION_QUERY = `#graphql
   }
 `;
 
+const APP_SUBSCRIPTION_CREATE = `#graphql
+  mutation AppSubscriptionCreate(
+    $name: String!
+    $returnUrl: String!
+    $lineItems: [AppSubscriptionLineItemInput!]!
+    $test: Boolean
+  ) {
+    appSubscriptionCreate(name: $name, returnUrl: $returnUrl, lineItems: $lineItems, test: $test) {
+      userErrors { field message }
+      confirmationUrl
+      appSubscription { id status }
+    }
+  }
+`;
+
+// ── Loader ────────────────────────────────────────────────────────────────────
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
@@ -47,9 +67,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const res = await admin.graphql(SUBSCRIPTION_QUERY);
       const json = await res.json() as {
         data?: {
-          currentAppInstallation?: {
-            activeSubscriptions?: typeof activeSubscriptions;
-          };
+          currentAppInstallation?: { activeSubscriptions?: typeof activeSubscriptions };
         };
       };
       activeSubscriptions = json.data?.currentAppInstallation?.activeSubscriptions ?? [];
@@ -68,11 +86,88 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-export default function BillingPage() {
-  const { planCode, planLabel: label, isInhouse, activeSubscriptions, standardPlan, proPlan, standardFeatures, proFeatures } =
-    useLoaderData<typeof loader>();
+// ── Action（サブスクリプション作成 → confirmationUrl へリダイレクト） ──────────
 
+export async function action({ request }: ActionFunctionArgs) {
+  const { admin, session } = await authenticate.admin(request);
+  const shop = await resolveShop(session.shop, admin);
+
+  if (isInhouseMode()) {
+    return { ok: false, error: "自社用モードでは課金不要です" };
+  }
+
+  const formData = await request.formData();
+  const planKey = formData.get("plan") === "pro" ? "pro" : "standard";
+  const planConfig = BILLING_PLANS[planKey];
+
+  const appUrl = process.env.SHOPIFY_APP_URL ?? "";
+  const returnUrl = `${appUrl}/app/settings/billing/callback?plan=${planKey}&shop=${session.shop}`;
+
+  const res = await admin.graphql(APP_SUBSCRIPTION_CREATE, {
+    variables: {
+      name: planConfig.name,
+      returnUrl,
+      test: process.env.NODE_ENV !== "production",
+      lineItems: [
+        {
+          plan: {
+            appRecurringPricingDetails: {
+              price: { amount: planConfig.amount, currencyCode: planConfig.currencyCode },
+              interval: "EVERY_30_DAYS",
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  const json = await res.json() as {
+    data?: {
+      appSubscriptionCreate?: {
+        confirmationUrl?: string;
+        userErrors?: { field: string; message: string }[];
+      };
+    };
+  };
+
+  const result = json.data?.appSubscriptionCreate;
+  const userErrors = result?.userErrors ?? [];
+  if (userErrors.length > 0) {
+    return { ok: false, error: userErrors[0].message };
+  }
+
+  const confirmationUrl = result?.confirmationUrl;
+  if (!confirmationUrl) {
+    return { ok: false, error: "課金URLの取得に失敗しました" };
+  }
+
+  // planCode を仮更新
+  await prisma.shop.update({
+    where: { id: shop.id },
+    data: { planCode: planKey },
+  });
+
+  // Shopify の課金承認ページへリダイレクト
+  return redirect(confirmationUrl);
+}
+
+// ── Page Component ────────────────────────────────────────────────────────────
+
+export default function BillingPage() {
+  const {
+    planCode,
+    planLabel: label,
+    isInhouse,
+    activeSubscriptions,
+    standardPlan,
+    proPlan,
+    standardFeatures,
+    proFeatures,
+  } = useLoaderData<typeof loader>();
+
+  const fetcher = useFetcher<typeof action>();
   const isPro = isInhouse || planCode === "pro" || planCode === "unlimited";
+  const actionError = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
 
   return (
     <Page title="プラン・課金" backAction={{ url: "/app/settings" }}>
@@ -103,16 +198,23 @@ export default function BillingPage() {
           </Card>
         </Layout.Section>
 
+        {/* エラー */}
+        {actionError && (
+          <Layout.Section>
+            <Banner tone="critical">{actionError}</Banner>
+          </Layout.Section>
+        )}
+
         {/* プラン比較 */}
         <Layout.Section>
-          <InlineStack gap="400" align="start">
+          <InlineStack gap="400" align="start" wrap>
             {/* スタンダード */}
             <Box minWidth="280px">
               <Card>
                 <BlockStack gap="300">
                   <InlineStack align="space-between" blockAlign="center">
                     <Text variant="headingMd" as="h2">スタンダード</Text>
-                    {!isPro && planCode === "standard" && <Badge tone="info">現在のプラン</Badge>}
+                    {!isPro && <Badge tone="info">現在のプラン</Badge>}
                   </InlineStack>
                   <Text variant="headingLg" as="p">
                     ¥{standardPlan.amount.toLocaleString("ja-JP")}
@@ -124,11 +226,6 @@ export default function BillingPage() {
                       <List.Item key={f.key}>{f.label}</List.Item>
                     ))}
                   </List>
-                  {!isPro && planCode === "standard" && (
-                    <Box paddingBlockStart="200">
-                      <Text tone="subdued" as="p">現在ご利用中のプランです。</Text>
-                    </Box>
-                  )}
                 </BlockStack>
               </Card>
             </Box>
@@ -153,7 +250,16 @@ export default function BillingPage() {
                   </List>
                   {!isInhouse && !isPro && (
                     <Box paddingBlockStart="200">
-                      <UpgradeButton plan="pro" />
+                      <fetcher.Form method="post">
+                        <input type="hidden" name="plan" value="pro" />
+                        <Button
+                          variant="primary"
+                          submit
+                          loading={fetcher.state === "submitting"}
+                        >
+                          プロプランにアップグレード
+                        </Button>
+                      </fetcher.Form>
                     </Box>
                   )}
                   {!isInhouse && isPro && (
@@ -171,37 +277,12 @@ export default function BillingPage() {
           <Layout.Section>
             <Banner tone="info">
               <Text as="p">
-                プロプランにアップグレードすると、売上サマリー・予算管理・入店数報告が利用できます。
-                アップグレード後、Shopify の課金承認ページに遷移します。
+                アップグレード後、Shopify の課金承認ページに遷移します。承認後に自動でプロプランが有効になります。
               </Text>
             </Banner>
           </Layout.Section>
         )}
       </Layout>
     </Page>
-  );
-}
-
-function UpgradeButton({ plan }: { plan: string }) {
-  const handleUpgrade = async () => {
-    try {
-      const res = await fetch("/api/billing", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
-      });
-      const data = await res.json() as { confirmationUrl?: string };
-      if (data.confirmationUrl) {
-        window.location.href = data.confirmationUrl;
-      }
-    } catch (e) {
-      alert("アップグレードに失敗しました。再度お試しください。");
-    }
-  };
-
-  return (
-    <Button variant="primary" onClick={handleUpgrade}>
-      プロプランにアップグレード
-    </Button>
   );
 }

@@ -3,7 +3,7 @@
  * 要件書 21.2: 注文詳細（core, transactions, refunds, customer, location, line items）
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 
 const ORDER_DETAIL_QUERY = `#graphql
   query OrderDetail($id: ID!) {
@@ -50,10 +50,10 @@ const ORDER_DETAIL_QUERY = `#graphql
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
-    const { admin } = await authenticate.public(request);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
     const orderId = params.orderId;
     if (!orderId) {
-      return Response.json(
+      return corsJson(
         { ok: false, error: "orderId required" },
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
@@ -67,7 +67,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const json = await response.json();
     if (json.errors?.length) {
-      return Response.json(
+      return corsJson(
         { ok: false, error: "GraphQL error", details: json.errors },
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
@@ -75,7 +75,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const order = json.data?.order;
     if (!order) {
-      return Response.json(
+      return corsJson(
         { ok: false, error: "Order not found" },
         { status: 404, headers: { "Content-Type": "application/json" } }
       );
@@ -119,12 +119,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       })),
     };
 
-    return Response.json(result, {
+    return corsJson(result, {
       headers: { "Content-Type": "application/json" },
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json(
+    return corsJson(
       { ok: false, error: message },
       { status: 500, headers: { "Content-Type": "application/json" } }
     );

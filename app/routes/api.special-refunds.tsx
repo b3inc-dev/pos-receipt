@@ -4,9 +4,8 @@
  * 要件書 21.4: 特殊返金イベント 一覧取得・登録
  */
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 
 const ALLOWED_EVENT_TYPES = [
   "cash_refund",
@@ -17,14 +16,13 @@ const ALLOWED_EVENT_TYPES = [
 // GET /api/special-refunds?sourceOrderId=...
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const url = new URL(request.url);
     const sourceOrderId = url.searchParams.get("sourceOrderId");
 
     if (!sourceOrderId) {
-      return Response.json(
+      return corsJson(
         { ok: false, error: "sourceOrderId is required" },
         { status: 400 }
       );
@@ -39,21 +37,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
       orderBy: { createdAt: "desc" },
     });
 
-    return Response.json({ items: items.map(serializeEvent) });
+    return corsJson({ items: items.map(serializeEvent) });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }
 
 // POST /api/special-refunds
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+    return corsJson({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const body = await request.json() as Record<string, unknown>;
     const {
@@ -71,13 +68,13 @@ export async function action({ request }: ActionFunctionArgs) {
     } = body;
 
     if (!sourceOrderId || !eventType || amount == null) {
-      return Response.json(
+      return corsJson(
         { ok: false, error: "sourceOrderId, eventType, amount are required" },
         { status: 400 }
       );
     }
     if (!ALLOWED_EVENT_TYPES.includes(eventType as typeof ALLOWED_EVENT_TYPES[number])) {
-      return Response.json(
+      return corsJson(
         { ok: false, error: `eventType must be one of: ${ALLOWED_EVENT_TYPES.join(", ")}` },
         { status: 400 }
       );
@@ -101,10 +98,10 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
-    return Response.json({ ok: true, event: serializeEvent(event) }, { status: 201 });
+    return corsJson({ ok: true, event: serializeEvent(event) }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }
 

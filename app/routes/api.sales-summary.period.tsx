@@ -4,19 +4,17 @@
  * Query: dateFrom, dateTo, locationIds[]
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 import { checkPlanAccess } from "../utils/planFeatures.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const access = checkPlanAccess(shop.planCode, "sales_summary");
     if (!access.allowed) {
-      return Response.json({ ok: false, error: access.message }, { status: 403 });
+      return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
 
     const url = new URL(request.url);
@@ -43,7 +41,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const locationGids = targetLocations.map((l) => l.shopifyLocationGid);
 
     if (locationGids.length === 0) {
-      return Response.json({ rows: [], totals: {}, dateFrom, dateTo });
+      return corsJson({ rows: [], totals: {}, dateFrom, dateTo });
     }
 
     // 日次キャッシュから集計
@@ -128,9 +126,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       items: rows.reduce((s, r) => s + r.items, 0),
     };
 
-    return Response.json({ rows, totals, dateFrom, dateTo });
+    return corsJson({ rows, totals, dateFrom, dateTo });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }

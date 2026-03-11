@@ -3,9 +3,8 @@
  * 要件書 §21.5: 領収書発行・再発行 + DB保存
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
 
 const ORDER_QUERY = `#graphql
@@ -22,17 +21,16 @@ const ORDER_QUERY = `#graphql
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+    return corsJson({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const body = await request.json() as Record<string, unknown>;
     const { orderId, recipientName, proviso, isReissue, createdBy } = body;
 
     if (!orderId) {
-      return Response.json({ ok: false, error: "orderId is required" }, { status: 400 });
+      return corsJson({ ok: false, error: "orderId is required" }, { status: 400 });
     }
 
     const gid = String(orderId).startsWith("gid://")
@@ -54,7 +52,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const order = orderJson.data?.order;
     if (!order) {
-      return Response.json({ ok: false, error: "Order not found" }, { status: 404 });
+      return corsJson({ ok: false, error: "Order not found" }, { status: 404 });
     }
 
     const tmpl = await prisma.receiptTemplate.findFirst({
@@ -107,9 +105,9 @@ export async function action({ request }: ActionFunctionArgs) {
       templateVersion: tmpl?.version ?? 1,
     };
 
-    return Response.json({ ok: true, receipt: receiptData }, { status: 201 });
+    return corsJson({ ok: true, receipt: receiptData }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }

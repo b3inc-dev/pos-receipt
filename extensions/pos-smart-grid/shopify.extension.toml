@@ -52,6 +52,7 @@ target = "pos.home.modal.render"
 type = "ui_extension"
 name = "領収書発行"
 handle = "pos-receipt-issue"
+uid = "48eb3dec-21ec-8072-0dc9-c6d43350fe2022972a31"
 description = "領収書の発行・再発行"
 
 [[extensions.targeting]]
@@ -75,6 +76,7 @@ target = "pos.order-details.action.menu-item.render"
 type = "ui_extension"
 name = "売上サマリー表示"
 handle = "pos-sales-summary"
+uid = "dfcb6e02-8400-c5bb-b42a-b4a3aac005a26756443d"
 description = "全ロケーション横断の売上・予算・KPI確認"
 
 [[extensions.targeting]]

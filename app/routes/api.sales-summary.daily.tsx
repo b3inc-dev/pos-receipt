@@ -4,20 +4,18 @@
  * Query: targetDate, locationIds[]
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import { checkPlanAccess } from "../utils/planFeatures.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const access = checkPlanAccess(shop.planCode, "sales_summary");
     if (!access.allowed) {
-      return Response.json({ ok: false, error: access.message }, { status: 403 });
+      return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
 
     const url = new URL(request.url);
@@ -43,7 +41,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : allLocations;
 
     if (targetLocations.length === 0) {
-      return Response.json({
+      return corsJson({
         rows: [],
         totals: { actual: 0, orders: 0, items: 0, budget: null, visitors: null },
       });
@@ -76,9 +74,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : null,
     };
 
-    return Response.json({ rows, totals, targetDate });
+    return corsJson({ rows, totals, targetDate });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }

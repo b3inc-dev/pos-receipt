@@ -4,14 +4,12 @@
  * 要件書 §21.3, §6.10
  */
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const url = new URL(request.url);
     const locationId = url.searchParams.get("locationId");
@@ -30,35 +28,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
       take: limit,
     });
 
-    return Response.json({
+    return corsJson({
       items: settlements.map(serializeSettlement),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+    return corsJson({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const body = await request.json() as { settlementId?: string };
     const { settlementId } = body;
 
     if (!settlementId) {
-      return Response.json({ ok: false, error: "settlementId is required" }, { status: 400 });
+      return corsJson({ ok: false, error: "settlementId is required" }, { status: 400 });
     }
 
     const existing = await prisma.settlement.findFirst({
       where: { id: settlementId, shopId: shop.id },
     });
     if (!existing) {
-      return Response.json({ ok: false, error: "Settlement not found" }, { status: 404 });
+      return corsJson({ ok: false, error: "Settlement not found" }, { status: 404 });
     }
 
     const updated = await prisma.settlement.update({
@@ -66,10 +63,10 @@ export async function action({ request }: ActionFunctionArgs) {
       data: { status: "printed", printedAt: new Date() },
     });
 
-    return Response.json({ ok: true, settlement: serializeSettlement(updated) });
+    return corsJson({ ok: true, settlement: serializeSettlement(updated) });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }
 

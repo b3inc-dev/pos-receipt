@@ -3,9 +3,8 @@
  * ショップのロケーション一覧と印字方式設定を返す
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 
 const LOCATIONS_QUERY = `#graphql
   query {
@@ -23,8 +22,7 @@ const LOCATIONS_QUERY = `#graphql
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const response = await admin.graphql(LOCATIONS_QUERY);
     const json = await response.json();
@@ -47,9 +45,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         };
       });
 
-    return Response.json({ locations }, { headers: { "Content-Type": "application/json" } });
+    return corsJson({ locations }, { headers: { "Content-Type": "application/json" } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }

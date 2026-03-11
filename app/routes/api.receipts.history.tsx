@@ -4,14 +4,12 @@
  * Query: orderId?, dateFrom?, dateTo?, limit?
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, session } = await authenticate.public(request);
-    const shop = await resolveShop(session.shop, admin);
+    const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const url = new URL(request.url);
     const orderId = url.searchParams.get("orderId");
@@ -36,7 +34,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       take: limit,
     });
 
-    return Response.json({
+    return corsJson({
       items: items.map((r) => ({
         id: r.id,
         orderId: r.orderId,
@@ -54,6 +52,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsJson({ ok: false, error: message }, { status: 500 });
   }
 }
