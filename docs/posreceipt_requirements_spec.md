@@ -1737,13 +1737,15 @@ Responsibility:
 | **Prompt 4（特殊返金・商品券調整）** | Backend: `app/utils/shopResolver.server.ts`、`api.special-refunds.tsx`（GET list / POST create）、`api.special-refunds.$id.void.tsx`（POST void）、`api.voucher-adjustments.tsx`（POST create）を実装。POS 拡張: ソースファイルを4タイル分割構成に整備（`SpecialRefundTile/Modal/OrderAction.jsx`、`SettlementTile/Modal.jsx`、`ReceiptTile/Modal/OrderAction.jsx`、`SalesSummaryTile/Modal.jsx`）。`extensions/common/specialRefundApi.js` を追加。`shopify.extension.toml` は登録済み UID 1本（pos-special-refund）のみ使用し、他3タイルは `shopify app generate extension` で UID 発行後に接続予定（Phase 5–7）。 |
 | **バグ修正: Render 502 / Session テーブル未作成** | `prisma/migrations/` が未コミットだったため Render 上で `prisma migrate deploy` が何も実行せず全テーブルが未作成だった。`prisma/migrations/20260310112900_init/migration.sql` をコミット・プッシュして解消。 |
 | **バグ修正: POS ビルドエラー（Tile.jsx not found）** | `.shopify/dev-bundle` キャッシュが旧ファイル（`Tile.jsx/Modal.jsx/OrderAction.jsx`）を参照していた。キャッシュ削除 + TOML を登録済み UID 1本に修正して解消。 |
+| **Prompt 5（精算）** | Settlement Engine（`app/services/settlementEngine.server.ts`）を実装。API 4本（preview / create / recalculate / print）と `api.locations.tsx` を追加。`extensions/common/settlementApi.js` を追加。`SettlementModal.jsx` を全ステップ実装（main → preview → confirm → done → history）。CloudPRNT直印字 / 注文経由印字（Shopify精算注文作成）の両分岐に対応。点検レシートも同フローで `isInspection=true` で処理。`shopify.extension.toml` に精算タイルエントリを追加（UID は `shopify app generate extension` で取得必要）。 |
 
 ### 30.2 主要ファイル一覧（実装済み）
 
 - **Backend**: `app/shopify.server.ts`, `app/db.server.ts`, `app/routes/api.orders.search.tsx`, `app/routes/api.orders.$orderId.tsx`, `app/routes/api.special-refunds.tsx`, `app/routes/api.special-refunds.$id.void.tsx`, `app/routes/api.voucher-adjustments.tsx`, `app/utils/shopResolver.server.ts`
-- **POS 拡張**: `extensions/common/appUrl.js`, `extensions/common/orderPickerApi.js`, `extensions/common/specialRefundApi.js`
+- **精算 Backend**: `app/services/settlementEngine.server.ts`, `app/routes/api.locations.tsx`, `app/routes/api.settlements.preview.tsx`, `app/routes/api.settlements.create.tsx`, `app/routes/api.settlements.recalculate.tsx`, `app/routes/api.settlements.print.tsx`
+- **POS 拡張**: `extensions/common/appUrl.js`, `extensions/common/orderPickerApi.js`, `extensions/common/specialRefundApi.js`, `extensions/common/settlementApi.js`
   - 特殊返金（稼働中）: `SpecialRefundTile.jsx`, `SpecialRefundModal.jsx`, `SpecialRefundOrderAction.jsx`
-  - 精算（スタブ）: `SettlementTile.jsx`, `SettlementModal.jsx`
+  - 精算（実装済み・UID 取得後に TOML 接続）: `SettlementTile.jsx`, `SettlementModal.jsx`
   - 領収書（スタブ）: `ReceiptTile.jsx`, `ReceiptModal.jsx`, `ReceiptOrderAction.jsx`
   - 売上サマリー（スタブ）: `SalesSummaryTile.jsx`, `SalesSummaryModal.jsx`
 - **DB**: `prisma/schema.prisma`, `prisma/migrations/20260310112900_init/migration.sql`
@@ -1752,11 +1754,13 @@ Responsibility:
 
 ### 30.3 既知の制約・注意事項
 
-- **POS タイルは現在1つ**（特殊返金・商品券調整）。他3タイル（精算・領収書・売上サマリー）は `shopify app generate extension` で UID を発行してから `shopify.extension.toml` に追加する。
+- **精算タイルの UID**: `shopify.extension.toml` に精算タイルエントリを追加済みだが、`uid` フィールドは未設定。`shopify app generate extension` を実行して UID を取得し、TOML に追加する必要がある。
 - **`.shopify/` キャッシュ**: `shopify app dev` でビルドエラーが出た場合は `.shopify/dev-bundle/` と `extensions/pos-smart-grid/dist/` を削除してから再起動する。
+- **精算タイムゾーン**: 特殊返金イベントの日付絞り込みは UTC 基準。JST（UTC+9）では夜9時以降の翌日分が翌営業日に含まれない場合がある（MVP 許容）。
 
 ### 30.4 次のステップ
 
-- **Prompt 5（精算）**: Settlement Engine、印字分岐（CloudPRNT / order-based）、点検レシート、精算履歴。精算タイルの UID を発行して TOML に接続する。
-- 上記のあと、Prompt 6（領収書）→ Prompt 7（売上サマリー）→ Prompt 8（Billing）の順で実装を進める。
+- **精算タイル UID 発行**: `shopify app generate extension` を実行して精算タイルの UID を取得し、`shopify.extension.toml` に追加する。
+- **Prompt 6（領収書）**: 領収書テンプレート編集、プレビュー API、発行 API、履歴保存、管理画面編集 UI。
+- 上記のあと、Prompt 7（売上サマリー）→ Prompt 8（Billing）の順で実装を進める。
 

@@ -1,6 +1,6 @@
 /**
  * 精算タイル
- * Phase 6 で実装予定
+ * 要件書 §2, §19.1
  */
 import { render } from "preact";
 
@@ -12,7 +12,7 @@ function SettlementTile() {
   return (
     <s-tile
       heading="精算"
-      subheading="精算レシート・点検レシート"
+      subheading="精算・点検レシート発行"
       onClick={() => shopify.action.presentModal()}
     />
   );
