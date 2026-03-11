@@ -67,18 +67,20 @@ module = "./src/ReceiptOrderAction.jsx"
 target = "pos.order-details.action.menu-item.render"
 
 # ============================================================
-# 売上サマリータイル（Phase 7 で実装予定 — UID 取得後にコメントを外す）
+# 売上サマリータイル（Phase 7 実装済み）
+# TODO: `shopify app generate extension --type ui_extension --name "売上サマリー"` を実行して
+#       UID を取得後、uid フィールドを追加してください
 # ============================================================
-# [[extensions]]
-# type = "ui_extension"
-# name = "売上サマリー"
-# handle = "pos-sales-summary"
-# description = "全ロケーション横断の売上・予算・KPI確認"
-#
-# [[extensions.targeting]]
-# module = "./src/SalesSummaryTile.jsx"
-# target = "pos.home.tile.render"
-#
-# [[extensions.targeting]]
-# module = "./src/SalesSummaryModal.jsx"
-# target = "pos.home.modal.render"
+[[extensions]]
+type = "ui_extension"
+name = "売上サマリー表示"
+handle = "pos-sales-summary"
+description = "全ロケーション横断の売上・予算・KPI確認"
+
+[[extensions.targeting]]
+module = "./src/SalesSummaryTile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/SalesSummaryModal.jsx"
+target = "pos.home.modal.render"

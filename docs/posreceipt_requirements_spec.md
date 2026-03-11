@@ -1738,29 +1738,34 @@ Responsibility:
 | **バグ修正: Render 502 / Session テーブル未作成** | `prisma/migrations/` が未コミットだったため Render 上で `prisma migrate deploy` が何も実行せず全テーブルが未作成だった。`prisma/migrations/20260310112900_init/migration.sql` をコミット・プッシュして解消。 |
 | **バグ修正: POS ビルドエラー（Tile.jsx not found）** | `.shopify/dev-bundle` キャッシュが旧ファイル（`Tile.jsx/Modal.jsx/OrderAction.jsx`）を参照していた。キャッシュ削除 + TOML を登録済み UID 1本に修正して解消。 |
 | **Prompt 5（精算）** | Settlement Engine（`app/services/settlementEngine.server.ts`）を実装。API 4本（preview / create / recalculate / print）と `api.locations.tsx` を追加。`extensions/common/settlementApi.js` を追加。`SettlementModal.jsx` を全ステップ実装（main → preview → confirm → done → history）。CloudPRNT直印字 / 注文経由印字（Shopify精算注文作成）の両分岐に対応。点検レシートも同フローで `isInspection=true` で処理。`shopify.extension.toml` に精算タイルエントリを追加（UID は `shopify app generate extension` で取得必要）。 |
+| **Prompt 6（領収書）** | `api.settings.receipt-template.tsx`（GET/POST テンプレート）、`api.receipts.preview.tsx`、`api.receipts.issue.tsx`、`api.receipts.history.tsx` を実装。`extensions/common/receiptApi.js` を追加。`ReceiptModal.jsx` を全ステップ実装（search → form → preview → confirm → done → history）。テンプレートは1件 active 管理。再発行 `isReissue` フラグ対応。`shopify.extension.toml` に領収書タイルエントリを追加（UID 未設定）。 |
+| **Prompt 7（売上サマリー）** | Sales Summary Engine（`app/services/salesSummaryEngine.server.ts`）を実装。API 5本（`api.sales-summary.daily.tsx`、`api.sales-summary.period.tsx`、`api.footfall.tsx`、`api.budgets.upsert.tsx`、`api.budgets.import.tsx`）を追加。`extensions/common/salesSummaryApi.js` を追加。`SalesSummaryModal.jsx` を全実装（日次/期間モード切替、ロケーション別KPIカード、入店数入力・保存）。`shopify.extension.toml` に売上サマリータイルエントリを追加（UID 未設定）。 |
 
 ### 30.2 主要ファイル一覧（実装済み）
 
 - **Backend**: `app/shopify.server.ts`, `app/db.server.ts`, `app/routes/api.orders.search.tsx`, `app/routes/api.orders.$orderId.tsx`, `app/routes/api.special-refunds.tsx`, `app/routes/api.special-refunds.$id.void.tsx`, `app/routes/api.voucher-adjustments.tsx`, `app/utils/shopResolver.server.ts`
 - **精算 Backend**: `app/services/settlementEngine.server.ts`, `app/routes/api.locations.tsx`, `app/routes/api.settlements.preview.tsx`, `app/routes/api.settlements.create.tsx`, `app/routes/api.settlements.recalculate.tsx`, `app/routes/api.settlements.print.tsx`
-- **POS 拡張**: `extensions/common/appUrl.js`, `extensions/common/orderPickerApi.js`, `extensions/common/specialRefundApi.js`, `extensions/common/settlementApi.js`
+- **領収書 Backend**: `app/routes/api.settings.receipt-template.tsx`, `app/routes/api.receipts.preview.tsx`, `app/routes/api.receipts.issue.tsx`, `app/routes/api.receipts.history.tsx`
+- **売上サマリー Backend**: `app/services/salesSummaryEngine.server.ts`, `app/routes/api.sales-summary.daily.tsx`, `app/routes/api.sales-summary.period.tsx`, `app/routes/api.footfall.tsx`, `app/routes/api.budgets.upsert.tsx`, `app/routes/api.budgets.import.tsx`
+- **POS 拡張**: `extensions/common/appUrl.js`, `extensions/common/orderPickerApi.js`, `extensions/common/specialRefundApi.js`, `extensions/common/settlementApi.js`, `extensions/common/receiptApi.js`, `extensions/common/salesSummaryApi.js`
   - 特殊返金（稼働中）: `SpecialRefundTile.jsx`, `SpecialRefundModal.jsx`, `SpecialRefundOrderAction.jsx`
-  - 精算（実装済み・UID 取得後に TOML 接続）: `SettlementTile.jsx`, `SettlementModal.jsx`
-  - 領収書（スタブ）: `ReceiptTile.jsx`, `ReceiptModal.jsx`, `ReceiptOrderAction.jsx`
-  - 売上サマリー（スタブ）: `SalesSummaryTile.jsx`, `SalesSummaryModal.jsx`
+  - 精算（実装済み）: `SettlementTile.jsx`, `SettlementModal.jsx`
+  - 領収書（実装済み）: `ReceiptTile.jsx`, `ReceiptModal.jsx`, `ReceiptOrderAction.jsx`
+  - 売上サマリー（実装済み）: `SalesSummaryTile.jsx`, `SalesSummaryModal.jsx`
 - **DB**: `prisma/schema.prisma`, `prisma/migrations/20260310112900_init/migration.sql`
 - **設定**: `shopify.app.toml`（自社用）, `shopify.app.public.toml`（公開用）, `extensions/pos-smart-grid/shopify.extension.toml`
 - **ドキュメント**: `docs/PROJECT_STRUCTURE_PROPOSAL.md`, `docs/DB_MIGRATION.md`, `docs/PUBLIC_INHOUSE_APP_DEFINITION.md`, `docs/CLI_SETUP_AND_USAGE.md`, `docs/RENDER_SETUP.md`, `docs/NEXT_STEPS_AFTER_RENDER.md` 他
 
 ### 30.3 既知の制約・注意事項
 
-- **精算タイルの UID**: `shopify.extension.toml` に精算タイルエントリを追加済みだが、`uid` フィールドは未設定。`shopify app generate extension` を実行して UID を取得し、TOML に追加する必要がある。
+- **UID 未設定のタイル**: 領収書・売上サマリーは `shopify.extension.toml` にエントリ追加済みだが `uid` 未設定。`shopify app generate extension --type ui_extension --name "..."` を実行して UID を取得・追加すること。
 - **`.shopify/` キャッシュ**: `shopify app dev` でビルドエラーが出た場合は `.shopify/dev-bundle/` と `extensions/pos-smart-grid/dist/` を削除してから再起動する。
-- **精算タイムゾーン**: 特殊返金イベントの日付絞り込みは UTC 基準。JST（UTC+9）では夜9時以降の翌日分が翌営業日に含まれない場合がある（MVP 許容）。
+- **売上サマリーのタイムゾーン**: Shopify注文クエリは UTC 基準。JST（UTC+9）では夜9時以降が翌日集計になる場合がある（MVP 許容）。
+- **売上サマリー有効化**: `Location.salesSummaryEnabled = true` の店舗のみ対象。管理画面で設定が必要。
 
 ### 30.4 次のステップ
 
-- **精算タイル UID 発行**: `shopify app generate extension` を実行して精算タイルの UID を取得し、`shopify.extension.toml` に追加する。
-- **Prompt 6（領収書）**: 領収書テンプレート編集、プレビュー API、発行 API、履歴保存、管理画面編集 UI。
-- 上記のあと、Prompt 7（売上サマリー）→ Prompt 8（Billing）の順で実装を進める。
+- **UID 発行**: `shopify app generate extension --type ui_extension --name "領収書発行"` および `--name "売上サマリー"` を実行し、TOML に `uid` を追加する。
+- **Prompt 8（Billing）**: スタンダード / プロプランのサブスクリプション、feature flag、機能制御。
+- **管理画面 UI**: 領収書テンプレート編集、予算管理、精算履歴、ロケーション設定など。
 
