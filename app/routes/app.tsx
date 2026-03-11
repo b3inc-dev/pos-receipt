@@ -7,16 +7,19 @@ import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
-  return { shop: new URL(request.url).searchParams.get("shop") ?? "" };
+  return {
+    shop: new URL(request.url).searchParams.get("shop") ?? "",
+    apiKey: process.env.SHOPIFY_API_KEY ?? "",
+  };
 };
 
 export const headers: HeadersFunction = (args) => boundary.headers(args);
 
 export default function AppLayout() {
-  const { shop } = useLoaderData<typeof loader>();
+  const { shop, apiKey } = useLoaderData<typeof loader>();
 
   return (
-    <AppProvider>
+    <AppProvider embedded apiKey={apiKey}>
       <Outlet context={{ shop }} />
     </AppProvider>
   );
