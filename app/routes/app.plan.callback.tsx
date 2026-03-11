@@ -1,5 +1,5 @@
 /**
- * /app/settings/billing/callback — Shopify 課金承認コールバック
+ * /app/plan/callback — Shopify 課金承認コールバック
  * Shopify の課金承認後にリダイレクトされる URL
  */
 import type { LoaderFunctionArgs } from "react-router";
@@ -23,5 +23,5 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   }
 
-  return redirect("/app/settings/billing");
+  return redirect("/app/plan");
 }

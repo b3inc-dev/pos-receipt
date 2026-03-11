@@ -1,11 +1,11 @@
 /**
- * /app/settings/billing — プラン・課金管理ページ
+ * /app/plan — プラン・課金管理ページ（POS Stock / location-stock-indicator と同様のフラット構造）
  * 要件書 §3 / §Epic G
  *
  * 「アップグレード」ボタン → action → Shopify 課金承認 URL へリダイレクト
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { redirect, useLoaderData, useFetcher } from "react-router";
+import { redirect, useLoaderData, useFetcher, useLocation, useNavigate } from "react-router";
 import {
   Page,
   Layout,
@@ -26,9 +26,11 @@ import { resolveShop } from "../utils/shopResolver.server";
 import {
   isInhouseMode,
   planLabel,
+  getFullAccess,
   PLAN_FEATURES,
   BILLING_PLANS,
 } from "../utils/planFeatures.server";
+import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 
 const SUBSCRIPTION_QUERY = `#graphql
   query CurrentSubscription {
@@ -60,9 +62,10 @@ const APP_SUBSCRIPTION_CREATE = `#graphql
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
+  const fullAccess = await getFullAccess(admin, session);
 
   let activeSubscriptions: { id: string; name: string; status: string; currentPeriodEnd: string }[] = [];
-  if (!isInhouseMode()) {
+  if (!fullAccess) {
     try {
       const res = await admin.graphql(SUBSCRIPTION_QUERY);
       const json = await res.json() as {
@@ -76,8 +79,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     planCode: shop.planCode ?? "standard",
-    planLabel: planLabel(shop.planCode),
-    isInhouse: isInhouseMode(),
+    planLabel: fullAccess
+      ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
+      : planLabel(shop.planCode),
+    isInhouse: fullAccess,
     activeSubscriptions,
     standardPlan: BILLING_PLANS.standard,
     proPlan: BILLING_PLANS.pro,
@@ -101,7 +106,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const planConfig = BILLING_PLANS[planKey];
 
   const appUrl = process.env.SHOPIFY_APP_URL ?? "";
-  const returnUrl = `${appUrl}/app/settings/billing/callback?plan=${planKey}&shop=${session.shop}`;
+  const returnUrl = `${appUrl}/app/plan/callback?plan=${planKey}&shop=${session.shop}`;
 
   const res = await admin.graphql(APP_SUBSCRIPTION_CREATE, {
     variables: {
@@ -153,7 +158,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
 // ── Page Component ────────────────────────────────────────────────────────────
 
-export default function BillingPage() {
+export default function PlanPage() {
   const {
     planCode,
     planLabel: label,
@@ -166,11 +171,15 @@ export default function BillingPage() {
   } = useLoaderData<typeof loader>();
 
   const fetcher = useFetcher<typeof action>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const q = location.search || "";
   const isPro = isInhouse || planCode === "pro" || planCode === "unlimited";
   const actionError = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
 
   return (
-    <Page title="プラン・課金" backAction={{ url: "/app/settings" }}>
+    <PolarisPageWrapper>
+    <Page title="プラン・課金" backAction={{ content: "戻る", onAction: () => navigate("/app" + q) }}>
       <Layout>
         {/* エラー */}
         {actionError && (
@@ -280,5 +289,6 @@ export default function BillingPage() {
         </Layout.AnnotatedSection>
       </Layout>
     </Page>
+    </PolarisPageWrapper>
   );
 }

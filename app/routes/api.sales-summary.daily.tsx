@@ -7,13 +7,14 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
-import { checkPlanAccess } from "../utils/planFeatures.server";
+import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
 
-    const access = checkPlanAccess(shop.planCode, "sales_summary");
+    const access = checkPlanAccess(shop.planCode, "sales_summary", fullAccess);
     if (!access.allowed) {
       return corsJson({ ok: false, error: access.message }, { status: 403 });
     }

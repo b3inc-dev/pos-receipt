@@ -7,7 +7,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { checkPlanAccess } from "../utils/planFeatures.server";
+import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 
 interface BudgetRow {
   locationId: string;
@@ -21,8 +21,9 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   try {
     const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
 
-    const access = checkPlanAccess(shop.planCode, "budget_management");
+    const access = checkPlanAccess(shop.planCode, "budget_management", fullAccess);
     if (!access.allowed) {
       return corsJson({ ok: false, error: access.message }, { status: 403 });
     }

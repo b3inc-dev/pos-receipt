@@ -3,7 +3,7 @@
  * 要件書 §8.3–§8.4 / §19.3 管理画面: 領収書テンプレート
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit } from "react-router";
+import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
 import {
   Page,
   Layout,
@@ -22,6 +22,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
+import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { useState } from "react";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -89,6 +90,9 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function ReceiptTemplatePage() {
   const { template, version } = useLoaderData<typeof loader>();
   const submit = useSubmit();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const q = location.search || "";
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<ReceiptTemplateData>({ ...template });
 
@@ -111,9 +115,10 @@ export default function ReceiptTemplatePage() {
   };
 
   return (
+    <PolarisPageWrapper>
     <Page
       title="領収書テンプレート設定"
-      backAction={{ url: "/app/settings" }}
+      backAction={{ content: "戻る", onAction: () => navigate("/app/settings" + q) }}
       subtitle={`バージョン: ${version}`}
       primaryAction={{ content: "保存", onAction: handleSave }}
     >
@@ -208,6 +213,7 @@ export default function ReceiptTemplatePage() {
         </Layout.Section>
       </Layout>
     </Page>
+    </PolarisPageWrapper>
   );
 }
 

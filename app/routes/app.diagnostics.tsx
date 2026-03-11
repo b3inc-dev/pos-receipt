@@ -8,7 +8,7 @@
  * - 直近のエラー傾向（settlements / receipts の件数）
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useLocation, useNavigate } from "react-router";
 import {
   Page,
   Layout,
@@ -25,7 +25,8 @@ import {
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { isInhouseMode, planLabel } from "../utils/planFeatures.server";
+import { getFullAccess, isInhouseMode, planLabel } from "../utils/planFeatures.server";
+import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 
 // 環境変数の存在チェック（値は返さない）
 const REQUIRED_ENV_VARS = [
@@ -90,14 +91,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     required: false,
   }));
 
+  const fullAccess = await getFullAccess(admin, session);
   return {
     shop: {
       id: shop.id,
       domain: session.shop,
       planCode: shop.planCode ?? "standard",
-      planLabel: planLabel(shop.planCode),
+      planLabel: fullAccess
+        ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
+        : planLabel(shop.planCode),
     },
-    isInhouse: isInhouseMode(),
+    isInhouse: fullAccess,
     dbCounts: {
       locationCount,
       settlementCount,
@@ -127,15 +131,18 @@ export default function DiagnosticsPage() {
     optionalEnvChecks,
     checkedAt,
   } = useLoaderData<typeof loader>();
-
+  const location = useLocation();
+  const navigate = useNavigate();
+  const q = location.search || "";
   const missingRequired = envChecks.filter((e) => !e.present);
   const allEnvOk = missingRequired.length === 0;
 
   return (
+    <PolarisPageWrapper>
     <Page
       title="システム診断"
       subtitle={`確認日時: ${new Date(checkedAt).toLocaleString("ja-JP")}`}
-      backAction={{ url: "/app" }}
+      backAction={{ content: "戻る", onAction: () => navigate("/app" + q) }}
     >
       <Layout>
         {/* ── 環境変数エラー ── */}
@@ -251,5 +258,6 @@ export default function DiagnosticsPage() {
         </Layout.AnnotatedSection>
       </Layout>
     </Page>
+    </PolarisPageWrapper>
   );
 }

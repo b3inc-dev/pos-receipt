@@ -1,13 +1,13 @@
 /**
  * GET /api/billing → 現在のプラン状態（管理画面から呼ぶ場合用）
- * ※ サブスクリプション作成は app.settings.billing.tsx の action で行う
+ * ※ サブスクリプション作成は app.plan.tsx の action で行う
  *
  * 要件書 §3 / §Epic G: プラン制御
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { isInhouseMode, planLabel } from "../utils/planFeatures.server";
+import { getFullAccess, isInhouseMode, planLabel } from "../utils/planFeatures.server";
 
 const APP_SUBSCRIPTION_QUERY = `#graphql
   query CurrentSubscription {
@@ -24,10 +24,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { admin, session } = await authenticate.admin(request);
     const shop = await resolveShop(session.shop, admin);
 
-    if (isInhouseMode()) {
+    const fullAccess = await getFullAccess(admin, session);
+    if (fullAccess) {
       return Response.json({
         planCode: "unlimited",
-        planLabel: "自社用（無制限）",
+        planLabel: isInhouseMode() ? "自社用（無制限）" : "全機能利用可能",
         isInhouse: true,
         activeSubscriptions: [],
       });

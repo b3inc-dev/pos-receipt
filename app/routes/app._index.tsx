@@ -2,7 +2,7 @@
  * /app — 管理画面トップ
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useLocation, useNavigate } from "react-router";
 import {
   Page,
   Layout,
@@ -16,23 +16,33 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { planLabel, isInhouseMode } from "../utils/planFeatures.server";
+import { planLabel, getFullAccess, isInhouseMode } from "../utils/planFeatures.server";
+import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
+  const fullAccess = await getFullAccess(admin, session);
   return {
     planCode: shop.planCode ?? "standard",
-    planLabel: planLabel(shop.planCode),
-    isInhouse: isInhouseMode(),
+    planLabel: fullAccess
+      ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
+      : planLabel(shop.planCode),
+    isInhouse: fullAccess,
   };
 }
 
 export default function AppIndex() {
   const { planCode, planLabel: label, isInhouse } = useLoaderData<typeof loader>();
+  const location = useLocation();
+  const navigate = useNavigate();
   const isPro = isInhouse || planCode === "pro" || planCode === "unlimited";
+  const q = location.search || "";
+
+  const to = (path: string) => () => navigate(path + q);
 
   return (
+    <PolarisPageWrapper>
     <Page title="POS Receipt">
       <Layout>
         {/* ── 現在のプラン ── */}
@@ -55,7 +65,7 @@ export default function AppIndex() {
                     <Text as="p">
                       プロプランにアップグレードすると売上サマリー・予算管理・入店数報告が利用できます。
                     </Text>
-                    <Button url="/app/settings/billing" variant="primary">
+                    <Button onClick={to("/app/plan")} variant="primary">
                       プロプランにアップグレード
                     </Button>
                   </BlockStack>
@@ -78,7 +88,7 @@ export default function AppIndex() {
               <Text tone="subdued" as="p">
                 発行者情報・但し書き・印字設定を編集します。
               </Text>
-              <Button url="/app/receipt-template">テンプレート設定を開く</Button>
+              <Button onClick={to("/app/receipt-template")}>テンプレート設定を開く</Button>
             </BlockStack>
           </Card>
         </Layout.AnnotatedSection>
@@ -94,9 +104,9 @@ export default function AppIndex() {
                 印字方式・売上サマリー有効化を店舗ごとに設定します。
               </Text>
               <InlineStack gap="200">
-                <Button url="/app/settings">設定を開く</Button>
+                <Button onClick={to("/app/settings")}>設定を開く</Button>
                 {!isInhouse && (
-                  <Button url="/app/settings/billing" variant={isPro ? "plain" : "primary"}>
+                  <Button onClick={to("/app/plan")} variant={isPro ? "plain" : "primary"}>
                     {isPro ? "プラン詳細" : "プロプランへ"}
                   </Button>
                 )}
@@ -115,11 +125,12 @@ export default function AppIndex() {
               <Text tone="subdued" as="p">
                 接続中のショップ情報・直近アクティビティ・必須環境変数の設定状態を一覧で確認できます。
               </Text>
-              <Button url="/app/diagnostics">診断ページを開く</Button>
+              <Button onClick={to("/app/diagnostics")}>診断ページを開く</Button>
             </BlockStack>
           </Card>
         </Layout.AnnotatedSection>
       </Layout>
     </Page>
+    </PolarisPageWrapper>
   );
 }

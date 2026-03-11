@@ -7,7 +7,7 @@
  * - 領収書テンプレート設定リンク
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit } from "react-router";
+import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
 import {
   Page,
   Layout,
@@ -26,7 +26,8 @@ import {
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { planLabel, isInhouseMode, PLAN_FEATURES } from "../utils/planFeatures.server";
+import { planLabel, getFullAccess, isInhouseMode, PLAN_FEATURES } from "../utils/planFeatures.server";
+import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 
 const LOCATIONS_QUERY = `#graphql
   query Locations {
@@ -70,9 +71,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   });
 
+  const fullAccess = await getFullAccess(admin, session);
   return {
-    shop: { id: shop.id, planCode: shop.planCode, planLabel: planLabel(shop.planCode) },
-    isInhouse: isInhouseMode(),
+    shop: {
+      id: shop.id,
+      planCode: shop.planCode,
+      planLabel: fullAccess
+        ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
+        : planLabel(shop.planCode),
+    },
+    isInhouse: fullAccess,
     locations,
     proFeatures: PLAN_FEATURES.pro,
     standardFeatures: PLAN_FEATURES.standard,
@@ -110,7 +118,11 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function SettingsPage() {
   const { shop, isInhouse, locations } = useLoaderData<typeof loader>();
   const submit = useSubmit();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const q = location.search || "";
   const isPro = isInhouse || shop.planCode === "pro" || shop.planCode === "unlimited";
+  const to = (path: string) => () => navigate(path + q);
 
   const handleLocationChange = (
     locationId: string,
@@ -136,10 +148,11 @@ export default function SettingsPage() {
   };
 
   return (
+    <PolarisPageWrapper>
     <Page
       title="設定"
-      primaryAction={{ content: "領収書テンプレート設定", url: "/app/receipt-template" }}
-      backAction={{ url: "/app" }}
+      primaryAction={{ content: "領収書テンプレート設定", onAction: to("/app/receipt-template") }}
+      backAction={{ content: "戻る", onAction: to("/app") }}
     >
       <Layout>
         {/* ── プラン状態 ── */}
@@ -162,7 +175,7 @@ export default function SettingsPage() {
                     <Text as="p">
                       プロプランにアップグレードすると売上サマリー・予算管理・入店数報告が利用できます。
                     </Text>
-                    <Button url="/app/settings/billing" variant="primary">
+                    <Button onClick={to("/app/plan")} variant="primary">
                       プロプランにアップグレード
                     </Button>
                   </BlockStack>
@@ -174,7 +187,7 @@ export default function SettingsPage() {
               )}
 
               {!isInhouse && (
-                <Button url="/app/settings/billing" variant="plain">
+                <Button onClick={to("/app/plan")} variant="plain">
                   プラン・課金管理
                 </Button>
               )}
@@ -247,11 +260,12 @@ export default function SettingsPage() {
               <Text tone="subdued" as="p">
                 障害調査や本番環境の設定確認に利用してください。
               </Text>
-              <Button url="/app/diagnostics" variant="plain">診断ページを開く</Button>
+              <Button onClick={to("/app/diagnostics")} variant="plain">診断ページを開く</Button>
             </BlockStack>
           </Card>
         </Layout.AnnotatedSection>
       </Layout>
     </Page>
+    </PolarisPageWrapper>
   );
 }

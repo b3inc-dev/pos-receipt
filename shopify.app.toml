@@ -18,8 +18,9 @@ api_version = "2026-04"
 topics = ["app/uninstalled"]
 uri = "/webhooks/app/uninstalled"
 
+# GDPR 必須コンプライアンス Webhook（topics ではなく compliance_topics を使用）
 [[webhooks.subscriptions]]
-topics = ["customers/data_request", "customers/redact", "shop/redact"]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
 uri = "/webhooks/compliance"
 
 [access_scopes]

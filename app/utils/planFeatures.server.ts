@@ -2,7 +2,10 @@
  * プラン別機能フラグ
  * 要件書 §3: プラン構成
  *
- * APP_DISTRIBUTION=inhouse のときは全機能を無制限で許可する。
+ * 以下は常に全機能を解放する（POS Stock と同様）:
+ * - APP_DISTRIBUTION=inhouse（自社用）
+ * - CUSTOM_APP_STORE_IDS に含まれるショップドメイン（カスタム／開発用）
+ * - Shopify の開発ストア（shop.plan.partnerDevelopment）
  */
 
 export type PlanCode = "standard" | "pro" | "unlimited";
@@ -23,10 +26,41 @@ const PRO_FEATURES: FeatureKey[] = [
   "budget_management",
 ];
 
-// ── 自社用判定（APP_DISTRIBUTION=inhouse → 無制限） ──────────────────────────
+const SHOP_PLAN_QUERY = `#graphql
+  query ShopPlan { shop { plan { partnerDevelopment } } }
+`;
 
+/** カスタムアプリとして扱うショップドメイン一覧（カンマ区切り）。ここに含まれるストアは常に全機能解放。 */
+export function getCustomAppStoreIds(): string[] {
+  const raw = process.env.CUSTOM_APP_STORE_IDS ?? "";
+  return raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
+/** 自社用判定（APP_DISTRIBUTION=inhouse のとき true）。getFullAccess の一部としても使用。 */
 export function isInhouseMode(): boolean {
   return process.env.APP_DISTRIBUTION === "inhouse";
+}
+
+/**
+ * 全機能解放かどうか（自社用・CUSTOM_APP_STORE_IDS・開発ストアのいずれかで true）。
+ * 管理画面・API の loader で使い、isInhouse の代わりに返す。
+ */
+export async function getFullAccess(
+  admin: { graphql: (query: string) => Promise<Response> },
+  session: { shop: string }
+): Promise<boolean> {
+  if (isInhouseMode()) return true;
+  const customIds = getCustomAppStoreIds();
+  const shopNorm = session.shop.trim().toLowerCase();
+  if (shopNorm && customIds.some((id) => id === shopNorm)) return true;
+  try {
+    const res = await admin.graphql(SHOP_PLAN_QUERY);
+    const json = (await res.json()) as { data?: { shop?: { plan?: { partnerDevelopment?: boolean } } } };
+    if (json?.data?.shop?.plan?.partnerDevelopment === true) return true;
+  } catch {
+    // ignore
+  }
+  return false;
 }
 
 // ── プラン表示名 ────────────────────────────────────────────────────────────
@@ -47,9 +81,15 @@ export interface PlanAccessResult {
   message: string;
 }
 
-export function checkPlanAccess(planCode: string | null, feature: FeatureKey): PlanAccessResult {
-  // 自社用 or unlimited は全機能許可
-  if (isInhouseMode() || planCode === "unlimited") {
+export function checkPlanAccess(
+  planCode: string | null,
+  feature: FeatureKey,
+  fullAccess?: boolean
+): PlanAccessResult {
+  if (fullAccess === true || planCode === "unlimited") {
+    return { allowed: true, message: "" };
+  }
+  if (isInhouseMode()) {
     return { allowed: true, message: "" };
   }
 
