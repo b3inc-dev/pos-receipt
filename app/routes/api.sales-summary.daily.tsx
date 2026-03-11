@@ -2,12 +2,15 @@
  * GET /api/sales-summary/daily
  * 要件書 §21.6: 日次売上サマリー
  * Query: targetDate, locationIds[]
+ * 設定 §10: 売上サマリー設定で表示対象・KPI を制御
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
+import { getAppSetting } from "../utils/appSettings.server";
+import { SALES_SUMMARY_SETTINGS_KEY, DEFAULT_SALES_SUMMARY_SETTINGS } from "../utils/appSettings.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -19,17 +22,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
 
+    const settings = await getAppSetting<typeof DEFAULT_SALES_SUMMARY_SETTINGS>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
+    const merged = { ...DEFAULT_SALES_SUMMARY_SETTINGS, ...settings };
     const url = new URL(request.url);
     const targetDate =
       url.searchParams.get("targetDate") ?? new Date().toISOString().slice(0, 10);
     const locationIdsParam = url.searchParams.getAll("locationIds[]");
 
-    // サマリー有効ロケーション取得
+    if (!merged.salesSummaryEnabled) {
+      return corsJson({ rows: [], totals: { actual: 0, orders: 0, items: 0, budget: null, visitors: null }, displayOptions: merged, targetDate });
+    }
+
     const allLocations = await prisma.location.findMany({
       where: { shopId: shop.id, salesSummaryEnabled: true },
     });
 
-    const targetLocations =
+    let targetLocations =
       locationIdsParam.length > 0
         ? allLocations.filter((l) =>
             locationIdsParam.some(
@@ -41,10 +49,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
           )
         : allLocations;
 
+    if (merged.visibleLocationIds.length > 0) {
+      targetLocations = targetLocations.filter((l) =>
+        merged.visibleLocationIds.includes(l.shopifyLocationGid)
+      );
+    }
+
     if (targetLocations.length === 0) {
       return corsJson({
         rows: [],
         totals: { actual: 0, orders: 0, items: 0, budget: null, visitors: null },
+        displayOptions: merged,
+        targetDate,
       });
     }
 
@@ -75,7 +91,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : null,
     };
 
-    return corsJson({ rows, totals, targetDate });
+    return corsJson({ rows, totals, targetDate, displayOptions: merged });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsJson({ ok: false, error: message }, { status: 500 });

@@ -8,7 +8,16 @@ import { Link, useLocation } from "react-router";
 const NAV_ITEMS = [
   { path: "/app", label: "ホーム" },
   { path: "/app/receipt-template", label: "領収書テンプレート" },
+  { path: "/app/payment-methods", label: "支払方法マスタ" },
   { path: "/app/budget-management", label: "予算管理" },
+  { path: "/app/general-settings", label: "一般設定" },
+  { path: "/app/settlement-settings", label: "精算設定" },
+  { path: "/app/print-settings", label: "印字設定" },
+  { path: "/app/budget-settings", label: "予算設定" },
+  { path: "/app/sales-summary-settings", label: "売上サマリー設定" },
+  { path: "/app/loyalty-settings", label: "ポイント/会員施策" },
+  { path: "/app/voucher-settings", label: "商品券設定" },
+  { path: "/app/special-refund-settings", label: "特殊返金設定" },
   { path: "/app/settlement-history", label: "精算履歴" },
   { path: "/app/special-refund-history", label: "特殊返金履歴" },
   { path: "/app/receipt-history", label: "領収書履歴" },
@@ -48,7 +57,7 @@ export function AppNavBar() {
             key={path}
             to={to}
             style={{
-              color: isActive ? "#005bd3" : "#202223",
+              color: isActive ? "#2c6ecb" : "#202223",
               fontWeight: isActive ? 600 : 400,
               textDecoration: "none",
             }}

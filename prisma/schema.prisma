@@ -40,9 +40,10 @@ model Shop {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  locations        Location[]
-  appSettings      AppSetting[]
-  settlements      Settlement[]
+  locations             Location[]
+  appSettings           AppSetting[]
+  paymentMethodMasters  PaymentMethodMaster[]
+  settlements           Settlement[]
   specialRefundEvents SpecialRefundEvent[]
   receiptTemplates ReceiptTemplate[]
   receiptIssues    ReceiptIssue[]
@@ -52,17 +53,37 @@ model Shop {
   salesSummaryCachePeriod  SalesSummaryCachePeriod[]
 }
 
-// ========== 20.2 ロケーション（印字方式・サマリー設定） ==========
+// ========== 20.2 ロケーション（印字方式・サマリー設定）要件 §4 ==========
 model Location {
-  id                      String   @id @default(cuid())
-  shopId                  String
-  shop                    Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  shopifyLocationGid      String   // Shopify Location GID
-  name                    String
-  code                    String?
-  printMode               String   @default("order_based") // cloudprnt_direct | order_based
-  salesSummaryEnabled     Boolean  @default(false)
-  footfallReportingEnabled Boolean @default(false)
+  id                        String   @id @default(cuid())
+  shopId                    String
+  shop                      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shopifyLocationGid        String   // Shopify Location GID
+  name                      String   // Shopify のロケーション名
+  displayName               String?  // 管理画面・レシート用表示名（未設定時は name を使用）
+  shortName                 String?  // 短縮表示名
+  sortOrder                 Int      @default(0) // 並び順（小さいほど上）
+  code                      String?
+  printMode                 String   @default("order_based") // cloudprnt_direct | order_based
+  salesSummaryEnabled       Boolean  @default(false)
+  footfallReportingEnabled  Boolean  @default(false)
+  // §4.2.2 機能有効可否
+  settlementEnabled        Boolean  @default(true)
+  receiptEnabled           Boolean  @default(true)
+  specialRefundEnabled     Boolean  @default(true)
+  voucherAdjustmentEnabled Boolean @default(true)
+  inspectionReceiptEnabled Boolean  @default(true)
+  // §4.2.3 集計・表示対象制御
+  includeInStoreTotals     Boolean  @default(true)
+  includeInOverallTotals  Boolean  @default(true)
+  visibleInSummaryDefault Boolean  @default(true)
+  // §4.2.4 印字関連
+  printerProfileId        String?
+  cloudprntEnabled        Boolean  @default(false)
+  // §4.2.5 売上サマリー関連
+  summaryTargetGroup      String?
+  budgetTargetEnabled     Boolean  @default(false)
+  footfallTargetEnabled   Boolean  @default(false)
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
@@ -81,6 +102,30 @@ model AppSetting {
   updatedAt DateTime @updatedAt
 
   @@unique([shopId, key])
+  @@index([shopId])
+}
+
+// ========== 要件 §13.3 支払方法マスタ ==========
+model PaymentMethodMaster {
+  id                            String   @id @default(cuid())
+  shopId                        String
+  shop                          Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  rawGatewayPattern             String   // 判定用: gateway 文字列のパターン
+  formattedGatewayPattern       String?  // 判定用: formattedGateway のパターン（任意）
+  matchType                     String   @default("contains_match") // contains_match | exact_match | starts_with_match
+  displayLabel                  String   // 精算・特殊返金での表示名
+  category                      String   @default("uncategorized") // cash | credit_card | e_money | qr | transit_ic | voucher | paypal | uncategorized
+  sortOrder                     Int      @default(0)
+  isVoucher                     Boolean  @default(false)
+  voucherChangeSupported        Boolean  @default(false)
+  voucherNoChangeSupported      Boolean  @default(false)
+  selectableForSpecialRefund     Boolean  @default(true)
+  selectableForReceiptCashAdjustment Boolean @default(false)
+  selectableForPaymentOverride   Boolean  @default(false)
+  enabled                       Boolean  @default(true)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+
   @@index([shopId])
 }
 

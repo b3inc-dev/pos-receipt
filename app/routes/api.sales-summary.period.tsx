@@ -2,11 +2,14 @@
  * GET /api/sales-summary/period
  * 要件書 §21.6: 期間売上サマリー
  * Query: dateFrom, dateTo, locationIds[]
+ * 設定 §10: 売上サマリー設定で表示対象を制御
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
+import { getAppSetting } from "../utils/appSettings.server";
+import { SALES_SUMMARY_SETTINGS_KEY, DEFAULT_SALES_SUMMARY_SETTINGS } from "../utils/appSettings.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -18,6 +21,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
 
+    const settings = await getAppSetting<typeof DEFAULT_SALES_SUMMARY_SETTINGS>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
+    const merged = { ...DEFAULT_SALES_SUMMARY_SETTINGS, ...settings };
+    if (!merged.salesSummaryEnabled) {
+      return corsJson({ rows: [], totals: {}, dateFrom: null, dateTo: null, displayOptions: merged });
+    }
+
     const url = new URL(request.url);
     const dateFrom = url.searchParams.get("dateFrom");
     const dateTo = url.searchParams.get("dateTo");
@@ -27,7 +36,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       where: { shopId: shop.id, salesSummaryEnabled: true },
     });
 
-    const targetLocations =
+    let targetLocations =
       locationIdsParam.length > 0
         ? allLocations.filter((l) =>
             locationIdsParam.some(
@@ -39,10 +48,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
           )
         : allLocations;
 
+    if (merged.visibleLocationIds.length > 0) {
+      targetLocations = targetLocations.filter((l) =>
+        merged.visibleLocationIds.includes(l.shopifyLocationGid)
+      );
+    }
+
     const locationGids = targetLocations.map((l) => l.shopifyLocationGid);
 
     if (locationGids.length === 0) {
-      return corsJson({ rows: [], totals: {}, dateFrom, dateTo });
+      return corsJson({ rows: [], totals: {}, dateFrom, dateTo, displayOptions: merged });
     }
 
     // 日次キャッシュから集計
@@ -127,7 +142,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       items: rows.reduce((s, r) => s + r.items, 0),
     };
 
-    return corsJson({ rows, totals, dateFrom, dateTo });
+    return corsJson({ rows, totals, dateFrom, dateTo, displayOptions: merged });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsJson({ ok: false, error: message }, { status: 500 });

@@ -2,21 +2,34 @@
  * GET  /api/special-refunds?sourceOrderId=...
  * POST /api/special-refunds
  * 要件書 21.4: 特殊返金イベント 一覧取得・登録
+ * 設定 §8: 有効なイベント種別は特殊返金設定に従う
  */
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import { getAppSetting } from "../utils/appSettings.server";
+import { SPECIAL_REFUND_SETTINGS_KEY, DEFAULT_SPECIAL_REFUND_SETTINGS } from "../utils/appSettings.server";
 
-const ALLOWED_EVENT_TYPES = [
-  "cash_refund",
-  "payment_method_override",
-  "receipt_cash_adjustment",
-] as const;
+const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
+
+function getAllowedEventTypes(settings: typeof DEFAULT_SPECIAL_REFUND_SETTINGS | null): string[] {
+  const s = settings ?? DEFAULT_SPECIAL_REFUND_SETTINGS;
+  const out: string[] = [];
+  if (s.enableCashRefund) out.push("cash_refund");
+  if (s.enablePaymentMethodOverride) out.push("payment_method_override");
+  if (s.enableVoucherChangeAdjustment) out.push("voucher_change_adjustment");
+  if (s.enableReceiptCashAdjustment) out.push("receipt_cash_adjustment");
+  return out.length > 0 ? out : [...EVENT_TYPES];
+}
 
 // GET /api/special-refunds?sourceOrderId=...
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { admin, shop, corsJson } = await authenticatePosRequest(request);
+
+    const settings = await getAppSetting<typeof DEFAULT_SPECIAL_REFUND_SETTINGS>(shop.id, SPECIAL_REFUND_SETTINGS_KEY);
+    const merged = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...settings };
+    const allowedTypes = getAllowedEventTypes(merged);
 
     const url = new URL(request.url);
     const sourceOrderId = url.searchParams.get("sourceOrderId");
@@ -32,12 +45,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       where: {
         shopId: shop.id,
         sourceOrderId,
-        eventType: { in: [...ALLOWED_EVENT_TYPES] },
+        eventType: { in: allowedTypes },
       },
       orderBy: { createdAt: "desc" },
     });
 
-    return corsJson({ items: items.map(serializeEvent) });
+    return corsJson({ items: items.map(serializeEvent), allowedEventTypes: allowedTypes, uiLabels: { specialRefund: merged.specialRefundUiLabel, voucherAdjustment: merged.voucherAdjustmentUiLabel, cashRefund: merged.cashRefundUiLabel, paymentOverride: merged.paymentOverrideUiLabel } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsJson({ ok: false, error: message }, { status: 500 });
@@ -52,6 +65,10 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
+    const settings = await getAppSetting<typeof DEFAULT_SPECIAL_REFUND_SETTINGS>(shop.id, SPECIAL_REFUND_SETTINGS_KEY);
+    const merged = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...settings };
+    const allowedTypes = getAllowedEventTypes(merged);
+
     const body = await request.json() as Record<string, unknown>;
     const {
       sourceOrderId,
@@ -62,6 +79,9 @@ export async function action({ request }: ActionFunctionArgs) {
       currency,
       originalPaymentMethod,
       actualRefundMethod,
+      voucherFaceValue,
+      voucherAppliedAmount,
+      voucherChangeAmount,
       adjustKind,
       note,
       createdBy,
@@ -73,9 +93,9 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 400 }
       );
     }
-    if (!ALLOWED_EVENT_TYPES.includes(eventType as typeof ALLOWED_EVENT_TYPES[number])) {
+    if (!allowedTypes.includes(String(eventType))) {
       return corsJson(
-        { ok: false, error: `eventType must be one of: ${ALLOWED_EVENT_TYPES.join(", ")}` },
+        { ok: false, error: `eventType must be one of: ${allowedTypes.join(", ")}` },
         { status: 400 }
       );
     }
@@ -91,6 +111,9 @@ export async function action({ request }: ActionFunctionArgs) {
         currency: currency ? String(currency) : "JPY",
         originalPaymentMethod: originalPaymentMethod ? String(originalPaymentMethod) : null,
         actualRefundMethod: actualRefundMethod ? String(actualRefundMethod) : null,
+        voucherFaceValue: voucherFaceValue != null ? Number(voucherFaceValue) : null,
+        voucherAppliedAmount: voucherAppliedAmount != null ? Number(voucherAppliedAmount) : null,
+        voucherChangeAmount: voucherChangeAmount != null ? Number(voucherChangeAmount) : null,
         adjustKind: adjustKind ? String(adjustKind) : null,
         note: note ? String(note) : null,
         createdBy: createdBy ? String(createdBy) : null,

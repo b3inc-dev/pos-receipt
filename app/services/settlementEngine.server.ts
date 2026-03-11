@@ -5,8 +5,12 @@
  * - Shopify注文データから日次売上を集計
  * - 支払方法別内訳（payment sections）を算出
  * - 特殊返金・商品券調整イベントを反映
+ * - 支払方法マスタ・ポイント/会員施策設定を参照
  */
 import prisma from "../db.server";
+import { getPaymentMethodDisplayLabel } from "../utils/paymentMethod.server";
+import { getAppSetting } from "../utils/appSettings.server";
+import { LOYALTY_SETTINGS_KEY, DEFAULT_LOYALTY_SETTINGS } from "../utils/appSettings.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,23 +50,11 @@ export interface SettlementPreviewDTO {
     voucherChangeAmount: number;
     sourceOrderName: string | null;
   }[];
+  /** ポイント利用額の表示ラベル（設定から取得） */
+  loyaltyUsageDisplayLabel: string;
 }
 
-// ── Gateway Labels（日本語） ───────────────────────────────────────────────────
-
-const GATEWAY_LABELS: Record<string, string> = {
-  cash: "現金",
-  shopify_payments: "クレジットカード",
-  bogus: "クレジットカード（テスト）",
-  gift_card: "ギフトカード",
-  exchange_v2: "商品交換",
-  manual: "手動決済",
-  "": "不明",
-};
-
-function gatewayLabel(gateway: string): string {
-  return GATEWAY_LABELS[gateway] ?? gateway ?? "その他";
-}
+// ── Gateway Labels（支払方法マスタ未設定時はフォールバックを paymentMethod.server で使用） ───
 
 // ── Shopify Types ─────────────────────────────────────────────────────────────
 
@@ -181,9 +173,12 @@ async function fetchAllOrders(admin: AdminClient, query: string): Promise<Shopif
   return orders;
 }
 
-// ── Payment Sections 算出 ─────────────────────────────────────────────────────
+// ── Payment Sections 算出（支払方法マスタで表示名を解決） ────────────────────────
 
-function calculatePaymentSections(orders: ShopifyOrder[]): PaymentSectionDTO[] {
+async function calculatePaymentSections(
+  orders: ShopifyOrder[],
+  shopId: string
+): Promise<PaymentSectionDTO[]> {
   const sections: Record<string, { net: number; refund: number; txCount: number; refundCount: number }> = {};
 
   const ensure = (gateway: string) => {
@@ -193,7 +188,6 @@ function calculatePaymentSections(orders: ShopifyOrder[]): PaymentSectionDTO[] {
   };
 
   for (const order of orders) {
-    // 売上トランザクション（SALE or CAPTURE, status: SUCCESS）
     for (const tx of order.transactions) {
       if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS") {
         const gw = tx.gateway ?? "";
@@ -202,8 +196,6 @@ function calculatePaymentSections(orders: ShopifyOrder[]): PaymentSectionDTO[] {
         sections[gw].txCount += 1;
       }
     }
-
-    // 返金トランザクション
     for (const refund of order.refunds) {
       for (const tx of refund.transactions) {
         if (tx.kind === "REFUND") {
@@ -216,11 +208,12 @@ function calculatePaymentSections(orders: ShopifyOrder[]): PaymentSectionDTO[] {
     }
   }
 
-  return Object.entries(sections).map(([gateway, data]) => ({
-    gateway,
-    label: gatewayLabel(gateway),
-    ...data,
-  }));
+  const result: PaymentSectionDTO[] = [];
+  for (const [gateway, data] of Object.entries(sections)) {
+    const label = await getPaymentMethodDisplayLabel(shopId, gateway);
+    result.push({ gateway, label, ...data });
+  }
+  return result;
 }
 
 // ── メインエントリ ─────────────────────────────────────────────────────────────
@@ -289,6 +282,10 @@ export async function buildSettlementPreview(
     .filter((e) => e.originalPaymentMethod === "points")
     .reduce((sum, e) => sum + Number(e.amount), 0);
 
+  const loyaltySettings = await getAppSetting<{ loyaltyUsageDisplayLabel?: string }>(shopId, LOYALTY_SETTINGS_KEY);
+  const loyaltyUsageDisplayLabel =
+    loyaltySettings?.loyaltyUsageDisplayLabel ?? DEFAULT_LOYALTY_SETTINGS.loyaltyUsageDisplayLabel;
+
   const round2 = (n: number) => Math.round(n * 100) / 100;
 
   return {
@@ -306,7 +303,7 @@ export async function buildSettlementPreview(
     refundCount,
     itemCount,
     voucherChangeAmount: round2(voucherChangeAmount),
-    paymentSections: calculatePaymentSections(orders),
+    paymentSections: await calculatePaymentSections(orders, shopId),
     appliedSpecialRefundEvents: otherEvents.map((e) => ({
       id: e.id,
       eventType: e.eventType,
@@ -318,5 +315,6 @@ export async function buildSettlementPreview(
       voucherChangeAmount: Number(e.voucherChangeAmount ?? 0),
       sourceOrderName: e.sourceOrderName,
     })),
+    loyaltyUsageDisplayLabel,
   };
 }

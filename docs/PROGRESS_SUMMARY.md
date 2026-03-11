@@ -40,7 +40,29 @@
   - `extensions/pos-smart-grid/src/Modal.jsx` … 検索フォーム・結果一覧・取引選択
   - `extensions/pos-smart-grid/src/OrderAction.jsx` … 取引詳細画面から「この取引で開く」
 
-### 2.3 ドキュメント・デプロイ
+### 2.3 設定要件書（posreceipt_settings_detail.md）対応
+- **Phase 1〜2**  
+  - `PaymentMethodMaster` テーブル追加、Location に表示名・並び順・機能有効フラグ追加（§4, §13.3）  
+  - 支払方法マスタ設定画面（`/app/payment-methods`）と API（GET/POST/PATCH/DELETE）  
+  - 設定ページのロケーション設定を拡張（表示名・短縮名・並び順・精算/領収書/特殊返金/商品券/点検の ON/OFF）
+- **Phase 3（領収書・売上サマリー・ポイント）**  
+  - 領収書テンプレートを §9.2 全項目対応。管理画面プレビューを保存前後で一致（§9.3）  
+  - 売上サマリー設定（`/app/sales-summary-settings`）：§10 の表示・KPI・入店数報告を AppSetting で保存  
+  - ポイント/会員施策設定（`/app/loyalty-settings`）：§9A の loyalty_usage 表示名・抽出元を AppSetting で保存  
+- **Phase 4（設定参照・商品券・特殊返金）**  
+  - 売上サマリー API（daily/period）で sales_summary_settings を参照（表示対象ロケーション・displayOptions 返却）  
+  - 精算エンジンで支払方法マスタの表示ラベル・loyalty_settings の表示ラベルを参照  
+  - 特殊返金 API で special_refund_settings から有効イベント種別・UI ラベルを取得  
+  - 商品券設定（`/app/voucher-settings`）、特殊返金設定（`/app/special-refund-settings`）画面を追加  
+- **全設定画面の網羅（§3・§5・§11・§12・§4.2.3〜4.2.5）**  
+  - 一般設定（`/app/general-settings`）：アプリ表示名・連絡先・タイムゾーン・通貨・プラン・言語・デバッグ（AppSetting `general_settings`）  
+  - 精算設定（`/app/settlement-settings`）：表題・表示項目ON/OFF・項目名・項目順・税表示・再処理・order_based ルール（AppSetting `settlement_settings`）  
+  - 印字設定（`/app/print-settings`）：デフォルト印字方式・ロケーション上書き・CloudPRNT・order-based・領収書印字（AppSetting `print_settings`）  
+  - 予算設定（`/app/budget-settings`）：CSVマッピング・手動/一括編集・input_unit・apply_mode（AppSetting `budget_settings`）  
+  - ロケーション設定：§4.2.3（店舗/全体合計・サマリー表示）、§4.2.4（printer_profile_id, cloudprnt_enabled）、§4.2.5（summary_target_group, budget_target_enabled, footfall_target_enabled）を Location に追加・設定ページで編集  
+- ギャップ一覧: `docs/SETTINGS_GAP_ANALYSIS.md`、網羅状況: `docs/SETTINGS_REQUIREMENTS_COVERAGE.md`
+
+### 2.4 ドキュメント・デプロイ
 - Render 手順: `RENDER_SETUP.md`, `RENDER_DATABASE_URL.md`, `NEXT_STEPS_AFTER_RENDER.md`
 - 構成案: `PROJECT_STRUCTURE_PROPOSAL.md`、DB: `DB_MIGRATION.md`
 
