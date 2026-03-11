@@ -44,25 +44,27 @@ module = "./src/SettlementModal.jsx"
 target = "pos.home.modal.render"
 
 # ============================================================
-# 領収書タイル（Phase 6 で実装予定 — UID 取得後にコメントを外す）
+# 領収書タイル（Phase 6 実装済み）
+# UID 取得: shopify app generate extension --type ui_extension --name "領収書発行"
+# 取得後、uid フィールドをこのブロックに追加すること
 # ============================================================
-# [[extensions]]
-# type = "ui_extension"
-# name = "領収書"
-# handle = "pos-receipt-issue"
-# description = "領収書の発行・再発行"
-#
-# [[extensions.targeting]]
-# module = "./src/ReceiptTile.jsx"
-# target = "pos.home.tile.render"
-#
-# [[extensions.targeting]]
-# module = "./src/ReceiptModal.jsx"
-# target = "pos.home.modal.render"
-#
-# [[extensions.targeting]]
-# module = "./src/ReceiptOrderAction.jsx"
-# target = "pos.order-details.action.menu-item.render"
+[[extensions]]
+type = "ui_extension"
+name = "領収書発行"
+handle = "pos-receipt-issue"
+description = "領収書の発行・再発行"
+
+[[extensions.targeting]]
+module = "./src/ReceiptTile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/ReceiptModal.jsx"
+target = "pos.home.modal.render"
+
+[[extensions.targeting]]
+module = "./src/ReceiptOrderAction.jsx"
+target = "pos.order-details.action.menu-item.render"
 
 # ============================================================
 # 売上サマリータイル（Phase 7 で実装予定 — UID 取得後にコメントを外す）
