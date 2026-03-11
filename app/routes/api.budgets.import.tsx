@@ -8,6 +8,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
+import { checkPlanAccess } from "../utils/planFeatures.server";
 
 interface BudgetRow {
   locationId: string;
@@ -22,6 +23,11 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { admin, session } = await authenticate.public(request);
     const shop = await resolveShop(session.shop, admin);
+
+    const access = checkPlanAccess(shop.planCode, "budget_management");
+    if (!access.allowed) {
+      return Response.json({ ok: false, error: access.message }, { status: 403 });
+    }
 
     const contentType = request.headers.get("content-type") ?? "";
     let rows: BudgetRow[] = [];

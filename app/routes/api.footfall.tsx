@@ -7,6 +7,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
+import { checkPlanAccess } from "../utils/planFeatures.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
@@ -15,6 +16,11 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { admin, session } = await authenticate.public(request);
     const shop = await resolveShop(session.shop, admin);
+
+    const access = checkPlanAccess(shop.planCode, "footfall_reporting");
+    if (!access.allowed) {
+      return Response.json({ ok: false, error: access.message }, { status: 403 });
+    }
 
     const body = (await request.json()) as Record<string, unknown>;
     const { locationId, targetDate, visitors, createdBy } = body;

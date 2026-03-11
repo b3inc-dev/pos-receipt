@@ -7,11 +7,17 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
+import { checkPlanAccess } from "../utils/planFeatures.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { admin, session } = await authenticate.public(request);
     const shop = await resolveShop(session.shop, admin);
+
+    const access = checkPlanAccess(shop.planCode, "sales_summary");
+    if (!access.allowed) {
+      return Response.json({ ok: false, error: access.message }, { status: 403 });
+    }
 
     const url = new URL(request.url);
     const dateFrom = url.searchParams.get("dateFrom");
