@@ -1,6 +1,9 @@
 /**
  * POST /api/receipts/issue
  * 要件書 §21.5: 領収書発行・再発行 + DB保存
+ *
+ * リトライ安全: クライアントが idempotencyKey（UUID）を送信することで、
+ * ネットワーク再試行時に重複発行を防ぐ。同一キーが既存の場合は既存レコードを返す。
  */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequest } from "../utils/posAuth.server";
@@ -21,16 +24,45 @@ const ORDER_QUERY = `#graphql
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return corsJson({ error: "Method not allowed" }, { status: 405 });
+    return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   try {
     const { admin, shop, corsJson } = await authenticatePosRequest(request);
 
     const body = await request.json() as Record<string, unknown>;
-    const { orderId, recipientName, proviso, isReissue, createdBy } = body;
+    const { orderId, recipientName, proviso, isReissue, createdBy, idempotencyKey } = body;
 
     if (!orderId) {
       return corsJson({ ok: false, error: "orderId is required" }, { status: 400 });
+    }
+
+    // ── 冪等性チェック ──────────────────────────────────────────────────────
+    // 同一 idempotencyKey が既に存在する場合は重複発行せず既存レコードを返す
+    if (idempotencyKey && typeof idempotencyKey === "string") {
+      const existing = await prisma.receiptIssue.findUnique({
+        where: { idempotencyKey },
+      });
+      if (existing) {
+        return corsJson(
+          {
+            ok: true,
+            idempotent: true,
+            receipt: {
+              receiptIssueId: existing.id,
+              orderId: existing.orderId,
+              orderName: existing.orderName,
+              recipientName: existing.recipientName,
+              proviso: existing.proviso,
+              amount: Number(existing.amount),
+              currency: existing.currency,
+              issueDate: existing.createdAt.toISOString().slice(0, 10),
+              isReissue: existing.isReissue,
+              templateVersion: existing.templateVersion,
+            },
+          },
+          { status: 200 }
+        );
+      }
     }
 
     const gid = String(orderId).startsWith("gid://")
@@ -81,6 +113,9 @@ export async function action({ request }: ActionFunctionArgs) {
         templateVersion: tmpl?.version ?? 1,
         isReissue: Boolean(isReissue),
         createdBy: createdBy ? String(createdBy) : null,
+        idempotencyKey: idempotencyKey && typeof idempotencyKey === "string"
+          ? idempotencyKey
+          : null,
       },
     });
 
@@ -105,9 +140,9 @@ export async function action({ request }: ActionFunctionArgs) {
       templateVersion: tmpl?.version ?? 1,
     };
 
-    return corsJson({ ok: true, receipt: receiptData }, { status: 201 });
+    return corsJson({ ok: true, idempotent: false, receipt: receiptData }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return Response.json({ ok: false, error: message }, { status: 500 });
   }
 }

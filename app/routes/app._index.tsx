@@ -12,7 +12,7 @@ import {
   Button,
   BlockStack,
   InlineStack,
-  Box,
+  Banner,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
@@ -33,69 +33,77 @@ export default function AppIndex() {
   const isPro = isInhouse || planCode === "pro" || planCode === "unlimited";
 
   return (
-    <Page title="POS Receipt 管理画面">
+    <Page title="POS Receipt">
       <Layout>
-        {/* プラン状態 */}
-        <Layout.Section>
+        {/* ── 現在のプラン ── */}
+        <Layout.AnnotatedSection
+          title="現在のプラン"
+          description="ご契約中のプランと利用可能な機能を確認できます。"
+        >
           <Card>
             <BlockStack gap="300">
               <InlineStack align="space-between" blockAlign="center">
-                <Text variant="headingMd" as="h2">現在のプラン</Text>
+                <Text variant="headingMd" as="h2">プラン</Text>
                 <Badge tone={isPro ? "success" : "info"}>{label}</Badge>
               </InlineStack>
               <Text tone="subdued" as="p">
                 精算・特殊返金・領収書などは POS アプリのタイルから利用できます。
               </Text>
-              <InlineStack gap="300">
-                <Button url="/app/settings">設定</Button>
-                {!isInhouse && !isPro && (
-                  <Button url="/app/settings/billing" variant="primary">
-                    プロプランにアップグレード
+              {!isInhouse && !isPro && (
+                <Banner tone="info">
+                  <BlockStack gap="200">
+                    <Text as="p">
+                      プロプランにアップグレードすると売上サマリー・予算管理・入店数報告が利用できます。
+                    </Text>
+                    <Button url="/app/settings/billing" variant="primary">
+                      プロプランにアップグレード
+                    </Button>
+                  </BlockStack>
+                </Banner>
+              )}
+              {(isInhouse || isPro) && (
+                <Text tone="subdued" as="p">全機能が利用可能です。</Text>
+              )}
+            </BlockStack>
+          </Card>
+        </Layout.AnnotatedSection>
+
+        {/* ── 領収書テンプレート ── */}
+        <Layout.AnnotatedSection
+          title="領収書テンプレート"
+          description="発行者情報（会社名・住所・電話番号）や但し書きのデフォルト値を設定します。"
+        >
+          <Card>
+            <BlockStack gap="200">
+              <Text tone="subdued" as="p">
+                発行者情報・但し書き・印字設定を編集します。
+              </Text>
+              <Button url="/app/receipt-template">テンプレート設定を開く</Button>
+            </BlockStack>
+          </Card>
+        </Layout.AnnotatedSection>
+
+        {/* ── ロケーション・プラン設定 ── */}
+        <Layout.AnnotatedSection
+          title="ロケーション設定"
+          description="各店舗の印字方式や売上サマリー・入店数報告の有効化を設定します。"
+        >
+          <Card>
+            <BlockStack gap="200">
+              <Text tone="subdued" as="p">
+                印字方式・売上サマリー有効化を店舗ごとに設定します。
+              </Text>
+              <InlineStack gap="200">
+                <Button url="/app/settings">設定を開く</Button>
+                {!isInhouse && (
+                  <Button url="/app/settings/billing" variant={isPro ? "plain" : "primary"}>
+                    {isPro ? "プラン詳細" : "プロプランへ"}
                   </Button>
                 )}
               </InlineStack>
             </BlockStack>
           </Card>
-        </Layout.Section>
-
-        {/* クイックリンク */}
-        <Layout.Section>
-          <Layout>
-            <Layout.Section variant="oneThird">
-              <Card>
-                <BlockStack gap="200">
-                  <Text variant="headingSm" as="h3">領収書テンプレート</Text>
-                  <Text tone="subdued" as="p">発行者情報・但し書き・印字設定を編集します。</Text>
-                  <Button url="/app/receipt-template">テンプレート設定</Button>
-                </BlockStack>
-              </Card>
-            </Layout.Section>
-
-            <Layout.Section variant="oneThird">
-              <Card>
-                <BlockStack gap="200">
-                  <Text variant="headingSm" as="h3">ロケーション設定</Text>
-                  <Text tone="subdued" as="p">印字方式・売上サマリー有効化を店舗ごとに設定します。</Text>
-                  <Button url="/app/settings">設定を開く</Button>
-                </BlockStack>
-              </Card>
-            </Layout.Section>
-
-            <Layout.Section variant="oneThird">
-              <Card>
-                <BlockStack gap="200">
-                  <Text variant="headingSm" as="h3">プラン管理</Text>
-                  <Text tone="subdued" as="p">
-                    {isPro
-                      ? "プロプランをご利用中です。全機能が利用可能です。"
-                      : "スタンダードプランをご利用中です。プロプランでさらに多くの機能が使えます。"}
-                  </Text>
-                  <Button url="/app/settings/billing">プラン詳細</Button>
-                </BlockStack>
-              </Card>
-            </Layout.Section>
-          </Layout>
-        </Layout.Section>
+        </Layout.AnnotatedSection>
       </Layout>
     </Page>
   );

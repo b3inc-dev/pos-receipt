@@ -7,7 +7,7 @@
  * - 領収書テンプレート設定リンク
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, Form } from "react-router";
+import { useLoaderData, useSubmit } from "react-router";
 import {
   Page,
   Layout,
@@ -22,7 +22,6 @@ import {
   Banner,
   Divider,
   Box,
-  DataTable,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -137,14 +136,21 @@ export default function SettingsPage() {
   };
 
   return (
-    <Page title="設定" primaryAction={{ content: "領収書テンプレート設定", url: "/app/receipt-template" }}>
+    <Page
+      title="設定"
+      primaryAction={{ content: "領収書テンプレート設定", url: "/app/receipt-template" }}
+      backAction={{ url: "/app" }}
+    >
       <Layout>
         {/* ── プラン状態 ── */}
-        <Layout.Section>
+        <Layout.AnnotatedSection
+          title="プラン"
+          description="ご契約中のプランと利用できる機能を確認できます。プロプランでは売上サマリー・予算管理・入店数報告が利用可能です。"
+        >
           <Card>
             <BlockStack gap="300">
               <InlineStack align="space-between" blockAlign="center">
-                <Text variant="headingMd" as="h2">プラン</Text>
+                <Text variant="headingMd" as="h2">現在のプラン</Text>
                 <Badge tone={isPro ? "success" : "info"}>
                   {shop.planLabel}
                 </Badge>
@@ -164,23 +170,25 @@ export default function SettingsPage() {
               )}
 
               {(isInhouse || isPro) && (
-                <Text tone="subdued" as="p">
-                  全機能が利用可能です。
-                </Text>
+                <Text tone="subdued" as="p">全機能が利用可能です。</Text>
+              )}
+
+              {!isInhouse && (
+                <Button url="/app/settings/billing" variant="plain">
+                  プラン・課金管理
+                </Button>
               )}
             </BlockStack>
           </Card>
-        </Layout.Section>
+        </Layout.AnnotatedSection>
 
         {/* ── ロケーション設定 ── */}
-        <Layout.Section>
+        <Layout.AnnotatedSection
+          title="ロケーション設定"
+          description="各店舗の印字方式と売上サマリー設定を管理します。売上サマリー・入店数報告はプロプランが必要です。"
+        >
           <Card>
             <BlockStack gap="400">
-              <Text variant="headingMd" as="h2">ロケーション設定</Text>
-              <Text tone="subdued" as="p">
-                各店舗の印字方式と売上サマリー設定を管理します。
-              </Text>
-
               {locations.length === 0 && (
                 <Text tone="subdued" as="p">ロケーションが見つかりません。</Text>
               )}
@@ -227,7 +235,7 @@ export default function SettingsPage() {
               ))}
             </BlockStack>
           </Card>
-        </Layout.Section>
+        </Layout.AnnotatedSection>
       </Layout>
     </Page>
   );

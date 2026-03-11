@@ -172,12 +172,22 @@ export default function BillingPage() {
   return (
     <Page title="プラン・課金" backAction={{ url: "/app/settings" }}>
       <Layout>
-        {/* 現在のプラン */}
-        <Layout.Section>
+        {/* エラー */}
+        {actionError && (
+          <Layout.Section>
+            <Banner tone="critical">{actionError}</Banner>
+          </Layout.Section>
+        )}
+
+        {/* ── 現在のプラン ── */}
+        <Layout.AnnotatedSection
+          title="現在のプラン"
+          description="ご契約中のプランと次回更新日を確認できます。"
+        >
           <Card>
             <BlockStack gap="300">
               <InlineStack align="space-between" blockAlign="center">
-                <Text variant="headingMd" as="h2">現在のプラン</Text>
+                <Text variant="headingMd" as="h2">プラン</Text>
                 <Badge tone={isPro ? "success" : "info"}>{label}</Badge>
               </InlineStack>
 
@@ -194,94 +204,80 @@ export default function BillingPage() {
                   ))}
                 </BlockStack>
               )}
+
+              {!isInhouse && activeSubscriptions.length === 0 && (
+                <Text tone="subdued" as="p">有効なサブスクリプションがありません。</Text>
+              )}
             </BlockStack>
           </Card>
-        </Layout.Section>
+        </Layout.AnnotatedSection>
 
-        {/* エラー */}
-        {actionError && (
-          <Layout.Section>
-            <Banner tone="critical">{actionError}</Banner>
-          </Layout.Section>
-        )}
-
-        {/* プラン比較 */}
-        <Layout.Section>
-          <InlineStack gap="400" align="start" wrap>
+        {/* ── プラン比較 ── */}
+        <Layout.AnnotatedSection
+          title="プラン比較"
+          description="スタンダードとプロの機能・料金を比較できます。アップグレード後は Shopify の課金承認ページに遷移します。"
+        >
+          <BlockStack gap="400">
             {/* スタンダード */}
-            <Box minWidth="280px">
-              <Card>
-                <BlockStack gap="300">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text variant="headingMd" as="h2">スタンダード</Text>
-                    {!isPro && <Badge tone="info">現在のプラン</Badge>}
-                  </InlineStack>
-                  <Text variant="headingLg" as="p">
-                    ¥{standardPlan.amount.toLocaleString("ja-JP")}
-                    <Text as="span" tone="subdued" variant="bodySm"> / 月</Text>
-                  </Text>
-                  <Divider />
-                  <List type="bullet">
-                    {standardFeatures.map((f) => (
-                      <List.Item key={f.key}>{f.label}</List.Item>
-                    ))}
-                  </List>
-                </BlockStack>
-              </Card>
-            </Box>
+            <Card>
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text variant="headingMd" as="h2">スタンダード</Text>
+                  {!isPro && <Badge tone="info">現在のプラン</Badge>}
+                </InlineStack>
+                <Text variant="headingLg" as="p">
+                  ¥{standardPlan.amount.toLocaleString("ja-JP")}
+                  <Text as="span" tone="subdued" variant="bodySm"> / 月</Text>
+                </Text>
+                <Divider />
+                <List type="bullet">
+                  {standardFeatures.map((f) => (
+                    <List.Item key={f.key}>{f.label}</List.Item>
+                  ))}
+                </List>
+              </BlockStack>
+            </Card>
 
             {/* プロ */}
-            <Box minWidth="280px">
-              <Card>
-                <BlockStack gap="300">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text variant="headingMd" as="h2">プロ</Text>
-                    {isPro && !isInhouse && <Badge tone="success">現在のプラン</Badge>}
-                  </InlineStack>
-                  <Text variant="headingLg" as="p">
-                    ¥{proPlan.amount.toLocaleString("ja-JP")}
-                    <Text as="span" tone="subdued" variant="bodySm"> / 月</Text>
-                  </Text>
-                  <Divider />
-                  <List type="bullet">
-                    {proFeatures.map((f) => (
-                      <List.Item key={f.key}>{f.label}</List.Item>
-                    ))}
-                  </List>
-                  {!isInhouse && !isPro && (
-                    <Box paddingBlockStart="200">
-                      <fetcher.Form method="post">
-                        <input type="hidden" name="plan" value="pro" />
-                        <Button
-                          variant="primary"
-                          submit
-                          loading={fetcher.state === "submitting"}
-                        >
-                          プロプランにアップグレード
-                        </Button>
-                      </fetcher.Form>
-                    </Box>
-                  )}
-                  {!isInhouse && isPro && (
-                    <Box paddingBlockStart="200">
-                      <Text tone="subdued" as="p">現在ご利用中のプランです。</Text>
-                    </Box>
-                  )}
-                </BlockStack>
-              </Card>
-            </Box>
-          </InlineStack>
-        </Layout.Section>
-
-        {!isInhouse && !isPro && (
-          <Layout.Section>
-            <Banner tone="info">
-              <Text as="p">
-                アップグレード後、Shopify の課金承認ページに遷移します。承認後に自動でプロプランが有効になります。
-              </Text>
-            </Banner>
-          </Layout.Section>
-        )}
+            <Card>
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text variant="headingMd" as="h2">プロ</Text>
+                  {isPro && !isInhouse && <Badge tone="success">現在のプラン</Badge>}
+                </InlineStack>
+                <Text variant="headingLg" as="p">
+                  ¥{proPlan.amount.toLocaleString("ja-JP")}
+                  <Text as="span" tone="subdued" variant="bodySm"> / 月</Text>
+                </Text>
+                <Divider />
+                <List type="bullet">
+                  {proFeatures.map((f) => (
+                    <List.Item key={f.key}>{f.label}</List.Item>
+                  ))}
+                </List>
+                {!isInhouse && !isPro && (
+                  <Box paddingBlockStart="200">
+                    <fetcher.Form method="post">
+                      <input type="hidden" name="plan" value="pro" />
+                      <Button
+                        variant="primary"
+                        submit
+                        loading={fetcher.state === "submitting"}
+                      >
+                        プロプランにアップグレード
+                      </Button>
+                    </fetcher.Form>
+                  </Box>
+                )}
+                {!isInhouse && isPro && (
+                  <Box paddingBlockStart="200">
+                    <Text tone="subdued" as="p">現在ご利用中のプランです。</Text>
+                  </Box>
+                )}
+              </BlockStack>
+            </Card>
+          </BlockStack>
+        </Layout.AnnotatedSection>
       </Layout>
     </Page>
   );

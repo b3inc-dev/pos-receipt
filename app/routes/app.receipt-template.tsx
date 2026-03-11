@@ -3,7 +3,7 @@
  * 要件書 §8.3–§8.4 / §19.3 管理画面: 領収書テンプレート
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, Form } from "react-router";
+import { useLoaderData, useSubmit } from "react-router";
 import {
   Page,
   Layout,
@@ -56,7 +56,7 @@ export async function action({ request }: ActionFunctionArgs) {
     logoUrl: formData.get("logoUrl") ? String(formData.get("logoUrl")) : null,
   };
 
-  // 既存テンプレートを無効化してから新規作成（バージョン管理）
+  // 既存テンプレートを更新（バージョンインクリメント）
   const existing = await prisma.receiptTemplate.findFirst({
     where: { shopId: shop.id, isActive: true },
     orderBy: { updatedAt: "desc" },
@@ -90,7 +90,6 @@ export default function ReceiptTemplatePage() {
   const { template, version } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const [saved, setSaved] = useState(false);
-
   const [form, setForm] = useState<ReceiptTemplateData>({ ...template });
 
   const handleSave = () => {
@@ -116,6 +115,7 @@ export default function ReceiptTemplatePage() {
       title="領収書テンプレート設定"
       backAction={{ url: "/app/settings" }}
       subtitle={`バージョン: ${version}`}
+      primaryAction={{ content: "保存", onAction: handleSave }}
     >
       <Layout>
         {saved && (
@@ -124,11 +124,13 @@ export default function ReceiptTemplatePage() {
           </Layout.Section>
         )}
 
-        <Layout.Section>
+        {/* ── 発行者情報 ── */}
+        <Layout.AnnotatedSection
+          title="発行者情報"
+          description="領収書に印字される会社名・住所・電話番号を設定します。これらは発行された領収書のフッターに表示されます。"
+        >
           <Card>
             <BlockStack gap="400">
-              <Text variant="headingMd" as="h2">発行者情報</Text>
-
               <TextField
                 label="会社名・店舗名"
                 value={form.companyName}
@@ -147,15 +149,24 @@ export default function ReceiptTemplatePage() {
                 onChange={(v) => set("phone", v)}
                 autoComplete="off"
               />
+              <TextField
+                label="ロゴ画像URL（任意）"
+                value={form.logoUrl ?? ""}
+                onChange={(v) => set("logoUrl", v || null)}
+                helpText="https://... で始まる画像URLを入力してください"
+                autoComplete="off"
+              />
             </BlockStack>
           </Card>
-        </Layout.Section>
+        </Layout.AnnotatedSection>
 
-        <Layout.Section>
+        {/* ── 印字設定 ── */}
+        <Layout.AnnotatedSection
+          title="印字設定"
+          description="但し書きのデフォルト値と各種印字オプションを設定します。但し書きは発行時に変更することもできます。"
+        >
           <Card>
             <BlockStack gap="400">
-              <Text variant="headingMd" as="h2">印字設定</Text>
-
               <TextField
                 label="但し書きデフォルト値"
                 value={form.defaultProviso}
@@ -173,28 +184,21 @@ export default function ReceiptTemplatePage() {
                 checked={form.showDate}
                 onChange={(v) => set("showDate", v)}
               />
-              <TextField
-                label="ロゴ画像URL（任意）"
-                value={form.logoUrl ?? ""}
-                onChange={(v) => set("logoUrl", v || null)}
-                helpText="https://... で始まる画像URLを入力してください"
-                autoComplete="off"
-              />
             </BlockStack>
           </Card>
-        </Layout.Section>
+        </Layout.AnnotatedSection>
 
-        {/* プレビュー */}
-        <Layout.Section>
+        {/* ── プレビュー ── */}
+        <Layout.AnnotatedSection
+          title="プレビュー"
+          description="現在の設定で発行される領収書のイメージです。実際の印字内容はプリンター設定によって異なる場合があります。"
+        >
           <Card>
-            <BlockStack gap="300">
-              <Text variant="headingMd" as="h2">プレビュー</Text>
-              <Divider />
-              <ReceiptPreview template={form} />
-            </BlockStack>
+            <ReceiptPreview template={form} />
           </Card>
-        </Layout.Section>
+        </Layout.AnnotatedSection>
 
+        {/* ── 保存ボタン ── */}
         <Layout.Section>
           <InlineStack align="end">
             <Button variant="primary" onClick={handleSave}>
@@ -229,7 +233,7 @@ function ReceiptPreview({ template }: { template: ReceiptTemplateData }) {
         {template.showDate && <Text as="p">発行日: {today}</Text>}
         {template.showOrderNumber && <Text as="p">注文番号: #1001</Text>}
         <Divider />
-        <Text as="p">{template.companyName}</Text>
+        <Text as="p">{template.companyName || "（会社名未設定）"}</Text>
         {template.address && <Text tone="subdued" as="p">{template.address}</Text>}
         {template.phone && <Text tone="subdued" as="p">TEL: {template.phone}</Text>}
       </BlockStack>

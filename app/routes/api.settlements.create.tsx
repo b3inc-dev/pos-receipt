@@ -5,15 +5,28 @@
  * - cloudprnt_direct: 集計してDB保存 → printable payload を返す
  * - order_based: 集計 → Shopify精算注文作成 → DB保存
  * - isInspection=true: 点検レシート（DB保存するが periodLabel に "点検_" プレフィックス）
+ *
+ * リトライ安全: locationId+targetDate+printMode のハッシュを idempotencyKey として使用。
+ * 同一キーが既存の場合は重複精算を作成せず既存レコードを返す（点検レシートは除外）。
  */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { buildSettlementPreview, type SettlementPreviewDTO } from "../services/settlementEngine.server";
 
+/** locationId + targetDate + printMode から冪等キーを生成 */
+function buildIdempotencyKey(
+  shopId: string,
+  locationId: string,
+  targetDate: string,
+  printMode: string,
+): string {
+  return `${shopId}:${locationId}:${targetDate}:${printMode}`;
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
-    return corsJson({ error: "Method not allowed" }, { status: 405 });
+    return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   try {
     const { admin, shop, corsJson } = await authenticatePosRequest(request);
@@ -26,6 +39,31 @@ export async function action({ request }: ActionFunctionArgs) {
         { ok: false, error: "locationId, targetDate, printMode are required" },
         { status: 400 }
       );
+    }
+
+    // ── 冪等性チェック（点検レシートは対象外） ──────────────────────────────
+    if (!isInspection) {
+      const idemKey = buildIdempotencyKey(
+        shop.id, String(locationId), String(targetDate), String(printMode)
+      );
+      const existingSettlement = await prisma.settlement.findUnique({
+        where: { idempotencyKey: idemKey },
+      });
+      if (existingSettlement) {
+        return corsJson(
+          {
+            ok: true,
+            idempotent: true,
+            settlementId: existingSettlement.id,
+            preview: null,
+            sourceOrderId: existingSettlement.sourceOrderId,
+            sourceOrderName: existingSettlement.sourceOrderName,
+            printMode: existingSettlement.printMode,
+            isInspection: false,
+          },
+          { status: 200 }
+        );
+      }
     }
 
     const preview = await buildSettlementPreview(
@@ -45,6 +83,10 @@ export async function action({ request }: ActionFunctionArgs) {
       sourceOrderId = result.orderId;
       sourceOrderName = result.orderName;
     }
+
+    const idemKey = !isInspection
+      ? buildIdempotencyKey(shop.id, String(locationId), String(targetDate), String(printMode))
+      : null;
 
     const settlement = await prisma.settlement.create({
       data: {
@@ -68,12 +110,14 @@ export async function action({ request }: ActionFunctionArgs) {
         paymentSectionsJson: JSON.stringify(preview.paymentSections),
         printMode: String(printMode),
         status: "completed",
+        idempotencyKey: idemKey,
       },
     });
 
     return corsJson(
       {
         ok: true,
+        idempotent: false,
         settlementId: settlement.id,
         preview,
         sourceOrderId,
@@ -85,7 +129,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return Response.json({ ok: false, error: message }, { status: 500 });
   }
 }
 
