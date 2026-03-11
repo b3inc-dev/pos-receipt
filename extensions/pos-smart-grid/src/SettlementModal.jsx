@@ -43,19 +43,23 @@ function SettlementModal() {
   const [isInspection, setIsInspection] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [locationLoadError, setLocationLoadError] = useState("");
 
-  // ロケーション初期ロード
-  useEffect(() => {
+  const loadLocations = useCallback(() => {
     setLoading(true);
+    setLocationLoadError("");
     getLocations()
       .then((res) => {
         const locs = res.locations ?? [];
         setLocations(locs);
         if (locs.length > 0) setSelectedLocation(locs[0]);
       })
-      .catch((e) => setError(e?.message ?? "ロケーションの取得に失敗しました"))
+      .catch((e) => setLocationLoadError(e?.message ?? "ロケーションの取得に失敗しました"))
       .finally(() => setLoading(false));
   }, []);
+
+  // ロケーション初期ロード
+  useEffect(() => { loadLocations(); }, []);
 
   const handlePreview = useCallback(
     async (inspection = false) => {
@@ -127,11 +131,13 @@ function SettlementModal() {
         targetDate={targetDate}
         loading={loading}
         error={error}
+        locationLoadError={locationLoadError}
         onSelectLocation={(loc) => setSelectedLocation(loc)}
         onDateChange={(d) => setTargetDate(d)}
         onPreview={() => handlePreview(false)}
         onInspection={() => handlePreview(true)}
         onHistory={() => setStep("history")}
+        onRetryLocations={loadLocations}
         setError={setError}
       />
     );
@@ -195,11 +201,13 @@ function MainView({
   targetDate,
   loading,
   error,
+  locationLoadError,
   onSelectLocation,
   onDateChange,
   onPreview,
   onInspection,
   onHistory,
+  onRetryLocations,
   setError,
 }) {
   const handleLocChange = (e) => {
@@ -215,7 +223,14 @@ function MainView({
           <s-stack gap="base">
 
             {/* ロケーション選択 */}
-            {locations.length > 1 ? (
+            {locationLoadError ? (
+              <s-stack gap="small">
+                <s-text tone="critical">{locationLoadError}</s-text>
+                <s-button kind="secondary" onClick={onRetryLocations} loading={loading}>
+                  再読み込み
+                </s-button>
+              </s-stack>
+            ) : locations.length > 1 ? (
               <s-select
                 label="ロケーション"
                 value={selectedLocation?.locationId ?? ""}
@@ -237,10 +252,13 @@ function MainView({
                   </s-text>
                 </s-stack>
               </s-box>
+            ) : loading ? (
+              <s-text tone="subdued">ロケーションを読み込み中…</s-text>
             ) : (
-              <s-text tone="subdued">
-                {loading ? "ロケーションを読み込み中…" : "ロケーションが見つかりません"}
-              </s-text>
+              <s-stack gap="small">
+                <s-text tone="subdued">ロケーションが見つかりません</s-text>
+                <s-button kind="plain" onClick={onRetryLocations}>再読み込み</s-button>
+              </s-stack>
             )}
 
             {/* 対象日 */}

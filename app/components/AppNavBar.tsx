@@ -8,6 +8,10 @@ import { Link, useLocation } from "react-router";
 const NAV_ITEMS = [
   { path: "/app", label: "ホーム" },
   { path: "/app/receipt-template", label: "領収書テンプレート" },
+  { path: "/app/budget-management", label: "予算管理" },
+  { path: "/app/settlement-history", label: "精算履歴" },
+  { path: "/app/special-refund-history", label: "特殊返金履歴" },
+  { path: "/app/receipt-history", label: "領収書履歴" },
   { path: "/app/settings", label: "設定" },
   { path: "/app/plan", label: "プラン・課金" },
   { path: "/app/diagnostics", label: "システム診断" },

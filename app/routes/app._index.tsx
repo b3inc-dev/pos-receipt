@@ -115,6 +115,25 @@ export default function AppIndex() {
           </Card>
         </Layout.AnnotatedSection>
 
+        {/* ── 履歴・管理 ── */}
+        <Layout.AnnotatedSection
+          title="履歴・管理"
+          description="精算・特殊返金・領収書の実行履歴と予算管理を確認できます。"
+        >
+          <Card>
+            <BlockStack gap="200">
+              <InlineStack gap="200" wrap>
+                <Button onClick={to("/app/settlement-history")} variant="plain">精算履歴</Button>
+                <Button onClick={to("/app/special-refund-history")} variant="plain">特殊返金履歴</Button>
+                <Button onClick={to("/app/receipt-history")} variant="plain">領収書履歴</Button>
+                {(isInhouse || isPro) && (
+                  <Button onClick={to("/app/budget-management")} variant="plain">予算管理</Button>
+                )}
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.AnnotatedSection>
+
         {/* ── システム診断 ── */}
         <Layout.AnnotatedSection
           title="システム診断"

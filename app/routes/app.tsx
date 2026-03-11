@@ -37,6 +37,10 @@ export default function AppLayout() {
       <s-app-nav>
         <s-link href="/app" rel="home">ホーム</s-link>
         <s-link href="/app/receipt-template">領収書テンプレート</s-link>
+        <s-link href="/app/budget-management">予算管理</s-link>
+        <s-link href="/app/settlement-history">精算履歴</s-link>
+        <s-link href="/app/special-refund-history">特殊返金履歴</s-link>
+        <s-link href="/app/receipt-history">領収書履歴</s-link>
         <s-link href="/app/settings">設定</s-link>
         <s-link href="/app/plan">プラン・課金</s-link>
         <s-link href="/app/diagnostics">システム診断</s-link>
