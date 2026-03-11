@@ -1,6 +1,6 @@
 /**
  * 領収書タイル
- * Phase 5 で実装予定
+ * 要件書 §8, §19.2
  */
 import { render } from "preact";
 

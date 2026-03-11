@@ -104,6 +104,21 @@ export default function AppIndex() {
             </BlockStack>
           </Card>
         </Layout.AnnotatedSection>
+
+        {/* ── システム診断 ── */}
+        <Layout.AnnotatedSection
+          title="システム診断"
+          description="DB接続・テーブル件数・環境変数の設定状態を確認できます。障害調査や設定確認にご利用ください。"
+        >
+          <Card>
+            <BlockStack gap="200">
+              <Text tone="subdued" as="p">
+                接続中のショップ情報・直近アクティビティ・必須環境変数の設定状態を一覧で確認できます。
+              </Text>
+              <Button url="/app/diagnostics">診断ページを開く</Button>
+            </BlockStack>
+          </Card>
+        </Layout.AnnotatedSection>
       </Layout>
     </Page>
   );

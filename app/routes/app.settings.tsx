@@ -236,6 +236,21 @@ export default function SettingsPage() {
             </BlockStack>
           </Card>
         </Layout.AnnotatedSection>
+
+        {/* ── システム診断 ── */}
+        <Layout.AnnotatedSection
+          title="システム診断"
+          description="DB接続・テーブル件数・環境変数の設定状態を確認できます。"
+        >
+          <Card>
+            <BlockStack gap="200">
+              <Text tone="subdued" as="p">
+                障害調査や本番環境の設定確認に利用してください。
+              </Text>
+              <Button url="/app/diagnostics" variant="plain">診断ページを開く</Button>
+            </BlockStack>
+          </Card>
+        </Layout.AnnotatedSection>
       </Layout>
     </Page>
   );

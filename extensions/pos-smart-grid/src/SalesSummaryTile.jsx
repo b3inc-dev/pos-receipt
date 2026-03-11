@@ -1,6 +1,6 @@
 /**
  * 売上サマリータイル
- * Phase 7 で実装予定
+ * 要件書 §7, §19.2
  */
 import { render } from "preact";
 

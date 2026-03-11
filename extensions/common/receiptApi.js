@@ -33,11 +33,16 @@ export async function previewReceipt({ orderId, recipientName, proviso }) {
   });
 }
 
-/** 領収書発行 */
+/**
+ * 領収書発行
+ * idempotencyKey を自動生成して送信することで、ネットワーク再試行時の重複発行を防ぐ。
+ * 再発行時（isReissue=true）は毎回新規キーを生成する。
+ */
 export async function issueReceipt({ orderId, recipientName, proviso, isReissue = false }) {
+  const idempotencyKey = crypto.randomUUID();
   return apiFetch("/api/receipts/issue", {
     method: "POST",
-    body: JSON.stringify({ orderId, recipientName, proviso, isReissue }),
+    body: JSON.stringify({ orderId, recipientName, proviso, isReissue, idempotencyKey }),
   });
 }
 

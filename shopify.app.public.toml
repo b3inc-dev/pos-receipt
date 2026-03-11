@@ -13,6 +13,14 @@ automatically_update_urls_on_dev = true
 [webhooks]
 api_version = "2026-04"
 
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled"]
+uri = "/webhooks/app/uninstalled"
+
+[[webhooks.subscriptions]]
+topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "/webhooks/compliance"
+
 [access_scopes]
 scopes = "read_orders,read_locations"
 
