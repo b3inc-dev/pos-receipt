@@ -95,19 +95,27 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       object-fit: contain;
     }
     .plastic-card-bottom {
-      padding: 12px 20px 20px;
+      padding: 12px 16px 0;
       display: flex;
       flex-direction: column;
-      align-items: center;
+      align-items: stretch;
       justify-content: flex-end;
     }
     .plastic-card .barcode-wrap {
       display: flex;
       justify-content: center;
+      align-items: center;
       width: 100%;
-      margin: 0 0 8px;
+      margin: 0;
     }
-    .plastic-card .barcode-wrap svg { max-width: 100%; height: 44px; }
+    .plastic-card .barcode-wrap svg { width: 100%; height: 56px; max-width: 100%; }
+    .plastic-card .member-id-white {
+      background: #fff;
+      margin: 0 -1px 0;
+      padding: 10px 16px 14px;
+      border-radius: 0 0 16px 16px;
+      text-align: center;
+    }
     .plastic-card .member-id-on-card {
       font-size: 14px;
       font-weight: 600;
@@ -117,7 +125,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     .hint-below-card {
       font-size: 13px;
       color: #6d7175;
-      text-align: left;
+      text-align: center;
       margin: 0 0 20px;
       line-height: 1.6;
     }
@@ -128,11 +136,12 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       margin-bottom: 16px;
       font-size: 14px;
       color: #202223;
+      text-align: center;
     }
     .section-bordered .label { color: #6d7175; }
-    .rank-row { margin-bottom: 12px; font-size: 14px; }
+    .rank-row { margin-bottom: 12px; font-size: 14px; text-align: center; }
     .rank-row .label { color: #6d7175; }
-    .points-row { margin-top: 4px; }
+    .points-row { margin-top: 4px; text-align: center; }
     .points-value {
       font-size: 28px;
       font-weight: 700;
@@ -191,7 +200,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       '<div class="plastic-card-top"><img class="plastic-card-logo" src="' + logoUrl + '" alt="" /></div>' +
       '<div class="plastic-card-bottom">' +
         '<div class="barcode-wrap"><svg id="barcode-wrap"></svg></div>' +
-        '<div class="member-id-on-card">' + safeId + '</div>' +
+        '<div class="member-id-white"><span class="member-id-on-card">' + safeId + '</span></div>' +
       '</div></div>' +
       '<p class="hint-below-card">お会計の際にこの画面のバーコードを提示してください。</p>' +
       '<div class="section-bordered">会員ID：' + safeId + '</div>' +
@@ -201,9 +210,9 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     var wrap = document.getElementById('barcode-wrap');
     if (wrap) {
       try {
-        JsBarcode(wrap, String(memberId).trim(), { format: 'CODE128', width: 2, height: 44, displayValue: false });
+        JsBarcode(wrap, String(memberId).trim(), { format: 'CODE128', width: 2, height: 56, displayValue: false });
       } catch (e) {
-        root.querySelector('.plastic-card-bottom').innerHTML = '<p class="error">バーコードの表示に失敗しました</p><div class="member-id-on-card">' + safeId + '</div>';
+        root.querySelector('.plastic-card-bottom').innerHTML = '<p class="error">バーコードの表示に失敗しました</p><div class="member-id-white"><span class="member-id-on-card">' + safeId + '</span></div>';
       }
     }
   }
