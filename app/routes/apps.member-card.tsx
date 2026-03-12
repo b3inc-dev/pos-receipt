@@ -57,8 +57,15 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
 
   var root = document.getElementById('root');
 
-  function showError(msg) {
-    root.innerHTML = '<div class="error">' + String(msg).replace(/</g, '&lt;') + '</div>';
+  var isDebug = typeof location !== 'undefined' && location.search.indexOf('debug=1') !== -1;
+
+  function esc(s) { return String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function showError(msg, detail) {
+    var html = '<div class="error">' + esc(msg) + '</div>';
+    if (detail && isDebug) {
+      html += '<div class="error" style="margin-top:8px;font-size:12px;word-break:break-all;">' + esc(detail) + '</div>';
+    }
+    root.innerHTML = html;
   }
 
   function showMember(memberId) {
@@ -108,8 +115,11 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     });
   }
 
-  liff.init({ liffId: LIFF_ID }).then(run).catch(function() {
-    showError(messages.LIFF_INIT_FAILED);
+  liff.init({ liffId: LIFF_ID }).then(run).catch(function(err) {
+    var detail = isDebug && err && err.message
+      ? 'ページURL: ' + location.href + ' / LIFF ID: ' + LIFF_ID + ' / エラー: ' + err.message
+      : (isDebug ? 'ページURL: ' + location.href + ' / LIFF ID: ' + LIFF_ID : null);
+    showError(messages.LIFF_INIT_FAILED, detail);
   });
 })();
   </script>
