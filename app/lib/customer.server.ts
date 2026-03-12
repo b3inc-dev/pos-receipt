@@ -14,6 +14,9 @@ const CUSTOMERS_QUERY = `#graphql
           metafield(namespace: "membership", key: "id") {
             value
           }
+          lineMetafield: metafield(namespace: "socialplus", key: "line") {
+            value
+          }
         }
       }
     }
@@ -35,7 +38,8 @@ export type GetMemberIdResponse = GetMemberIdResult | GetMemberIdError;
 /**
  * LINE user ID（sub）に一致する socialplus.line を持つ顧客を検索し、
  * その顧客の membership.id（会員番号）を返す。
- * 顧客検索は first で件数制限（安全のため最大 5 件まで取得して先頭を採用）。
+ * 取得結果は socialplus.line をコード側で照合し、完全一致した顧客のみ採用する
+ * （metafield が検索可能でない場合でも正しい顧客を返すため）。
  */
 export async function getMemberIdByLineId(
   admin: AdminApiContext,
@@ -45,12 +49,13 @@ export async function getMemberIdByLineId(
     return { ok: false, error: "CUSTOMER_NOT_FOUND" };
   }
 
+  const lineIdNorm = lineUserId.trim().toLowerCase();
   const escaped = lineUserId.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const query = `metafields.socialplus.line:"${escaped}"`;
 
   try {
     const res = await admin.graphql(CUSTOMERS_QUERY, {
-      variables: { query, first: 5 },
+      variables: { query, first: 50 },
     });
     const json = (await res.json()) as {
       data?: {
@@ -59,6 +64,7 @@ export async function getMemberIdByLineId(
             node?: {
               id: string;
               metafield?: { value?: string } | null;
+              lineMetafield?: { value?: string } | null;
             };
           }>;
         };
@@ -72,19 +78,25 @@ export async function getMemberIdByLineId(
     }
 
     const edges = json.data?.customers?.edges ?? [];
-    const node = edges[0]?.node;
-    if (!node) {
-      return { ok: false, error: "CUSTOMER_NOT_FOUND" };
+
+    for (const edge of edges) {
+      const node = edge?.node;
+      if (!node) continue;
+      const lineValue = node.lineMetafield?.value;
+      const lineMatch =
+        typeof lineValue === "string" && lineValue.trim().toLowerCase() === lineIdNorm;
+      if (!lineMatch) continue;
+
+      const memberIdRaw = node.metafield?.value;
+      const memberId =
+        typeof memberIdRaw === "string" ? memberIdRaw.trim() : undefined;
+      if (!memberId) {
+        return { ok: false, error: "MEMBER_ID_NOT_SET" };
+      }
+      return { ok: true, memberId };
     }
 
-    const memberIdRaw = node.metafield?.value;
-    const memberId =
-      typeof memberIdRaw === "string" ? memberIdRaw.trim() : undefined;
-    if (!memberId) {
-      return { ok: false, error: "MEMBER_ID_NOT_SET" };
-    }
-
-    return { ok: true, memberId };
+    return { ok: false, error: "CUSTOMER_NOT_FOUND" };
   } catch (err) {
     console.error("getMemberIdByLineId error:", err);
     return { ok: false, error: "API_ERROR" };

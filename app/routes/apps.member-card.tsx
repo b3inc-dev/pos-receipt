@@ -34,8 +34,8 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     .loading { text-align: center; padding: 48px 16px; color: #6d7175; font-size: 14px; }
     .error { background: #fff4e5; border: 1px solid #e0b252; border-radius: 8px; padding: 16px; margin-bottom: 16px; color: #202223; font-size: 14px; }
     .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 24px; margin-bottom: 16px; }
-    #barcode-wrap { text-align: center; margin: 16px 0; }
-    #barcode-wrap svg { max-width: 100%; height: auto; }
+    .barcode-wrap { display: flex; justify-content: center; margin: 16px 0; }
+    #barcode-wrap { display: block; max-width: 100%; height: auto; }
     .member-id { font-size: 18px; font-weight: 600; text-align: center; margin: 16px 0; letter-spacing: 0.05em; }
     .hint { font-size: 13px; color: #6d7175; text-align: center; margin-top: 24px; line-height: 1.5; }
   </style>
@@ -69,7 +69,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
   }
 
   function showMember(memberId) {
-    root.innerHTML = '<div class="card"><svg id="barcode-wrap"></svg><div class="member-id">' + String(memberId).replace(/</g, '&lt;') + '</div><div class="hint">スタッフにこの画面を提示してください。</div></div>';
+    root.innerHTML = '<div class="card"><div class="barcode-wrap"><svg id="barcode-wrap"></svg></div><div class="member-id">' + String(memberId).replace(/</g, '&lt;') + '</div><div class="hint">スタッフにこの画面を提示してください。</div></div>';
     var wrap = document.getElementById('barcode-wrap');
     try {
       JsBarcode(wrap, String(memberId).trim(), { format: 'CODE128', width: 2, height: 80, displayValue: false });
