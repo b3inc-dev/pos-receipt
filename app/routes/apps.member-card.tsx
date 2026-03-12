@@ -234,6 +234,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     }
     .rank-row { margin-bottom: 12px; font-size: 14px; text-align: center; }
     .rank-row .label { color: #6d7175; }
+    .rank-row .value { font-weight: 600; color: #202223; }
     .points-row { margin-top: 4px; text-align: center; }
     .points-value { font-size: 28px; font-weight: 700; color: #202223; letter-spacing: 0.02em; }
     .points-unit { font-size: 14px; color: #6d7175; margin-left: 4px; }
@@ -309,15 +310,40 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     if (r.indexOf('レギュラー') !== -1 || r.indexOf('白') !== -1) return 'regular';
     return '';
   }
+  /** 次のランクまでの閾値（円）。テーマの会員証と同一 */
+  function getNextRankThreshold(rankName) {
+    if (!rankName || typeof rankName !== 'string') return null;
+    var r = rankName.trim();
+    if (r.indexOf('ダイヤモンド') !== -1 || r === 'VIP') return null;
+    if (r.indexOf('レギュラー') !== -1 || r.indexOf('白') !== -1) return 15000;
+    if (r.indexOf('シルバー') !== -1) return 30000;
+    if (r.indexOf('ゴールド') !== -1) return 50000;
+    if (r.indexOf('プラチナ') !== -1) return 100000;
+    return null;
+  }
+  function formatYen(num) {
+    if (num == null || isNaN(num)) return '';
+    var n = Math.floor(Number(num));
+    return '¥' + String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+  }
   function showMember(data) {
     var memberId = data.memberId || '';
     var rankName = data.rankName != null ? data.rankName : '';
     var pointsApproved = data.pointsApproved != null ? data.pointsApproved : '';
+    var rankDecisionPurchasePrice = data.rankDecisionPurchasePrice != null ? Number(data.rankDecisionPurchasePrice) : NaN;
     var safeId = esc(memberId);
     var safeRank = esc(rankName);
     var pointsDisplay = formatPoints(pointsApproved);
     var rankClass = getRankClass(rankName);
     var cardClass = 'plastic-card' + (rankClass ? ' plastic-card--' + rankClass : '');
+    var nextRankHtml = '';
+    var threshold = getNextRankThreshold(rankName);
+    if (threshold != null && !isNaN(rankDecisionPurchasePrice)) {
+      var remaining = Math.max(0, threshold - rankDecisionPurchasePrice);
+      if (remaining > 0) {
+        nextRankHtml = '<div class="rank-row"><span class="label">ランクアップまで残り：</span><span class="value">' + esc(formatYen(remaining)) + '</span></div>';
+      }
+    }
     var sectionHtml = '<div class="member-card-section">' +
       '<div class="' + cardClass + '">' +
         '<div class="plastic-card-top"><div class="plastic-card-logo-wrap">' + LOGO_SVG + '</div></div>' +
@@ -332,6 +358,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       '<p class="hint-below-card">お会計の際にこの画面のバーコードを提示してください。</p>' +
       '<div class="section-bordered">会員ID：' + safeId + '</div>' +
       '<div class="rank-row"><span class="label">現在のランク：</span>' + (safeRank || '—') + '</div>' +
+      nextRankHtml +
       '<div class="points-row"><span class="points-value">' + (pointsDisplay ? esc(pointsDisplay) : '0') + '</span><span class="points-unit">ポイント</span></div>' +
       '</div>';
     root.innerHTML = sectionHtml;
@@ -380,7 +407,12 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       body: JSON.stringify({ idToken: idToken, shop: SHOP })
     }).then(function(res) { return res.json(); }).then(function(data) {
       if (data.ok && data.memberId) {
-        showMember({ memberId: data.memberId, rankName: data.rankName, pointsApproved: data.pointsApproved });
+        showMember({
+          memberId: data.memberId,
+          rankName: data.rankName,
+          pointsApproved: data.pointsApproved,
+          rankDecisionPurchasePrice: data.rankDecisionPurchasePrice
+        });
       } else {
         showError(messages[data.message] || messages.SYSTEM_ERROR);
       }

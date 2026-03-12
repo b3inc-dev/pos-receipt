@@ -23,6 +23,9 @@ const CUSTOMERS_QUERY = `#graphql
           vipPointsApproved: metafield(namespace: "vip", key: "points_approved") {
             value
           }
+          vipRankDecisionPurchasePrice: metafield(namespace: "vip", key: "rank_decision_purchase_price") {
+            value
+          }
         }
       }
       pageInfo {
@@ -38,6 +41,8 @@ export interface GetMemberIdResult {
   memberId: string;
   rankName?: string;
   pointsApproved?: string;
+  /** ランク判定用累計購入額（円）。未設定時は undefined */
+  rankDecisionPurchasePrice?: number;
 }
 
 export interface GetMemberIdError {
@@ -79,6 +84,7 @@ type CustomersJson = {
           lineMetafield?: { value?: string } | null;
           vipRankName?: { value?: string } | null;
           vipPointsApproved?: { value?: string } | null;
+          vipRankDecisionPurchasePrice?: { value?: string } | null;
         };
       }>;
       pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
@@ -158,7 +164,13 @@ export async function getMemberIdByLineId(
         const pointsRaw = node.vipPointsApproved?.value;
         const pointsApproved =
           typeof pointsRaw === "string" ? pointsRaw.trim() || undefined : undefined;
-        return { ok: true, memberId, rankName, pointsApproved };
+        const priceRaw = node.vipRankDecisionPurchasePrice?.value;
+        let rankDecisionPurchasePrice: number | undefined;
+        if (priceRaw != null && priceRaw !== "") {
+          const n = Number(priceRaw);
+          if (!Number.isNaN(n) && n >= 0) rankDecisionPurchasePrice = n;
+        }
+        return { ok: true, memberId, rankName, pointsApproved, rankDecisionPurchasePrice };
       }
 
       if (!pageInfo?.hasNextPage || !pageInfo?.endCursor) {

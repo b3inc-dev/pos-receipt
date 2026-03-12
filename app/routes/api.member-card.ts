@@ -112,5 +112,6 @@ export async function action({ request }: ActionFunctionArgs) {
     memberId: memberResult.memberId,
     rankName: memberResult.rankName ?? null,
     pointsApproved: memberResult.pointsApproved ?? null,
+    rankDecisionPurchasePrice: memberResult.rankDecisionPurchasePrice ?? null,
   });
 }
