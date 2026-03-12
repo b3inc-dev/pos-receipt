@@ -80,8 +80,9 @@ type CustomersJson = {
 /**
  * LINE user ID（sub）に一致する socialplus.line を持つ顧客を検索し、
  * その顧客の membership.id（会員番号）を返す。
- * 「socialplus.line が存在する顧客」のみ query で取得し、コード側で sub と照合する。
- * 値での絞り込みが効かない場合でも、ページネーションで全件照合できる。
+ * Admin API の customers 検索ではメタフィールド「値」での絞り込みができないため、
+ * 「socialplus.line が存在する顧客」を query で取得し、コード側で sub と照合する。
+ * ページネーション（最大 50,000 件）で全件照合する現状が、この前提では一般的な実装。
  */
 export async function getMemberIdByLineId(
   admin: AdminApiContext,
@@ -104,6 +105,7 @@ export async function getMemberIdByLineId(
   try {
     let cursor: string | null = null;
     let pageCount = 0;
+    let firstPageEdgeCount: number | null = null;
 
     while (pageCount < MAX_PAGES) {
       const query = 'metafields.socialplus.line:*';
@@ -116,6 +118,15 @@ export async function getMemberIdByLineId(
 
       const edges = json.data?.customers?.edges ?? [];
       const pageInfo = json.data?.customers?.pageInfo;
+
+      if (pageCount === 0) {
+        firstPageEdgeCount = edges.length;
+        if (edges.length === 0) {
+          console.warn("[member-card] Query metafields.socialplus.line:* returned 0 customers. フィルタが効いているか、該当メタフィールドを持つ顧客がいるか確認してください。");
+        } else {
+          console.info("[member-card] First page:", edges.length, "customers (query: metafields.socialplus.line:*)");
+        }
+      }
 
       for (const edge of edges) {
         const node = edge?.node;
@@ -135,7 +146,11 @@ export async function getMemberIdByLineId(
       }
 
       if (!pageInfo?.hasNextPage || !pageInfo?.endCursor) {
-        console.warn("[member-card] No matching customer. sub (last4):", lineIdNorm.slice(-4), "| ログイン中のLINEと顧客の socialplus.line が同一か確認してください");
+        const hint =
+          firstPageEdgeCount === 0
+            ? "初回クエリが0件です。metafields.socialplus.line:* が効いていないか、該当顧客がいません。"
+            : "ログイン中のLINEと顧客の socialplus.line（または JSON 内 uid）が同一か、同一チャネルか確認してください。";
+        console.warn("[member-card] No matching customer. sub (last4):", lineIdNorm.slice(-4), "|", hint);
         return { ok: false, error: "CUSTOMER_NOT_FOUND" };
       }
 
@@ -143,7 +158,18 @@ export async function getMemberIdByLineId(
       pageCount++;
     }
 
-    console.warn("[member-card] Max pages reached. sub (last4):", lineIdNorm.slice(-4));
+    const totalScanned = pageCount * FIRST_PAGE;
+    console.warn(
+      "[member-card] Max pages reached. Scanned",
+      pageCount,
+      "pages (",
+      totalScanned,
+      "customers with socialplus.line). sub (last4):",
+      lineIdNorm.slice(-4),
+      "| 該当する顧客が先頭",
+      totalScanned,
+      "件にいないか、ログイン中のLINEと顧客の socialplus.line が一致していません。"
+    );
     return { ok: false, error: "CUSTOMER_NOT_FOUND" };
   } catch (err) {
     console.error("getMemberIdByLineId error:", err);

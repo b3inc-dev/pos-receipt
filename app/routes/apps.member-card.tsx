@@ -28,16 +28,91 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
   <title>会員証</title>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 24px 16px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #fff; color: #202223; min-height: 100vh; }
+    body {
+      margin: 0;
+      padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", sans-serif;
+      background: #f4f5f7;
+      color: #202223;
+      min-height: 100vh;
+    }
     .container { max-width: 360px; margin: 0 auto; }
-    h1 { font-size: 20px; font-weight: 700; margin: 0 0 24px; text-align: center; }
-    .loading { text-align: center; padding: 48px 16px; color: #6d7175; font-size: 14px; }
-    .error { background: #fff4e5; border: 1px solid #e0b252; border-radius: 8px; padding: 16px; margin-bottom: 16px; color: #202223; font-size: 14px; }
-    .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 24px; margin-bottom: 16px; }
-    .barcode-wrap { display: flex; justify-content: center; margin: 16px 0; }
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      margin: 0 0 20px;
+      text-align: center;
+      color: #202223;
+      letter-spacing: 0.02em;
+    }
+    .loading {
+      text-align: center;
+      padding: 56px 20px;
+      color: #6d7175;
+      font-size: 15px;
+    }
+    .loading::before {
+      content: "";
+      display: block;
+      width: 32px;
+      height: 32px;
+      margin: 0 auto 16px;
+      border: 3px solid #e1e3e5;
+      border-top-color: #5c5f62;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error {
+      background: #fff4e5;
+      border: 1px solid #e0b252;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 16px;
+      color: #202223;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      padding: 28px 24px;
+      margin-bottom: 20px;
+    }
+    .barcode-wrap {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 20px 0;
+      padding: 20px 12px;
+      background: #fff;
+      border-radius: 12px;
+      border: 1px solid #e1e3e5;
+    }
     #barcode-wrap { display: block; max-width: 100%; height: auto; }
-    .member-id { font-size: 18px; font-weight: 600; text-align: center; margin: 16px 0; letter-spacing: 0.05em; }
-    .hint { font-size: 13px; color: #6d7175; text-align: center; margin-top: 24px; line-height: 1.5; }
+    .member-id-label {
+      font-size: 12px;
+      color: #6d7175;
+      text-align: center;
+      margin: 0 0 6px;
+      letter-spacing: 0.05em;
+    }
+    .member-id {
+      font-size: 20px;
+      font-weight: 600;
+      text-align: center;
+      margin: 0 0 20px;
+      letter-spacing: 0.12em;
+      color: #202223;
+    }
+    .hint {
+      font-size: 13px;
+      color: #6d7175;
+      text-align: center;
+      margin: 0;
+      line-height: 1.6;
+    }
   </style>
 </head>
 <body>
@@ -69,7 +144,8 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
   }
 
   function showMember(memberId) {
-    root.innerHTML = '<div class="card"><div class="barcode-wrap"><svg id="barcode-wrap"></svg></div><div class="member-id">' + String(memberId).replace(/</g, '&lt;') + '</div><div class="hint">スタッフにこの画面を提示してください。</div></div>';
+    var safeId = String(memberId).replace(/</g, '&lt;');
+    root.innerHTML = '<div class="card"><div class="barcode-wrap"><svg id="barcode-wrap"></svg></div><p class="member-id-label">会員番号</p><div class="member-id">' + safeId + '</div><p class="hint">スタッフにこの画面を提示してください。</p></div>';
     var wrap = document.getElementById('barcode-wrap');
     try {
       JsBarcode(wrap, String(memberId).trim(), { format: 'CODE128', width: 2, height: 80, displayValue: false });

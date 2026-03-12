@@ -63,11 +63,48 @@ Render のログで次のどちらかが出ているか確認する。
 
 ---
 
-## 3. まとめ
+## 3. クエリフィルタが効いていない（Case 3）
+
+顧客検索では `metafields.socialplus.line:*` というクエリで「socialplus.line が存在する顧客」だけを取得しています。このクエリが効いていないと、0 件になるか、逆に全顧客の先頭から取れてしまう可能性があります。
+
+### ログで確認する
+
+- **初回が 0 件のとき**
+  ```text
+  [member-card] Query metafields.socialplus.line:* returned 0 customers. フィルタが効いているか、該当メタフィールドを持つ顧客がいるか確認してください。
+  ```
+  - **意味**: クエリで 1 件も返ってこなかった。
+  - **確認**: メタフィールドの「ストア分析で絞り込む」がオンか。実際に `socialplus.line` が入っている顧客が 1 人以上いるか。
+
+- **初回で 250 件取れているとき**
+  ```text
+  [member-card] First page: 250 customers (query: metafields.socialplus.line:*)
+  ```
+  - **意味**: フィルタが効いていれば「socialplus.line あり」の顧客が 250 件返っている。効いていなければ、単に「先頭 250 件」が返っている可能性もある。
+  - **確認**: 「No matching customer」まで進んでいるなら、sub と各顧客の `socialplus.line`（または JSON 内 `uid`）の一致を確認（セクション 2 のチェックリスト）。
+
+「No matching customer」の直前に、上記のどちらのログ（0 件 vs 250 件）が出ているかで、**クエリが 0 件なのか**／**データは取れているが sub と一致する顧客がいないのか**を切り分けられます。
+
+### 「Max pages reached」が出た場合
+
+```text
+[member-card] Max pages reached. Scanned 200 pages ( 50000 customers with socialplus.line). sub (last4): 5215 | ...
+```
+
+- **意味**: `socialplus.line` が設定されている顧客を最大 200 ページ（50,000 件）まで取得したが、ログイン中の LINE（sub 末尾 5215）と一致する顧客が 1 件もいなかった。
+- **考えられる原因**:
+  1. **別の LINE アカウントで開いている**  
+     会員証を開いている LINE のユーザー ID（例: …5215）と、管理画面で確認している顧客の「LINE ID」メタフィールド（例: …2189）が別人。末尾 4 文字が一致するか確認する。
+  2. その顧客の `socialplus.line` に、今ログインしている LINE の ID（sub）が入っていない。
+  3. LINE 連携済み顧客が 5 万件を超えており、該当顧客が 5 万件より後ろにいる（要対応: 件数拡張や別の検索方法）。
+
+---
+
+## 4. まとめ
 
 | 画面の表示                     | ログのヒント                          | まず確認すること |
 |------------------------------|----------------------------------------|------------------|
 | トークンの有効期限が切れました | `IdToken expired`                      | ページ再読み込み／LINEアプリから開き直し |
 | LINE認証に失敗しました        | `LINE verify failed: 400/401`          | LINE_CHANNEL_ID、LIFF のチャネル |
-| LINE連携済み会員が見つかりません | `No customers in query result`         | メタフィールドの「ストア分析で絞り込む」と、該当顧客の存在 |
-| LINE連携済み会員が見つかりません | `No matching customer. sub (last4): xxxx` | ログイン中の LINE と顧客の socialplus.line が同一か。sub (last4) と顧客「LINE ID」の末尾4文字を照合 |
+| LINE連携済み会員が見つかりません | `returned 0 customers`（初回クエリ 0 件） | メタフィールドの「ストア分析で絞り込む」と、該当顧客の存在 |
+| LINE連携済み会員が見つかりません | `No matching customer` + 初回 250 件   | ログイン中の LINE と顧客の socialplus.line が同一か。sub (last4) と顧客「LINE ID」の末尾4文字を照合 |
