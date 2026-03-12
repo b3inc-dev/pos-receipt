@@ -111,7 +111,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     .member-card-section .plastic-card-top,
     .member-card-section .plastic-card-bottom { position: relative; z-index: 2; }
     .member-card-section .plastic-card--diamond {
-      background: radial-gradient(circle at 16% 18%, rgba(255,255,255,0.42) 0%, rgba(255,255,255,0.08) 18%, transparent 38%), radial-gradient(circle at 78% 24%, rgba(215,244,255,0.14) 0%, rgba(215,244,255,0.03) 16%, transparent 28%), radial-gradient(circle at 84% 78%, rgba(245,238,255,0.10) 0%, rgba(245,238,255,0.02) 18%, transparent 32%), linear-gradient(135deg, #a3abb4 0%, #f4f7fa 18%, #dde4ea 36%, #ffffff 54%, #eef3f7 72%, #b6bcc5 100%);
+      background: radial-gradient(circle at 18% 18%, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.015) 18%, transparent 34%), radial-gradient(circle at 78% 24%, rgba(214,236,255,0.08) 0%, rgba(214,236,255,0.012) 16%, transparent 28%), radial-gradient(circle at 84% 78%, rgba(238,233,255,0.06) 0%, rgba(238,233,255,0.01) 18%, transparent 30%), linear-gradient(135deg, #111315 0%, #1b1f24 18%, #2b3138 36%, #161a1f 54%, #242b33 72%, #0d0f12 100%);
     }
     .member-card-section .plastic-card--platinum {
       background: radial-gradient(circle at 18% 18%, rgba(255,255,255,0.36) 0%, rgba(255,255,255,0.08) 20%, transparent 40%), radial-gradient(circle at 82% 78%, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.02) 18%, transparent 32%), linear-gradient(135deg, #9299a4 0%, #e9edf2 16%, #d2d7df 34%, #fbfcfd 52%, #dce0e7 72%, #9aa1ac 100%);
@@ -153,13 +153,17 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       transition: fill 0.3s ease, filter 0.3s ease;
     }
     .member-card-section .plastic-card--diamond .plastic-card-logo--svg {
-      filter: drop-shadow(0 1px 0 rgba(255,255,255,0.7)) drop-shadow(0 0 8px rgba(218,240,255,0.18));
+      filter: drop-shadow(0 1px 0 rgba(255,255,255,0.28)) drop-shadow(0 0 4px rgba(255,255,255,0.08)) drop-shadow(0 0 8px rgba(210,228,245,0.08));
     }
-    .member-card-section .plastic-card--diamond .plastic-card-logo--svg .cls-1 { fill: #1f2630; }
+    .member-card-section .plastic-card--diamond .plastic-card-logo--svg .cls-1 { fill: #5b6673; }
+    .member-card-section .plastic-card--diamond .barcode-id-block {
+      background: radial-gradient(circle at 16% 18%, rgba(255,255,255,0.94) 0%, rgba(242,250,255,0.82) 20%, rgba(223,242,255,0.74) 38%, rgba(238,230,255,0.72) 58%, rgba(255,255,255,0.80) 100%), radial-gradient(circle at 82% 22%, rgba(184,232,255,0.58) 0%, rgba(184,232,255,0.20) 22%, transparent 40%), radial-gradient(circle at 78% 82%, rgba(232,216,255,0.46) 0%, rgba(232,216,255,0.14) 22%, transparent 40%), linear-gradient(135deg, rgba(237,247,255,0.99) 0%, rgba(214,235,255,0.98) 26%, rgba(247,246,255,0.99) 52%, rgba(222,239,255,0.98) 76%, rgba(248,246,255,0.99) 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.78), inset 0 -1px 0 rgba(210,227,247,0.30), 0 -1px 0 rgba(0,0,0,0.03);
+    }
     .member-card-section .plastic-card--platinum .plastic-card-logo--svg {
       filter: drop-shadow(0 1px 0 rgba(255,255,255,0.55)) drop-shadow(0 0 6px rgba(255,255,255,0.18));
     }
-    .member-card-section .plastic-card--platinum .plastic-card-logo--svg .cls-1 { fill: #2f3440; }
+    .member-card-section .plastic-card--platinum .plastic-card-logo--svg .cls-1 { fill: #3b4450; }
     .member-card-section .plastic-card--gold .plastic-card-logo--svg {
       filter: drop-shadow(0 0 3px rgba(255,220,90,0.88)) drop-shadow(0 0 10px rgba(255,215,0,0.55)) drop-shadow(0 1px 0 rgba(255,248,196,0.96));
     }
