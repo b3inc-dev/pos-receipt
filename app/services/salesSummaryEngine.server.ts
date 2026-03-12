@@ -2,10 +2,13 @@
  * Sales Summary Engine
  * 要件書 §21.6: 売上サマリー算出
  *
- * - Shopify注文データから日次KPIを算出
+ * - Shopify注文データから日次KPIを算出（ショップタイムゾーンで「その日」の境界を算出）
+ * - その日の返金を反映し actual を純売上（粗利−返金）とする（GAS_vs_APP_IMPLEMENTATION_GAP §7.3）
  * - 予算・入店数と組み合わせてキャッシュに保存
  */
 import prisma from "../db.server";
+import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
+import { getRefundOverlayForDay } from "./settlementEngine.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,10 +32,16 @@ export interface DailySummaryRowDTO {
 
 // ── Shopify Types ─────────────────────────────────────────────────────────────
 
+interface SummaryRefund {
+  createdAt?: string;
+  totalRefundedSet: { shopMoney: { amount: string; currencyCode: string } };
+}
+
 interface SummaryOrder {
   id: string;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   lineItems: { edges: { node: { quantity: number } }[] };
+  refunds: SummaryRefund[];
   tags: string[];
 }
 
@@ -52,6 +61,10 @@ const SUMMARY_ORDERS_QUERY = `#graphql
           totalPriceSet { shopMoney { amount currencyCode } }
           lineItems(first: 250) {
             edges { node { quantity } }
+          }
+          refunds {
+            createdAt
+            totalRefundedSet { shopMoney { amount currencyCode } }
           }
           tags
         }
@@ -111,21 +124,31 @@ export async function computeAndCacheDailySummary(
     ? locationId
     : `gid://shopify/Location/${locationId}`;
 
-  // Shopify注文取得
-  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${targetDate}T00:00:00 created_at:<=${targetDate}T23:59:59`;
+  const timezone = await getShopTimezoneForDaily(admin, shopId);
+  const dayRange = getDayRangeInUtc(targetDate, timezone);
+
+  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso}`;
   const orders = await fetchSummaryOrders(admin, shopifyQuery);
 
-  let actual = 0;
+  let gross = 0;
+  let refundsFromOrders = 0;
   let orderCount = 0;
   let itemCount = 0;
   let currency = "JPY";
 
   for (const order of orders) {
-    actual += Number(order.totalPriceSet.shopMoney.amount);
+    gross += Number(order.totalPriceSet.shopMoney.amount);
+    for (const r of order.refunds ?? []) {
+      refundsFromOrders += Number(r.totalRefundedSet?.shopMoney?.amount ?? 0);
+    }
     currency = order.totalPriceSet.shopMoney.currencyCode;
     orderCount += 1;
     itemCount += order.lineItems.edges.reduce((sum, e) => sum + e.node.quantity, 0);
   }
+
+  const orderIdsCreatedInDay = new Set(orders.map((o) => o.id));
+  const overlay = await getRefundOverlayForDay(admin, locIdRaw, orderIdsCreatedInDay, dayRange);
+  const actual = Math.max(0, gross - refundsFromOrders - overlay.refundTotal);
 
   // 予算取得（複数の ID 形式に対応）
   const budget = await prisma.budget.findFirst({
@@ -148,7 +171,7 @@ export async function computeAndCacheDailySummary(
   const budgetAmount = budget ? Number(budget.amount) : null;
   const visitors = footfall?.visitors ?? null;
 
-  // KPI 算出
+  // KPI 算出（actual = 純売上 = 粗利 - その日の返金）
   const budgetRatio = budgetAmount && budgetAmount > 0 ? actual / budgetAmount : null;
   const conv = visitors && visitors > 0 ? orderCount / visitors : null;
   const atv = orderCount > 0 ? actual / orderCount : null;

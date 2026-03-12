@@ -77,7 +77,7 @@ export async function action({ request }: ActionFunctionArgs) {
     let sourceOrderId: string | null = null;
     let sourceOrderName: string | null = null;
 
-    // order_based: Shopify精算注文を作成（点検レシートは作成しない）
+    // ガイド 8.1: order_based のときのみ精算注文を生成。cloudprnt_direct のときは生成しない。点検レシートは作成しない。
     if (String(printMode) === "order_based" && !isInspection) {
       const result = await createSettlementOrder(admin, preview);
       sourceOrderId = result.orderId;
