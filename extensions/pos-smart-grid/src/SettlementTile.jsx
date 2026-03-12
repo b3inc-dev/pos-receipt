@@ -12,7 +12,7 @@ function SettlementTile() {
   return (
     <s-tile
       heading="精算"
-      subheading="精算点検発行・履歴"
+      subheading="精算・点検"
       onClick={() => shopify.action.presentModal()}
     />
   );

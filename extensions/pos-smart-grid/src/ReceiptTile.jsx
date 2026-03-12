@@ -12,7 +12,7 @@ function ReceiptTile() {
   return (
     <s-tile
       heading="領収書"
-      subheading="領収書発行・履歴"
+      subheading="発行・履歴"
       onClick={() => shopify.action.presentModal()}
     />
   );
