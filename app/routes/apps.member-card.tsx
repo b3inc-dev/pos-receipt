@@ -32,13 +32,13 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+      padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", sans-serif;
       background: #f4f5f7;
       color: #202223;
       min-height: 100vh;
     }
-    .container { max-width: 360px; margin: 0 auto; }
+    .container { max-width: 100%; margin: 0 auto; }
     .loading {
       text-align: center;
       padding: 56px 20px;
@@ -69,7 +69,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     }
     .plastic-card {
       width: 100%;
-      max-width: 340px;
+      max-width: 100%;
       margin: 0 auto 16px;
       aspect-ratio: 1.586;
       background: #e3c8aa;
@@ -95,7 +95,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       object-fit: contain;
     }
     .plastic-card-bottom {
-      padding: 12px 16px 0;
+      padding: 0 16px 0;
       display: flex;
       flex-direction: column;
       align-items: stretch;
@@ -112,9 +112,9 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       justify-content: center;
       align-items: center;
       width: 100%;
-      margin: 0 0 6px;
+      margin: 0;
     }
-    .plastic-card .barcode-id-block .barcode-wrap svg { width: 100%; height: 56px; max-width: 100%; }
+    .plastic-card .barcode-id-block .barcode-wrap svg { width: 100%; height: 80px; max-width: 100%; }
     .plastic-card .barcode-id-block .member-id-on-card {
       text-align: center;
     }
@@ -220,7 +220,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     var wrap = document.getElementById('barcode-wrap');
     if (wrap) {
       try {
-        JsBarcode(wrap, String(memberId).trim(), { format: 'CODE128', width: 2, height: 56, displayValue: false });
+        JsBarcode(wrap, String(memberId).trim(), { format: 'CODE128', width: 2, height: 80, displayValue: false });
       } catch (e) {
         root.querySelector('.plastic-card-bottom').innerHTML = '<div class="barcode-id-block"><p class="error">バーコードの表示に失敗しました</p><div class="member-id-on-card">' + safeId + '</div></div><div class="card-bottom-spacer"></div>';
       }
