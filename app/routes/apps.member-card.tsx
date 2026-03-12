@@ -9,6 +9,8 @@ import { isInhouseMode } from "../utils/planFeatures.server";
 const LIFF_SDK_URL = "https://static.line-scdn.net/liff/edge/2/sdk.js";
 const JSBARCODE_CDN =
   "https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.3/JsBarcode.all.min.js";
+const CARD_LOGO_URL =
+  "https://cdn.shopify.com/s/files/1/0627/8669/9510/files/ciara-logo-white.png";
 
 function buildHtml(liffId: string, apiBase: string, shop: string): string {
   const escapedShop = shop
@@ -37,14 +39,6 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       min-height: 100vh;
     }
     .container { max-width: 360px; margin: 0 auto; }
-    h1 {
-      font-size: 22px;
-      font-weight: 700;
-      margin: 0 0 20px;
-      text-align: center;
-      color: #202223;
-      letter-spacing: 0.02em;
-    }
     .loading {
       text-align: center;
       padding: 56px 20px;
@@ -73,51 +67,83 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       font-size: 14px;
       line-height: 1.5;
     }
-    .card {
-      background: #fff;
+    .plastic-card {
+      width: 100%;
+      max-width: 340px;
+      margin: 0 auto 16px;
+      aspect-ratio: 1.586;
+      background: #e3c8aa;
       border-radius: 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      padding: 28px 24px;
-      margin-bottom: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
-    .barcode-wrap {
+    .plastic-card-top {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 24px;
+      min-height: 0;
+    }
+    .plastic-card-logo {
+      max-width: 120px;
+      max-height: 48px;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+    }
+    .plastic-card-bottom {
+      padding: 12px 20px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .plastic-card .barcode-wrap {
       display: flex;
       justify-content: center;
-      align-items: center;
-      margin: 20px 0;
-      padding: 20px 12px;
-      background: #fff;
-      border-radius: 12px;
-      border: 1px solid #e1e3e5;
+      width: 100%;
+      margin: 0 0 8px;
     }
-    #barcode-wrap { display: block; max-width: 100%; height: auto; }
-    .member-id-label {
-      font-size: 12px;
-      color: #6d7175;
-      text-align: center;
-      margin: 0 0 6px;
-      letter-spacing: 0.05em;
-    }
-    .member-id {
-      font-size: 20px;
+    .plastic-card .barcode-wrap svg { max-width: 100%; height: 44px; }
+    .plastic-card .member-id-on-card {
+      font-size: 14px;
       font-weight: 600;
-      text-align: center;
-      margin: 0 0 20px;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.08em;
       color: #202223;
     }
-    .hint {
+    .hint-below-card {
       font-size: 13px;
       color: #6d7175;
-      text-align: center;
-      margin: 0;
+      text-align: left;
+      margin: 0 0 20px;
       line-height: 1.6;
     }
+    .section-bordered {
+      border-top: 1px solid #e1e3e5;
+      border-bottom: 1px solid #e1e3e5;
+      padding: 14px 0;
+      margin-bottom: 16px;
+      font-size: 14px;
+      color: #202223;
+    }
+    .section-bordered .label { color: #6d7175; }
+    .rank-row { margin-bottom: 12px; font-size: 14px; }
+    .rank-row .label { color: #6d7175; }
+    .points-row { margin-top: 4px; }
+    .points-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #202223;
+      letter-spacing: 0.02em;
+    }
+    .points-unit { font-size: 14px; color: #6d7175; margin-left: 4px; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>会員証</h1>
     <div id="root">
       <div class="loading">読み込み中…</div>
     </div>
@@ -134,7 +160,10 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
 
   var isDebug = typeof location !== 'undefined' && location.search.indexOf('debug=1') !== -1;
 
-  function esc(s) { return String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function esc(s) {
+    if (s == null || s === '') return '';
+    return String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
   function showError(msg, detail) {
     var html = '<div class="error">' + esc(msg) + '</div>';
     if (detail && isDebug) {
@@ -143,14 +172,39 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     root.innerHTML = html;
   }
 
-  function showMember(memberId) {
-    var safeId = String(memberId).replace(/</g, '&lt;');
-    root.innerHTML = '<div class="card"><div class="barcode-wrap"><svg id="barcode-wrap"></svg></div><p class="member-id-label">会員番号</p><div class="member-id">' + safeId + '</div><p class="hint">スタッフにこの画面を提示してください。</p></div>';
+  function formatPoints(val) {
+    if (val == null || val === '') return '';
+    var str = String(val).replace(/[^0-9-]/g, '');
+    var n = parseInt(str, 10);
+    if (isNaN(n)) return String(val);
+    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+  }
+  function showMember(data) {
+    var memberId = data.memberId || '';
+    var rankName = data.rankName != null ? data.rankName : '';
+    var pointsApproved = data.pointsApproved != null ? data.pointsApproved : '';
+    var safeId = esc(memberId);
+    var safeRank = esc(rankName);
+    var pointsDisplay = formatPoints(pointsApproved);
+    var logoUrl = '${CARD_LOGO_URL}';
+    var html = '<div class="plastic-card">' +
+      '<div class="plastic-card-top"><img class="plastic-card-logo" src="' + logoUrl + '" alt="" /></div>' +
+      '<div class="plastic-card-bottom">' +
+        '<div class="barcode-wrap"><svg id="barcode-wrap"></svg></div>' +
+        '<div class="member-id-on-card">' + safeId + '</div>' +
+      '</div></div>' +
+      '<p class="hint-below-card">お会計の際にこの画面のバーコードを提示してください。</p>' +
+      '<div class="section-bordered">会員ID：' + safeId + '</div>' +
+      '<div class="rank-row"><span class="label">現在のランク：</span>' + (safeRank || '—') + '</div>' +
+      '<div class="points-row"><span class="points-value">' + (pointsDisplay ? esc(pointsDisplay) : '0') + '</span><span class="points-unit">ポイント</span></div>';
+    root.innerHTML = html;
     var wrap = document.getElementById('barcode-wrap');
-    try {
-      JsBarcode(wrap, String(memberId).trim(), { format: 'CODE128', width: 2, height: 80, displayValue: false });
-    } catch (e) {
-      root.querySelector('.card').innerHTML = '<p class="error">バーコードの表示に失敗しました</p><div class="member-id">' + String(memberId).replace(/</g, '&lt;') + '</div>';
+    if (wrap) {
+      try {
+        JsBarcode(wrap, String(memberId).trim(), { format: 'CODE128', width: 2, height: 44, displayValue: false });
+      } catch (e) {
+        root.querySelector('.plastic-card-bottom').innerHTML = '<p class="error">バーコードの表示に失敗しました</p><div class="member-id-on-card">' + safeId + '</div>';
+      }
     }
   }
 
@@ -188,7 +242,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       body: JSON.stringify({ idToken: idToken, shop: SHOP })
     }).then(function(res) { return res.json(); }).then(function(data) {
       if (data.ok && data.memberId) {
-        showMember(data.memberId);
+        showMember({ memberId: data.memberId, rankName: data.rankName, pointsApproved: data.pointsApproved });
       } else {
         showError(messages[data.message] || messages.SYSTEM_ERROR);
       }

@@ -110,5 +110,7 @@ export async function action({ request }: ActionFunctionArgs) {
   return jsonResponse({
     ok: true,
     memberId: memberResult.memberId,
+    rankName: memberResult.rankName ?? null,
+    pointsApproved: memberResult.pointsApproved ?? null,
   });
 }

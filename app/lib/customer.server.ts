@@ -17,6 +17,12 @@ const CUSTOMERS_QUERY = `#graphql
           lineMetafield: metafield(namespace: "socialplus", key: "line") {
             value
           }
+          vipRankName: metafield(namespace: "vip", key: "rank_name") {
+            value
+          }
+          vipPointsApproved: metafield(namespace: "vip", key: "points_approved") {
+            value
+          }
         }
       }
       pageInfo {
@@ -30,6 +36,8 @@ const CUSTOMERS_QUERY = `#graphql
 export interface GetMemberIdResult {
   ok: true;
   memberId: string;
+  rankName?: string;
+  pointsApproved?: string;
 }
 
 export interface GetMemberIdError {
@@ -69,6 +77,8 @@ type CustomersJson = {
           id: string;
           metafield?: { value?: string } | null;
           lineMetafield?: { value?: string } | null;
+          vipRankName?: { value?: string } | null;
+          vipPointsApproved?: { value?: string } | null;
         };
       }>;
       pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
@@ -142,7 +152,13 @@ export async function getMemberIdByLineId(
         if (!memberId) {
           return { ok: false, error: "MEMBER_ID_NOT_SET" };
         }
-        return { ok: true, memberId };
+        const rankNameRaw = node.vipRankName?.value;
+        const rankName =
+          typeof rankNameRaw === "string" ? rankNameRaw.trim() || undefined : undefined;
+        const pointsRaw = node.vipPointsApproved?.value;
+        const pointsApproved =
+          typeof pointsRaw === "string" ? pointsRaw.trim() || undefined : undefined;
+        return { ok: true, memberId, rankName, pointsApproved };
       }
 
       if (!pageInfo?.hasNextPage || !pageInfo?.endCursor) {
