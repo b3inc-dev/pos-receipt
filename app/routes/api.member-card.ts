@@ -1,8 +1,9 @@
 /**
  * POST /api/member-card
  * LIFF 会員証用 API。カスタムアプリ（APP_DISTRIBUTION=inhouse）でのみ有効。
+ * OPTIONS（CORS プリフライト）は loader で処理する。
  */
-import type { ActionFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { unauthenticated } from "../shopify.server";
 import { verifyLineIdToken } from "../lib/line.server";
 import { getMemberIdByLineId } from "../lib/customer.server";
@@ -25,10 +26,14 @@ function jsonResponse(
   return new Response(JSON.stringify(data), { ...init, headers });
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
+  return jsonResponse({ ok: false, message: "METHOD_NOT_ALLOWED" }, { status: 405 });
+}
+
+export async function action({ request }: ActionFunctionArgs) {
 
   if (request.method === "POST") {
     console.info("[member-card] POST /api/member-card received");

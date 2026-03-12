@@ -8,7 +8,7 @@ import { isInhouseMode } from "../utils/planFeatures.server";
 
 const LIFF_SDK_URL = "https://static.line-scdn.net/liff/edge/2/sdk.js";
 const JSBARCODE_CDN =
-  "https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.min.js";
+  "https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.3/JsBarcode.all.min.js";
 
 function buildHtml(liffId: string, apiBase: string, shop: string): string {
   const escapedShop = shop
