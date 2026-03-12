@@ -50,34 +50,43 @@ export async function getMemberIdByLineId(
   }
 
   const lineIdNorm = lineUserId.trim().toLowerCase();
-  const escaped = lineUserId.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const query = `metafields.socialplus.line:"${escaped}"`;
+  const escaped = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+  const runQuery = async (queryValue: string) => {
+    const q = `metafields.socialplus.line:"${escaped(queryValue)}"`;
+    const res = await admin.graphql(CUSTOMERS_QUERY, {
+      variables: { query: q, first: 50 },
+    });
+    return res;
+  };
 
   try {
-    const res = await admin.graphql(CUSTOMERS_QUERY, {
-      variables: { query, first: 50 },
-    });
-    const json = (await res.json()) as {
-      data?: {
-        customers?: {
-          edges?: Array<{
-            node?: {
-              id: string;
-              metafield?: { value?: string } | null;
-              lineMetafield?: { value?: string } | null;
-            };
-          }>;
-        };
-      };
+    let res = await runQuery(lineIdNorm);
+    let json = (await res.json()) as {
+      data?: { customers?: { edges?: Array<{ node?: { id: string; metafield?: { value?: string } | null; lineMetafield?: { value?: string } | null } }> } };
       errors?: Array<{ message?: string }>;
     };
-
     if (json.errors?.length) {
       console.error("Customer query errors:", json.errors);
       return { ok: false, error: "API_ERROR" };
     }
+    let edges = json.data?.customers?.edges ?? [];
+    if (edges.length === 0 && lineUserId.trim() !== lineIdNorm) {
+      res = await runQuery(lineUserId.trim());
+      json = (await res.json()) as typeof json;
+      if (json.errors?.length) {
+        console.error("Customer query errors (retry):", json.errors);
+        return { ok: false, error: "API_ERROR" };
+      }
+      edges = json.data?.customers?.edges ?? [];
+    }
 
-    const edges = json.data?.customers?.edges ?? [];
+    if (edges.length === 0) {
+      console.warn("[member-card] No customers in query result. sub (last4):", lineIdNorm.slice(-4), "| Check metafield 'ストア分析で絞り込む' for socialplus.line");
+    } else {
+      const sampleLine = edges[0]?.node?.lineMetafield?.value;
+      console.warn("[member-card] Query returned", edges.length, "customers but no line match. sub (last4):", lineIdNorm.slice(-4), "| sample lineMetafield (last4):", typeof sampleLine === "string" ? sampleLine.slice(-4) : sampleLine);
+    }
 
     for (const edge of edges) {
       const node = edge?.node;
