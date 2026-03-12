@@ -69,12 +69,12 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
   }
 
   function showMember(memberId) {
-    root.innerHTML = '<div class="card"><div id="barcode-wrap"></div><div class="member-id">' + String(memberId).replace(/</g, '&lt;') + '</div><div class="hint">スタッフにこの画面を提示してください。</div></div>';
+    root.innerHTML = '<div class="card"><svg id="barcode-wrap"></svg><div class="member-id">' + String(memberId).replace(/</g, '&lt;') + '</div><div class="hint">スタッフにこの画面を提示してください。</div></div>';
     var wrap = document.getElementById('barcode-wrap');
     try {
-      JsBarcode(wrap, memberId, { format: 'CODE128', width: 2, height: 80, displayValue: false });
+      JsBarcode(wrap, String(memberId).trim(), { format: 'CODE128', width: 2, height: 80, displayValue: false });
     } catch (e) {
-      wrap.innerHTML = '<p class="error">バーコードの表示に失敗しました</p>';
+      root.querySelector('.card').innerHTML = '<p class="error">バーコードの表示に失敗しました</p><div class="member-id">' + String(memberId).replace(/</g, '&lt;') + '</div>';
     }
   }
 
