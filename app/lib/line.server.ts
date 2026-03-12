@@ -12,7 +12,7 @@ export interface LineVerifyResult {
 
 export interface LineVerifyError {
   ok: false;
-  error: "LINE_AUTH_FAILED";
+  error: "LINE_AUTH_FAILED" | "ID_TOKEN_EXPIRED";
 }
 
 export type LineVerifyResponse = LineVerifyResult | LineVerifyError;
@@ -42,7 +42,17 @@ export async function verifyLineIdToken(idToken: string): Promise<LineVerifyResp
     if (!res.ok) {
       const text = await res.text();
       console.error("[member-card] LINE verify failed:", res.status, text);
-      return { ok: false, error: "LINE_AUTH_FAILED" };
+      const isExpired =
+        /expired|IdToken expired/i.test(text) ||
+        (() => {
+          try {
+            const body = JSON.parse(text) as { error_description?: string };
+            return /expired/i.test(String(body.error_description ?? ""));
+          } catch {
+            return false;
+          }
+        })();
+      return { ok: false, error: isExpired ? "ID_TOKEN_EXPIRED" : "LINE_AUTH_FAILED" };
     }
 
     const data = (await res.json()) as { sub?: string };

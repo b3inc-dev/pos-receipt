@@ -73,10 +73,8 @@ export async function action({ request }: ActionFunctionArgs) {
   const verifyResult = await verifyLineIdToken(idToken);
   if (!verifyResult.ok) {
     console.error("[member-card] id_token verify failed for shop:", shop);
-    return jsonResponse(
-      { ok: false, message: "LINE_AUTH_FAILED" },
-      { status: 401 }
-    );
+    const message = verifyResult.error === "ID_TOKEN_EXPIRED" ? "ID_TOKEN_EXPIRED" : "LINE_AUTH_FAILED";
+    return jsonResponse({ ok: false, message }, { status: 401 });
   }
 
   let admin;

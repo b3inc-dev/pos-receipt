@@ -82,6 +82,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     LIFF_INIT_FAILED: 'LIFFの初期化に失敗しました（LIFF ID・Endpoint URLを確認）',
     ID_TOKEN_FAILED: 'IDトークンの取得に失敗しました',
     LINE_AUTH_FAILED: 'LINE認証に失敗しました',
+    ID_TOKEN_EXPIRED: 'トークンの有効期限が切れました。ページを再読み込みするか、LINEアプリから開き直してください。',
     CUSTOMER_NOT_LINKED: 'LINE連携済み会員が見つかりません',
     MEMBER_ID_NOT_SET: '会員番号が設定されていません',
     SYSTEM_ERROR: 'システムエラーが発生しました'
