@@ -1,16 +1,23 @@
 /**
  * 会員証（LIFF）設定・説明の管理画面。
- * LIFF ID と App Proxy の設定状態を確認し、LINE 側の設定手順を案内する。
+ * カスタムアプリ（APP_DISTRIBUTION=inhouse）でのみ表示。公開アプリでは /app へリダイレクト。
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, redirect } from "react-router";
 import { Page, Layout, Card, Text, BlockStack } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { MemberBarcode } from "../components/MemberBarcode";
+import { isInhouseMode } from "../utils/planFeatures.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await authenticate.admin(request);
+  if (!isInhouseMode()) {
+    const url = new URL(request.url);
+    const shop = url.searchParams.get("shop");
+    const q = shop ? `?shop=${encodeURIComponent(shop)}` : "";
+    return redirect(`/app${q}`);
+  }
   const shop = new URL(request.url).searchParams.get("shop") ?? "";
   const liffIdSet = Boolean(process.env.LIFF_ID?.trim());
   const apiBaseSet = Boolean(process.env.SHOPIFY_APP_URL?.trim());

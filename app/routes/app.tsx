@@ -5,12 +5,14 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import "@shopify/polaris/build/esm/styles.css";
 import { authenticate } from "../shopify.server";
 import { AppNavBar } from "../components/AppNavBar";
+import { isInhouseMode } from "../utils/planFeatures.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
   return {
     shop: new URL(request.url).searchParams.get("shop") ?? "",
     apiKey: process.env.SHOPIFY_API_KEY ?? "",
+    memberCardEnabled: isInhouseMode(),
   };
 };
 
@@ -28,7 +30,7 @@ export function ErrorBoundary() {
  * - meta[shopify-api-key] は使わない（他アプリ同様。AppProvider が data-api-key で script に渡す）
  */
 export default function AppLayout() {
-  const { apiKey } = useLoaderData<typeof loader>();
+  const { apiKey, memberCardEnabled } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isLoading = navigation.state === "loading";
 
@@ -75,7 +77,9 @@ export default function AppLayout() {
         <s-link href="/app/settings">設定</s-link>
         <s-link href="/app/plan">プラン・課金</s-link>
         <s-link href="/app/diagnostics">システム診断</s-link>
-        <s-link href="/app/member-card-admin">会員証（LIFF）</s-link>
+        {memberCardEnabled && (
+          <s-link href="/app/member-card-admin">会員証（LIFF）</s-link>
+        )}
       </s-app-nav>
       {/* 上部メニュー（s-app-nav が表示されない環境用・常に表示） */}
       <AppNavBar />

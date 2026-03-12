@@ -1,12 +1,12 @@
 /**
  * POST /api/member-card
- * LIFF 会員証用 API: idToken を受け取り、LINE 検証後に会員番号を返す。
- * フロントは App Proxy 経由の別オリジンから呼ぶため CORS を付与する。
+ * LIFF 会員証用 API。カスタムアプリ（APP_DISTRIBUTION=inhouse）でのみ有効。
  */
 import type { ActionFunctionArgs } from "react-router";
 import { unauthenticated } from "../shopify.server";
 import { verifyLineIdToken } from "../lib/line.server";
 import { getMemberIdByLineId } from "../lib/customer.server";
+import { isInhouseMode } from "../utils/planFeatures.server";
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -28,6 +28,10 @@ function jsonResponse(
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
+  if (!isInhouseMode()) {
+    return jsonResponse({ ok: false, message: "FORBIDDEN" }, { status: 403 });
   }
 
   if (request.method !== "POST") {

@@ -74,6 +74,8 @@ Open the URL generated in your console. Once you grant permission to the app, yo
 
 LINE LIFF を使った会員証表示機能です。LINE リッチメニューから LIFF を起動し、Shopify ログイン不要で会員バーコードを表示します。
 
+**カスタムアプリのみ有効**: この機能は `APP_DISTRIBUTION=inhouse` のときのみ有効です。公開アプリ（`shopify.app.public.toml` でデプロイ）では管理画面のメニューに表示されず、会員証 URL にアクセスしても 404 となります。
+
 ### 環境変数
 
 | 変数名 | 説明 | 必須 |

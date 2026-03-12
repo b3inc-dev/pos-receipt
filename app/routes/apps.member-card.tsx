@@ -1,10 +1,10 @@
 /**
  * App Proxy 経由で公開される LIFF 会員証ページ（GET のみ）。
- * Shopify の App Proxy で https://{shop}/apps/member-card にアクセスされるとこのルートが呼ばれる。
- * HTML を返し、LIFF SDK で LINE 認証後に会員番号を取得してバーコード表示する。
+ * カスタムアプリ（APP_DISTRIBUTION=inhouse）でのみ有効。公開アプリでは 404 を返す。
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
+import { isInhouseMode } from "../utils/planFeatures.server";
 
 const LIFF_SDK_URL = "https://static.line-scdn.net/liff/edge/2/sdk.js";
 const JSBARCODE_CDN =
@@ -116,6 +116,12 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  if (!isInhouseMode()) {
+    return new Response(
+      "<!DOCTYPE html><html><head><meta charset='utf-8'/><title>ご利用できません</title></head><body><p>この機能はカスタムアプリでのみご利用いただけます。</p></body></html>",
+      { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } }
+    );
+  }
   await authenticate.public.appProxy(request);
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop") ?? "";
