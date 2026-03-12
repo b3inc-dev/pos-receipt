@@ -170,3 +170,31 @@ npm run deploy:inhouse
 3. その **Client secret** を Render の **SHOPIFY_API_SECRET** にそのまま貼り付ける（前後に余白を入れない）。
 4. Render で **SHOPIFY_API_KEY** が `ec5374155070d767e71bbe5c258160e2` になっていることを確認する。
 5. 保存 → **再デプロイ** → ストアの管理画面で **「POS Receipt - Ciara」** を開き直す。
+
+### それでも 401 が続く場合：Client secret を再発行して差し替える
+
+トークンの **aud** が自社用アプリの Client ID（`ec5374155070d767e71bbe5c258160e2`）になっているのに 401 になる場合は、**サーバーが持っている秘密鍵と、トークン署名に使われた秘密鍵が一致していない**状態です。次の手順で秘密鍵を「再発行 → 即反映」すると確実に揃えられます。
+
+1. パートナー → **POS Receipt - Ciara** → **設定**（または **API 認証情報**）。
+2. **Client secret** の **「再発行」** または **「Regenerate」** を実行する。
+3. 表示された **新しい Client secret** をコピーする（この画面を閉じると二度と表示されないので、すぐに Render に貼る）。
+4. Render → 自社用 Web サービス → **Environment** → **SHOPIFY_API_SECRET** の値を、今コピーした**新しい秘密鍵**で上書きする。
+5. **Save Changes** のあと、**Manual Deploy** → **Clear build cache & deploy**（または **Deploy latest commit**）で再デプロイする。
+6. デプロイ完了後、管理画面で **「POS Receipt - Ciara」** を開き直す（必要ならブラウザのキャッシュを無効にして再読み込み）。
+
+※ 再発行すると**古い秘密鍵は使えなくなる**ため、公開用の Render や他環境で同じアプリの秘密鍵を使っている場合は、そちらも同じ新しい値に更新してください。今回は自社用（Ciara）だけなので、自社用 Render だけ更新すれば問題ありません。
+
+### サーバー側で秘密鍵をトリムする（実装済み）
+
+環境変数に**改行やスペース**が混ざっていると JWT 検証で 401 になります。アプリでは `SHOPIFY_API_KEY` と `SHOPIFY_API_SECRET` を **trim** してから Shopify に渡すようにしています。それでも 401 になる場合は、Render の環境変数入力欄で値の前後や途中に改行が入っていないか確認してください。
+
+### 401 デバッグ用エンドポイント（/env-check）
+
+サーバーが実際に読み込んでいる環境変数の状態を、**認証なし**で確認できます。401 のときだけ一時的に使ってください。
+
+- **URL**: `https://pos-receipt-ciara.onrender.com/env-check`
+- **返す内容**: `SHOPIFY_API_KEY` の先頭 8 文字・長さ・期待値との一致、`SHOPIFY_API_SECRET` の設定有無・長さ、`SHOPIFY_APP_URL` の有無（値そのものは返しません）。
+- **確認ポイント**:
+  - `SHOPIFY_API_KEY.prefix` が `ec537415` かつ `match: true` になっているか。
+  - `SHOPIFY_API_SECRET.length` が 0 でないか（通常 32 文字前後）。0 なら未設定、31/33 などなら typo や改行の可能性。
+- 原因を特定したあとは、このルート（`app/routes/env-check.tsx`）を削除するか無効化してください。
