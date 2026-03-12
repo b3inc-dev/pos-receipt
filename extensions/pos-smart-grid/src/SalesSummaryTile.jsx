@@ -12,7 +12,7 @@ function SalesSummaryTile() {
   return (
     <s-tile
       heading="売上サマリー"
-      subheading="売上確認"
+      subheading="予算・実績確認"
       onClick={() => shopify.action.presentModal()}
     />
   );

@@ -10,7 +10,7 @@ export default async () => {
 function SpecialRefundTile() {
   return (
     <s-tile
-      heading="返金/商品券"
+      heading="返金 / 商品券"
       subheading="特殊返金・商品券釣銭調整"
       onClick={() => shopify.action.presentModal()}
     />
