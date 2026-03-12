@@ -92,26 +92,31 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       liff.login();
       return;
     }
-    liff.getIDToken().then(function(idToken) {
-      if (!idToken) {
-        showError(messages.ID_TOKEN_FAILED);
-        return;
-      }
-      fetch(API_BASE + '/api/member-card', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken: idToken, shop: SHOP })
-      }).then(function(res) { return res.json(); }).then(function(data) {
-        if (data.ok && data.memberId) {
-          showMember(data.memberId);
-        } else {
-          showError(messages[data.message] || messages.SYSTEM_ERROR);
-        }
-      }).catch(function() {
-        showError(messages.SYSTEM_ERROR);
-      });
-    }).catch(function() {
+    var tokenPromise = liff.getIDToken();
+    if (tokenPromise && typeof tokenPromise.then === 'function') {
+      tokenPromise.then(sendTokenToApi).catch(function() { showError(messages.ID_TOKEN_FAILED); });
+    } else {
+      sendTokenToApi(tokenPromise);
+    }
+  }
+
+  function sendTokenToApi(idToken) {
+    if (!idToken) {
       showError(messages.ID_TOKEN_FAILED);
+      return;
+    }
+    fetch(API_BASE + '/api/member-card', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: idToken, shop: SHOP })
+    }).then(function(res) { return res.json(); }).then(function(data) {
+      if (data.ok && data.memberId) {
+        showMember(data.memberId);
+      } else {
+        showError(messages[data.message] || messages.SYSTEM_ERROR);
+      }
+    }).catch(function() {
+      showError(messages.SYSTEM_ERROR);
     });
   }
 
