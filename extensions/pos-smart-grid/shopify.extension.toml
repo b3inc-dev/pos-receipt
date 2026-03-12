@@ -5,10 +5,10 @@ api_version = "2026-01"
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "特殊返金・商品券調整"
+name = "返金/商品券"
 uid = "149c1d23-b280-f51c-42ee-3a558fd9cf8a2b8ba0cd"
 handle = "pos-special-refund"
-description = "返金手段変更・商品券釣有り差額の後処理"
+description = "特殊返金・商品券釣銭調整"
 
 [[extensions.targeting]]
 module = "./src/SpecialRefundTile.jsx"
@@ -30,10 +30,10 @@ target = "pos.order-details.action.menu-item.render"
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "精算レシート"
+name = "精算"
 handle = "pos-settlement"
 uid = "7c9e0f75-5a2c-efb4-d535-1253af1f8bb6fc6c5fd8"
-description = "精算レシート・点検レシートの発行"
+description = "精算・点検レシート発行"
 
 [[extensions.targeting]]
 module = "./src/SettlementTile.jsx"
@@ -50,10 +50,10 @@ target = "pos.home.modal.render"
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "領収書発行"
+name = "領収書"
 handle = "pos-receipt-issue"
 uid = "48eb3dec-21ec-8072-0dc9-c6d43350fe2022972a31"
-description = "領収書の発行・再発行"
+description = "領収書発行"
 
 [[extensions.targeting]]
 module = "./src/ReceiptTile.jsx"
@@ -74,10 +74,10 @@ target = "pos.order-details.action.menu-item.render"
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "売上サマリー表示"
+name = "売上サマリー"
 handle = "pos-sales-summary"
 uid = "dfcb6e02-8400-c5bb-b42a-b4a3aac005a26756443d"
-description = "全ロケーション横断の売上・予算・KPI確認"
+description = "売上確認"
 
 [[extensions.targeting]]
 module = "./src/SalesSummaryTile.jsx"
