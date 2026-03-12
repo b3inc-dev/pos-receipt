@@ -33,16 +33,19 @@ Render のログで次のどちらかが出ているか確認する。
   1. 顧客メタフィールド `socialplus.line` が「**ストア分析でデータを絞り込む、またはグループ化する**」になっていない。
   2. そのストアに、指定した LINE ID（sub）を `socialplus.line` に持つ顧客がまだいない。
 
-**パターン B**
+**パターン B（ページネーション検索時）**
 
 ```text
-[member-card] Query returned N customers but no line match. sub (last4): xxxx | sample lineMetafield (last4): xxxx
+[member-card] No matching customer. sub (last4): xxxx | ログイン中のLINEと顧客の socialplus.line が同一か確認してください
 ```
 
-- **意味**: 顧客は N 件返っているが、どの顧客の `socialplus.line` も、今回の LINE の sub と一致していない。
+- **意味**: `socialplus.line` が設定されている顧客をページネーションで検索したが、今回の LINE の sub と一致する顧客がいなかった。
 - **よくある原因**:
-  1. 表示したい会員の顧客に、**正しい LINE ユーザー ID** が `socialplus.line` で入っていない。
-  2. LINE の sub と、メタフィールドの値の**表記ゆれ**（前後の空白、大文字・小文字はコード側で吸収しているが、 typo や別IDは吸収されない）。
+  1. **別の LINE アカウントで開いている**  
+     会員証を開いている LINE（ログイン中）のユーザー ID と、該当顧客の「LINE ID」メタフィールドが**別人**。  
+     → ログの `sub (last4): 5215` と、管理画面の顧客メタフィールド「LINE ID」の**末尾4文字**（例: `2189`）が一致するか確認する。一致していなければ、その顧客の LINE とは紐づいていない。
+  2. 表示したい会員の顧客に、**正しい LINE ユーザー ID** が `socialplus.line` で入っていない。
+  3. 表記ゆれ（typo や別ID）はコードでは吸収できない。
 
 ### チェックリスト
 
@@ -67,4 +70,4 @@ Render のログで次のどちらかが出ているか確認する。
 | トークンの有効期限が切れました | `IdToken expired`                      | ページ再読み込み／LINEアプリから開き直し |
 | LINE認証に失敗しました        | `LINE verify failed: 400/401`          | LINE_CHANNEL_ID、LIFF のチャネル |
 | LINE連携済み会員が見つかりません | `No customers in query result`         | メタフィールドの「ストア分析で絞り込む」と、該当顧客の存在 |
-| LINE連携済み会員が見つかりません | `Query returned N customers but no line match` | 顧客の socialplus.line の値と、ログの sub (last4) の一致 |
+| LINE連携済み会員が見つかりません | `No matching customer. sub (last4): xxxx` | ログイン中の LINE と顧客の socialplus.line が同一か。sub (last4) と顧客「LINE ID」の末尾4文字を照合 |
