@@ -70,21 +70,23 @@
 
 ## 3. 次のステップ（推奨順）
 
-### 直近: Prompt 4 — 特殊返金・商品券調整
-- **Backend**
-  - `POST /api/special-refunds` … イベント作成（event_type 4種）
-  - `GET /api/special-refunds?orderId=...` … 注文に紐づくイベント一覧
-  - `POST /api/special-refunds/:id/void`（または PATCH status=voided）… 無効化
-- **event_type**  
-  `cash_refund` / `payment_method_override` / `voucher_change_adjustment` / `receipt_cash_adjustment`
-- **POS UI**  
-  取引選択後 → 「特殊返金」 or 「商品券調整」選択 → 種別ごとの入力フォーム → 確認・実行  
-  （既存の Modal.jsx の「選択した取引」の先に画面を追加）
+詳細な手順・ファイル参照は **`docs/NEXT_STEPS_IMPLEMENTATION.md`** を参照してください。
 
-### その後
-- **Prompt 5**: 精算（プレビューAPI、create、print adapter、cloudprnt_direct / order_based）
-- **Prompt 6**: 領収書（テンプレート編集、プレビュー、発行、履歴）
-- **Prompt 7**: 売上サマリー（日次/期間API、予算、入店数、キャッシュ、管理画面設定）
+### 直近: POS タイルの UID 設定
+- 領収書・売上サマリー含め **4 タイルすべて UID は設定済み**（`extensions/pos-smart-grid/shopify.extension.toml`）。
+- 新規アプリや拡張の作り直しをした場合は、`shopify app generate extension` で UID を取得し、同 toml の該当ブロックに `uid` を設定する。
+
+### 実装済み（2026-03-12）
+- **CloudPRNT payload** … 精算 create 時に `printMode === "cloudprnt_direct"` のときレスポンスに `printPayload` を付与。`buildSettlementReceiptText` で印字用テキストを共通生成。`GET /api/settlements/:id/print-payload` で再印字・ポーリング用に payload 取得可能。
+- **税率の設定化** … 精算設定に「消費税率（%）」を追加。精算エンジンで `taxRatePercent` を参照（未設定時 10%）。
+
+### 実装済み（続き）
+- **支払方法マスタ・商品券判定の拡張** … 一覧に「商品券」「釣銭あり」列を追加。分類ラベル「商品券・ギフトカード」、商品券の説明文、`formattedGatewayPattern` のマッチング修正、`getPaymentMethodVoucherInfo` API を追加。
+- **CloudPRNT POS 導線** … 精算完了画面（CloudPRNT 直印字時）に印字用データ取得URLを表示。実機確認時にプリンタのポーリング先に設定する案内を表示。
+
+### オプション（必要に応じて）
+- **location_settings の key-value テーブル** … 必要になったら LocationSetting 等を追加。
+- **CloudPRNT 実機** … 実機での印字確認（後ほど実施）。
 
 ---
 

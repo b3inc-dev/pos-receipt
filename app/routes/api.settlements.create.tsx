@@ -12,7 +12,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequest } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { buildSettlementPreview, type SettlementPreviewDTO } from "../services/settlementEngine.server";
+import { buildSettlementPreview, buildSettlementReceiptText, type SettlementPreviewDTO } from "../services/settlementEngine.server";
 
 /** locationId + targetDate + printMode から冪等キーを生成 */
 function buildIdempotencyKey(
@@ -114,6 +114,10 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
+    // cloudprnt_direct 時は印字用 payload（テキスト）を返す。CloudPRNT 実機連携で利用。
+    const printPayload =
+      String(printMode) === "cloudprnt_direct" ? buildSettlementReceiptText(preview) : undefined;
+
     return corsJson(
       {
         ok: true,
@@ -124,6 +128,7 @@ export async function action({ request }: ActionFunctionArgs) {
         sourceOrderName,
         printMode,
         isInspection: Boolean(isInspection),
+        ...(printPayload !== undefined && { printPayload }),
       },
       { status: 201 }
     );
@@ -157,27 +162,7 @@ async function createSettlementOrder(
   admin: { graphql: (q: string, opts?: object) => Promise<{ json: () => Promise<unknown> }> },
   preview: SettlementPreviewDTO,
 ): Promise<{ orderId: string; orderName: string }> {
-  // 精算レシート用のノート文字列
-  const noteLines = [
-    "【精算レシート】",
-    `日付: ${preview.targetDate}`,
-    `ロケーション: ${preview.locationName}`,
-    "─────────────────",
-    `総売上: ¥${preview.total.toLocaleString()}`,
-    `純売上: ¥${preview.netSales.toLocaleString()}`,
-    `消費税: ¥${preview.tax.toLocaleString()}`,
-    `割引: ¥${preview.discounts.toLocaleString()}`,
-    `返金: ¥${preview.refundTotal.toLocaleString()}`,
-    `件数: ${preview.orderCount}件 (返金${preview.refundCount}件)`,
-    `点数: ${preview.itemCount}点`,
-    ...(preview.voucherChangeAmount > 0
-      ? [`商品券釣有り差額: ¥${preview.voucherChangeAmount.toLocaleString()}`]
-      : []),
-    "─────────────────",
-    ...preview.paymentSections.map(
-      (s) => `${s.label}: ¥${s.net.toLocaleString()} (返金¥${s.refund.toLocaleString()})`
-    ),
-  ].join("\n");
+  const noteLines = buildSettlementReceiptText(preview);
 
   const createRes = await admin.graphql(DRAFT_ORDER_CREATE, {
     variables: {

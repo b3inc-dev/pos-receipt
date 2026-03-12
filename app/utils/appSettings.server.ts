@@ -278,6 +278,8 @@ export interface SettlementSettings {
   paymentSectionOrderJson: string;
   taxDisplayMode: "inclusive_only" | "inclusive_and_audit";
   taxRoundingMode: "round" | "floor" | "ceil";
+  /** 消費税率（%）。例: 10 → 10%。未設定時は 10 を使用 */
+  taxRatePercent: number;
   allowRecalculateLatestSettlement: boolean;
   allowReprintSettlement: boolean;
   allowManualTargetDate: boolean;
@@ -317,6 +319,7 @@ export const DEFAULT_SETTLEMENT_SETTINGS: SettlementSettings = {
   paymentSectionOrderJson: "[]",
   taxDisplayMode: "inclusive_only",
   taxRoundingMode: "round",
+  taxRatePercent: 10,
   allowRecalculateLatestSettlement: true,
   allowReprintSettlement: true,
   allowManualTargetDate: true,

@@ -34,7 +34,7 @@ const CATEGORY_OPTIONS = [
   { label: "電子マネー", value: "e_money" },
   { label: "QR決済", value: "qr" },
   { label: "交通系IC", value: "transit_ic" },
-  { label: "商品券", value: "voucher" },
+  { label: "商品券・ギフトカード", value: "voucher" },
   { label: "PayPal", value: "paypal" },
   { label: "その他", value: "uncategorized" },
 ];
@@ -198,6 +198,16 @@ export default function PaymentMethodsPage() {
         {CATEGORY_OPTIONS.find((o) => o.value === item.category)?.label ?? item.category}
       </IndexTable.Cell>
       <IndexTable.Cell>
+        <Badge tone={item.isVoucher ? "attention" : "default"}>
+          {item.isVoucher ? "○" : "－"}
+        </Badge>
+      </IndexTable.Cell>
+      <IndexTable.Cell>
+        <Badge tone={item.voucherChangeSupported ? "success" : "default"}>
+          {item.voucherChangeSupported ? "○" : "－"}
+        </Badge>
+      </IndexTable.Cell>
+      <IndexTable.Cell>
         <Badge tone={item.enabled ? "success" : "critical"}>
           {item.enabled ? "有効" : "無効"}
         </Badge>
@@ -245,6 +255,8 @@ export default function PaymentMethodsPage() {
                     { title: "表示名" },
                     { title: "Gateway パターン" },
                     { title: "分類" },
+                    { title: "商品券" },
+                    { title: "釣銭あり" },
                     { title: "状態" },
                     { title: "操作" },
                   ]}
@@ -319,6 +331,9 @@ export default function PaymentMethodsPage() {
               checked={form.isVoucher}
               onChange={(v) => setForm((p) => ({ ...p, isVoucher: v }))}
             />
+            <Text as="p" variant="bodySm" tone="subdued">
+              Shopify の gateway に「gift_card」「Gift card」等が含まれる場合、上記パターンで登録しONにしてください。精算・特殊返金で商品券として扱われます。
+            </Text>
             <Checkbox
               label="釣銭あり対応"
               checked={form.voucherChangeSupported}

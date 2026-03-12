@@ -10,7 +10,7 @@
 import prisma from "../db.server";
 import { getPaymentMethodDisplayLabel } from "../utils/paymentMethod.server";
 import { getAppSetting } from "../utils/appSettings.server";
-import { LOYALTY_SETTINGS_KEY, DEFAULT_LOYALTY_SETTINGS } from "../utils/appSettings.server";
+import { LOYALTY_SETTINGS_KEY, DEFAULT_LOYALTY_SETTINGS, SETTLEMENT_SETTINGS_KEY } from "../utils/appSettings.server";
 import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -519,7 +519,9 @@ export async function buildSettlementPreview(
   // 税・net の再計算（GAS_vs_APP_IMPLEMENTATION_GAP §7.2: 返金反映後の税込額から税・純売上を算出）
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const effectiveGross = Math.max(0, total - refundTotal - discounts);
-  tax = round2(effectiveGross * 10 / 110);
+  const settlementSettings = await getAppSetting<{ taxRatePercent?: number }>(shopId, SETTLEMENT_SETTINGS_KEY);
+  const taxRatePercent = Number(settlementSettings?.taxRatePercent) || 10;
+  tax = round2((effectiveGross * taxRatePercent) / (100 + taxRatePercent));
   netSales = round2((total - refundTotal - discounts) - tax);
 
   for (const sec of paymentSections) {
@@ -557,4 +559,34 @@ export async function buildSettlementPreview(
     })),
     loyaltyUsageDisplayLabel,
   };
+}
+
+// ── CloudPRNT / 印字用テキスト生成 ─────────────────────────────────────────────
+
+/**
+ * 精算レシートの印字用テキスト（1行ずつ改行）を組み立てる。
+ * order_based 時の注文ノート・cloudprnt_direct 時の printPayload で共通利用。
+ */
+export function buildSettlementReceiptText(preview: SettlementPreviewDTO): string {
+  const lines = [
+    "【精算レシート】",
+    `日付: ${preview.targetDate}`,
+    `ロケーション: ${preview.locationName}`,
+    "─────────────────",
+    `総売上: ¥${preview.total.toLocaleString()}`,
+    `純売上: ¥${preview.netSales.toLocaleString()}`,
+    `消費税: ¥${preview.tax.toLocaleString()}`,
+    `割引: ¥${preview.discounts.toLocaleString()}`,
+    `返金: ¥${preview.refundTotal.toLocaleString()}`,
+    `件数: ${preview.orderCount}件 (返金${preview.refundCount}件)`,
+    `点数: ${preview.itemCount}点`,
+    ...(preview.voucherChangeAmount > 0
+      ? [`商品券釣有り差額: ¥${preview.voucherChangeAmount.toLocaleString()}`]
+      : []),
+    "─────────────────",
+    ...preview.paymentSections.map(
+      (s) => `${s.label}: ¥${s.net.toLocaleString()} (返金¥${s.refund.toLocaleString()})`
+    ),
+  ];
+  return lines.join("\n");
 }

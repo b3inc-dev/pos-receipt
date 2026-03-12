@@ -18,6 +18,7 @@ import {
   recalculateSettlement,
   getSettlementHistory,
 } from "../../common/settlementApi.js";
+import { getAppUrl } from "../../common/appUrl.js";
 
 // ── 今日の日付（YYYY-MM-DD） ────────────────────────────────────────────────
 function todayStr() {
@@ -493,6 +494,16 @@ function DoneView({ result, isInspection, onBack }) {
                 <s-stack gap="small">
                   <s-text fontWeight="bold">CloudPRNT 直印字</s-text>
                   <s-text tone="subdued">精算データを保存しました。プリンタから印刷されます。</s-text>
+                  {result?.settlementId ? (
+                    <>
+                      <s-text tone="subdued" fontSize="small">
+                        印字用データは以下のURLで取得できます。実機確認時に CloudPRNT 対応プリンタのポーリング先に設定してください。
+                      </s-text>
+                      <s-text fontSize="small" fontWeight="bold">
+                        {getAppUrl()}/api/settlements/{result.settlementId}/print-payload
+                      </s-text>
+                    </>
+                  ) : null}
                 </s-stack>
               </s-box>
             )}

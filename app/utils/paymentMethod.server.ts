@@ -40,11 +40,40 @@ export async function getPaymentMethodDisplayLabel(
 
   for (const m of masters) {
     const rawMatch = matches(gateway, m.rawGatewayPattern, m.matchType);
-    const fmtMatch =
-      !m.formattedGatewayPattern ||
-      matches(gateway, m.formattedGatewayPattern, m.matchType);
+    const fmtMatch = m.formattedGatewayPattern
+      ? matches(gateway, m.formattedGatewayPattern, m.matchType)
+      : false;
     if (rawMatch || fmtMatch) return m.displayLabel;
   }
 
   return FALLBACK_LABELS[gateway] ?? gateway ?? "その他";
+}
+
+/**
+ * 指定 gateway が商品券として登録されているか・釣銭あり対応かを返す。
+ * 特殊返金・精算で商品券判定に利用。
+ */
+export async function getPaymentMethodVoucherInfo(
+  shopId: string,
+  gateway: string
+): Promise<{ isVoucher: boolean; voucherChangeSupported: boolean }> {
+  const masters = await prisma.paymentMethodMaster.findMany({
+    where: { shopId, enabled: true },
+    orderBy: { sortOrder: "asc" },
+  });
+
+  for (const m of masters) {
+    const rawMatch = matches(gateway, m.rawGatewayPattern, m.matchType);
+    const fmtMatch = m.formattedGatewayPattern
+      ? matches(gateway, m.formattedGatewayPattern, m.matchType)
+      : false;
+    if (rawMatch || fmtMatch) {
+      return {
+        isVoucher: m.isVoucher,
+        voucherChangeSupported: m.voucherChangeSupported,
+      };
+    }
+  }
+
+  return { isVoucher: false, voucherChangeSupported: false };
 }

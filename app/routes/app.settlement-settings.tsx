@@ -43,6 +43,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shop = await resolveShop(session.shop, admin);
   const saved = await getAppSetting<Partial<SettlementSettings>>(shop.id, SETTLEMENT_SETTINGS_KEY);
   const settings: SettlementSettings = { ...DEFAULT_SETTLEMENT_SETTINGS, ...saved };
+  if (typeof settings.taxRatePercent !== "number" || !Number.isFinite(settings.taxRatePercent)) {
+    settings.taxRatePercent = 10;
+  }
   return { settings };
 }
 
@@ -53,6 +56,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const get = (k: string) => formData.get(k);
   const str = (k: string, d: string) => String(get(k) ?? d).trim();
   const bool = (k: string, def: boolean) => get(k) === "true" || (def && get(k) !== "false");
+  const num = (k: string, d: number) => {
+    const v = get(k);
+    if (v == null || v === "") return d;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : d;
+  };
   const settings: SettlementSettings = {
     ...DEFAULT_SETTLEMENT_SETTINGS,
     settlementReceiptTitle: str("settlementReceiptTitle", "精算レシート"),
@@ -85,6 +94,7 @@ export async function action({ request }: ActionFunctionArgs) {
     paymentSectionOrderJson: str("paymentSectionOrderJson", "[]"),
     taxDisplayMode: (get("taxDisplayMode") as SettlementSettings["taxDisplayMode"]) || "inclusive_only",
     taxRoundingMode: (get("taxRoundingMode") as SettlementSettings["taxRoundingMode"]) || "round",
+    taxRatePercent: Math.min(100, Math.max(0, num("taxRatePercent", 10))),
     allowRecalculateLatestSettlement: bool("allowRecalculateLatestSettlement", true),
     allowReprintSettlement: bool("allowReprintSettlement", true),
     allowManualTargetDate: bool("allowManualTargetDate", true),
@@ -188,6 +198,14 @@ export default function SettlementSettingsPage() {
               <BlockStack gap="400">
                 <Select label="税表示" options={TAX_DISPLAY_OPTIONS} value={form.taxDisplayMode} onChange={(v) => set("taxDisplayMode", v as SettlementSettings["taxDisplayMode"])} />
                 <Select label="税丸め" options={TAX_ROUNDING_OPTIONS} value={form.taxRoundingMode} onChange={(v) => set("taxRoundingMode", v as SettlementSettings["taxRoundingMode"])} />
+                <TextField
+                  label="消費税率（%）"
+                  type="number"
+                  value={String(form.taxRatePercent ?? 10)}
+                  onChange={(v) => set("taxRatePercent", Math.min(100, Math.max(0, Number(v) || 10)))}
+                  autoComplete="off"
+                  helpText="精算時の税・純売上算出に使用。例: 10"
+                />
                 <Checkbox label="最新精算の再計算を許可" checked={form.allowRecalculateLatestSettlement} onChange={(v) => set("allowRecalculateLatestSettlement", v)} />
                 <Checkbox label="精算の再印字を許可" checked={form.allowReprintSettlement} onChange={(v) => set("allowReprintSettlement", v)} />
                 <Checkbox label="手動で対象日を指定可能" checked={form.allowManualTargetDate} onChange={(v) => set("allowManualTargetDate", v)} />
