@@ -220,7 +220,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     var wrap = document.getElementById('barcode-wrap');
     if (wrap) {
       try {
-        JsBarcode(wrap, String(memberId).trim(), { format: 'CODE128', width: 2, height: 80, displayValue: false });
+        JsBarcode(wrap, String(memberId).trim(), { format: 'CODE128', width: 2, height: 45, displayValue: false });
       } catch (e) {
         root.querySelector('.plastic-card-bottom').innerHTML = '<div class="barcode-id-block"><p class="error">バーコードの表示に失敗しました</p><div class="member-id-on-card">' + safeId + '</div></div><div class="card-bottom-spacer"></div>';
       }
