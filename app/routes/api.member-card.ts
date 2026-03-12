@@ -30,6 +30,10 @@ export async function action({ request }: ActionFunctionArgs) {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
+  if (request.method === "POST") {
+    console.info("[member-card] POST /api/member-card received");
+  }
+
   if (!isInhouseMode()) {
     return jsonResponse({ ok: false, message: "FORBIDDEN" }, { status: 403 });
   }
@@ -63,6 +67,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const verifyResult = await verifyLineIdToken(idToken);
   if (!verifyResult.ok) {
+    console.error("[member-card] id_token verify failed for shop:", shop);
     return jsonResponse(
       { ok: false, message: "LINE_AUTH_FAILED" },
       { status: 401 }

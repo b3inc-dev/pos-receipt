@@ -41,7 +41,7 @@ export async function verifyLineIdToken(idToken: string): Promise<LineVerifyResp
 
     if (!res.ok) {
       const text = await res.text();
-      console.error("LINE verify failed:", res.status, text);
+      console.error("[member-card] LINE verify failed:", res.status, text);
       return { ok: false, error: "LINE_AUTH_FAILED" };
     }
 
