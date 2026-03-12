@@ -22,8 +22,18 @@ uri = "/webhooks/app/uninstalled"
 compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
 uri = "/webhooks/compliance"
 
+[access.admin]
+direct_api_mode = "offline"
+embedded_app_direct_api_access = true
+
 [access_scopes]
-scopes = "read_orders,read_locations"
+scopes = "read_orders,read_locations,read_customers,write_app_proxy"
+
+# 会員証 LIFF 用 App Proxy（公開URL: https://{shop}/apps/member-card）
+[app_proxy]
+url = "/apps/member-card"
+prefix = "apps"
+subpath = "member-card"
 
 [auth]
 redirect_urls = [ "https://pos-receipt-ciara.onrender.com" ]

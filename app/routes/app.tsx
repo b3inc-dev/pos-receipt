@@ -75,6 +75,7 @@ export default function AppLayout() {
         <s-link href="/app/settings">設定</s-link>
         <s-link href="/app/plan">プラン・課金</s-link>
         <s-link href="/app/diagnostics">システム診断</s-link>
+        <s-link href="/app/member-card-admin">会員証（LIFF）</s-link>
       </s-app-nav>
       {/* 上部メニュー（s-app-nav が表示されない環境用・常に表示） */}
       <AppNavBar />
