@@ -42,6 +42,25 @@ export type GetMemberIdResponse = GetMemberIdResult | GetMemberIdError;
 const FIRST_PAGE = 250;
 const MAX_PAGES = 200;
 
+/**
+ * socialplus.line の値を LINE ユーザー ID に正規化する。
+ * 生の "Uxxx..." または JSON（{"provider":"line","uid":"Uxxx..."} 等）の両方に対応。
+ */
+function normalizeStoredLineId(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  const str = typeof value === "string" ? value.trim() : String(value).trim();
+  if (!str) return undefined;
+  try {
+    const parsed = JSON.parse(str) as Record<string, unknown>;
+    const id =
+      parsed.uid ?? parsed.id ?? parsed.line_user_id ?? parsed.userId;
+    const idStr = typeof id === "string" ? id.trim() : id != null ? String(id).trim() : "";
+    return idStr || str;
+  } catch {
+    return str;
+  }
+}
+
 type CustomersJson = {
   data?: {
     customers?: {
@@ -101,9 +120,9 @@ export async function getMemberIdByLineId(
       for (const edge of edges) {
         const node = edge?.node;
         if (!node) continue;
-        const lineValue = node.lineMetafield?.value;
+        const storedLineId = normalizeStoredLineId(node.lineMetafield?.value);
         const lineMatch =
-          typeof lineValue === "string" && lineValue.trim().toLowerCase() === lineIdNorm;
+          !!storedLineId && storedLineId.toLowerCase() === lineIdNorm;
         if (!lineMatch) continue;
 
         const memberIdRaw = node.metafield?.value;
