@@ -70,11 +70,28 @@ npx prisma migrate dev --name init_mvp
 
 ---
 
-## 4. まとめ
+## 4. 本番（Render）で自社用と公開用を分ける場合
+
+**自社用**（POS Receipt - Ciara）と**公開用**（POS Receipt）で別々の Render Web サービスを用意している場合、それぞれで次のように環境変数を分けます。
+
+| 変数 | 自社用（pos-receipt-ciara.onrender.com） | 公開用（pos-receipt.onrender.com） |
+|------|------------------------------------------|-------------------------------------|
+| **SHOPIFY_API_KEY** | 自社用アプリの Client ID（`ec5374155070d767e71bbe5c258160e2`） | 公開用アプリの Client ID |
+| **SHOPIFY_API_SECRET** | 自社用アプリの Client secret | 公開用アプリの Client secret |
+| **SHOPIFY_APP_URL** | **`https://pos-receipt-ciara.onrender.com`**（必須・未設定だと管理画面が真っ白になる） | `https://pos-receipt.onrender.com` |
+| **APP_DISTRIBUTION** | `inhouse`（必須） | 未設定 または `public` |
+| **DATABASE_URL** | 自社用の DB または共有 DB の URL | 公開用の DB または共有 DB の URL |
+
+- 自社用の Render では、**SHOPIFY_API_KEY** と **SHOPIFY_API_SECRET** をパートナー上の「POS Receipt - Ciara」アプリの値にしてください。公開用の値のままにすると認証で失敗します。
+- 詳細は `docs/DEPLOY_PUBLIC_AND_INHOUSE.md` を参照してください。
+
+---
+
+## 5. まとめ
 
 1. **`.env` を用意する**（`cp .env.example .env`）
 2. **`DATABASE_URL` に PostgreSQL の接続文字列を書く**（ローカル / Render / Supabase のどれか）
 3. **`npx prisma generate` と `npx prisma migrate dev` を実行する**
 4. 開発時は **`npm run dev`** で起動する（Shopify 用の変数は CLI が補う場合あり）
 
-本番（Render など）では、**.env ではなくサービス側の「Environment」画面で `DATABASE_URL` を設定**してください。
+本番（Render など）では、**.env ではなくサービス側の「Environment」画面で上記変数を設定**してください。

@@ -8,6 +8,8 @@
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
     "deploy": "shopify app deploy",
+    "deploy:public": "node scripts/set-app-mode.js public && shopify app config use shopify.app.public.toml && shopify app deploy --force",
+    "deploy:inhouse": "node scripts/set-app-mode.js inhouse && shopify app config use shopify.app.toml && shopify app deploy --force",
     "start": "react-router-serve ./build/server/index.js",
     "setup": "prisma generate && prisma migrate deploy",
     "shopify": "shopify",

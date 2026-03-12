@@ -36,9 +36,10 @@ export function getCustomAppStoreIds(): string[] {
   return raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
 
-/** 自社用判定（APP_DISTRIBUTION=inhouse のとき true）。getFullAccess の一部としても使用。 */
+/** 自社用判定（APP_DISTRIBUTION=inhouse のとき true）。getFullAccess の一部としても使用。大文字小文字は無視。 */
 export function isInhouseMode(): boolean {
-  return process.env.APP_DISTRIBUTION === "inhouse";
+  const v = (process.env.APP_DISTRIBUTION ?? "").trim().toLowerCase();
+  return v === "inhouse";
 }
 
 /**

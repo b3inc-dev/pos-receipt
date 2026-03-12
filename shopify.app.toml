@@ -2,14 +2,13 @@
 # デプロイ先: 自社用 Render の URL（例: https://pos-receipt-ciara.onrender.com）
 # client_id はパートナーで作成した「自社用」アプリの Client ID に差し替える（公開用とは別の値）
 
-client_id = "5c0909e598067f0376e701295c9a938d"
+client_id = "ec5374155070d767e71bbe5c258160e2"
 name = "POS Receipt - Ciara"
 application_url = "https://pos-receipt-ciara.onrender.com"
 embedded = true
 
 [build]
 automatically_update_urls_on_dev = true
-include_config_on_deploy = true
 
 [webhooks]
 api_version = "2026-04"
