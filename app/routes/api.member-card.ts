@@ -97,13 +97,17 @@ export async function action({ request }: ActionFunctionArgs) {
         ? 404
         : memberResult.error === "MEMBER_ID_NOT_SET"
           ? 422
-          : 500;
+          : memberResult.error === "THROTTLED"
+            ? 503
+            : 500;
     const message =
       memberResult.error === "CUSTOMER_NOT_FOUND"
         ? "CUSTOMER_NOT_LINKED"
         : memberResult.error === "MEMBER_ID_NOT_SET"
           ? "MEMBER_ID_NOT_SET"
-          : "SYSTEM_ERROR";
+          : memberResult.error === "THROTTLED"
+            ? "THROTTLED"
+            : "SYSTEM_ERROR";
     return jsonResponse({ ok: false, message }, { status });
   }
 

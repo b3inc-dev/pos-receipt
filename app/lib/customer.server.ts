@@ -47,13 +47,42 @@ export interface GetMemberIdResult {
 
 export interface GetMemberIdError {
   ok: false;
-  error: "CUSTOMER_NOT_FOUND" | "MEMBER_ID_NOT_SET" | "API_ERROR";
+  error: "CUSTOMER_NOT_FOUND" | "MEMBER_ID_NOT_SET" | "API_ERROR" | "THROTTLED";
 }
 
 export type GetMemberIdResponse = GetMemberIdResult | GetMemberIdError;
 
 const FIRST_PAGE = 250;
 const MAX_PAGES = 200;
+
+/** リトライ上限（Throttled 時） */
+const MAX_THROTTLE_RETRIES = 3;
+/** 初回待機 ms、以降は指数バックオフ */
+const THROTTLE_BACKOFF_MS = 1000;
+
+/**
+ * Shopify GraphQL の Throttled かどうかを判定する。
+ * クライアントは GraphqlQueryError で message に "Throttled" を含めて投げる。
+ */
+function isThrottledError(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = (err as Error & { message?: string }).message ?? "";
+    return msg.includes("Throttled");
+  }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** リトライし尽くしたときに投げる印 */
+export class ThrottledExhaustedError extends Error {
+  constructor() {
+    super("Throttled: max retries exhausted");
+    this.name = "ThrottledExhaustedError";
+  }
+}
 
 /**
  * socialplus.line の値を LINE ユーザー ID に正規化する。
@@ -118,6 +147,44 @@ export async function getMemberIdByLineId(
     return (await res.json()) as CustomersJson;
   };
 
+  /**
+   * Throttled 時に指数バックオフでリトライする。リトライし尽くしたら ThrottledExhaustedError を投げる。
+   */
+  const runQueryWithRetry = async (
+    query: string,
+    after: string | null
+  ): Promise<CustomersJson> => {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= MAX_THROTTLE_RETRIES; attempt++) {
+      try {
+        return await runQuery(query, after);
+      } catch (err) {
+        lastErr = err;
+        if (!isThrottledError(err)) throw err;
+        if (attempt === MAX_THROTTLE_RETRIES) {
+          console.warn(
+            "[member-card] Throttled after",
+            MAX_THROTTLE_RETRIES,
+            "retries, giving up"
+          );
+          throw new ThrottledExhaustedError();
+        }
+        const waitMs = THROTTLE_BACKOFF_MS * Math.pow(2, attempt - 1);
+        console.info(
+          "[member-card] Throttled, retry",
+          attempt,
+          "/",
+          MAX_THROTTLE_RETRIES,
+          "after",
+          waitMs,
+          "ms"
+        );
+        await sleep(waitMs);
+      }
+    }
+    throw lastErr;
+  };
+
   try {
     let cursor: string | null = null;
     let pageCount = 0;
@@ -125,7 +192,7 @@ export async function getMemberIdByLineId(
 
     while (pageCount < MAX_PAGES) {
       const query = 'metafields.socialplus.line:*';
-      const json = await runQuery(query, cursor);
+      const json = await runQueryWithRetry(query, cursor);
 
       if (json.errors?.length) {
         console.error("Customer query errors:", json.errors);
@@ -200,6 +267,9 @@ export async function getMemberIdByLineId(
     );
     return { ok: false, error: "CUSTOMER_NOT_FOUND" };
   } catch (err) {
+    if (err instanceof ThrottledExhaustedError) {
+      return { ok: false, error: "THROTTLED" };
+    }
     console.error("getMemberIdByLineId error:", err);
     return { ok: false, error: "API_ERROR" };
   }

@@ -380,6 +380,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     ID_TOKEN_EXPIRED: 'トークンの有効期限が切れました。ページを再読み込みするか、LINEアプリから開き直してください。',
     CUSTOMER_NOT_LINKED: 'LINE連携済み会員が見つかりません',
     MEMBER_ID_NOT_SET: '会員番号が設定されていません',
+    THROTTLED: '混雑しています。しばらくしてからお試しください。',
     SYSTEM_ERROR: 'システムエラーが発生しました'
   };
 
