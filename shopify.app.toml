@@ -27,7 +27,7 @@ direct_api_mode = "offline"
 embedded_app_direct_api_access = true
 
 [access_scopes]
-scopes = "read_orders,read_locations,read_customers,write_app_proxy"
+scopes = "read_orders,read_locations,read_customers,write_customers,write_app_proxy"
 
 # 会員証 LIFF 用 App Proxy（公開URL: https://{shop}/apps/member-card）
 [app_proxy]
