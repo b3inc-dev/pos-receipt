@@ -75,7 +75,7 @@ export default function AppLayout() {
         <s-link href="/app/special-refund-history">特殊返金履歴</s-link>
         <s-link href="/app/receipt-history">領収書履歴</s-link>
         <s-link href="/app/settings">設定</s-link>
-        <s-link href="/app/plan">プラン・課金</s-link>
+        <s-link href="/app/plan">料金プラン</s-link>
         <s-link href="/app/diagnostics">システム診断</s-link>
         {memberCardEnabled && (
           <s-link href="/app/member-card-admin">会員証（LIFF）</s-link>

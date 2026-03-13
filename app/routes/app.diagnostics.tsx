@@ -96,7 +96,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     shop: {
       id: shop.id,
       domain: session.shop,
-      planCode: shop.planCode ?? "standard",
+      planCode: shop.planCode === "standard" ? "lite" : (shop.planCode ?? "lite"),
       planLabel: fullAccess
         ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
         : planLabel(shop.planCode),

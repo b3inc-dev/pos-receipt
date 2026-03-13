@@ -234,7 +234,7 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   supportContactEmail: "",
   defaultTimezone: "Asia/Tokyo",
   defaultCurrency: "JPY",
-  currentPlanCode: "standard",
+  currentPlanCode: "lite",
   enabledFeaturesJson: "{}",
   adminLanguage: "ja",
   posLanguage: "ja",

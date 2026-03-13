@@ -8,7 +8,7 @@
  * - Shopify の開発ストア（shop.plan.partnerDevelopment）
  */
 
-export type PlanCode = "standard" | "pro" | "unlimited";
+export type PlanCode = "lite" | "pro" | "unlimited" | "standard"; // standard は後方互換のため残す（Lite 相当）
 
 // ── フィーチャーキー定義 ────────────────────────────────────────────────────
 
@@ -69,9 +69,11 @@ export async function getFullAccess(
 export function planLabel(planCode: string | null): string {
   if (isInhouseMode()) return "自社用（無制限）";
   switch (planCode) {
-    case "pro":       return "プロプラン";
+    case "pro":       return "Proプラン";
     case "unlimited": return "アンリミテッド";
-    default:          return "スタンダードプラン";
+    case "lite":
+    case "standard":  return "Liteプラン"; // standard は旧名称・Lite 相当
+    default:          return "Liteプラン";
   }
 }
 
@@ -95,7 +97,8 @@ export function checkPlanAccess(
   }
 
   const isProRequired = PRO_FEATURES.includes(feature);
-  if (isProRequired && planCode !== "pro") {
+  const isPro = planCode === "pro" || planCode === "unlimited";
+  if (isProRequired && !isPro) {
     return {
       allowed: false,
       message: "この機能はプロプランでのみ利用できます。管理画面からアップグレードしてください。",
@@ -107,8 +110,8 @@ export function checkPlanAccess(
 
 // ── プラン別フィーチャー一覧 ─────────────────────────────────────────────────
 
-export const PLAN_FEATURES: Record<"standard" | "pro", { key: FeatureKey; label: string }[]> = {
-  standard: [
+export const PLAN_FEATURES: Record<"lite" | "pro", { key: FeatureKey; label: string }[]> = {
+  lite: [
     { key: "settlement",     label: "精算・点検レシート" },
     { key: "special_refund", label: "特殊返金・商品券調整" },
     { key: "receipt",        label: "領収書発行・再発行" },
@@ -123,19 +126,29 @@ export const PLAN_FEATURES: Record<"standard" | "pro", { key: FeatureKey; label:
   ],
 };
 
-// ── Shopify Billing プラン名 ─────────────────────────────────────────────────
+/** 後方互換: standard を lite として参照 */
+export const PLAN_FEATURES_LEGACY = { standard: PLAN_FEATURES.lite } as const;
+
+// ── Shopify Billing プラン（POS Receipt: Lite $100/3ロケーション、Pro $200/10ロケーション、11ロケーション以降 $20/ロケーション） ───
 
 export const BILLING_PLANS = {
-  standard: {
-    name: "スタンダードプラン",
-    amount: 2980,
-    currencyCode: "JPY",
-    planCode: "standard" as PlanCode,
+  lite: {
+    name: "Liteプラン",
+    amount: 100,
+    currencyCode: "USD",
+    planCode: "lite" as PlanCode,
+    maxLocations: 3,
+    priceNote: "3ロケーションまで",
   },
   pro: {
-    name: "プロプラン",
-    amount: 5980,
-    currencyCode: "JPY",
+    name: "Proプラン",
+    amount: 200,
+    currencyCode: "USD",
     planCode: "pro" as PlanCode,
+    maxLocations: 10,
+    priceNote: "10ロケーションまで",
   },
 } as const;
+
+/** 11ロケーション以降の追加料金（USD/月・1ロケーションあたり） */
+export const EXTRA_LOCATION_PRICE_USD = 20;

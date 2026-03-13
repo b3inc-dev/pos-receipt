@@ -22,7 +22,7 @@ const NAV_ITEMS = [
   { path: "/app/special-refund-history", label: "特殊返金履歴" },
   { path: "/app/receipt-history", label: "領収書履歴" },
   { path: "/app/settings", label: "設定" },
-  { path: "/app/plan", label: "プラン・課金" },
+  { path: "/app/plan", label: "料金プラン" },
   { path: "/app/diagnostics", label: "システム診断" },
 ];
 

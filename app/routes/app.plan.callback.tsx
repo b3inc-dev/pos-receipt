@@ -13,13 +13,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shop = await resolveShop(session.shop, admin);
 
   const url = new URL(request.url);
-  const plan = url.searchParams.get("plan") ?? "standard";
+  const plan = url.searchParams.get("plan") ?? "lite";
 
-  // planCode を DB に保存
-  if (plan === "pro" || plan === "standard") {
+  // planCode を DB に保存（lite / standard / pro を許容。standard は後方互換で lite 相当）
+  if (plan === "pro" || plan === "lite" || plan === "standard") {
     await prisma.shop.update({
       where: { id: shop.id },
-      data: { planCode: plan },
+      data: { planCode: plan === "standard" ? "lite" : plan },
     });
   }
 

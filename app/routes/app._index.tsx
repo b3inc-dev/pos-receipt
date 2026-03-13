@@ -24,7 +24,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shop = await resolveShop(session.shop, admin);
   const fullAccess = await getFullAccess(admin, session);
   return {
-    planCode: shop.planCode ?? "standard",
+    planCode: shop.planCode === "standard" ? "lite" : (shop.planCode ?? "lite"),
     planLabel: fullAccess
       ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
       : planLabel(shop.planCode),

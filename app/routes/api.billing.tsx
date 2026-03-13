@@ -48,7 +48,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     } catch {}
 
     return Response.json({
-      planCode: shop.planCode ?? "standard",
+      planCode: shop.planCode === "standard" ? "lite" : (shop.planCode ?? "lite"),
       planLabel: planLabel(shop.planCode),
       isInhouse: false,
       activeSubscriptions,

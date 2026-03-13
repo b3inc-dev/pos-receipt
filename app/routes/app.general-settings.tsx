@@ -29,8 +29,8 @@ import {
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 
 const PLAN_OPTIONS = [
-  { label: "スタンダード", value: "standard" },
-  { label: "プロ", value: "pro" },
+  { label: "Lite", value: "lite" },
+  { label: "Pro", value: "pro" },
 ];
 const LANG_OPTIONS = [{ label: "日本語", value: "ja" }];
 
@@ -55,7 +55,7 @@ export async function action({ request }: ActionFunctionArgs) {
     supportContactEmail: str("supportContactEmail", ""),
     defaultTimezone: str("defaultTimezone", "Asia/Tokyo"),
     defaultCurrency: str("defaultCurrency", "JPY"),
-    currentPlanCode: str("currentPlanCode", "standard"),
+    currentPlanCode: str("currentPlanCode", "lite"),
     enabledFeaturesJson: str("enabledFeaturesJson", "{}"),
     adminLanguage: str("adminLanguage", "ja"),
     posLanguage: str("posLanguage", "ja"),

@@ -103,7 +103,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     isInhouse: fullAccess,
     locations,
     proFeatures: PLAN_FEATURES.pro,
-    standardFeatures: PLAN_FEATURES.standard,
+    liteFeatures: PLAN_FEATURES.lite,
   };
 }
 
@@ -335,7 +335,7 @@ export default function SettingsPage() {
 
               {!isInhouse && (
                 <Button onClick={to("/app/plan")} variant="plain">
-                  プラン・課金管理
+                  料金プラン
                 </Button>
               )}
             </BlockStack>

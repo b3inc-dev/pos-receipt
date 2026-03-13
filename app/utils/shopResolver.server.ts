@@ -19,7 +19,7 @@ export async function resolveShop(shopDomain: string, admin: { graphql: (query: 
 
   return prisma.shop.upsert({
     where: { shopifyShopGid: shopGid },
-    create: { shopifyShopGid: shopGid, shopDomain, planCode: "standard" },
+    create: { shopifyShopGid: shopGid, shopDomain, planCode: "lite" },
     update: { shopDomain },
   });
 }
