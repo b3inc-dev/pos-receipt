@@ -53,7 +53,6 @@ export interface GetMemberIdError {
 export type GetMemberIdResponse = GetMemberIdResult | GetMemberIdError;
 
 const FIRST_PAGE = 250;
-const MAX_PAGES = 200;
 
 /** リトライ上限（Throttled 時） */
 const MAX_THROTTLE_RETRIES = 5;
@@ -125,9 +124,9 @@ type CustomersJson = {
 /**
  * LINE user ID（sub）に一致する socialplus.line を持つ顧客を検索し、
  * その顧客の membership.id（会員番号）を返す。
- * Admin API の customers 検索ではメタフィールド「値」での絞り込みができないため、
- * 「socialplus.line が存在する顧客」を query で取得し、コード側で sub と照合する。
- * ページネーション（最大 50,000 件）で全件照合する現状が、この前提では一般的な実装。
+ * metafields.socialplus.line:<lineUserId> でShopify側が絞り込むため、
+ * 全件スキャン不要。生の "Uxxx..." でも JSON 内 uid でも両方ヒットする。
+ * 件数制限なし。
  */
 export async function getMemberIdByLineId(
   admin: AdminApiContext,
@@ -138,7 +137,7 @@ export async function getMemberIdByLineId(
   }
 
   const lineIdNorm = lineUserId.trim().toLowerCase();
-  console.info("[member-card] Searching for LINE sub (last4):", lineIdNorm.slice(-4), "| 照合する顧客の socialplus.line 末尾4文字と一致するか確認してください");
+  console.info("[member-card] Searching for LINE sub (last4):", lineIdNorm.slice(-4));
 
   const runQuery = async (query: string, after: string | null): Promise<CustomersJson> => {
     const res = await admin.graphql(CUSTOMERS_QUERY, {
@@ -147,9 +146,6 @@ export async function getMemberIdByLineId(
     return (await res.json()) as CustomersJson;
   };
 
-  /**
-   * Throttled 時に指数バックオフでリトライする。リトライし尽くしたら ThrottledExhaustedError を投げる。
-   */
   const runQueryWithRetry = async (
     query: string,
     after: string | null
@@ -162,25 +158,13 @@ export async function getMemberIdByLineId(
         lastErr = err;
         if (!isThrottledError(err)) throw err;
         if (attempt === MAX_THROTTLE_RETRIES) {
-          console.warn(
-            "[member-card] Throttled after",
-            MAX_THROTTLE_RETRIES,
-            "retries, giving up"
-          );
+          console.warn("[member-card] Throttled after", MAX_THROTTLE_RETRIES, "retries, giving up");
           throw new ThrottledExhaustedError();
         }
         const baseMs = THROTTLE_BACKOFF_MS * Math.pow(2, attempt - 1);
         const jitterMs = Math.floor(baseMs * 0.3 * Math.random());
         const waitMs = baseMs + jitterMs;
-        console.info(
-          "[member-card] Throttled, retry",
-          attempt,
-          "/",
-          MAX_THROTTLE_RETRIES,
-          "after",
-          waitMs,
-          "ms"
-        );
+        console.info("[member-card] Throttled, retry", attempt, "/", MAX_THROTTLE_RETRIES, "after", waitMs, "ms");
         await sleep(waitMs);
       }
     }
@@ -188,13 +172,13 @@ export async function getMemberIdByLineId(
   };
 
   try {
+    // LINE ID で直接絞り込み。全件スキャン不要・件数制限なし。
+    const searchQuery = `metafields.socialplus.line:${lineUserId.trim()}`;
     let cursor: string | null = null;
     let pageCount = 0;
-    let firstPageEdgeCount: number | null = null;
 
-    while (pageCount < MAX_PAGES) {
-      const query = 'metafields.socialplus.line:*';
-      const json = await runQueryWithRetry(query, cursor);
+    while (true) {
+      const json = await runQueryWithRetry(searchQuery, cursor);
 
       if (json.errors?.length) {
         console.error("Customer query errors:", json.errors);
@@ -205,34 +189,29 @@ export async function getMemberIdByLineId(
       const pageInfo = json.data?.customers?.pageInfo;
 
       if (pageCount === 0) {
-        firstPageEdgeCount = edges.length;
         if (edges.length === 0) {
-          console.warn("[member-card] Query metafields.socialplus.line:* returned 0 customers. フィルタが効いているか、該当メタフィールドを持つ顧客がいるか確認してください。");
-        } else {
-          console.info("[member-card] First page:", edges.length, "customers (query: metafields.socialplus.line:*)");
+          console.warn("[member-card] No customers found for LINE ID (last4):", lineIdNorm.slice(-4));
+          return { ok: false, error: "CUSTOMER_NOT_FOUND" };
         }
+        console.info("[member-card] Direct search returned", edges.length, "candidate(s)");
       }
 
       for (const edge of edges) {
         const node = edge?.node;
         if (!node) continue;
         const storedLineId = normalizeStoredLineId(node.lineMetafield?.value);
-        const lineMatch =
-          !!storedLineId && storedLineId.toLowerCase() === lineIdNorm;
+        const lineMatch = !!storedLineId && storedLineId.toLowerCase() === lineIdNorm;
         if (!lineMatch) continue;
 
         const memberIdRaw = node.metafield?.value;
-        const memberId =
-          typeof memberIdRaw === "string" ? memberIdRaw.trim() : undefined;
+        const memberId = typeof memberIdRaw === "string" ? memberIdRaw.trim() : undefined;
         if (!memberId) {
           return { ok: false, error: "MEMBER_ID_NOT_SET" };
         }
         const rankNameRaw = node.vipRankName?.value;
-        const rankName =
-          typeof rankNameRaw === "string" ? rankNameRaw.trim() || undefined : undefined;
+        const rankName = typeof rankNameRaw === "string" ? rankNameRaw.trim() || undefined : undefined;
         const pointsRaw = node.vipPointsApproved?.value;
-        const pointsApproved =
-          typeof pointsRaw === "string" ? pointsRaw.trim() || undefined : undefined;
+        const pointsApproved = typeof pointsRaw === "string" ? pointsRaw.trim() || undefined : undefined;
         const priceRaw = node.vipRankDecisionPurchasePrice?.value;
         let rankDecisionPurchasePrice: number | undefined;
         if (priceRaw != null && priceRaw !== "") {
@@ -243,31 +222,13 @@ export async function getMemberIdByLineId(
       }
 
       if (!pageInfo?.hasNextPage || !pageInfo?.endCursor) {
-        const hint =
-          firstPageEdgeCount === 0
-            ? "初回クエリが0件です。metafields.socialplus.line:* が効いていないか、該当顧客がいません。"
-            : "ログイン中のLINEと顧客の socialplus.line（または JSON 内 uid）が同一か、同一チャネルか確認してください。";
-        console.warn("[member-card] No matching customer. sub (last4):", lineIdNorm.slice(-4), "|", hint);
+        console.warn("[member-card] No exact match after", pageCount + 1, "page(s). sub (last4):", lineIdNorm.slice(-4), "| socialplus.line の値が一致していません。");
         return { ok: false, error: "CUSTOMER_NOT_FOUND" };
       }
 
       cursor = pageInfo.endCursor;
       pageCount++;
     }
-
-    const totalScanned = pageCount * FIRST_PAGE;
-    console.warn(
-      "[member-card] Max pages reached. Scanned",
-      pageCount,
-      "pages (",
-      totalScanned,
-      "customers with socialplus.line). sub (last4):",
-      lineIdNorm.slice(-4),
-      "| 該当する顧客が先頭",
-      totalScanned,
-      "件にいないか、ログイン中のLINEと顧客の socialplus.line が一致していません。"
-    );
-    return { ok: false, error: "CUSTOMER_NOT_FOUND" };
   } catch (err) {
     if (err instanceof ThrottledExhaustedError) {
       return { ok: false, error: "THROTTLED" };
