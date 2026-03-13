@@ -124,9 +124,9 @@ type CustomersJson = {
 /**
  * LINE user ID（sub）に一致する socialplus.line を持つ顧客を検索し、
  * その顧客の membership.id（会員番号）を返す。
- * metafields.socialplus.line:<lineUserId> でShopify側が絞り込むため、
- * 全件スキャン不要。生の "Uxxx..." でも JSON 内 uid でも両方ヒットする。
- * 件数制限なし。
+ * Shopify Admin API はメタフィールド「値」での顧客絞り込みが非対応のため、
+ * metafields.socialplus.line:* で全件取得しコード側で照合する。
+ * ページ制限なし（件数無制限）。
  */
 export async function getMemberIdByLineId(
   admin: AdminApiContext,
@@ -172,8 +172,9 @@ export async function getMemberIdByLineId(
   };
 
   try {
-    // LINE ID で直接絞り込み。全件スキャン不要・件数制限なし。
-    const searchQuery = `metafields.socialplus.line:${lineUserId.trim()}`;
+    // socialplus.line を持つ顧客を全件取得しコード側で照合（件数制限なし）。
+    // Shopify Admin API は顧客メタフィールド値での絞り込みが非対応のため全件スキャンが唯一の手段。
+    const searchQuery = 'metafields.socialplus.line:*';
     let cursor: string | null = null;
     let pageCount = 0;
 
@@ -190,10 +191,10 @@ export async function getMemberIdByLineId(
 
       if (pageCount === 0) {
         if (edges.length === 0) {
-          console.warn("[member-card] No customers found for LINE ID (last4):", lineIdNorm.slice(-4));
+          console.warn("[member-card] metafields.socialplus.line:* returned 0 customers. 該当メタフィールドを持つ顧客がいないか、クエリが効いていません。");
           return { ok: false, error: "CUSTOMER_NOT_FOUND" };
         }
-        console.info("[member-card] Direct search returned", edges.length, "candidate(s)");
+        console.info("[member-card] First page:", edges.length, "customers with socialplus.line");
       }
 
       for (const edge of edges) {
