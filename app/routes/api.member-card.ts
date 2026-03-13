@@ -6,8 +6,14 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { unauthenticated } from "../shopify.server";
 import { verifyLineIdToken } from "../lib/line.server";
-import { getMemberIdByLineId } from "../lib/customer.server";
+import {
+  getMemberIdByLineId,
+  type GetMemberIdResponse,
+} from "../lib/customer.server";
 import { isInhouseMode } from "../utils/planFeatures.server";
+
+/** ショップごとに会員検索を直列化し、同時 GraphQL 呼び出しを抑えて Throttled を防ぐ */
+const shopMemberCardQueue = new Map<string, Promise<GetMemberIdResponse>>();
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -89,7 +95,16 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  const memberResult = await getMemberIdByLineId(admin, verifyResult.sub);
+  const memberResult = await ((): Promise<GetMemberIdResponse> => {
+    const prev = shopMemberCardQueue.get(shop) ?? Promise.resolve();
+    const task = prev
+      .then(() => getMemberIdByLineId(admin, verifyResult.sub))
+      .finally(() => {
+        if (shopMemberCardQueue.get(shop) === task) shopMemberCardQueue.delete(shop);
+      });
+    shopMemberCardQueue.set(shop, task);
+    return task;
+  })();
 
   if (!memberResult.ok) {
     const status =

@@ -56,9 +56,9 @@ const FIRST_PAGE = 250;
 const MAX_PAGES = 200;
 
 /** リトライ上限（Throttled 時） */
-const MAX_THROTTLE_RETRIES = 3;
-/** 初回待機 ms、以降は指数バックオフ */
-const THROTTLE_BACKOFF_MS = 1000;
+const MAX_THROTTLE_RETRIES = 5;
+/** 初回待機 ms、以降は指数バックオフ（2s → 4s → 8s → 16s → 32s） */
+const THROTTLE_BACKOFF_MS = 2000;
 
 /**
  * Shopify GraphQL の Throttled かどうかを判定する。
@@ -169,7 +169,9 @@ export async function getMemberIdByLineId(
           );
           throw new ThrottledExhaustedError();
         }
-        const waitMs = THROTTLE_BACKOFF_MS * Math.pow(2, attempt - 1);
+        const baseMs = THROTTLE_BACKOFF_MS * Math.pow(2, attempt - 1);
+        const jitterMs = Math.floor(baseMs * 0.3 * Math.random());
+        const waitMs = baseMs + jitterMs;
         console.info(
           "[member-card] Throttled, retry",
           attempt,
