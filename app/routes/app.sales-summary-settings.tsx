@@ -32,7 +32,7 @@ import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 const LOCATIONS_QUERY = `#graphql
   query Locations {
     locations(first: 50, includeLegacy: false) {
-      edges { node { id name isActive } }
+      nodes { id name isActive }
     }
   }
 `;
@@ -43,11 +43,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const locRes = await admin.graphql(LOCATIONS_QUERY);
   const locJson = (await locRes.json()) as {
-    data?: { locations?: { edges?: { node: { id: string; name: string; isActive: boolean } }[] } };
+    data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
   };
-  const locations = (locJson.data?.locations?.edges ?? [])
-    .map((e) => e.node)
-    .filter((l) => l.isActive);
+  const locations = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
 
   const saved = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
   const settings: SalesSummarySettings = {
@@ -104,9 +102,9 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const locRes = await admin.graphql(LOCATIONS_QUERY);
   const locJson = (await locRes.json()) as {
-    data?: { locations?: { edges?: { node: { id: string } }[] } };
+    data?: { locations?: { nodes?: { id: string }[] } };
   };
-  const locations = (locJson.data?.locations?.edges ?? []).map((e) => e.node);
+  const locations = locJson.data?.locations?.nodes ?? [];
 
   const formData = await request.formData();
   const settings = formDataToSettings(formData, locations);

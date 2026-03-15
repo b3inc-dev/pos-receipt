@@ -40,8 +40,8 @@ interface SummaryRefund {
 interface SummaryOrder {
   id: string;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
-  lineItems: { edges: { node: { quantity: number } }[] };
-  refunds: { nodes: SummaryRefund[] };
+  lineItems: { nodes: { quantity: number }[] };
+  refunds: SummaryRefund[];
   tags: string[];
 }
 
@@ -54,22 +54,17 @@ type AdminClient = {
 const SUMMARY_ORDERS_QUERY = `#graphql
   query SalesSummaryOrders($first: Int!, $after: String, $query: String) {
     orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT) {
-      edges {
-        cursor
-        node {
-          id
-          totalPriceSet { shopMoney { amount currencyCode } }
-          lineItems(first: 250) {
-            edges { node { quantity } }
-          }
-          refunds(first: 50) {
-            nodes {
-              createdAt
-              totalRefundedSet { shopMoney { amount currencyCode } }
-            }
-          }
-          tags
+      nodes {
+        id
+        totalPriceSet { shopMoney { amount currencyCode } }
+        lineItems(first: 250) {
+          nodes { quantity }
         }
+        refunds {
+          createdAt
+          totalRefundedSet { shopMoney { amount currencyCode } }
+        }
+        tags
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -90,18 +85,18 @@ async function fetchSummaryOrders(admin: AdminClient, query: string): Promise<Su
     const json = await response.json() as {
       data?: {
         orders?: {
-          edges?: { cursor: string; node: SummaryOrder }[];
+          nodes?: SummaryOrder[];
           pageInfo?: { hasNextPage: boolean; endCursor: string };
         };
       };
     };
 
-    const edges = json.data?.orders?.edges ?? [];
+    const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
 
-    for (const edge of edges) {
-      if (!edge.node.tags?.includes("settlement")) {
-        orders.push(edge.node);
+    for (const node of nodes) {
+      if (!node.tags?.includes("settlement")) {
+        orders.push(node);
       }
     }
 
@@ -140,12 +135,12 @@ export async function computeAndCacheDailySummary(
 
   for (const order of orders) {
     gross += Number(order.totalPriceSet.shopMoney.amount);
-    for (const r of order.refunds?.nodes ?? []) {
+    for (const r of order.refunds ?? []) {
       refundsFromOrders += Number(r.totalRefundedSet?.shopMoney?.amount ?? 0);
     }
     currency = order.totalPriceSet.shopMoney.currencyCode;
     orderCount += 1;
-    itemCount += order.lineItems.edges.reduce((sum, e) => sum + e.node.quantity, 0);
+    itemCount += order.lineItems.nodes.reduce((sum, n) => sum + n.quantity, 0);
   }
 
   const orderIdsCreatedInDay = new Set(orders.map((o) => o.id));

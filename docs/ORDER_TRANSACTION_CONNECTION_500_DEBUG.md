@@ -3,11 +3,16 @@
 この 500 は、**精算プレビューで叩いている API を処理しているサーバー**が、まだ古い GraphQL クエリ（`transactions { id ... }`）を使っているときに発生します。  
 どこが原因か切り分ける手順です。
 
-## 原因（技術メモ）
+## 原因（技術メモ）・公式仕様との対応
 
-Shopify Admin API の `Order.transactions` と `Order.refunds` は **Connection 型**（`OrderTransactionConnection` / `OrderRefundConnection`）です。Connection 型には `id` はなく、**`edges { node { id ... } }`** で中身を取得する必要があります。`nodes { id ... }` は API バージョンによってはサポートされず、その場合も同様のエラーになります。そのため、本アプリでは **`edges { node { ... } }`** 形式に統一しています（`settlementEngine.server.ts` と `api.orders.$orderId.tsx`）。
+**Order.transactions**（[Admin API Order](https://shopify.dev/docs/api/admin-graphql/latest/objects/Order)）は **リスト型** `[[OrderTransaction!]!]` です。`edges` は存在しないため、クエリでは `transactions(first: 50) { id kind status ... }` のように **直接フィールド** を指定します。
+
+**Refund.transactions**（[Admin API Refund](https://shopify.dev/docs/api/admin-graphql/latest/objects/Refund)）は **Connection 型** `OrderTransactionConnection!` です。[OrderTransactionConnection](https://shopify.dev/docs/api/admin-graphql/latest/connections/OrderTransactionConnection) では `edges { node { ... } }` または **`nodes { ... }`** で取得します。本アプリでは公式でサポートされる **`nodes`** を使用しています（`settlementEngine.server.ts`）。
 
 **関連:** Order 型にロケーションを取る場合は **`location` ではなく `retailLocation`** を使います（`location` は Order に存在せず "Field 'location' doesn't exist on type 'Order'" になる）。領収書・注文検索・注文詳細で `retailLocation { id name }` に統一済み。
+
+- エラー「Field 'edges' doesn't exist on type 'OrderTransaction'」は、Order.transactions に `edges` を要求しているか、Refund.transactions で `edges` が使えなくなった API バージョンで発生します。上記のとおり Order は直接フィールド、Refund は `nodes` に統一済みです。
+- 本アプリでは **すべての Connection 型を `nodes` で取得**するよう統一しています（orders, lineItems, Refund.transactions, locations, customers）。詳細は `docs/GRAPHQL_OFFICIAL_COMPLIANCE.md` を参照してください。
 
 ---
 

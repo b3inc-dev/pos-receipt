@@ -34,9 +34,7 @@ const PAGE_SIZE = 50;
 const LOCATIONS_QUERY = `#graphql
   query Locations {
     locations(first: 50, includeLegacy: false) {
-      edges {
-        node { id name isActive }
-      }
+      nodes { id name isActive }
     }
   }
 `;
@@ -69,11 +67,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Shopify ロケーション一覧
   const locRes  = await admin.graphql(LOCATIONS_QUERY);
   const locJson = await locRes.json() as {
-    data?: { locations?: { edges?: { node: { id: string; name: string; isActive: boolean } }[] } };
+    data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
   };
-  const shopifyLocations = (locJson.data?.locations?.edges ?? [])
-    .map((e) => e.node)
-    .filter((l) => l.isActive);
+  const shopifyLocations = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
 
   // プランチェック（自社用 or Pro のみ）
   const fullAccess = await getFullAccess(admin, session);

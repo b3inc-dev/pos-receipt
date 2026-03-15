@@ -87,7 +87,7 @@ interface ShopifyOrder {
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   totalTaxSet: { shopMoney: { amount: string } };
   totalDiscountsSet: { shopMoney: { amount: string } };
-  lineItems: { edges: { node: { quantity: number } }[] };
+  lineItems: { nodes: { quantity: number }[] };
   transactions: ShopifyTransaction[];
   refunds: ShopifyRefund[];
   tags: string[];
@@ -102,43 +102,36 @@ type AdminClient = {
 const SETTLEMENT_ORDERS_QUERY = `#graphql
   query SettlementOrders($first: Int!, $after: String, $query: String) {
     orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT) {
-      edges {
-        cursor
-        node {
+      nodes {
+        id
+        name
+        totalPriceSet { shopMoney { amount currencyCode } }
+        totalTaxSet { shopMoney { amount } }
+        totalDiscountsSet { shopMoney { amount } }
+        lineItems(first: 250) {
+          nodes { quantity }
+        }
+        transactions(first: 50) {
           id
-          name
-          totalPriceSet { shopMoney { amount currencyCode } }
-          totalTaxSet { shopMoney { amount } }
-          totalDiscountsSet { shopMoney { amount } }
-          lineItems(first: 250) {
-            edges { node { quantity } }
-          }
+          kind
+          status
+          amountSet { shopMoney { amount currencyCode } }
+          gateway
+        }
+        refunds {
+          id
+          createdAt
+          totalRefundedSet { shopMoney { amount currencyCode } }
           transactions(first: 50) {
-            edges { node {
+            nodes {
               id
               kind
-              status
-              amountSet { shopMoney { amount currencyCode } }
               gateway
-            } }
+              amountSet { shopMoney { amount currencyCode } }
+            }
           }
-          refunds(first: 50) {
-            edges { node {
-              id
-              createdAt
-              totalRefundedSet { shopMoney { amount currencyCode } }
-              transactions(first: 50) {
-                edges { node {
-                  id
-                  kind
-                  gateway
-                  amountSet { shopMoney { amount currencyCode } }
-                } }
-              }
-            } }
-          }
-          tags
         }
+        tags
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -149,25 +142,20 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
 const REFUNDS_ORDERS_QUERY = `#graphql
   query RefundsOrders($first: Int!, $after: String, $query: String) {
     orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
-      edges {
-        cursor
-        node {
+      nodes {
+        id
+        tags
+        refunds {
           id
-          tags
-          refunds(first: 50) {
-            edges { node {
+          createdAt
+          totalRefundedSet { shopMoney { amount currencyCode } }
+          transactions(first: 50) {
+            nodes {
               id
-              createdAt
-              totalRefundedSet { shopMoney { amount currencyCode } }
-              transactions(first: 50) {
-                edges { node {
-                  id
-                  kind
-                  gateway
-                  amountSet { shopMoney { amount currencyCode } }
-                } }
-              }
-            } }
+              kind
+              gateway
+              amountSet { shopMoney { amount currencyCode } }
+            }
           }
         }
       }
@@ -190,31 +178,26 @@ async function fetchAllOrders(admin: AdminClient, query: string): Promise<Shopif
     const json = await response.json() as {
       data?: {
         orders?: {
-          edges?: { cursor: string; node: ShopifyOrder }[];
+          nodes?: (ShopifyOrder & {
+            refunds?: (Omit<ShopifyRefund, "transactions"> & { transactions?: { nodes?: ShopifyRefundTransaction[] } })[];
+          })[];
           pageInfo?: { hasNextPage: boolean; endCursor: string };
         };
       };
     };
 
-    const edges = json.data?.orders?.edges ?? [];
+    const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
 
-    for (const edge of edges) {
-      if (!edge.node.tags?.includes("settlement")) {
-        const node = edge.node as ShopifyOrder & {
-          transactions?: { edges?: { node: ShopifyTransaction }[] };
-          refunds?: { edges?: { node: ShopifyRefund & { transactions?: { edges?: { node: ShopifyRefundTransaction }[] } } }[] };
-        };
+    for (const node of nodes) {
+      if (!node.tags?.includes("settlement")) {
         const order: ShopifyOrder = {
           ...node,
-          transactions: (node.transactions?.edges ?? []).map((e) => e.node),
-          refunds: (node.refunds?.edges ?? []).map((e) => {
-            const r = e.node;
-            return {
-              ...r,
-              transactions: (r.transactions?.edges ?? []).map((tx) => tx.node),
-            };
-          }),
+          transactions: node.transactions ?? [],
+          refunds: (node.refunds ?? []).map((r) => ({
+            ...r,
+            transactions: r.transactions?.nodes ?? [],
+          })),
         };
         orders.push(order);
       }
@@ -249,30 +232,26 @@ async function fetchOrdersUpdatedInDayRange(
     const json = await response.json() as {
       data?: {
         orders?: {
-          edges?: { cursor: string; node: OrderWithRefundsCreatedAt }[];
+          nodes?: (OrderWithRefundsCreatedAt & {
+            refunds?: (Omit<ShopifyRefund, "transactions"> & { transactions?: { nodes?: ShopifyRefundTransaction[] } })[];
+          })[];
           pageInfo?: { hasNextPage: boolean; endCursor: string };
         };
       };
     };
 
-    const edges = json.data?.orders?.edges ?? [];
+    const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
 
-    for (const edge of edges) {
-      if (!edge.node.tags?.includes("settlement")) {
-        const node = edge.node as OrderWithRefundsCreatedAt & {
-          refunds?: { edges?: { node: ShopifyRefund & { transactions?: { edges?: { node: ShopifyRefundTransaction }[] } } }[] };
-        };
+    for (const node of nodes) {
+      if (!node.tags?.includes("settlement")) {
         orders.push({
           id: node.id,
           tags: node.tags,
-          refunds: (node.refunds?.edges ?? []).map((e) => {
-            const r = e.node;
-            return {
-              ...r,
-              transactions: (r.transactions?.edges ?? []).map((tx) => tx.node),
-            };
-          }),
+          refunds: (node.refunds ?? []).map((r) => ({
+            ...r,
+            transactions: r.transactions?.nodes ?? [],
+          })),
         });
       }
     }
@@ -504,7 +483,7 @@ export async function buildSettlementPreview(
     total += Number(order.totalPriceSet.shopMoney.amount);
     tax += Number(order.totalTaxSet.shopMoney.amount);
     discounts += Number(order.totalDiscountsSet.shopMoney.amount);
-    itemCount += order.lineItems.edges.reduce((sum, e) => sum + e.node.quantity, 0);
+    itemCount += order.lineItems.nodes.reduce((sum, n) => sum + n.quantity, 0);
     for (const refund of order.refunds) {
       refundTotal += Number(refund.totalRefundedSet.shopMoney.amount);
       refundCount += 1;

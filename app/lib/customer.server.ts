@@ -8,30 +8,28 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 const CUSTOMERS_QUERY = `#graphql
   query findCustomerByLineId($query: String!, $first: Int!, $after: String) {
     customers(first: $first, query: $query, after: $after) {
-      edges {
-        node {
-          id
-          metafield(namespace: "membership", key: "id") {
-            value
-          }
-          lineMetafield: metafield(namespace: "socialplus", key: "line") {
-            value
-          }
-          vipRankName: metafield(namespace: "vip", key: "rank_name") {
-            value
-          }
-          vipPointsApproved: metafield(namespace: "vip", key: "points_approved") {
-            value
-          }
-          vipRankDecisionPurchasePrice: metafield(namespace: "vip", key: "rank_decision_purchase_price") {
-            value
-          }
-          vipExpiryDate: metafield(namespace: "vip", key: "expiry_date") {
-            value
-          }
-          vipExpiringPoints: metafield(namespace: "vip", key: "expiring_points") {
-            value
-          }
+      nodes {
+        id
+        metafield(namespace: "membership", key: "id") {
+          value
+        }
+        lineMetafield: metafield(namespace: "socialplus", key: "line") {
+          value
+        }
+        vipRankName: metafield(namespace: "vip", key: "rank_name") {
+          value
+        }
+        vipPointsApproved: metafield(namespace: "vip", key: "points_approved") {
+          value
+        }
+        vipRankDecisionPurchasePrice: metafield(namespace: "vip", key: "rank_decision_purchase_price") {
+          value
+        }
+        vipExpiryDate: metafield(namespace: "vip", key: "expiry_date") {
+          value
+        }
+        vipExpiringPoints: metafield(namespace: "vip", key: "expiring_points") {
+          value
         }
       }
       pageInfo {
@@ -127,17 +125,15 @@ function normalizeStoredLineId(value: unknown): string | undefined {
 type CustomersJson = {
   data?: {
     customers?: {
-      edges?: Array<{
-        node?: {
-          id: string;
-          metafield?: { value?: string } | null;
-          lineMetafield?: { value?: string } | null;
-          vipRankName?: { value?: string } | null;
-          vipPointsApproved?: { value?: string } | null;
-          vipRankDecisionPurchasePrice?: { value?: string } | null;
-          vipExpiryDate?: { value?: string } | null;
-          vipExpiringPoints?: { value?: string } | null;
-        };
+      nodes?: Array<{
+        id: string;
+        metafield?: { value?: string } | null;
+        lineMetafield?: { value?: string } | null;
+        vipRankName?: { value?: string } | null;
+        vipPointsApproved?: { value?: string } | null;
+        vipRankDecisionPurchasePrice?: { value?: string } | null;
+        vipExpiryDate?: { value?: string } | null;
+        vipExpiringPoints?: { value?: string } | null;
       }>;
       pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
     };
@@ -235,9 +231,8 @@ export async function getMemberIdByLineId(
     const lineTag = `${LINE_TAG_PREFIX}${lineIdNorm}`;
     const tagJson = await runQuery(`tag:"${lineTag}"`, null).catch(() => null);
     if (tagJson && !tagJson.errors?.length) {
-      const tagEdges = tagJson.data?.customers?.edges ?? [];
-      for (const edge of tagEdges) {
-        const node = edge?.node;
+      const tagNodes = tagJson.data?.customers?.nodes ?? [];
+      for (const node of tagNodes) {
         if (!node) continue;
         const storedLineId = normalizeStoredLineId(node.lineMetafield?.value);
         if (!storedLineId || storedLineId.toLowerCase() !== lineIdNorm) continue;
@@ -259,19 +254,18 @@ export async function getMemberIdByLineId(
         return { ok: false, error: "API_ERROR" };
       }
 
-      const edges = json.data?.customers?.edges ?? [];
+      const nodes = json.data?.customers?.nodes ?? [];
       const pageInfo = json.data?.customers?.pageInfo;
 
       if (pageCount === 0) {
-        if (edges.length === 0) {
+        if (nodes.length === 0) {
           console.warn("[member-card] metafields.socialplus.line:* returned 0 customers.");
           return { ok: false, error: "CUSTOMER_NOT_FOUND" };
         }
-        console.info("[member-card] Full scan first page:", edges.length, "customers");
+        console.info("[member-card] Full scan first page:", nodes.length, "customers");
       }
 
-      for (const edge of edges) {
-        const node = edge?.node;
+      for (const node of nodes) {
         if (!node) continue;
         const storedLineId = normalizeStoredLineId(node.lineMetafield?.value);
         if (!storedLineId || storedLineId.toLowerCase() !== lineIdNorm) continue;

@@ -9,19 +9,17 @@ import prisma from "../db.server";
 const LOCATIONS_QUERY = `#graphql
   query {
     locations(first: 50, includeLegacy: false) {
-      edges {
-        node {
-          id
-          name
-          isActive
-        }
+      nodes {
+        id
+        name
+        isActive
       }
     }
   }
 `;
 
 /** デプロイ済みか確認する用。この文字列を変えれば「再デプロイ後」と分かる */
-const PING_DIAGNOSTIC_VERSION = "2025-03-graphql-nodes";
+const PING_DIAGNOSTIC_VERSION = "2025-03-graphql-nodes-refund-nodes";
 
 /** 認証不要の接続確認・切り分け用（?ping=1 で CORS 付き 200。graphqlTransactionsUseNodes は OrderTransactionConnection 修正済みかどうか） */
 function corsPingResponse(request: Request): Response {
@@ -61,15 +59,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const response = await admin.graphql(LOCATIONS_QUERY);
     const json = await response.json();
-    const edges = (json.data as { locations?: { edges?: { node: { id: string; name: string; isActive: boolean } }[] } })?.locations?.edges ?? [];
+    const nodes = (json.data as { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } })?.locations?.nodes ?? [];
 
     const dbLocations = await prisma.location.findMany({ where: { shopId: shop.id } });
     const dbMap = new Map(dbLocations.map((l) => [l.shopifyLocationGid, l]));
 
-    const locations = edges
-      .filter((e) => e.node.isActive)
-      .map((e) => {
-        const node = e.node;
+    const locations = nodes
+      .filter((node) => node.isActive)
+      .map((node) => {
         const db = dbMap.get(node.id);
         return {
           locationId: node.id,

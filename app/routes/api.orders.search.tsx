@@ -8,21 +8,18 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 const ORDERS_SEARCH_QUERY = `#graphql
   query OrdersSearch($first: Int!, $after: String, $query: String) {
     orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
-      edges {
-        cursor
-        node {
+      nodes {
+        id
+        name
+        createdAt
+        totalPriceSet { shopMoney { amount } }
+        displayFinancialStatus
+        customer {
+          displayName
+        }
+        retailLocation {
           id
           name
-          createdAt
-          totalPriceSet { shopMoney { amount } }
-          displayFinancialStatus
-          customer {
-            displayName
-          }
-          retailLocation {
-            id
-            name
-          }
         }
       }
       pageInfo {
@@ -89,11 +86,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
     }
 
-    const edges = json.data?.orders?.edges ?? [];
+    const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo ?? {};
 
-    const items = edges.map((edge: { cursor: string; node: Record<string, unknown> }) => {
-      const node = edge.node as {
+    const items = nodes.map((node: Record<string, unknown>) => {
+      const n = node as {
         id: string;
         name: string;
         createdAt: string;
@@ -102,14 +99,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         retailLocation?: { id: string; name: string } | null;
       };
       return {
-        orderId: node.id?.replace("gid://shopify/Order/", "") ?? node.id,
-        orderName: node.name,
-        customerName: node.customer?.displayName ?? "",
-        locationId: node.retailLocation?.id ?? "",
-        locationName: node.retailLocation?.name ?? "",
-        totalPrice: node.totalPriceSet?.shopMoney?.amount ?? "0",
+        orderId: n.id?.replace("gid://shopify/Order/", "") ?? n.id,
+        orderName: n.name,
+        customerName: n.customer?.displayName ?? "",
+        locationId: n.retailLocation?.id ?? "",
+        locationName: n.retailLocation?.name ?? "",
+        totalPrice: n.totalPriceSet?.shopMoney?.amount ?? "0",
         currency: "JPY",
-        createdAt: node.createdAt,
+        createdAt: n.createdAt,
       };
     });
 

@@ -260,6 +260,9 @@
 | `ADMIN_UI_DIFF_POS_STOCK_VS_POS_RECEIPT.md` | POS Stock との相違・揃えチェック |
 | `ADMIN_ROUTES_AND_PATHS.md` | 管理画面パス一覧 |
 | `DEPLOY_PUBLIC_AND_INHOUSE.md` | 公開用・自社用デプロイと環境変数 |
+| `ORDER_TRANSACTION_CONNECTION_500_DEBUG.md` | 精算時の GraphQL「edges/nodes」エラー切り分け・公式仕様 |
+| `ERROR_ORDER_ACCESS_PROTECTED_DATA.md` | 領収書「Order にアクセスできません」エラー（保護データ承認） |
+| `GRAPHQL_OFFICIAL_COMPLIANCE.md` | GraphQL Admin API 公式準拠一覧（Connection は nodes 統一） |
 
 ---
 
