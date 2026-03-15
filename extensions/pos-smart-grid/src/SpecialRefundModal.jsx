@@ -19,6 +19,7 @@ import {
   createVoucherAdjustment,
   voidSpecialRefund,
 } from "../../common/specialRefundApi.js";
+import { getSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 
 const STORAGE_KEY = "pos_special_refund_order_id";
@@ -199,6 +200,7 @@ function OrderSearchView({ loading, error, setError, setLoading, onSelect }) {
   const [items, setItems] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
 
+  const { locationIdParam } = getSessionLocation();
   const onSearch = useCallback(async () => {
     setError("");
     setLoading(true);
@@ -207,6 +209,7 @@ function OrderSearchView({ loading, error, setError, setLoading, onSelect }) {
         q: q.trim() || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
+        locationId: locationIdParam ?? undefined,
         limit: 20,
       });
       setItems(res.items);
@@ -217,7 +220,7 @@ function OrderSearchView({ loading, error, setError, setLoading, onSelect }) {
     } finally {
       setLoading(false);
     }
-  }, [q, dateFrom, dateTo, setError, setLoading]);
+  }, [q, dateFrom, dateTo, locationIdParam, setError, setLoading]);
 
   const onLoadMore = useCallback(async () => {
     if (!nextCursor) return;
@@ -227,6 +230,7 @@ function OrderSearchView({ loading, error, setError, setLoading, onSelect }) {
         q: q.trim() || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
+        locationId: locationIdParam ?? undefined,
         cursor: nextCursor,
         limit: 20,
       });

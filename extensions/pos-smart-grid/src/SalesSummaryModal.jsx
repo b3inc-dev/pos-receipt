@@ -13,6 +13,7 @@ import {
   getPeriodSummary,
   reportFootfall,
 } from "../../common/salesSummaryApi.js";
+import { getSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 
 export default async () => {
@@ -61,11 +62,13 @@ function SalesSummaryModal() {
     setLoading(true);
     setError(null);
     try {
+      const { locationGid } = getSessionLocation();
+      const locationIds = locationGid ? [locationGid] : [];
       let result;
       if (mode === "daily") {
-        result = await getDailySummary({ targetDate });
+        result = await getDailySummary({ targetDate, locationIds });
       } else {
-        result = await getPeriodSummary({ dateFrom, dateTo });
+        result = await getPeriodSummary({ dateFrom, dateTo, locationIds });
       }
       setData(result);
       // 入店数の初期値をロード

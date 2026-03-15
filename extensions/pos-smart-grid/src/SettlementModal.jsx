@@ -20,6 +20,7 @@ import {
 } from "../../common/settlementApi.js";
 import { getAppUrl, isDevApiUrl, setApiBaseOverride, getApiBaseOverride } from "../../common/appUrl.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
+import { getSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 
 // ── 今日の日付（YYYY-MM-DD） ────────────────────────────────────────────────
@@ -57,9 +58,14 @@ function SettlementModal() {
     setLocationLoadError("");
     getLocationsFromShopify(50)
       .then((res) => {
-        const locs = res.locations ?? [];
+        let locs = res.locations ?? [];
+        const { locationGid } = getSessionLocation();
+        if (locationGid) {
+          locs = locs.filter((l) => l.locationId === locationGid);
+        }
         setLocations(locs);
-        if (locs.length > 0) setSelectedLocation(locs[0]);
+        const initial = locationGid ? locs.find((l) => l.locationId === locationGid) ?? locs[0] : locs[0];
+        if (initial) setSelectedLocation(initial);
         // バックエンドから printMode 等を取得してマージ（失敗してもリストは表示済みなのでエラーにしない）
         return getLocations()
           .then((backendRes) => {

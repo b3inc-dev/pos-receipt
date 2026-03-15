@@ -14,6 +14,7 @@ import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
 import { searchOrders, getOrder } from "../../common/orderPickerApi.js";
 import { previewReceipt, issueReceipt, getReceiptHistory } from "../../common/receiptApi.js";
+import { getSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { getAppUrl, setApiBaseOverride, getApiBaseOverride } from "../../common/appUrl.js";
 
@@ -200,11 +201,18 @@ function SearchView({ loading, error, setError, setLoading, onSelect, onHistory 
   const [devUrlInput, setDevUrlInput] = useState("");
   const apiOverride = getApiBaseOverride();
 
+  const { locationIdParam } = getSessionLocation();
   const onSearch = useCallback(async () => {
     setError("");
     setLoading(true);
     try {
-      const res = await searchOrders({ q: q.trim() || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, limit: 20 });
+      const res = await searchOrders({
+        q: q.trim() || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        locationId: locationIdParam ?? undefined,
+        limit: 20,
+      });
       setItems(res.items);
       setNextCursor(res.nextCursor);
     } catch (e) {
@@ -213,13 +221,20 @@ function SearchView({ loading, error, setError, setLoading, onSelect, onHistory 
     } finally {
       setLoading(false);
     }
-  }, [q, dateFrom, dateTo, setError, setLoading]);
+  }, [q, dateFrom, dateTo, locationIdParam, setError, setLoading]);
 
   const onLoadMore = useCallback(async () => {
     if (!nextCursor) return;
     setLoading(true);
     try {
-      const res = await searchOrders({ q: q.trim() || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, cursor: nextCursor, limit: 20 });
+      const res = await searchOrders({
+        q: q.trim() || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        locationId: locationIdParam ?? undefined,
+        cursor: nextCursor,
+        limit: 20,
+      });
       setItems((prev) => [...prev, ...res.items]);
       setNextCursor(res.nextCursor);
     } finally {
