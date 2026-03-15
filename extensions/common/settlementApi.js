@@ -6,14 +6,28 @@ import { getAppUrl } from "./appUrl.js";
 
 const BASE = getAppUrl();
 
+async function getToken() {
+  const session = globalThis?.shopify?.session;
+  if (!session?.getSessionToken) return null;
+  try {
+    return await session.getSessionToken();
+  } catch {
+    return null;
+  }
+}
+
+async function buildHeaders(extra = {}) {
+  const token = await getToken();
+  const headers = { "Content-Type": "application/json", ...extra };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
 async function apiFetch(path, options = {}) {
   const url = `${BASE}${path}`;
   const res = await fetch(url, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
-    },
+    headers: await buildHeaders(options.headers ?? {}),
   });
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
