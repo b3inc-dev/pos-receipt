@@ -18,6 +18,7 @@ import {
   recalculateSettlement,
   getSettlementHistory,
 } from "../../common/settlementApi.js";
+import { getAppUrl, isDevApiUrl, setApiBaseOverride, getApiBaseOverride } from "../../common/appUrl.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 
@@ -46,6 +47,8 @@ function SettlementModal() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [locationLoadError, setLocationLoadError] = useState("");
+  /** 精算プレビュー失敗時に接続先と GraphQL 修正有無を表示する用 */
+  const [previewErrorDiagnostic, setPreviewErrorDiagnostic] = useState(null);
 
   // POS Stock と同様: まず Shopify 内蔵 API でロケーション取得（バックエンド不要・Load failed 防止）
   // その後バックエンドで printMode 等を取得してマージ。バックエンド失敗時はデフォルトのまま表示
@@ -82,6 +85,7 @@ function SettlementModal() {
       if (!selectedLocation) return;
       setLoading(true);
       setError("");
+      setPreviewErrorDiagnostic(null);
       setIsInspection(inspection);
       try {
         const res = await previewSettlement({
@@ -93,6 +97,27 @@ function SettlementModal() {
         setStep("preview");
       } catch (e) {
         setError(toUserMessage(e?.message) || "プレビューの取得に失敗しました");
+        const baseUrl = getAppUrl();
+        setPreviewErrorDiagnostic({ baseUrl, graphqlFixed: null, pingFailed: false });
+        fetch(`${baseUrl}/api/locations?ping=1`)
+          .then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+          })
+          .then((d) => {
+            setPreviewErrorDiagnostic((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    graphqlFixed: d.graphqlTransactionsUseNodes === true,
+                    diagnosticVersion: d.diagnosticVersion ?? null,
+                  }
+                : null
+            );
+          })
+          .catch(() => {
+            setPreviewErrorDiagnostic((prev) => (prev ? { ...prev, pingFailed: true } : null));
+          });
       } finally {
         setLoading(false);
       }
@@ -148,6 +173,7 @@ function SettlementModal() {
         loading={loading}
         error={error}
         locationLoadError={locationLoadError}
+        previewErrorDiagnostic={previewErrorDiagnostic}
         onSelectLocation={(loc) => setSelectedLocation(loc)}
         onDateChange={(d) => setTargetDate(d)}
         onPreview={() => handlePreview(false)}
@@ -218,6 +244,7 @@ function MainView({
   loading,
   error,
   locationLoadError,
+  previewErrorDiagnostic,
   onSelectLocation,
   onDateChange,
   onPreview,
@@ -226,6 +253,31 @@ function MainView({
   onRetryLocations,
   setError,
 }) {
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagResult, setDiagResult] = useState(null);
+  const [diagError, setDiagError] = useState(null);
+  const [devUrlInput, setDevUrlInput] = useState("");
+  const apiOverride = getApiBaseOverride();
+
+  const runConnectionCheck = useCallback(() => {
+    setDiagOpen(true);
+    setDiagLoading(true);
+    setDiagError(null);
+    setDiagResult(null);
+    const base = getAppUrl();
+    fetch(`${base}/api/locations?ping=1`)
+      .then((r) => r.json())
+      .then((data) => {
+        setDiagResult(data);
+        setDiagLoading(false);
+      })
+      .catch((e) => {
+        setDiagError(e?.message ?? "接続できません");
+        setDiagLoading(false);
+      });
+  }, []);
+
   const handleLocChange = (e) => {
     const id = e?.currentTarget?.value ?? e?.currentValue?.value;
     const loc = locations.find((l) => l.locationId === id);
@@ -235,6 +287,23 @@ function MainView({
   return (
     <s-page heading="精算">
       <s-scroll-box>
+        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+          <s-stack gap="small">
+            <s-text fontWeight="bold" fontSize="small">開発時: 接続先</s-text>
+            <s-text tone="subdued" fontSize="small">いま: {getAppUrl()}</s-text>
+            {apiOverride ? (
+              <s-stack gap="extraSmall">
+                <s-text tone="success" fontSize="small">固定中: {apiOverride}</s-text>
+                <s-button kind="plain" onClick={() => { setApiBaseOverride(""); setDevUrlInput(""); }}>解除</s-button>
+              </s-stack>
+            ) : (
+              <s-stack gap="extraSmall">
+                <s-text-field label="トンネルURL" value={devUrlInput} onInput={(e) => setDevUrlInput(e?.currentTarget?.value ?? "")} />
+                <s-button kind="secondary" disabled={!devUrlInput.trim()} onClick={() => { const u = devUrlInput.trim().replace(/\/$/, ""); if (u) setApiBaseOverride(u); }}>開発サーバーを使う</s-button>
+              </s-stack>
+            )}
+          </s-stack>
+        </s-box>
         <s-box padding="base">
           <s-stack gap="base">
 
@@ -284,7 +353,56 @@ function MainView({
               onInput={(e) => { setError(""); onDateChange(e?.currentTarget?.value ?? targetDate); }}
             />
 
-            {error ? <s-text tone="critical">{error}</s-text> : null}
+            {error ? (
+              <s-stack gap="small">
+                <s-text tone="critical">{error}</s-text>
+                {previewErrorDiagnostic ? (
+                  <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="critical">
+                    <s-stack gap="small">
+                      <s-text fontWeight="bold" fontSize="small">原因の切り分け</s-text>
+                      <s-text tone="subdued" fontSize="small">接続先: {previewErrorDiagnostic.baseUrl}</s-text>
+                      {previewErrorDiagnostic.pingFailed ? (
+                        <s-text tone="critical" fontSize="small">
+                          接続先の応答を取得できませんでした。ブラウザで「{previewErrorDiagnostic.baseUrl}/api/locations?ping=1」を開き、JSON が返るか確認してください。デプロイ以外（キャッシュ・ネットワーク・CORS）の可能性もあります。
+                        </s-text>
+                      ) : (
+                        <>
+                          <s-text
+                            fontSize="small"
+                            tone={
+                              previewErrorDiagnostic.graphqlFixed === null
+                                ? "subdued"
+                                : previewErrorDiagnostic.graphqlFixed
+                                  ? "success"
+                                  : "critical"
+                            }
+                          >
+                            GraphQL修正済み:{" "}
+                            {previewErrorDiagnostic.graphqlFixed === null
+                              ? "確認中…"
+                              : previewErrorDiagnostic.graphqlFixed
+                                ? "はい"
+                                : "いいえ"}
+                          </s-text>
+                          {previewErrorDiagnostic.diagnosticVersion ? (
+                            <s-text tone="subdued" fontSize="small">
+                              サーバー表示バージョン: {previewErrorDiagnostic.diagnosticVersion}
+                            </s-text>
+                          ) : null}
+                          {previewErrorDiagnostic.graphqlFixed === false ? (
+                        <s-text tone="critical" fontSize="small">
+                          {isDevApiUrl(previewErrorDiagnostic.baseUrl)
+                            ? "→ 開発サーバーに修正が反映されていません。npm run dev:clean で開発サーバーを再起動し、トンネルURLを開き直してください。"
+                            : "→ 本番サーバーに修正が反映されていません。Render の「Clear build cache & deploy」で再デプロイしてください。"}
+                        </s-text>
+                      ) : null}
+                        </>
+                      )}
+                    </s-stack>
+                  </s-box>
+                ) : null}
+              </s-stack>
+            ) : null}
 
             {/* アクションボタン */}
             <s-stack gap="small">
@@ -307,6 +425,47 @@ function MainView({
               <s-button kind="plain" onClick={onHistory}>
                 精算履歴
               </s-button>
+            </s-stack>
+
+            {/* 接続・バージョン確認（タイル上で切り分け用） */}
+            <s-stack gap="small">
+              <s-button kind="plain" onClick={runConnectionCheck}>
+                接続・バージョン確認
+              </s-button>
+              {diagOpen ? (
+                <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                  <s-stack gap="small">
+                    <s-text fontWeight="bold" fontSize="small">接続先</s-text>
+                    <s-text tone="subdued" fontSize="small" wrap="wrap">{getAppUrl()}</s-text>
+                    {diagLoading ? (
+                      <s-text tone="subdued" fontSize="small">確認中…</s-text>
+                    ) : diagError ? (
+                      <s-text tone="critical" fontSize="small">{diagError}</s-text>
+                    ) : diagResult ? (
+                      <s-stack gap="extraSmall">
+                        <s-text fontSize="small">
+                          応答: {diagResult.ok ? "OK" : "エラー"}
+                        </s-text>
+                        <s-text fontSize="small" tone={diagResult.graphqlTransactionsUseNodes ? "success" : "critical"}>
+                          GraphQL修正済み: {diagResult.graphqlTransactionsUseNodes ? "はい" : "いいえ"}
+                        </s-text>
+                        {diagResult.diagnosticVersion ? (
+                          <s-text tone="subdued" fontSize="small">
+                            サーバー表示バージョン: {diagResult.diagnosticVersion}
+                          </s-text>
+                        ) : null}
+                        {!diagResult.graphqlTransactionsUseNodes ? (
+                          <s-text tone="subdued" fontSize="small">
+                            {isDevApiUrl(getAppUrl())
+                              ? "精算プレビュー500の場合は開発サーバーを npm run dev:clean で再起動してください。"
+                              : "精算プレビュー500の場合は本番を Render の「Clear build cache & deploy」で再デプロイしてください。"}
+                          </s-text>
+                        ) : null}
+                      </s-stack>
+                    ) : null}
+                  </s-stack>
+                </s-box>
+              ) : null}
             </s-stack>
 
           </s-stack>

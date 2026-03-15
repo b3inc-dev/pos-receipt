@@ -41,7 +41,7 @@ interface SummaryOrder {
   id: string;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   lineItems: { edges: { node: { quantity: number } }[] };
-  refunds: SummaryRefund[];
+  refunds: { nodes: SummaryRefund[] };
   tags: string[];
 }
 
@@ -62,9 +62,11 @@ const SUMMARY_ORDERS_QUERY = `#graphql
           lineItems(first: 250) {
             edges { node { quantity } }
           }
-          refunds {
-            createdAt
-            totalRefundedSet { shopMoney { amount currencyCode } }
+          refunds(first: 50) {
+            nodes {
+              createdAt
+              totalRefundedSet { shopMoney { amount currencyCode } }
+            }
           }
           tags
         }
@@ -138,7 +140,7 @@ export async function computeAndCacheDailySummary(
 
   for (const order of orders) {
     gross += Number(order.totalPriceSet.shopMoney.amount);
-    for (const r of order.refunds ?? []) {
+    for (const r of order.refunds?.nodes ?? []) {
       refundsFromOrders += Number(r.totalRefundedSet?.shopMoney?.amount ?? 0);
     }
     currency = order.totalPriceSet.shopMoney.currencyCode;

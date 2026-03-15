@@ -14,7 +14,7 @@ const ORDER_QUERY = `#graphql
       name
       createdAt
       totalPriceSet { shopMoney { amount currencyCode } }
-      location { id name }
+      retailLocation { id name }
     }
   }
 `;
@@ -48,7 +48,7 @@ export async function action({ request }: ActionFunctionArgs) {
           name: string;
           createdAt: string;
           totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
-          location?: { id: string; name: string } | null;
+          retailLocation?: { id: string; name: string } | null;
         } | null;
       };
     };
@@ -79,7 +79,7 @@ export async function action({ request }: ActionFunctionArgs) {
       amount: Number(order.totalPriceSet.shopMoney.amount),
       currency: order.totalPriceSet.shopMoney.currencyCode,
       issueDate,
-      locationName: order.location?.name ?? "",
+      locationName: order.retailLocation?.name ?? "",
       companyName: templateData.companyName,
       address: templateData.address,
       phone: templateData.phone,

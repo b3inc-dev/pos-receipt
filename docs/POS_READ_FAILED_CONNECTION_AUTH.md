@@ -62,6 +62,41 @@
 - ストアにインストールしているアプリ（公開用 / 自社用）と、そのサーバーの **SHOPIFY_API_KEY**・**SHOPIFY_API_SECRET** が一致しているか。
 - POS アプリを**完全に終了してから開き直し**、タイルを再度開く（トークン再取得のため）。
 
+### 0.4 開発ストアの POS タイルを開いたまま検証する
+
+**`shopify app dev`（`npm run dev`）で開発サーバーを起動すると、Vite の dev サーバーが OPTIONS /api/* に 204 + CORS で応答するようにしてあります。** 開発ストアで POS アプリのタイルを開いたまま、精算プレビューなどをそのまま試せます。
+
+1. ターミナルで **`npm run dev`**（または `shopify app dev`）を実行する。
+2. 表示された URL（トンネル or localhost）で管理画面や POS を開く。
+3. POS で「精算」タイル → 「精算プレビュー」などを操作し、接続・認証が通るか確認する。
+
+※ 本番では **server.js**（`npm run start`）が同じ OPTIONS 処理を行う。開発時は **vite.config.ts の corsPreflightDevPlugin** が同じ役割を担う。
+
+### 0.5 OPTIONS の動作だけを curl で確認する（オプション）
+
+**server.js の OPTIONS 処理**が動くかだけを、本番デプロイなしで確認したいとき:
+
+1. **`npm run check:cors`** を実行（ポート 3999。ビルド・env 不要）。
+2. 別ターミナルで:  
+   `curl -v -X OPTIONS http://localhost:3999/api/settlements/preview -H "Origin: https://admin.shopify.com"`  
+   → **204** と **Access-Control-Allow-Origin** が出れば OK。
+
+### 0.6 「Field \`id\` doesn't exist on type 'OrderTransactionConnection'」(HTTP 500)
+
+このエラーは **GraphQL の `transactions` / `refunds` を Connection の `nodes` で取得する修正** が、いま動いているサーバーに反映されていないときに出ます。
+
+- **開発で試している場合**
+  1. **dev を一度止める**（Ctrl+C）。
+  2. キャッシュを消してからビルドし直す:
+     ```bash
+     rm -rf build .vite node_modules/.vite
+     npm run build
+     npm run dev
+     ```
+  3. 再度 POS で「精算プレビュー」を試す。
+- **それでも 500 のとき**: POS の iframe では `window.location.origin` がトンネルではなく **Shopify のドメイン** になることがあり、その場合 **API は本番（Render）に飛びます**。修正を反映するには **本番へデプロイ**（コードを push して Render で再デプロイ）が必要です。
+- **本番で試している場合**: 修正を入れたコードを **push し、Render で再デプロイ** してください。デプロイ時に `npm run build` が走り、`build/server/index.js` が更新されます。
+
 ---
 
 ## 1. いま「開発モード」か「本番」か

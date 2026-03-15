@@ -5,8 +5,6 @@
 import { getAppUrl } from "./appUrl.js";
 import { toUserMessage } from "./errorMessage.js";
 
-const BASE = getAppUrl();
-
 async function getToken() {
   const session = globalThis?.shopify?.session;
   if (!session?.getSessionToken) return null;
@@ -25,7 +23,7 @@ async function buildHeaders(extra = {}) {
 }
 
 async function apiFetch(path, options = {}) {
-  const url = `${BASE}${path}`;
+  const url = `${getAppUrl()}${path}`;
   const res = await fetch(url, {
     ...options,
     headers: await buildHeaders(options.headers ?? {}),

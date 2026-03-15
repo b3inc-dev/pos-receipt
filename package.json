@@ -5,6 +5,7 @@
   "scripts": {
     "build": "react-router build",
     "dev": "shopify app dev",
+    "dev:clean": "node scripts/dev-clean.js",
     "dev:public": "node scripts/set-app-mode.js public && shopify app config use shopify.app.public.toml && shopify app dev",
     "dev:inhouse": "node scripts/set-app-mode.js inhouse && shopify app config use shopify.app.toml && shopify app dev",
     "config:link": "shopify app config link",
@@ -13,6 +14,7 @@
     "deploy:public": "node scripts/set-app-mode.js public && shopify app config use shopify.app.public.toml && shopify app deploy --force",
     "deploy:inhouse": "node scripts/set-app-mode.js inhouse && shopify app config use shopify.app.toml && shopify app deploy --force",
     "start": "node server.js",
+    "check:cors": "node scripts/check-options-cors.js",
     "setup": "prisma generate && prisma migrate deploy",
     "shopify": "shopify",
     "prisma": "prisma"

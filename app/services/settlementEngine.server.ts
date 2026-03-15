@@ -113,23 +113,29 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
           lineItems(first: 250) {
             edges { node { quantity } }
           }
-          transactions {
-            id
-            kind
-            status
-            amountSet { shopMoney { amount currencyCode } }
-            gateway
-          }
-          refunds {
-            id
-            createdAt
-            totalRefundedSet { shopMoney { amount currencyCode } }
-            transactions {
+          transactions(first: 50) {
+            edges { node {
               id
               kind
-              gateway
+              status
               amountSet { shopMoney { amount currencyCode } }
-            }
+              gateway
+            } }
+          }
+          refunds(first: 50) {
+            edges { node {
+              id
+              createdAt
+              totalRefundedSet { shopMoney { amount currencyCode } }
+              transactions(first: 50) {
+                edges { node {
+                  id
+                  kind
+                  gateway
+                  amountSet { shopMoney { amount currencyCode } }
+                } }
+              }
+            } }
           }
           tags
         }
@@ -148,16 +154,20 @@ const REFUNDS_ORDERS_QUERY = `#graphql
         node {
           id
           tags
-          refunds {
-            id
-            createdAt
-            totalRefundedSet { shopMoney { amount currencyCode } }
-            transactions {
+          refunds(first: 50) {
+            edges { node {
               id
-              kind
-              gateway
-              amountSet { shopMoney { amount currencyCode } }
-            }
+              createdAt
+              totalRefundedSet { shopMoney { amount currencyCode } }
+              transactions(first: 50) {
+                edges { node {
+                  id
+                  kind
+                  gateway
+                  amountSet { shopMoney { amount currencyCode } }
+                } }
+              }
+            } }
           }
         }
       }
@@ -191,7 +201,22 @@ async function fetchAllOrders(admin: AdminClient, query: string): Promise<Shopif
 
     for (const edge of edges) {
       if (!edge.node.tags?.includes("settlement")) {
-        orders.push(edge.node);
+        const node = edge.node as ShopifyOrder & {
+          transactions?: { edges?: { node: ShopifyTransaction }[] };
+          refunds?: { edges?: { node: ShopifyRefund & { transactions?: { edges?: { node: ShopifyRefundTransaction }[] } } }[] };
+        };
+        const order: ShopifyOrder = {
+          ...node,
+          transactions: (node.transactions?.edges ?? []).map((e) => e.node),
+          refunds: (node.refunds?.edges ?? []).map((e) => {
+            const r = e.node;
+            return {
+              ...r,
+              transactions: (r.transactions?.edges ?? []).map((tx) => tx.node),
+            };
+          }),
+        };
+        orders.push(order);
       }
     }
 
@@ -235,7 +260,20 @@ async function fetchOrdersUpdatedInDayRange(
 
     for (const edge of edges) {
       if (!edge.node.tags?.includes("settlement")) {
-        orders.push(edge.node);
+        const node = edge.node as OrderWithRefundsCreatedAt & {
+          refunds?: { edges?: { node: ShopifyRefund & { transactions?: { edges?: { node: ShopifyRefundTransaction }[] } } }[] };
+        };
+        orders.push({
+          id: node.id,
+          tags: node.tags,
+          refunds: (node.refunds?.edges ?? []).map((e) => {
+            const r = e.node;
+            return {
+              ...r,
+              transactions: (r.transactions?.edges ?? []).map((tx) => tx.node),
+            };
+          }),
+        });
       }
     }
 

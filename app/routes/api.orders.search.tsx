@@ -19,7 +19,7 @@ const ORDERS_SEARCH_QUERY = `#graphql
           customer {
             displayName
           }
-          location {
+          retailLocation {
             id
             name
           }
@@ -99,14 +99,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         createdAt: string;
         totalPriceSet?: { shopMoney?: { amount?: string } };
         customer?: { displayName?: string } | null;
-        location?: { id: string; name: string } | null;
+        retailLocation?: { id: string; name: string } | null;
       };
       return {
         orderId: node.id?.replace("gid://shopify/Order/", "") ?? node.id,
         orderName: node.name,
         customerName: node.customer?.displayName ?? "",
-        locationId: node.location?.id ?? "",
-        locationName: node.location?.name ?? "",
+        locationId: node.retailLocation?.id ?? "",
+        locationName: node.retailLocation?.name ?? "",
         totalPrice: node.totalPriceSet?.shopMoney?.amount ?? "0",
         currency: "JPY",
         createdAt: node.createdAt,

@@ -4,13 +4,13 @@
  * タイル／モーダルの「Load failed」を防ぐ。
  */
 
+/** POS Stock と同じクエリ形（locations(first).nodes）でロケーション取得 */
 const LOCATIONS_QUERY = `#graphql
   query Locations($first: Int!) {
-    locations(first: $first, includeLegacy: false) {
+    locations(first: $first) {
       nodes {
         id
         name
-        isActive
       }
     }
   }
@@ -75,9 +75,7 @@ export async function getLocationsFromShopify(first = 50) {
   const data = await adminGraphql(LOCATIONS_QUERY, { first });
   const nodes = Array.isArray(data?.locations?.nodes) ? data.locations.nodes : [];
   return {
-    locations: nodes
-      .filter((n) => n?.isActive !== false)
-      .map((n) => ({
+    locations: nodes.map((n) => ({
         locationId: n.id,
         locationName: n.name ?? "",
         printMode: "order_based",

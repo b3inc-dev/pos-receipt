@@ -20,11 +20,21 @@ const LOCATIONS_QUERY = `#graphql
   }
 `;
 
-/** 認証不要の接続確認用（?ping=1 で CORS 付き 200 を返す） */
+/** デプロイ済みか確認する用。この文字列を変えれば「再デプロイ後」と分かる */
+const PING_DIAGNOSTIC_VERSION = "2025-03-graphql-nodes";
+
+/** 認証不要の接続確認・切り分け用（?ping=1 で CORS 付き 200。graphqlTransactionsUseNodes は OrderTransactionConnection 修正済みかどうか） */
 function corsPingResponse(request: Request): Response {
   const origin = request.headers.get("Origin") || "*";
+  const body = {
+    ok: true,
+    message: "POS API is reachable",
+    method: request.method,
+    graphqlTransactionsUseNodes: true, // このキーがあれば transactions/refunds を nodes で取得する修正が入ったサーバー
+    diagnosticVersion: PING_DIAGNOSTIC_VERSION, // ブラウザで /api/locations?ping=1 を開いて「この値が出ていれば」最新デプロイが動いている
+  };
   return new Response(
-    JSON.stringify({ ok: true, message: "POS API is reachable", method: request.method }),
+    JSON.stringify(body),
     {
       status: 200,
       headers: {
@@ -32,6 +42,7 @@ function corsPingResponse(request: Request): Response {
         "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Methods": "GET, OPTIONS",
         "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        "Cache-Control": "no-store", // キャッシュで古い「修正済み: いいえ」が出ないようにする
       },
     }
   );

@@ -18,7 +18,7 @@ const ORDER_DETAIL_QUERY = `#graphql
         displayName
         email
       }
-      location {
+      retailLocation {
         id
         name
       }
@@ -32,17 +32,21 @@ const ORDER_DETAIL_QUERY = `#graphql
         }
       }
       transactions(first: 50) {
-        id
-        kind
-        status
-        gateway
-        amountSet { shopMoney { amount currencyCode } }
-        createdAt
+        edges { node {
+          id
+          kind
+          status
+          gateway
+          amountSet { shopMoney { amount currencyCode } }
+          createdAt
+        } }
       }
-      refunds {
-        id
-        createdAt
-        totalRefundedSet { shopMoney { amount } }
+      refunds(first: 50) {
+        edges { node {
+          id
+          createdAt
+          totalRefundedSet { shopMoney { amount } }
+        } }
       }
     }
   }
@@ -96,8 +100,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             email: order.customer.email,
           }
         : null,
-      location: order.location
-        ? { id: order.location.id, name: order.location.name }
+      location: order.retailLocation
+        ? { id: order.retailLocation.id, name: order.retailLocation.name }
         : null,
       lineItems: (order.lineItems?.nodes ?? []).map((li: Record<string, unknown>) => ({
         id: li.id,
@@ -106,7 +110,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         originalUnitPrice: (li.originalUnitPriceSet as { shopMoney?: { amount?: string } })?.shopMoney?.amount,
         discountedUnitPrice: (li.discountedUnitPriceSet as { shopMoney?: { amount?: string } })?.shopMoney?.amount,
       })),
-      transactions: (order.transactions ?? []).map((tx: Record<string, unknown>) => ({
+      transactions: ((order.transactions as { edges?: { node: Record<string, unknown> }[] })?.edges ?? []).map((e) => e.node).map((tx: Record<string, unknown>) => ({
         id: tx.id,
         kind: tx.kind,
         status: tx.status,
@@ -114,7 +118,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         amount: (tx.amountSet as { shopMoney?: { amount?: string; currencyCode?: string } })?.shopMoney,
         createdAt: tx.createdAt,
       })),
-      refunds: (order.refunds ?? []).map((r: Record<string, unknown>) => ({
+      refunds: ((order.refunds as { edges?: { node: Record<string, unknown> }[] })?.edges ?? []).map((e) => e.node).map((r: Record<string, unknown>) => ({
         id: r.id,
         createdAt: r.createdAt,
         totalRefunded: (r.totalRefundedSet as { shopMoney?: { amount?: string } })?.shopMoney?.amount,
