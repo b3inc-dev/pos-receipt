@@ -232,9 +232,15 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       color: #202223;
       text-align: center;
     }
-    .rank-row { margin-bottom: 12px; font-size: 14px; text-align: center; }
+    .rank-row { margin-bottom: 12px; font-size: 14px; text-align: center; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0 6px; }
     .rank-row .label { color: #6d7175; }
     .rank-row .value { font-weight: 600; color: #202223; }
+    .next-rank-mini-card { display: inline-block; vertical-align: middle; width: 22px; height: 14px; border-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.12); flex-shrink: 0; }
+    .next-rank-mini-card--diamond { background: linear-gradient(135deg, #1b1f24 0%, #2b3138 50%, #161a1f 100%); }
+    .next-rank-mini-card--platinum { background: linear-gradient(135deg, #9299a4 0%, #e9edf2 50%, #9aa1ac 100%); }
+    .next-rank-mini-card--gold { background: linear-gradient(135deg, #9b6a00 0%, #e2bb38 50%, #8a5e00 100%); }
+    .next-rank-mini-card--silver { background: linear-gradient(135deg, #8e959d 0%, #d9dde1 50%, #878e97 100%); }
+    .next-rank-mini-card--regular { background: linear-gradient(135deg, #d4b08d 0%, #e3c8aa 50%, #d9bb99 100%); }
     .points-row { margin-top: 4px; text-align: center; }
     .points-value { font-size: 28px; font-weight: 700; color: #202223; letter-spacing: 0.02em; }
     .points-unit { font-size: 14px; color: #6d7175; margin-left: 4px; }
@@ -321,6 +327,16 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     if (r.indexOf('プラチナ') !== -1) return 100000;
     return null;
   }
+  /** 次のランクの表示名とミニカード用クラス。最上位の場合は null */
+  function getNextRankInfo(rankName) {
+    if (!rankName || typeof rankName !== 'string') return null;
+    var r = rankName.trim();
+    if (r.indexOf('レギュラー') !== -1 || r.indexOf('白') !== -1) return { name: 'シルバー', class: 'silver' };
+    if (r.indexOf('シルバー') !== -1) return { name: 'ゴールド', class: 'gold' };
+    if (r.indexOf('ゴールド') !== -1) return { name: 'プラチナ', class: 'platinum' };
+    if (r.indexOf('プラチナ') !== -1) return { name: 'ダイヤモンド', class: 'diamond' };
+    return null;
+  }
   function formatYen(num) {
     if (num == null || isNaN(num)) return '';
     var n = Math.floor(Number(num));
@@ -340,10 +356,14 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     var cardClass = 'plastic-card' + (rankClass ? ' plastic-card--' + rankClass : '');
     var nextRankHtml = '';
     var threshold = getNextRankThreshold(rankName);
+    var nextRankInfo = getNextRankInfo(rankName);
     if (threshold != null && !isNaN(rankDecisionPurchasePrice)) {
       var remaining = Math.max(0, threshold - rankDecisionPurchasePrice);
       if (remaining > 0) {
-        nextRankHtml = '<div class="rank-row"><span class="label">ランクアップまで残り：</span><span class="value">' + esc(formatYen(remaining)) + '</span></div>';
+        var miniCardHtml = nextRankInfo
+          ? '<span class="next-rank-mini-card next-rank-mini-card--' + esc(nextRankInfo.class) + '" title="次のランク: ' + esc(nextRankInfo.name) + '" aria-hidden="true"></span>'
+          : '';
+        nextRankHtml = '<div class="rank-row"><span class="label">ランクアップまで残り：</span><span class="value">' + esc(formatYen(remaining)) + '</span>' + miniCardHtml + '</div>';
       }
     }
     var expiryBlockHtml = '';
