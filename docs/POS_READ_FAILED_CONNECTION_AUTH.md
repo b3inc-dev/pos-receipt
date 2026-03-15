@@ -21,7 +21,11 @@
 
 **原因**: ブラウザは POST やカスタムヘッダー（`Authorization` など）を送る前に **OPTIONS** で「このオリジン・メソッド・ヘッダーを許可するか」を問い合わせます。サーバーが OPTIONS に 204 + CORS ヘッダーで応答しないと、本番の POST が送られず、fetch が「Load failed」のような形で失敗し、「接続先と認証を確認してください」だけが表示されます。
 
-**対応**: 全 POS API ルートで **OPTIONS リクエスト** を受け付け、`corsPreflightResponse(request)` で 204 と CORS ヘッダーを返すようにしました。GET のみのルート（locations, orders/search など）も、Authorization 付きで呼ばれるため OPTIONS 用の action を追加済みです。**この変更をデプロイしたうえで POS を再試行してください。**
+**対応**:  
+1. **本番サーバー**: `server.js`（カスタムサーバー）で **OPTIONS /api/\*** をルーターの前に処理し、204 + CORS ヘッダーを返すようにしました。`npm run start` はこのサーバーを起動します。Render などで本番起動する場合は **`node server.js`**（または `npm run start`）を使ってください。  
+2. **ルート内**: 全 POS API ルートでも `corsPreflightResponse(request)` で OPTIONS に応答するようにしています（フレームワークが OPTIONS を action に渡す場合の保険）。  
+
+**まだ「接続先と認証を確認してください」だけが出る場合**: 本番環境で **react-router-serve** を直接使っていると OPTIONS がルートに届かず失敗します。**必ず `server.js` 経由で起動**（`node server.js`）するようにしてください。
 
 ---
 
