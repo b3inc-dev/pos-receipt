@@ -4,12 +4,14 @@
  * Query: orderId?, dateFrom?, dateTo?, limit?
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 import prisma from "../db.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
 
     const url = new URL(request.url);
     const orderId = url.searchParams.get("orderId");
@@ -52,6 +54,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }

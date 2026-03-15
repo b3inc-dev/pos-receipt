@@ -2,6 +2,7 @@
  * 注文検索・注文詳細をバックエンド API で取得する共通モジュール
  * 要件書 21.2 対応
  */
+import { toUserMessage } from "./errorMessage.js";
 
 const session = globalThis?.shopify?.session;
 
@@ -26,7 +27,10 @@ async function apiGet(path, params = {}) {
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(url.toString(), { method: "GET", headers });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const msg = toUserMessage(json.error || `HTTP ${res.status}`);
+    throw new Error(msg + (res.status ? ` (HTTP ${res.status})` : ""));
+  }
   return json;
 }
 

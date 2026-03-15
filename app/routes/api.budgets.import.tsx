@@ -5,7 +5,7 @@
  * ※ CSVインポートは管理画面側機能。POS/API向けは JSON 配列で受付。
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 
@@ -20,7 +20,9 @@ export async function action({ request }: ActionFunctionArgs) {
     return corsJson({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
     const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
 
     const access = checkPlanAccess(shop.planCode, "budget_management", fullAccess);
@@ -110,6 +112,6 @@ export async function action({ request }: ActionFunctionArgs) {
     return corsJson({ ok: true, inserted, updated, errors });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }

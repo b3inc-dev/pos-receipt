@@ -4,14 +4,16 @@
  * プリンタのポーリングや再印字時に利用。
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { buildSettlementReceiptText } from "../services/settlementEngine.server";
 import type { SettlementPreviewDTO } from "../services/settlementEngine.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
-    const { shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { shop, corsJson } = authResult;
     const id = params.id;
     if (!id) {
       return corsJson({ ok: false, error: "id is required" }, { status: 400 });
@@ -59,6 +61,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return corsJson({ ok: true, printPayload });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }

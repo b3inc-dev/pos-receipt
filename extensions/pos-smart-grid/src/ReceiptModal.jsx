@@ -14,6 +14,7 @@ import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
 import { searchOrders, getOrder } from "../../common/orderPickerApi.js";
 import { previewReceipt, issueReceipt, getReceiptHistory } from "../../common/receiptApi.js";
+import { toUserMessage } from "../../common/errorMessage.js";
 
 const STORAGE_KEY = "pos_receipt_order_id";
 
@@ -41,7 +42,7 @@ function ReceiptModal() {
       setLoading(true);
       getOrder(preId)
         .then((order) => { setSelectedOrder(order); setStep("form"); })
-        .catch((e) => setError(e?.message ?? "取得に失敗しました"))
+        .catch((e) => setError(toUserMessage(e?.message) || "取得に失敗しました"))
         .finally(() => setLoading(false));
     }
   }, []);
@@ -54,7 +55,7 @@ function ReceiptModal() {
       setSelectedOrder(order);
       setStep("form");
     } catch (e) {
-      setError(e?.message ?? "取得に失敗しました");
+      setError(toUserMessage(e?.message) || "取得に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -73,7 +74,7 @@ function ReceiptModal() {
       setPreview(res.preview);
       setStep("preview");
     } catch (e) {
-      setError(e?.message ?? "プレビューの取得に失敗しました");
+      setError(toUserMessage(e?.message) || "プレビューの取得に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -93,7 +94,7 @@ function ReceiptModal() {
       setIssuedReceipt(res.receipt);
       setStep("done");
     } catch (e) {
-      setError(e?.message ?? "発行に失敗しました");
+      setError(toUserMessage(e?.message) || "発行に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -204,7 +205,7 @@ function SearchView({ loading, error, setError, setLoading, onSelect, onHistory 
       setItems(res.items);
       setNextCursor(res.nextCursor);
     } catch (e) {
-      setError(e?.message ?? "検索に失敗しました");
+      setError(toUserMessage(e?.message) || "検索に失敗しました");
       setItems([]);
     } finally {
       setLoading(false);
@@ -488,7 +489,7 @@ function HistoryView({ onBack }) {
   useEffect(() => {
     getReceiptHistory({ limit: 20 })
       .then((res) => setItems(res.items ?? []))
-      .catch((e) => setError(e?.message ?? "履歴の取得に失敗しました"))
+      .catch((e) => setError(toUserMessage(e?.message) || "履歴の取得に失敗しました"))
       .finally(() => setLoading(false));
   }, []);
 

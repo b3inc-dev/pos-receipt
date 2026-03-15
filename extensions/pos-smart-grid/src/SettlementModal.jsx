@@ -18,7 +18,8 @@ import {
   recalculateSettlement,
   getSettlementHistory,
 } from "../../common/settlementApi.js";
-import { getAppUrl } from "../../common/appUrl.js";
+import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
+import { toUserMessage } from "../../common/errorMessage.js";
 
 // ── 今日の日付（YYYY-MM-DD） ────────────────────────────────────────────────
 function todayStr() {
@@ -46,20 +47,34 @@ function SettlementModal() {
   const [error, setError] = useState("");
   const [locationLoadError, setLocationLoadError] = useState("");
 
+  // POS Stock と同様: まず Shopify 内蔵 API でロケーション取得（バックエンド不要・Load failed 防止）
+  // その後バックエンドで printMode 等を取得してマージ。バックエンド失敗時はデフォルトのまま表示
   const loadLocations = useCallback(() => {
     setLoading(true);
     setLocationLoadError("");
-    getLocations()
+    getLocationsFromShopify(50)
       .then((res) => {
         const locs = res.locations ?? [];
         setLocations(locs);
         if (locs.length > 0) setSelectedLocation(locs[0]);
+        // バックエンドから printMode 等を取得してマージ（失敗してもリストは表示済みなのでエラーにしない）
+        return getLocations()
+          .then((backendRes) => {
+            const backendLocs = backendRes?.locations ?? [];
+            if (backendLocs.length === 0) return;
+            setLocations((prev) =>
+              prev.map((p) => {
+                const b = backendLocs.find((l) => l.locationId === p.locationId);
+                return b ? { ...p, ...b } : p;
+              })
+            );
+          })
+          .catch(() => {});
       })
-      .catch((e) => setLocationLoadError(e?.message ?? "ロケーションの取得に失敗しました"))
+      .catch((e) => setLocationLoadError(toUserMessage(e?.message) || "ロケーションの取得に失敗しました"))
       .finally(() => setLoading(false));
   }, []);
 
-  // ロケーション初期ロード
   useEffect(() => { loadLocations(); }, []);
 
   const handlePreview = useCallback(
@@ -77,7 +92,7 @@ function SettlementModal() {
         setPreview(res.preview);
         setStep("preview");
       } catch (e) {
-        setError(e?.message ?? "プレビューの取得に失敗しました");
+        setError(toUserMessage(e?.message) || "プレビューの取得に失敗しました");
       } finally {
         setLoading(false);
       }
@@ -100,7 +115,7 @@ function SettlementModal() {
       setSettlementResult(res);
       setStep("done");
     } catch (e) {
-      setError(e?.message ?? "精算の実行に失敗しました");
+      setError(toUserMessage(e?.message) || "精算の実行に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -118,7 +133,7 @@ function SettlementModal() {
       });
       setPreview(res.preview);
     } catch (e) {
-      setError(e?.message ?? "再集計に失敗しました");
+      setError(toUserMessage(e?.message) || "再集計に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -543,7 +558,7 @@ function HistoryView({ selectedLocation, onBack }) {
     if (!selectedLocation) { setLoading(false); return; }
     getSettlementHistory({ locationId: selectedLocation.locationId, limit: 20 })
       .then((res) => setItems(res.items ?? []))
-      .catch((e) => setError(e?.message ?? "履歴の取得に失敗しました"))
+      .catch((e) => setError(toUserMessage(e?.message) || "履歴の取得に失敗しました"))
       .finally(() => setLoading(false));
   }, [selectedLocation?.locationId]);
 

@@ -3,7 +3,7 @@
  * 要件書 21.2: 注文検索（部分一致・日付・ロケーション・ページング）
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 
 const ORDERS_SEARCH_QUERY = `#graphql
   query OrdersSearch($first: Int!, $after: String, $query: String) {
@@ -64,7 +64,9 @@ function buildSearchQuery(params: {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, corsJson } = authResult;
     const url = new URL(request.url);
     const q = url.searchParams.get("q");
     const locationId = url.searchParams.get("locationId");
@@ -120,9 +122,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson(
-      { ok: false, error: message },
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }

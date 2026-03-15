@@ -10,7 +10,7 @@
  * 同一キーが既存の場合は重複精算を作成せず既存レコードを返す（点検レシートは除外）。
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { buildSettlementPreview, buildSettlementReceiptText, type SettlementPreviewDTO } from "../services/settlementEngine.server";
 
@@ -29,7 +29,9 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
 
     const body = await request.json() as Record<string, unknown>;
     const { locationId, locationName, targetDate, printMode, isInspection } = body;
@@ -134,7 +136,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }
 

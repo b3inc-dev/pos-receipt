@@ -13,6 +13,7 @@ import {
   getPeriodSummary,
   reportFootfall,
 } from "../../common/salesSummaryApi.js";
+import { toUserMessage } from "../../common/errorMessage.js";
 
 export default async () => {
   render(<SalesSummaryModal />, document.body);
@@ -78,7 +79,7 @@ function SalesSummaryModal() {
         setFootfallInputs((prev) => ({ ...inputs, ...prev }));
       }
     } catch (err) {
-      setError(err.message);
+      setError(toUserMessage(err?.message));
     } finally {
       setLoading(false);
     }

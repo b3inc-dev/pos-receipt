@@ -5,7 +5,7 @@
  * 設定 §10: 売上サマリー設定で表示対象・KPI を制御
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
@@ -14,7 +14,9 @@ import { SALES_SUMMARY_SETTINGS_KEY, DEFAULT_SALES_SUMMARY_SETTINGS } from "../u
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
     const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
 
     const access = checkPlanAccess(shop.planCode, "sales_summary", fullAccess);
@@ -94,6 +96,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return corsJson({ rows, totals, targetDate, displayOptions: merged });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }

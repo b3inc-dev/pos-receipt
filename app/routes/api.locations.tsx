@@ -3,7 +3,7 @@
  * ショップのロケーション一覧と印字方式設定を返す
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 import prisma from "../db.server";
 
 const LOCATIONS_QUERY = `#graphql
@@ -20,9 +20,33 @@ const LOCATIONS_QUERY = `#graphql
   }
 `;
 
+/** 認証不要の接続確認用（?ping=1 で CORS 付き 200 を返す） */
+function corsPingResponse(request: Request): Response {
+  const origin = request.headers.get("Origin") || "*";
+  return new Response(
+    JSON.stringify({ ok: true, message: "POS API is reachable", method: request.method }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+      },
+    }
+  );
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  if (url.searchParams.get("ping") === "1") {
+    return corsPingResponse(request);
+  }
+
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
 
     const response = await admin.graphql(LOCATIONS_QUERY);
     const json = await response.json();
@@ -48,6 +72,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return corsJson({ locations }, { headers: { "Content-Type": "application/json" } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }

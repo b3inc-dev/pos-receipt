@@ -19,6 +19,7 @@ import {
   createVoucherAdjustment,
   voidSpecialRefund,
 } from "../../common/specialRefundApi.js";
+import { toUserMessage } from "../../common/errorMessage.js";
 
 const STORAGE_KEY = "pos_special_refund_order_id";
 
@@ -77,7 +78,7 @@ function SpecialRefundModal() {
           return listSpecialRefunds(order.orderId ?? preId);
         })
         .then((res) => setEvents(res.items ?? []))
-        .catch((e) => setError(e?.message ?? "取得に失敗しました"))
+        .catch((e) => setError(toUserMessage(e?.message) || "取得に失敗しました"))
         .finally(() => setLoading(false));
     }
   }, []);
@@ -92,7 +93,7 @@ function SpecialRefundModal() {
       setEvents(res.items ?? []);
       setStep("order_view");
     } catch (e) {
-      setError(e?.message ?? "取得に失敗しました");
+      setError(toUserMessage(e?.message) || "取得に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -108,7 +109,7 @@ function SpecialRefundModal() {
         prev.map((e) => (e.id === id ? { ...e, status: "voided" } : e))
       );
     } catch (e) {
-      setError(e?.message ?? "無効化に失敗しました");
+      setError(toUserMessage(e?.message) || "無効化に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -211,7 +212,7 @@ function OrderSearchView({ loading, error, setError, setLoading, onSelect }) {
       setItems(res.items);
       setNextCursor(res.nextCursor);
     } catch (e) {
-      setError(e?.message ?? "検索に失敗しました");
+      setError(toUserMessage(e?.message) || "検索に失敗しました");
       setItems([]);
     } finally {
       setLoading(false);
@@ -475,7 +476,7 @@ function SpecialRefundForm({ order, loading, error, setLoading, setError, onBack
       setConfirming(false);
       await onSuccess();
     } catch (e) {
-      setError(e?.message ?? "登録に失敗しました");
+      setError(toUserMessage(e?.message) || "登録に失敗しました");
       setConfirming(false);
     } finally {
       setLoading(false);
@@ -667,7 +668,7 @@ function VoucherAdjustmentForm({ order, loading, error, setLoading, setError, on
       setConfirming(false);
       await onSuccess();
     } catch (e) {
-      setError(e?.message ?? "登録に失敗しました");
+      setError(toUserMessage(e?.message) || "登録に失敗しました");
       setConfirming(false);
     } finally {
       setLoading(false);

@@ -4,12 +4,14 @@
  * 要件書 §21.3, §6.10
  */
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 import prisma from "../db.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
 
     const url = new URL(request.url);
     const locationId = url.searchParams.get("locationId");
@@ -33,16 +35,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  if (request.method !== "POST") {
-    return corsJson({ error: "Method not allowed" }, { status: 405 });
-  }
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
+    if (request.method !== "POST") {
+      return corsJson({ error: "Method not allowed" }, { status: 405 });
+    }
 
     const body = await request.json() as { settlementId?: string };
     const { settlementId } = body;
@@ -66,7 +70,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return corsJson({ ok: true, settlement: serializeSettlement(updated) });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }
 

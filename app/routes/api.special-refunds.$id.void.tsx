@@ -3,7 +3,7 @@
  * 要件書 21.4: 特殊返金イベント 無効化
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 import prisma from "../db.server";
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -11,7 +11,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return corsJson({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
 
     const eventId = params.id;
     if (!eventId) {
@@ -43,6 +45,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }

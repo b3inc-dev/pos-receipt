@@ -27,7 +27,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     SHOPIFY_API_SECRET: {
       set: secret.length > 0,
       length: secret.length,
-      note: "値は表示しません。通常 32 文字程度です。0 や 31/33 なら typo や改行の可能性。",
+      note: "値は表示しません。shpss_ で始まる 38 文字は正しい形式（shpss_ + 32 文字）。",
     },
     SHOPIFY_APP_URL: {
       set: appUrl.length > 0,

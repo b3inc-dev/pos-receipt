@@ -3,6 +3,7 @@
  * 要件書 §21.5
  */
 import { getAppUrl } from "./appUrl.js";
+import { toUserMessage } from "./errorMessage.js";
 
 const BASE = getAppUrl();
 
@@ -32,7 +33,8 @@ async function apiFetch(path, options = {}) {
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
     try { const j = await res.json(); msg = j?.error ?? j?.message ?? msg; } catch {}
-    throw new Error(msg);
+    const statusSuffix = res.status ? ` (HTTP ${res.status})` : "";
+    throw new Error(toUserMessage(msg) + statusSuffix);
   }
   return res.json();
 }

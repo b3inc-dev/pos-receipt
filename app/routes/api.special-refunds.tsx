@@ -5,7 +5,7 @@
  * 設定 §8: 有効なイベント種別は特殊返金設定に従う
  */
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { SPECIAL_REFUND_SETTINGS_KEY, DEFAULT_SPECIAL_REFUND_SETTINGS } from "../utils/appSettings.server";
@@ -25,7 +25,9 @@ function getAllowedEventTypes(settings: typeof DEFAULT_SPECIAL_REFUND_SETTINGS |
 // GET /api/special-refunds?sourceOrderId=...
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
 
     const settings = await getAppSetting<typeof DEFAULT_SPECIAL_REFUND_SETTINGS>(shop.id, SPECIAL_REFUND_SETTINGS_KEY);
     const merged = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...settings };
@@ -53,17 +55,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return corsJson({ items: items.map(serializeEvent), allowedEventTypes: allowedTypes, uiLabels: { specialRefund: merged.specialRefundUiLabel, voucherAdjustment: merged.voucherAdjustmentUiLabel, cashRefund: merged.cashRefundUiLabel, paymentOverride: merged.paymentOverrideUiLabel } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }
 
 // POST /api/special-refunds
 export async function action({ request }: ActionFunctionArgs) {
-  if (request.method !== "POST") {
-    return corsJson({ error: "Method not allowed" }, { status: 405 });
-  }
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
+    if (request.method !== "POST") {
+      return corsJson({ error: "Method not allowed" }, { status: 405 });
+    }
 
     const settings = await getAppSetting<typeof DEFAULT_SPECIAL_REFUND_SETTINGS>(shop.id, SPECIAL_REFUND_SETTINGS_KEY);
     const merged = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...settings };
@@ -124,7 +128,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return corsJson({ ok: true, event: serializeEvent(event) }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }
 

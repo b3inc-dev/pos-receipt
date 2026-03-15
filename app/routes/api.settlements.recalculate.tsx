@@ -5,7 +5,7 @@
  * Body: { settlementId } or { locationId, locationName, targetDate }
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { buildSettlementPreview } from "../services/settlementEngine.server";
 
@@ -14,7 +14,9 @@ export async function action({ request }: ActionFunctionArgs) {
     return corsJson({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
 
     const body = await request.json() as Record<string, unknown>;
     let { locationId, locationName, targetDate } = body;
@@ -50,6 +52,6 @@ export async function action({ request }: ActionFunctionArgs) {
     return corsJson({ ok: true, preview });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return corsJson({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }

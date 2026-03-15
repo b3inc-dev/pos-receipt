@@ -6,7 +6,7 @@
  * ネットワーク再試行時に重複発行を防ぐ。同一キーが既存の場合は既存レコードを返す。
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequest } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
 
@@ -27,7 +27,9 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const { admin, shop, corsJson } = await authenticatePosRequest(request);
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { admin, shop, corsJson } = authResult;
 
     const body = await request.json() as Record<string, unknown>;
     const { orderId, recipientName, proviso, isReissue, createdBy, idempotencyKey } = body;
@@ -143,6 +145,6 @@ export async function action({ request }: ActionFunctionArgs) {
     return corsJson({ ok: true, idempotent: false, receipt: receiptData }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return corsErrorJson(request, { ok: false, error: message }, 500);
   }
 }
