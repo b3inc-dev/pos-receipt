@@ -2,8 +2,8 @@
  * GET /api/locations
  * ショップのロケーション一覧と印字方式設定を返す
  */
-import type { LoaderFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 
 const LOCATIONS_QUERY = `#graphql
@@ -74,4 +74,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
   }
+}
+
+/** OPTIONS プリフライト対応（GET でも Authorization 付きだとブラウザが OPTIONS を送るため） */
+export async function action({ request }: ActionFunctionArgs) {
+  if (request.method === "OPTIONS") return corsPreflightResponse(request);
+  return new Response(null, { status: 405 });
 }

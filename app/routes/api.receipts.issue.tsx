@@ -6,7 +6,7 @@
  * ネットワーク再試行時に重複発行を防ぐ。同一キーが既存の場合は既存レコードを返す。
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
 
@@ -23,6 +23,7 @@ const ORDER_QUERY = `#graphql
 `;
 
 export async function action({ request }: ActionFunctionArgs) {
+  if (request.method === "OPTIONS") return corsPreflightResponse(request);
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }

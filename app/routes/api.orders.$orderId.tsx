@@ -2,8 +2,8 @@
  * GET /api/orders/:orderId
  * 要件書 21.2: 注文詳細（core, transactions, refunds, customer, location, line items）
  */
-import type { LoaderFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 
 const ORDER_DETAIL_QUERY = `#graphql
   query OrderDetail($id: ID!) {
@@ -128,4 +128,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
   }
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  if (request.method === "OPTIONS") return corsPreflightResponse(request);
+  return new Response(null, { status: 405 });
 }

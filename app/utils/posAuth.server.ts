@@ -11,6 +11,20 @@
 import { authenticate, unauthenticated } from "../shopify.server";
 import { resolveShop } from "./shopResolver.server";
 
+/** CORS プリフライト（OPTIONS）用の 204 レスポンス。POST 前にブラウザが送る OPTIONS に必須。 */
+export function corsPreflightResponse(request: Request): Response {
+  const origin = request.headers.get("Origin") || "*";
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Authorization, Content-Type",
+      "Access-Control-Max-Age": "86400",
+    },
+  });
+}
+
 /** レスポンスに POS 用 CORS ヘッダーを付与する（認証失敗時などで使用） */
 function addCorsToResponse(request: Request, response: Response): Response {
   const origin = request.headers.get("Origin");

@@ -5,10 +5,11 @@
  * 集計結果を計算して返す（DB保存なし）
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import { buildSettlementPreview } from "../services/settlementEngine.server";
 
 export async function action({ request }: ActionFunctionArgs) {
+  if (request.method === "OPTIONS") return corsPreflightResponse(request);
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;

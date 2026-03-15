@@ -5,7 +5,7 @@
  * 設定 §8: 有効なイベント種別は特殊返金設定に従う
  */
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { SPECIAL_REFUND_SETTINGS_KEY, DEFAULT_SPECIAL_REFUND_SETTINGS } from "../utils/appSettings.server";
@@ -61,6 +61,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 // POST /api/special-refunds
 export async function action({ request }: ActionFunctionArgs) {
+  if (request.method === "OPTIONS") return corsPreflightResponse(request);
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;

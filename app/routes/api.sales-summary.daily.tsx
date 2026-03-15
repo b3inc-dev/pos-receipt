@@ -4,8 +4,8 @@
  * Query: targetDate, locationIds[]
  * 設定 §10: 売上サマリー設定で表示対象・KPI を制御
  */
-import type { LoaderFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
@@ -98,4 +98,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
   }
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  if (request.method === "OPTIONS") return corsPreflightResponse(request);
+  return new Response(null, { status: 405 });
 }

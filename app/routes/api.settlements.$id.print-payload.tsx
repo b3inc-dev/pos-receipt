@@ -3,8 +3,8 @@
  * CloudPRNT 用: 指定精算の印字用テキストを返す。
  * プリンタのポーリングや再印字時に利用。
  */
-import type { LoaderFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { buildSettlementReceiptText } from "../services/settlementEngine.server";
 import type { SettlementPreviewDTO } from "../services/settlementEngine.server";
@@ -63,4 +63,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
   }
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  if (request.method === "OPTIONS") return corsPreflightResponse(request);
+  return new Response(null, { status: 405 });
 }

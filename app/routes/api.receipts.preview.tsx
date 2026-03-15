@@ -3,7 +3,7 @@
  * 要件書 §21.5: 領収書プレビュー（DB保存なし）
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
 
@@ -20,6 +20,7 @@ const ORDER_QUERY = `#graphql
 `;
 
 export async function action({ request }: ActionFunctionArgs) {
+  if (request.method === "OPTIONS") return corsPreflightResponse(request);
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;

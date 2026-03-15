@@ -5,13 +5,14 @@
  * Body: { settlementId } or { locationId, locationName, targetDate }
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { buildSettlementPreview } from "../services/settlementEngine.server";
 
 export async function action({ request }: ActionFunctionArgs) {
+  if (request.method === "OPTIONS") return corsPreflightResponse(request);
   if (request.method !== "POST") {
-    return corsJson({ error: "Method not allowed" }, { status: 405 });
+    return corsErrorJson(request, { error: "Method not allowed" }, 405);
   }
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);

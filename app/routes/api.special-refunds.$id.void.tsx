@@ -3,12 +3,13 @@
  * 要件書 21.4: 特殊返金イベント 無効化
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 
 export async function action({ request, params }: ActionFunctionArgs) {
+  if (request.method === "OPTIONS") return corsPreflightResponse(request);
   if (request.method !== "POST") {
-    return corsJson({ error: "Method not allowed" }, { status: 405 });
+    return corsErrorJson(request, { error: "Method not allowed" }, 405);
   }
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);

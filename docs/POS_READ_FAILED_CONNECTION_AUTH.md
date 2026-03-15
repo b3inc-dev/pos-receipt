@@ -17,6 +17,14 @@
 
 ---
 
+## 修正済み: CORS プリフライト（OPTIONS）
+
+**原因**: ブラウザは POST やカスタムヘッダー（`Authorization` など）を送る前に **OPTIONS** で「このオリジン・メソッド・ヘッダーを許可するか」を問い合わせます。サーバーが OPTIONS に 204 + CORS ヘッダーで応答しないと、本番の POST が送られず、fetch が「Load failed」のような形で失敗し、「接続先と認証を確認してください」だけが表示されます。
+
+**対応**: 全 POS API ルートで **OPTIONS リクエスト** を受け付け、`corsPreflightResponse(request)` で 204 と CORS ヘッダーを返すようにしました。GET のみのルート（locations, orders/search など）も、Authorization 付きで呼ばれるため OPTIONS 用の action を追加済みです。**この変更をデプロイしたうえで POS を再試行してください。**
+
+---
+
 ## 0. まだ「接続先と認証を確認してください」と出るときの確認（最新）
 
 ### 0.1 表示を確認する

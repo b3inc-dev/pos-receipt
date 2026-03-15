@@ -10,7 +10,7 @@
  * 同一キーが既存の場合は重複精算を作成せず既存レコードを返す（点検レシートは除外）。
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { buildSettlementPreview, buildSettlementReceiptText, type SettlementPreviewDTO } from "../services/settlementEngine.server";
 
@@ -25,6 +25,7 @@ function buildIdempotencyKey(
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  if (request.method === "OPTIONS") return corsPreflightResponse(request);
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
