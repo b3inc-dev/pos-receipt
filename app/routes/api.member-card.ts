@@ -132,5 +132,7 @@ export async function action({ request }: ActionFunctionArgs) {
     rankName: memberResult.rankName ?? null,
     pointsApproved: memberResult.pointsApproved ?? null,
     rankDecisionPurchasePrice: memberResult.rankDecisionPurchasePrice ?? null,
+    expiryDate: memberResult.expiryDate ?? null,
+    expiringPoints: memberResult.expiringPoints ?? null,
   });
 }

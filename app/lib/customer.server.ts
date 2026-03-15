@@ -26,6 +26,12 @@ const CUSTOMERS_QUERY = `#graphql
           vipRankDecisionPurchasePrice: metafield(namespace: "vip", key: "rank_decision_purchase_price") {
             value
           }
+          vipExpiryDate: metafield(namespace: "vip", key: "expiry_date") {
+            value
+          }
+          vipExpiringPoints: metafield(namespace: "vip", key: "expiring_points") {
+            value
+          }
         }
       }
       pageInfo {
@@ -55,6 +61,10 @@ export interface GetMemberIdResult {
   pointsApproved?: string;
   /** ランク判定用累計購入額（円）。未設定時は undefined */
   rankDecisionPurchasePrice?: number;
+  /** ポイント失効予定日（vip.expiry_date）。未設定時は undefined */
+  expiryDate?: string;
+  /** 失効予定ポイント数（vip.expiring_points）。未設定時は undefined */
+  expiringPoints?: string;
 }
 
 export interface GetMemberIdError {
@@ -125,6 +135,8 @@ type CustomersJson = {
           vipRankName?: { value?: string } | null;
           vipPointsApproved?: { value?: string } | null;
           vipRankDecisionPurchasePrice?: { value?: string } | null;
+          vipExpiryDate?: { value?: string } | null;
+          vipExpiringPoints?: { value?: string } | null;
         };
       }>;
       pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
@@ -140,6 +152,8 @@ type CustomerNode = {
   vipRankName?: { value?: string } | null;
   vipPointsApproved?: { value?: string } | null;
   vipRankDecisionPurchasePrice?: { value?: string } | null;
+  vipExpiryDate?: { value?: string } | null;
+  vipExpiringPoints?: { value?: string } | null;
 };
 
 /** ノードからメンバー情報を組み立てる共通処理 */
@@ -158,7 +172,11 @@ function buildMemberResult(node: CustomerNode): GetMemberIdResult | GetMemberIdE
     const n = Number(priceRaw);
     if (!Number.isNaN(n) && n >= 0) rankDecisionPurchasePrice = n;
   }
-  return { ok: true, memberId, rankName, pointsApproved, rankDecisionPurchasePrice };
+  const expiryDateRaw = node?.vipExpiryDate?.value;
+  const expiryDate = typeof expiryDateRaw === "string" ? expiryDateRaw.trim() || undefined : undefined;
+  const expiringPointsRaw = node?.vipExpiringPoints?.value;
+  const expiringPoints = typeof expiringPointsRaw === "string" ? expiringPointsRaw.trim() || undefined : undefined;
+  return { ok: true, memberId, rankName, pointsApproved, rankDecisionPurchasePrice, expiryDate, expiringPoints };
 }
 
 /**

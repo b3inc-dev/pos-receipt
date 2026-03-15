@@ -331,6 +331,8 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     var rankName = data.rankName != null ? data.rankName : '';
     var pointsApproved = data.pointsApproved != null ? data.pointsApproved : '';
     var rankDecisionPurchasePrice = data.rankDecisionPurchasePrice != null ? Number(data.rankDecisionPurchasePrice) : NaN;
+    var expiryDate = data.expiryDate != null && data.expiryDate !== '' ? String(data.expiryDate).trim() : '';
+    var expiringPoints = data.expiringPoints != null && data.expiringPoints !== '' ? String(data.expiringPoints).trim() : '';
     var safeId = esc(memberId);
     var safeRank = esc(rankName);
     var pointsDisplay = formatPoints(pointsApproved);
@@ -343,6 +345,12 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       if (remaining > 0) {
         nextRankHtml = '<div class="rank-row"><span class="label">ランクアップまで残り：</span><span class="value">' + esc(formatYen(remaining)) + '</span></div>';
       }
+    }
+    var expiryBlockHtml = '';
+    if (expiryDate && expiringPoints) {
+      var dateSlash = expiryDate.replace(/-/g, '/');
+      var expiryText = 'ポイント失効予定：' + esc(dateSlash) + ' ' + esc(formatPoints(expiringPoints)) + 'ポイント';
+      expiryBlockHtml = '<div class="section-bordered">' + expiryText + '</div>';
     }
     var sectionHtml = '<div class="member-card-section">' +
       '<div class="' + cardClass + '">' +
@@ -360,6 +368,7 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       '<div class="rank-row"><span class="label">現在のランク：</span>' + (safeRank || '—') + '</div>' +
       nextRankHtml +
       '<div class="points-row"><span class="points-value">' + (pointsDisplay ? esc(pointsDisplay) : '0') + '</span><span class="points-unit">ポイント</span></div>' +
+      expiryBlockHtml +
       '</div>';
     root.innerHTML = sectionHtml;
     var wrap = document.getElementById('barcode-wrap');
@@ -412,7 +421,9 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
           memberId: data.memberId,
           rankName: data.rankName,
           pointsApproved: data.pointsApproved,
-          rankDecisionPurchasePrice: data.rankDecisionPurchasePrice
+          rankDecisionPurchasePrice: data.rankDecisionPurchasePrice,
+          expiryDate: data.expiryDate,
+          expiringPoints: data.expiringPoints
         });
       } else {
         showError(messages[data.message] || messages.SYSTEM_ERROR);
