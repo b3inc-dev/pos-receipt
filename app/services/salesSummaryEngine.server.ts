@@ -95,7 +95,9 @@ async function fetchSummaryOrders(admin: AdminClient, query: string): Promise<Su
     const pageInfo = json.data?.orders?.pageInfo;
 
     for (const node of nodes) {
-      if (!node.tags?.includes("settlement")) {
+      // タグ表記ゆれ（SETTLEMENT / settlement）に備えて大文字小文字無視で精算注文を除外
+      const isSettlement = (node.tags ?? []).some((t) => String(t).toLowerCase() === "settlement");
+      if (!isSettlement) {
         orders.push(node);
       }
     }
@@ -124,7 +126,8 @@ export async function computeAndCacheDailySummary(
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
 
-  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso}`;
+  // 精算注文・キャンセル済みを除外（GAS_vs_APP §8.0 と settlementEngine と同様）
+  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const orders = await fetchSummaryOrders(admin, shopifyQuery);
 
   let gross = 0;

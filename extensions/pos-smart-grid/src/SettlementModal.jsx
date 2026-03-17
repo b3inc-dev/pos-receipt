@@ -536,7 +536,7 @@ function PreviewView({
               </s-stack>
             </s-box>
 
-            {/* 支払方法別内訳 */}
+            {/* 支払方法別内訳（売上額・返金額・件数） */}
             {preview.paymentSections?.length > 0 ? (
               <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-text fontWeight="bold" fontSize="small">支払方法別内訳</s-text>
@@ -547,6 +547,13 @@ function PreviewView({
                         <s-stack direction="horizontal" align="space-between">
                           <s-text fontWeight="bold" fontSize="small">{section.label}</s-text>
                           <s-text fontSize="small">¥{Number(section.net).toLocaleString()}</s-text>
+                        </s-stack>
+                        <s-stack direction="horizontal" align="space-between">
+                          <s-text tone="subdued" fontSize="small">　件数</s-text>
+                          <s-text tone="subdued" fontSize="small">
+                            {Number(section.txCount ?? 0)}件
+                            {Number(section.refundCount ?? 0) > 0 ? `（返金${section.refundCount}件）` : ""}
+                          </s-text>
                         </s-stack>
                         {Number(section.refund) > 0 ? (
                           <s-stack direction="horizontal" align="space-between">

@@ -469,8 +469,8 @@ export async function buildSettlementPreview(
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
 
-  // GAS と同一: 精算注文・キャンセル済みをクエリ段階で除外（tag は Shopify 側が大文字 "SETTLEMENT" のことがあるためクエリで除外）
-  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} -tag:SETTLEMENT -status:cancelled`;
+  // GAS と同一: 精算注文・キャンセル済みをクエリ段階で除外（精算注文は tags: ["settlement"] で作成。Shopify によっては -tag より tag_not が有効な場合あり）
+  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const orders = await fetchAllOrders(admin, shopifyQuery);
 
   const orderIdsCreatedInDay = new Set(orders.map((o) => o.id));
@@ -495,7 +495,7 @@ export async function buildSettlementPreview(
   }
 
   // 返金再集計（別パス）: その日に処理された返金のうち、注文が「その日作成」でない分を追加（GAS overlayRefundsAndRecalc 相当）
-  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} -tag:SETTLEMENT -status:cancelled`;
+  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
   const overlay = computeRefundsOnlyForDay(ordersUpdated, orderIdsCreatedInDay, dayRange);
 
@@ -606,7 +606,7 @@ export function buildSettlementReceiptText(preview: SettlementPreviewDTO): strin
       : []),
     "─────────────────",
     ...preview.paymentSections.map(
-      (s) => `${s.label}: ¥${s.net.toLocaleString()} (返金¥${s.refund.toLocaleString()})`
+      (s) => `${s.label}: ¥${s.net.toLocaleString()} (${s.txCount}件)${s.refund > 0 ? ` 返金${s.refundCount}件 ¥${s.refund.toLocaleString()}` : ""}`
     ),
   ];
   return lines.join("\n");
