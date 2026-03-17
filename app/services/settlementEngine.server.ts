@@ -190,7 +190,9 @@ async function fetchAllOrders(admin: AdminClient, query: string): Promise<Shopif
     const pageInfo = json.data?.orders?.pageInfo;
 
     for (const node of nodes) {
-      if (!node.tags?.includes("settlement")) {
+      // クエリで -tag:SETTLEMENT 済みだが、タグ表記ゆれ（SETTLEMENT / settlement）に備えて大文字小文字無視で除外
+      const isSettlement = (node.tags ?? []).some((t) => String(t).toLowerCase() === "settlement");
+      if (!isSettlement) {
         const order: ShopifyOrder = {
           ...node,
           transactions: node.transactions ?? [],
@@ -244,7 +246,8 @@ async function fetchOrdersUpdatedInDayRange(
     const pageInfo = json.data?.orders?.pageInfo;
 
     for (const node of nodes) {
-      if (!node.tags?.includes("settlement")) {
+      const isSettlement = (node.tags ?? []).some((t) => String(t).toLowerCase() === "settlement");
+      if (!isSettlement) {
         orders.push({
           id: node.id,
           tags: node.tags,
@@ -466,7 +469,8 @@ export async function buildSettlementPreview(
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
 
-  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso}`;
+  // GAS と同一: 精算注文・キャンセル済みをクエリ段階で除外（tag は Shopify 側が大文字 "SETTLEMENT" のことがあるためクエリで除外）
+  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} -tag:SETTLEMENT -status:cancelled`;
   const orders = await fetchAllOrders(admin, shopifyQuery);
 
   const orderIdsCreatedInDay = new Set(orders.map((o) => o.id));
@@ -491,7 +495,7 @@ export async function buildSettlementPreview(
   }
 
   // 返金再集計（別パス）: その日に処理された返金のうち、注文が「その日作成」でない分を追加（GAS overlayRefundsAndRecalc 相当）
-  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso}`;
+  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} -tag:SETTLEMENT -status:cancelled`;
   const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
   const overlay = computeRefundsOnlyForDay(ordersUpdated, orderIdsCreatedInDay, dayRange);
 
