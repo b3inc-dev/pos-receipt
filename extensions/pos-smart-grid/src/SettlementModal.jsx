@@ -20,7 +20,7 @@ import {
 } from "../../common/settlementApi.js";
 import { getAppUrl, isDevApiUrl, setApiBaseOverride, getApiBaseOverride } from "../../common/appUrl.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
-import { getSessionLocation } from "../../common/sessionLocation.js";
+import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 
 // ── 今日の日付（YYYY-MM-DD） ────────────────────────────────────────────────
@@ -51,20 +51,22 @@ function SettlementModal() {
   /** 精算プレビュー失敗時に接続先と GraphQL 修正有無を表示する用 */
   const [previewErrorDiagnostic, setPreviewErrorDiagnostic] = useState(null);
 
-  // POS Stock と同様: まず Shopify 内蔵 API でロケーション取得（バックエンド不要・Load failed 防止）
+  // POS Stock と同様: ポーリングでセッションのロケーションが確定するまで待つ
+  const { locationGid: sessionLocationGid, isReady: sessionReady } = useSessionLocation();
+
+  // まず Shopify 内蔵 API でロケーション取得（バックエンド不要・Load failed 防止）
   // その後バックエンドで printMode 等を取得してマージ。バックエンド失敗時はデフォルトのまま表示
-  const loadLocations = useCallback(() => {
+  const loadLocations = useCallback((gid) => {
     setLoading(true);
     setLocationLoadError("");
     getLocationsFromShopify(50)
       .then((res) => {
         let locs = res.locations ?? [];
-        const { locationGid } = getSessionLocation();
-        if (locationGid) {
-          locs = locs.filter((l) => l.locationId === locationGid);
+        if (gid) {
+          locs = locs.filter((l) => l.locationId === gid);
         }
         setLocations(locs);
-        const initial = locationGid ? locs.find((l) => l.locationId === locationGid) ?? locs[0] : locs[0];
+        const initial = gid ? locs.find((l) => l.locationId === gid) ?? locs[0] : locs[0];
         if (initial) setSelectedLocation(initial);
         // バックエンドから printMode 等を取得してマージ（失敗してもリストは表示済みなのでエラーにしない）
         return getLocations()
@@ -84,7 +86,12 @@ function SettlementModal() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { loadLocations(); }, []);
+  // セッションのロケーションが確定したらロケーション一覧をロード
+  useEffect(() => {
+    if (sessionReady) {
+      loadLocations(sessionLocationGid);
+    }
+  }, [sessionReady, sessionLocationGid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePreview = useCallback(
     async (inspection = false) => {

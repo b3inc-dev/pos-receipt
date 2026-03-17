@@ -13,7 +13,7 @@ import {
   getPeriodSummary,
   reportFootfall,
 } from "../../common/salesSummaryApi.js";
-import { getSessionLocation } from "../../common/sessionLocation.js";
+import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 
 export default async () => {
@@ -58,11 +58,13 @@ function SalesSummaryModal() {
   const [savingFootfall, setSavingFootfall] = useState({});
   const [footfallError, setFootfallError] = useState({});
 
+  // POS Stock と同様: ポーリングでセッションのロケーションが確定するまで待つ
+  const { locationGid, isReady: sessionReady } = useSessionLocation();
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const { locationGid } = getSessionLocation();
       const locationIds = locationGid ? [locationGid] : [];
       let result;
       if (mode === "daily") {
@@ -86,12 +88,14 @@ function SalesSummaryModal() {
     } finally {
       setLoading(false);
     }
-  }, [mode, targetDate, dateFrom, dateTo]);
+  }, [mode, targetDate, dateFrom, dateTo, locationGid]);
 
-  // 初回ロード
+  // セッションのロケーションが確定したらデータをロード（未確定の間は待機）
   useEffect(() => {
-    loadData();
-  }, []);
+    if (sessionReady) {
+      loadData();
+    }
+  }, [sessionReady, locationGid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSaveFootfall = async (locationId) => {
     const visitors = parseInt(footfallInputs[locationId] ?? "0", 10);

@@ -1,7 +1,7 @@
 // POS Receipt アプリのベース URL
 // 公開用 / 自社用の切り替えは PUBLIC_INHOUSE_APP_DEFINITION.md 参照
 
-const APP_MODE = "public"; // "public" | "inhouse"
+const APP_MODE = "inhouse"; // "public" | "inhouse"
 
 const DEV_APP_URL = "http://localhost:3000";
 const PROD_APP_URL_PUBLIC = "https://pos-receipt.onrender.com";

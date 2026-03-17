@@ -321,7 +321,7 @@ export async function getRefundOverlayForDay(
 ): Promise<{ refundTotal: number }> {
   const startIso = dayRange.startUtc.toISOString().replace(/\.000Z$/, "Z");
   const endIso = dayRange.endUtc.toISOString();
-  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${startIso} updated_at:<=${endIso}`;
+  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement -status:cancelled`;
   const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
   const overlay = computeRefundsOnlyForDay(ordersUpdated, orderIdsCreatedInDay, dayRange);
   return { refundTotal: overlay.refundTotal };
@@ -535,7 +535,11 @@ export async function buildSettlementPreview(
 
   let paymentSections = await calculatePaymentSections(orders, shopId);
   mergeRefundOverlay(paymentSections, overlay, { refundTotal, refundCount });
-  applySpecialRefundEventsToTotals(paymentSections, otherEvents, { total, refundTotal });
+  // 特殊返金イベントを totals オブジェクト経由で受け取り、ローカル変数に反映する
+  const eventTotals = { total, refundTotal };
+  applySpecialRefundEventsToTotals(paymentSections, otherEvents, eventTotals);
+  total = eventTotals.total;
+  refundTotal = eventTotals.refundTotal;
 
   // 税・net の再計算（GAS_vs_APP_IMPLEMENTATION_GAP §7.2: 返金反映後の税込額から税・純売上を算出）
   const round2 = (n: number) => Math.round(n * 100) / 100;

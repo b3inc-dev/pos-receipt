@@ -260,9 +260,14 @@ GAS 精算レシート（`GAS_精算レシート.md`）のロケーション別�
 - その結果、通常注文 21 件 ＋ 精算注文など 30 件 ≒ 51 件となり、売上も重複・不要分が加算されて約 2 倍に見えていた。
 
 **対応**（`settlementEngine.server.ts`）  
-1. **created_at 用クエリ**に `-tag:SETTLEMENT -status:cancelled` を追加。  
+1. **created_at 用クエリ**に `tag_not:settlement -status:cancelled` を追加（Shopify の order 検索では `tag_not` が有効な場合がある。精算注文は `tags: ["settlement"]` で作成しているため小文字で指定）。  
 2. **updated_at 用クエリ**（返金オーバーレイ用）にも同様に追加。  
 3. 取得後のフィルタを `tags.some(t => String(t).toLowerCase() === "settlement")` に変更し、表記ゆれがあっても精算注文を確実に除外。
+
+**デプロイ後も件数・売上が多い場合の確認ポイント**  
+- **ビルドが本番に反映されているか**: 本番は `build/` を実行するため、デプロイ時に **必ずビルドが走ること**が必要。Render の場合は「Clear build cache & deploy」で再デプロイすると、古いキャッシュでビルドがスキップされていた問題を解消できる場合がある。  
+- **クエリが効いていない可能性**: Shopify の order 検索で `tag_not:settlement` や `-tag:settlement` が無視される場合がある。その場合は「取得後のコード側フィルタ」（上記 3）で精算注文は除外されるが、**件数・金額は「取得した注文」を元にしている**ため、クエリで除外されないと API のページングで多くの件数を取得し、その分だけ件数・売上が多くなる。  
+- **ロケーション・日付**: 渡している `locationId` が正しいか、`targetDate` が想定している日付（ショップタイムゾーンの「その日」）と一致しているかも確認する。
 
 ---
 

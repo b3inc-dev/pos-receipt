@@ -7,7 +7,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
+import { computeAndCacheDailySummary, type DailySummaryRowDTO } from "../services/salesSummaryEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { SALES_SUMMARY_SETTINGS_KEY, DEFAULT_SALES_SUMMARY_SETTINGS } from "../utils/appSettings.server";
@@ -35,9 +35,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return corsJson({ rows: [], totals: { actual: 0, orders: 0, items: 0, budget: null, visitors: null }, displayOptions: merged, targetDate });
     }
 
-    const allLocations = await prisma.location.findMany({
+    let allLocations = await prisma.location.findMany({
       where: { shopId: shop.id, salesSummaryEnabled: true },
     });
+
+    // フォールバック: DB に salesSummaryEnabled な Location が未設定の場合は
+    // Shopify のアクティブなロケーションを自動同期して有効化する
+    if (allLocations.length === 0) {
+      const locRes = await admin.graphql(`#graphql
+        query { locations(first: 50, includeLegacy: false) { nodes { id name isActive } } }
+      `);
+      const locJson = (await locRes.json()) as {
+        data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
+      };
+      const shopifyLocs = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
+      for (const loc of shopifyLocs) {
+        await prisma.location.upsert({
+          where: { shopId_shopifyLocationGid: { shopId: shop.id, shopifyLocationGid: loc.id } },
+          update: { name: loc.name, salesSummaryEnabled: true },
+          create: { shopId: shop.id, shopifyLocationGid: loc.id, name: loc.name, salesSummaryEnabled: true },
+        });
+      }
+      allLocations = await prisma.location.findMany({
+        where: { shopId: shop.id, salesSummaryEnabled: true },
+      });
+    }
 
     let targetLocations =
       locationIdsParam.length > 0
@@ -51,10 +73,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
           )
         : allLocations;
 
+    // locationIdsParam でフィルタした結果が空の場合は全ロケーションを対象にする
+    // (POS セッションの locationId が DB の GID と一致しないケースへの安全網)
+    if (locationIdsParam.length > 0 && targetLocations.length === 0) {
+      targetLocations = allLocations;
+    }
+
     if (merged.visibleLocationIds.length > 0) {
-      targetLocations = targetLocations.filter((l) =>
+      const filtered = targetLocations.filter((l) =>
         merged.visibleLocationIds.includes(l.shopifyLocationGid)
       );
+      // visibleLocationIds フィルタで空になった場合は無視してフィルタ前を使う
+      if (filtered.length > 0) targetLocations = filtered;
     }
 
     if (targetLocations.length === 0) {
@@ -67,8 +97,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     // 各ロケーションを並列計算・キャッシュ
-    const rows = await Promise.all(
-      targetLocations.map(async (loc) => {
+    const rows: Array<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> = await Promise.all(
+      targetLocations.map(async (loc): Promise<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> => {
         const row = await computeAndCacheDailySummary(
           admin,
           shop.id,

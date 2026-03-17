@@ -34,9 +34,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const dateTo = url.searchParams.get("dateTo");
     const locationIdsParam = url.searchParams.getAll("locationIds[]");
 
-    const allLocations = await prisma.location.findMany({
+    let allLocations = await prisma.location.findMany({
       where: { shopId: shop.id, salesSummaryEnabled: true },
     });
+
+    // フォールバック: DB に salesSummaryEnabled な Location が未設定の場合は
+    // Shopify のアクティブなロケーションを自動同期して有効化する
+    if (allLocations.length === 0) {
+      const locRes = await admin.graphql(`#graphql
+        query { locations(first: 50, includeLegacy: false) { nodes { id name isActive } } }
+      `);
+      const locJson = (await locRes.json()) as {
+        data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
+      };
+      const shopifyLocs = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
+      for (const loc of shopifyLocs) {
+        await prisma.location.upsert({
+          where: { shopId_shopifyLocationGid: { shopId: shop.id, shopifyLocationGid: loc.id } },
+          update: { name: loc.name, salesSummaryEnabled: true },
+          create: { shopId: shop.id, shopifyLocationGid: loc.id, name: loc.name, salesSummaryEnabled: true },
+        });
+      }
+      allLocations = await prisma.location.findMany({
+        where: { shopId: shop.id, salesSummaryEnabled: true },
+      });
+    }
 
     let targetLocations =
       locationIdsParam.length > 0
@@ -50,10 +72,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
           )
         : allLocations;
 
+    // locationIdsParam でフィルタした結果が空の場合は全ロケーションを対象にする
+    if (locationIdsParam.length > 0 && targetLocations.length === 0) {
+      targetLocations = allLocations;
+    }
+
     if (merged.visibleLocationIds.length > 0) {
-      targetLocations = targetLocations.filter((l) =>
+      const filtered = targetLocations.filter((l) =>
         merged.visibleLocationIds.includes(l.shopifyLocationGid)
       );
+      if (filtered.length > 0) targetLocations = filtered;
     }
 
     const locationGids = targetLocations.map((l) => l.shopifyLocationGid);
