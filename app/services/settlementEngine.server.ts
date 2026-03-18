@@ -464,6 +464,9 @@ export async function buildSettlementPreview(
   targetDate: string,
 ): Promise<SettlementPreviewDTO> {
   const locIdRaw = locationId.replace("gid://shopify/Location/", "");
+  if (!locIdRaw || !/^\d+$/.test(locIdRaw)) {
+    throw new Error(`Invalid locationId: "${locationId}"`);
+  }
 
   // ショップタイムゾーンで「その日」の UTC 範囲を算出（GAS_vs_APP_IMPLEMENTATION_GAP §5）
   const timezone = await getShopTimezoneForDaily(admin, shopId);

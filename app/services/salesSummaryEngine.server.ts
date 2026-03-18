@@ -119,6 +119,9 @@ export async function computeAndCacheDailySummary(
   targetDate: string,
 ): Promise<DailySummaryRowDTO> {
   const locIdRaw = locationId.replace("gid://shopify/Location/", "");
+  if (!locIdRaw || !/^\d+$/.test(locIdRaw)) {
+    throw new Error(`Invalid locationId: "${locationId}"`);
+  }
   const locationGid = locationId.startsWith("gid://")
     ? locationId
     : `gid://shopify/Location/${locationId}`;

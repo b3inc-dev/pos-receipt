@@ -62,14 +62,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     let targetLocations =
       locationIdsParam.length > 0
-        ? allLocations.filter((l) =>
-            locationIdsParam.some(
-              (id) =>
-                l.shopifyLocationGid === id ||
-                l.shopifyLocationGid.endsWith(`/${id}`) ||
-                id.endsWith(l.shopifyLocationGid.replace("gid://shopify/Location/", ""))
-            )
-          )
+        ? allLocations.filter((l) => {
+            const lNum = l.shopifyLocationGid.replace("gid://shopify/Location/", "");
+            if (!lNum) return false; // 空 GID は除外
+            return locationIdsParam.some((id) => {
+              const idNum = id.replace("gid://shopify/Location/", "");
+              return lNum === idNum;
+            });
+          })
         : allLocations;
 
     // locationIdsParam でフィルタした結果が空の場合は全ロケーションを対象にする
