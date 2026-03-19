@@ -43,6 +43,7 @@ interface SummaryOrder {
   lineItems: { nodes: { quantity: number }[] };
   refunds: SummaryRefund[];
   tags: string[];
+  retailLocation?: { id: string } | null;
 }
 
 type AdminClient = {
@@ -65,11 +66,26 @@ const SUMMARY_ORDERS_QUERY = `#graphql
           totalRefundedSet { shopMoney { amount currencyCode } }
         }
         tags
+        retailLocation { id }
       }
       pageInfo { hasNextPage endCursor }
     }
   }
 `;
+
+/** 注文を retailLocation が指定ロケーションと一致するもののみに絞る（ロケーションなし・オンライン等を除外） */
+function filterSummaryOrdersByRetailLocation(
+  orders: SummaryOrder[],
+  locationId: string,
+  locIdRaw: string
+): SummaryOrder[] {
+  const locationGid = locationId.startsWith("gid://") ? locationId : `gid://shopify/Location/${locIdRaw}`;
+  return orders.filter((o) => {
+    const rid = o.retailLocation?.id;
+    if (!rid) return false;
+    return rid === locationGid || rid === locIdRaw || rid.endsWith(`/${locIdRaw}`);
+  });
+}
 
 // ── Fetch All Orders（精算注文を除外） ─────────────────────────────────────────
 
@@ -129,9 +145,10 @@ export async function computeAndCacheDailySummary(
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
 
-  // 精算注文・キャンセル済みを除外（GAS_vs_APP §8.0 と settlementEngine と同様）
-  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
+  // 精算注文・キャンセル済みを除外。source_name:pos で POS 注文のみに限定し、ロケーションなし（オンラインストア等）を除外
+  const shopifyQuery = `location_id:${locIdRaw} source_name:pos created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const orders = await fetchSummaryOrders(admin, shopifyQuery);
+  const ordersAtLocation = filterSummaryOrdersByRetailLocation(orders, locationId, locIdRaw);
 
   let gross = 0;
   let refundsFromOrders = 0;
@@ -139,7 +156,7 @@ export async function computeAndCacheDailySummary(
   let itemCount = 0;
   let currency = "JPY";
 
-  for (const order of orders) {
+  for (const order of ordersAtLocation) {
     gross += Number(order.totalPriceSet.shopMoney.amount);
     for (const r of order.refunds ?? []) {
       refundsFromOrders += Number(r.totalRefundedSet?.shopMoney?.amount ?? 0);
@@ -149,7 +166,7 @@ export async function computeAndCacheDailySummary(
     itemCount += order.lineItems.nodes.reduce((sum, n) => sum + n.quantity, 0);
   }
 
-  const orderIdsCreatedInDay = new Set(orders.map((o) => o.id));
+  const orderIdsCreatedInDay = new Set(ordersAtLocation.map((o) => o.id));
   const overlay = await getRefundOverlayForDay(admin, locIdRaw, orderIdsCreatedInDay, dayRange);
   const actual = Math.max(0, gross - refundsFromOrders - overlay.refundTotal);
 

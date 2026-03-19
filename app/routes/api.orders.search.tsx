@@ -30,6 +30,15 @@ const ORDERS_SEARCH_QUERY = `#graphql
   }
 `;
 
+/** ロケーションIDを Shopify の location_id クエリ用の数値に正規化（GID の場合は末尾の数値のみ使用） */
+function normalizeLocationIdForQuery(locationId: string | null | undefined): string | null {
+  const s = locationId?.trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return s;
+  const m = s.match(/Location\/(\d+)$/) ?? s.match(/\/(\d+)$/);
+  return m?.[1] ?? null;
+}
+
 function buildSearchQuery(params: {
   q?: string | null;
   locationId?: string | null;
@@ -46,8 +55,10 @@ function buildSearchQuery(params: {
       parts.push(params.q.trim());
     }
   }
-  if (params.locationId?.trim()) {
-    parts.push(`location_id:${params.locationId.trim()}`);
+  const locIdRaw = normalizeLocationIdForQuery(params.locationId);
+  if (locIdRaw) {
+    parts.push(`location_id:${locIdRaw}`);
+    parts.push("source_name:pos");
   }
   if (params.dateFrom) {
     parts.push(`created_at:>=${params.dateFrom}T00:00:00Z`);
@@ -89,7 +100,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo ?? {};
 
-    const items = nodes.map((node: Record<string, unknown>) => {
+    let items = nodes.map((node: Record<string, unknown>) => {
       const n = node as {
         id: string;
         name: string;
@@ -109,6 +120,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
         createdAt: n.createdAt,
       };
     });
+
+    // locationId 指定時: retailLocation がそのロケーションの注文のみ返す（ロケーションなし・オンライン等を確実に除外）
+    const requestedLocRaw = normalizeLocationIdForQuery(locationId);
+    if (requestedLocRaw) {
+      const locationGid = `gid://shopify/Location/${requestedLocRaw}`;
+      items = items.filter((item) => {
+        const rid = item.locationId?.trim();
+        if (!rid) return false;
+        return rid === locationGid || rid === requestedLocRaw || rid.endsWith(`/${requestedLocRaw}`);
+      });
+    }
 
     return corsJson(
       {

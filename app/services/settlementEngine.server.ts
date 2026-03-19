@@ -91,6 +91,7 @@ interface ShopifyOrder {
   transactions: ShopifyTransaction[];
   refunds: ShopifyRefund[];
   tags: string[];
+  retailLocation?: { id: string } | null;
 }
 
 type AdminClient = {
@@ -132,11 +133,26 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
           }
         }
         tags
+        retailLocation { id }
       }
       pageInfo { hasNextPage endCursor }
     }
   }
 `;
+
+/** 注文を retailLocation が指定ロケーションと一致するもののみに絞る（ロケーションなし・オンライン等を除外） */
+function filterOrdersByRetailLocation(
+  orders: ShopifyOrder[],
+  locationId: string,
+  locIdRaw: string
+): ShopifyOrder[] {
+  const locationGid = locationId.startsWith("gid://") ? locationId : `gid://shopify/Location/${locIdRaw}`;
+  return orders.filter((o) => {
+    const rid = o.retailLocation?.id;
+    if (!rid) return false;
+    return rid === locationGid || rid === locIdRaw || rid.endsWith(`/${locIdRaw}`);
+  });
+}
 
 /** 返金再集計用: updated_at でその日に更新された注文を取得（refunds.createdAt でフィルタするため） */
 const REFUNDS_ORDERS_QUERY = `#graphql
@@ -145,6 +161,7 @@ const REFUNDS_ORDERS_QUERY = `#graphql
       nodes {
         id
         tags
+        retailLocation { id }
         refunds {
           id
           createdAt
@@ -217,6 +234,21 @@ interface OrderWithRefundsCreatedAt {
   id: string;
   tags: string[];
   refunds: ShopifyRefund[];
+  retailLocation?: { id: string } | null;
+}
+
+/** 返金用注文を retailLocation が指定ロケーションと一致するもののみに絞る */
+function filterOrdersUpdatedByRetailLocation(
+  orders: OrderWithRefundsCreatedAt[],
+  locationId: string,
+  locIdRaw: string
+): OrderWithRefundsCreatedAt[] {
+  const locationGid = locationId.startsWith("gid://") ? locationId : `gid://shopify/Location/${locIdRaw}`;
+  return orders.filter((o) => {
+    const rid = o.retailLocation?.id;
+    if (!rid) return false;
+    return rid === locationGid || rid === locIdRaw || rid.endsWith(`/${locIdRaw}`);
+  });
 }
 
 async function fetchOrdersUpdatedInDayRange(
@@ -251,6 +283,7 @@ async function fetchOrdersUpdatedInDayRange(
         orders.push({
           id: node.id,
           tags: node.tags,
+          retailLocation: (node as OrderWithRefundsCreatedAt).retailLocation,
           refunds: (node.refunds ?? []).map((r) => ({
             ...r,
             transactions: r.transactions?.nodes ?? [],
@@ -321,9 +354,11 @@ export async function getRefundOverlayForDay(
 ): Promise<{ refundTotal: number }> {
   const startIso = dayRange.startUtc.toISOString().replace(/\.000Z$/, "Z");
   const endIso = dayRange.endUtc.toISOString();
-  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement -status:cancelled`;
+  const locationGid = `gid://shopify/Location/${locIdRaw}`;
+  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement -status:cancelled`;
   const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
-  const overlay = computeRefundsOnlyForDay(ordersUpdated, orderIdsCreatedInDay, dayRange);
+  const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationGid, locIdRaw);
+  const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
   return { refundTotal: overlay.refundTotal };
 }
 
@@ -472,11 +507,12 @@ export async function buildSettlementPreview(
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
 
-  // GAS と同一: 精算注文・キャンセル済みをクエリ段階で除外（精算注文は tags: ["settlement"] で作成。Shopify によっては -tag より tag_not が有効な場合あり）
-  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
+  // GAS と同一: 精算注文・キャンセル済みをクエリ段階で除外。source_name:pos で POS 注文のみに限定し、ロケーションなし（オンラインストア等）を除外
+  const shopifyQuery = `location_id:${locIdRaw} source_name:pos created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const orders = await fetchAllOrders(admin, shopifyQuery);
+  const ordersAtLocation = filterOrdersByRetailLocation(orders, locationId, locIdRaw);
 
-  const orderIdsCreatedInDay = new Set(orders.map((o) => o.id));
+  const orderIdsCreatedInDay = new Set(ordersAtLocation.map((o) => o.id));
 
   let total = 0;
   let tax = 0;
@@ -484,9 +520,9 @@ export async function buildSettlementPreview(
   let refundTotal = 0;
   let itemCount = 0;
   let refundCount = 0;
-  const currency = orders[0]?.totalPriceSet?.shopMoney?.currencyCode ?? "JPY";
+  const currency = ordersAtLocation[0]?.totalPriceSet?.shopMoney?.currencyCode ?? "JPY";
 
-  for (const order of orders) {
+  for (const order of ordersAtLocation) {
     total += Number(order.totalPriceSet.shopMoney.amount);
     tax += Number(order.totalTaxSet.shopMoney.amount);
     discounts += Number(order.totalDiscountsSet.shopMoney.amount);
@@ -498,9 +534,10 @@ export async function buildSettlementPreview(
   }
 
   // 返金再集計（別パス）: その日に処理された返金のうち、注文が「その日作成」でない分を追加（GAS overlayRefundsAndRecalc 相当）
-  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
+  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
-  const overlay = computeRefundsOnlyForDay(ordersUpdated, orderIdsCreatedInDay, dayRange);
+  const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationId, locIdRaw);
+  const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
 
   let netSales = total - discounts;
 
