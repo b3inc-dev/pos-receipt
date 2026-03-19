@@ -7,6 +7,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { SALES_SUMMARY_SETTINGS_KEY, DEFAULT_SALES_SUMMARY_SETTINGS } from "../utils/appSettings.server";
@@ -88,6 +89,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     if (locationGids.length === 0) {
       return corsJson({ rows: [], totals: {}, dateFrom, dateTo, displayOptions: merged });
+    }
+
+    // 期間表示時は先に日次キャッシュを再計算する（ロケーション除外ロジック変更後も正しい数字が出るように）
+    const MAX_DAYS_TO_REFRESH = 31;
+    if (dateFrom && dateTo) {
+      const start = new Date(dateFrom + "T00:00:00Z").getTime();
+      const end = new Date(dateTo + "T23:59:59Z").getTime();
+      const days: string[] = [];
+      for (let t = start; t <= end && days.length < MAX_DAYS_TO_REFRESH; t += 86400000) {
+        days.push(new Date(t).toISOString().slice(0, 10));
+      }
+      await Promise.all(
+        targetLocations.flatMap((loc) =>
+          days.map((targetDate) =>
+            computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, targetDate)
+          )
+        )
+      );
     }
 
     // 日次キャッシュから集計

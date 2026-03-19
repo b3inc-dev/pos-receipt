@@ -96,7 +96,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       });
     }
 
-    // 各ロケーションを並列計算・キャッシュ
+    // 日次は期間と同様、常に再計算してキャッシュを更新してから返す（キャッシュを読まず最新ロジックで計算）
     const rows: Array<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> = await Promise.all(
       targetLocations.map(async (loc): Promise<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> => {
         const row = await computeAndCacheDailySummary(
