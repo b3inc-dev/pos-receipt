@@ -16,7 +16,6 @@ import { searchOrders, getOrder } from "../../common/orderPickerApi.js";
 import { previewReceipt, issueReceipt, getReceiptHistory } from "../../common/receiptApi.js";
 import { getSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
-import { getAppUrl, setApiBaseOverride, getApiBaseOverride } from "../../common/appUrl.js";
 
 const STORAGE_KEY = "pos_receipt_order_id";
 
@@ -198,8 +197,6 @@ function SearchView({ loading, error, setError, setLoading, onSelect, onHistory 
   const [dateTo, setDateTo] = useState("");
   const [items, setItems] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
-  const [devUrlInput, setDevUrlInput] = useState("");
-  const apiOverride = getApiBaseOverride();
 
   const { locationIdParam } = getSessionLocation();
   const onSearch = useCallback(async () => {
@@ -245,23 +242,6 @@ function SearchView({ loading, error, setError, setLoading, onSelect, onHistory 
   return (
     <s-page heading="取引を選択（領収書）">
       <s-scroll-box>
-        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-          <s-stack gap="small">
-            <s-text fontWeight="bold" fontSize="small">開発時: 接続先</s-text>
-            <s-text tone="subdued" fontSize="small">いま: {getAppUrl()}</s-text>
-            {apiOverride ? (
-              <s-stack gap="extraSmall">
-                <s-text tone="success" fontSize="small">固定中: {apiOverride}</s-text>
-                <s-button kind="plain" onClick={() => { setApiBaseOverride(""); setDevUrlInput(""); }}>解除</s-button>
-              </s-stack>
-            ) : (
-              <s-stack gap="extraSmall">
-                <s-text-field label="トンネルURL" value={devUrlInput} onInput={(e) => setDevUrlInput(e?.currentTarget?.value ?? "")} />
-                <s-button kind="secondary" disabled={!devUrlInput.trim()} onClick={() => { const u = devUrlInput.trim().replace(/\/$/, ""); if (u) setApiBaseOverride(u); }}>開発サーバーを使う</s-button>
-              </s-stack>
-            )}
-          </s-stack>
-        </s-box>
         <s-box padding="base">
           <s-stack gap="base">
             <s-text-field
