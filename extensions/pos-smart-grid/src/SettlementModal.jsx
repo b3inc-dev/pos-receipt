@@ -199,17 +199,18 @@ function SettlementModal() {
     setMonthDailyError("");
     try {
       const daysInMonth = new Date(year, month, 0).getDate();
-      const requests = [];
+      const list = [];
       for (let day = 1; day <= daysInMonth; day++) {
         const targetDate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-        requests.push(
-          getDailySummary({ targetDate, locationIds: [locationId] }).then((res) => ({
-            targetDate,
-            row: Array.isArray(res?.rows) ? (res.rows[0] ?? null) : null,
-          }))
-        );
+        // Throttled(HTTP 500) 回避のため、日次APIは逐次呼び出しにする
+        // （同時31本のリクエストを避ける）
+        // eslint-disable-next-line no-await-in-loop
+        const res = await getDailySummary({ targetDate, locationIds: [locationId] });
+        list.push({
+          targetDate,
+          row: Array.isArray(res?.rows) ? (res.rows[0] ?? null) : null,
+        });
       }
-      const list = await Promise.all(requests);
       const latestSettlementByDate = new Map();
       for (const item of monthlyHistoryItems) {
         const key = String(item?.targetDate || "");
@@ -226,9 +227,8 @@ function SettlementModal() {
       const rows = list
         .map(({ targetDate, row }) => ({
           targetDate,
-          actual: Number(row?.actual ?? 0),
-          orders: Number(row?.orders ?? 0),
-          items: Number(row?.items ?? 0),
+          // 日次APIの actual はサーバー上で純売上（netSales）として計算されている
+          netSales: Number(row?.actual ?? 0),
           settlement: latestSettlementByDate.get(targetDate) ?? null,
         }))
         .sort((a, b) => (a.targetDate < b.targetDate ? 1 : -1));
@@ -490,7 +490,7 @@ function MainView({
     <s-page heading="精算">
       <s-stack gap="none" blockSize="100%" inlineSize="100%" minBlockSize="0">
         <s-box padding="base">
-          <s-stack gap="base">
+          <s-stack gap="small">
             {locationLoadError ? (
               <s-stack gap="small">
                 <s-text tone="critical">{locationLoadError}</s-text>
@@ -498,40 +498,33 @@ function MainView({
                   再読み込み
                 </s-button>
               </s-stack>
-            ) : locations.length > 1 ? (
-              <s-select
-                label="ロケーション"
-                value={selectedLocation?.locationId ?? ""}
-                onChange={handleLocChange}
-              >
-                {locations.map((loc) => (
-                  <s-option key={loc.locationId} value={loc.locationId}>
-                    {loc.locationName}
-                  </s-option>
-                ))}
-              </s-select>
-            ) : selectedLocation ? (
-              <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="extraSmall">
-                  <s-text tone="subdued" fontSize="small">ロケーション</s-text>
-                  <s-text fontWeight="bold">{selectedLocation.locationName}</s-text>
-                </s-stack>
-              </s-box>
-            ) : loading ? (
-              <s-text tone="subdued">ロケーションを読み込み中…</s-text>
             ) : (
-              <s-stack gap="small">
-                <s-text tone="subdued">ロケーションが見つかりません</s-text>
-                <s-button kind="plain" onClick={onRetryLocations}>再読み込み</s-button>
-              </s-stack>
-            )}
-          </s-stack>
-        </s-box>
-
-        <s-box padding="base" paddingBlockStart="none">
-          <s-stack direction="horizontal" align="space-between" blockAlignment="center" gap="small">
-            <s-text fontWeight="bold">{selectedLocation?.locationName ?? "ロケーション未選択"}</s-text>
-            <s-stack direction="horizontal" gap="small">
+              <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
+                <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+                  {locations.length > 1 ? (
+                    <s-select
+                      label=""
+                      value={selectedLocation?.locationId ?? ""}
+                      onChange={handleLocChange}
+                    >
+                      {locations.map((loc) => (
+                        <s-option key={loc.locationId} value={loc.locationId}>
+                          {loc.locationName}
+                        </s-option>
+                      ))}
+                    </s-select>
+                  ) : selectedLocation ? (
+                    <s-text fontWeight="bold">{selectedLocation.locationName}</s-text>
+                  ) : loading ? (
+                    <s-text tone="subdued">ロケーションを読み込み中…</s-text>
+                  ) : (
+                    <s-stack gap="small">
+                      <s-text tone="subdued">ロケーションが見つかりません</s-text>
+                      <s-button kind="plain" onClick={onRetryLocations}>再読み込み</s-button>
+                    </s-stack>
+                  )}
+                </s-box>
+                <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end">
               <s-stack gap="extraSmall">
                 <s-button
                   kind="secondary"
@@ -600,7 +593,9 @@ function MainView({
                 </s-box>
               ) : null}
               </s-stack>
-            </s-stack>
+                </s-stack>
+              </s-stack>
+            )}
           </s-stack>
         </s-box>
         <s-divider />
@@ -619,28 +614,13 @@ function MainView({
                   <s-box key={row.targetDate}>
                     <s-clickable onClick={() => onOpenDailyRow(row)}>
                       <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                        <s-stack gap="extraSmall">
-                          <s-stack direction="horizontal" align="space-between">
+                        <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
+                          <s-box style={{ flex: "1 1 0", minInlineSize: 0, textAlign: "start" }}>
                             <s-text fontWeight="bold">{row.targetDate}</s-text>
-                            <s-text fontWeight="bold">¥{Number(row.actual).toLocaleString()}</s-text>
-                          </s-stack>
-                          <s-stack direction="horizontal" align="space-between">
-                            <s-text tone="subdued" fontSize="small">
-                              {row.orders}件 / {row.items}点
-                            </s-text>
-                            <s-text tone="subdued" fontSize="small">
-                              {row.settlement
-                                ? (row.settlement.periodLabel?.startsWith("点検_") ? "点検済み" : "精算済み")
-                                : "未精算"}
-                            </s-text>
-                          </s-stack>
-                          <s-text tone="subdued" fontSize="small">
-                            {row.settlement
-                              ? (row.settlement.printMode === "order_based"
-                                ? `注文: ${row.settlement.sourceOrderName ?? "-"}`
-                                : "CloudPRNT")
-                              : "タップで日別明細"}
-                          </s-text>
+                          </s-box>
+                          <s-box style={{ flex: "0 0 auto", textAlign: "end" }}>
+                            <s-text fontWeight="bold">¥{Number(row.netSales).toLocaleString()}</s-text>
+                          </s-box>
                         </s-stack>
                       </s-box>
                     </s-clickable>
@@ -657,18 +637,18 @@ function MainView({
               <s-text tone="critical">{error}</s-text>
             </s-box>
           ) : null}
-          <s-stack direction="horizontal" gap="small">
-            <s-box style={{ flex: 1 }}>
+          <s-stack direction="inline" gap="small" justifyContent="space-between" alignItems="center">
+            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
               <s-button kind="secondary" onClick={onPreview} loading={loading} disabled={!selectedLocation}>
                 精算プレビュー
               </s-button>
             </s-box>
-            <s-box style={{ flex: 1 }}>
+            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
               <s-button kind="secondary" onClick={onInspection} loading={loading} disabled={!selectedLocation}>
                 点検
               </s-button>
             </s-box>
-            <s-box style={{ flex: 1 }}>
+            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
               <s-button kind="primary" onClick={onSettle} loading={loading} disabled={!selectedLocation}>
                 精算
               </s-button>
@@ -694,6 +674,74 @@ function PreviewView({
   if (!preview) return null;
   const printModeLabel = printMode === "cloudprnt_direct" ? "CloudPRNT直印字" : "注文経由印字";
 
+  const headerRows = [
+    { label: "ロケーション", value: preview.locationName ?? "-", valueBold: true },
+    { label: "対象日", value: preview.targetDate ?? "-" },
+    { label: "印字方式", value: printModeLabel },
+  ];
+
+  const summaryRows = [
+    { label: "総売上", value: `¥${Number(preview.total).toLocaleString()}`, valueBold: true },
+    { label: "純売上", value: `¥${Number(preview.netSales).toLocaleString()}` },
+    { label: "消費税", value: `¥${Number(preview.tax).toLocaleString()}` },
+    { label: "割引", value: `▲¥${Number(preview.discounts).toLocaleString()}` },
+    { label: "返金", value: `▲¥${Number(preview.refundTotal).toLocaleString()}` },
+  ];
+  if (Number(preview.voucherChangeAmount) > 0) {
+    summaryRows.push({
+      label: "商品券釣有り差額",
+      value: `¥${Number(preview.voucherChangeAmount).toLocaleString()}`,
+    });
+  }
+
+  const countRows = [
+    { label: "売上件数", value: `${preview.orderCount}件` },
+    { label: "返金件数", value: `${preview.refundCount}件` },
+    { label: "点数", value: `${preview.itemCount}点` },
+  ];
+
+  const paymentDetailRows = [];
+  if (preview.paymentSections?.length > 0) {
+    for (const section of preview.paymentSections) {
+      paymentDetailRows.push({
+        key: `${section.gateway}-net`,
+        label: section.label,
+        value: `¥${Number(section.net).toLocaleString()}`,
+        labelBold: true,
+      });
+      paymentDetailRows.push({
+        key: `${section.gateway}-tx`,
+        label: "件数",
+        value: `${Number(section.txCount ?? 0)}件${
+          Number(section.refundCount ?? 0) > 0 ? `（返金${section.refundCount}件）` : ""
+        }`,
+      });
+      if (Number(section.refund) > 0) {
+        paymentDetailRows.push({
+          key: `${section.gateway}-refund`,
+          label: "返金",
+          value: `▲¥${Number(section.refund).toLocaleString()}`,
+        });
+      }
+    }
+  }
+
+  const eventRows = [];
+  for (const ev of preview.appliedSpecialRefundEvents ?? []) {
+    eventRows.push({
+      key: `sr-${ev.id}`,
+      label: `${ev.sourceOrderName ?? "-"}（${ev.eventType ?? "-"}）`,
+      value: `¥${Number(ev.amount).toLocaleString()}`,
+    });
+  }
+  for (const ev of preview.appliedVoucherAdjustments ?? []) {
+    eventRows.push({
+      key: `va-${ev.id}`,
+      label: `${ev.sourceOrderName ?? "-"}（商品券釣有り）`,
+      value: `¥${Number(ev.voucherChangeAmount).toLocaleString()}`,
+    });
+  }
+
   return (
     <s-page heading={isInspection ? "点検レシート プレビュー" : "精算プレビュー"}>
       <s-scroll-box>
@@ -702,85 +750,84 @@ function PreviewView({
 
             {/* ヘッダー */}
             <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="extraSmall">
-                <s-text fontWeight="bold">{preview.locationName}</s-text>
-                <s-text tone="subdued" fontSize="small">対象日: {preview.targetDate}</s-text>
-                <s-text tone="subdued" fontSize="small">印字方式: {printModeLabel}</s-text>
+              <s-stack gap="none">
+                {headerRows.map((row, i) => (
+                  <SummaryRow
+                    key={row.label}
+                    label={row.label}
+                    value={row.value}
+                    valueBold={row.valueBold}
+                    divider={i < headerRows.length - 1}
+                  />
+                ))}
               </s-stack>
             </s-box>
 
             {/* 集計サマリー */}
             <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="small">
-                <SummaryRow label="総売上" value={`¥${Number(preview.total).toLocaleString()}`} bold />
-                <SummaryRow label="純売上" value={`¥${Number(preview.netSales).toLocaleString()}`} />
-                <SummaryRow label="消費税" value={`¥${Number(preview.tax).toLocaleString()}`} />
-                <SummaryRow label="割引" value={`▲¥${Number(preview.discounts).toLocaleString()}`} />
-                <SummaryRow label="返金" value={`▲¥${Number(preview.refundTotal).toLocaleString()}`} />
-                {Number(preview.voucherChangeAmount) > 0 ? (
+              <s-stack gap="none">
+                {summaryRows.map((row, i) => (
                   <SummaryRow
-                    label="商品券釣有り差額"
-                    value={`¥${Number(preview.voucherChangeAmount).toLocaleString()}`}
+                    key={row.label}
+                    label={row.label}
+                    value={row.value}
+                    valueBold={row.valueBold}
+                    divider={i < summaryRows.length - 1}
                   />
-                ) : null}
+                ))}
               </s-stack>
             </s-box>
 
             {/* 件数・点数 */}
             <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="small">
-                <SummaryRow label="売上件数" value={`${preview.orderCount}件`} />
-                <SummaryRow label="返金件数" value={`${preview.refundCount}件`} />
-                <SummaryRow label="点数" value={`${preview.itemCount}点`} />
+              <s-stack gap="none">
+                {countRows.map((row, i) => (
+                  <SummaryRow
+                    key={row.label}
+                    label={row.label}
+                    value={row.value}
+                    divider={i < countRows.length - 1}
+                  />
+                ))}
               </s-stack>
             </s-box>
 
             {/* 支払方法別内訳（売上額・返金額・件数） */}
-            {preview.paymentSections?.length > 0 ? (
+            {paymentDetailRows.length > 0 ? (
               <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-text fontWeight="bold" fontSize="small">支払方法別内訳</s-text>
-                <s-stack gap="extraSmall" paddingBlockStart="small">
-                  {preview.paymentSections.map((section) => (
-                    <s-box key={section.gateway} paddingBlock="extraSmall">
-                      <s-stack gap="extraSmall">
-                        <s-stack direction="horizontal" align="space-between">
-                          <s-text fontWeight="bold" fontSize="small">{section.label}</s-text>
-                          <s-text fontSize="small">¥{Number(section.net).toLocaleString()}</s-text>
-                        </s-stack>
-                        <s-stack direction="horizontal" align="space-between">
-                          <s-text tone="subdued" fontSize="small">　件数</s-text>
-                          <s-text tone="subdued" fontSize="small">
-                            {Number(section.txCount ?? 0)}件
-                            {Number(section.refundCount ?? 0) > 0 ? `（返金${section.refundCount}件）` : ""}
-                          </s-text>
-                        </s-stack>
-                        {Number(section.refund) > 0 ? (
-                          <s-stack direction="horizontal" align="space-between">
-                            <s-text tone="subdued" fontSize="small">　返金</s-text>
-                            <s-text tone="subdued" fontSize="small">▲¥{Number(section.refund).toLocaleString()}</s-text>
-                          </s-stack>
-                        ) : null}
-                      </s-stack>
-                    </s-box>
+                <s-stack gap="none">
+                  <s-box paddingBlockEnd="small">
+                    <s-text fontWeight="bold" fontSize="small">支払方法別内訳</s-text>
+                  </s-box>
+                  <s-divider />
+                  {paymentDetailRows.map((row, i) => (
+                    <SummaryRow
+                      key={row.key}
+                      label={row.label}
+                      value={row.value}
+                      labelBold={row.labelBold}
+                      divider={i < paymentDetailRows.length - 1}
+                    />
                   ))}
                 </s-stack>
               </s-box>
             ) : null}
 
             {/* 適用済み特殊返金・商品券調整 */}
-            {(preview.appliedSpecialRefundEvents?.length > 0 || preview.appliedVoucherAdjustments?.length > 0) ? (
+            {eventRows.length > 0 ? (
               <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-text fontWeight="bold" fontSize="small">適用済みイベント</s-text>
-                <s-stack gap="extraSmall" paddingBlockStart="small">
-                  {preview.appliedSpecialRefundEvents?.map((ev) => (
-                    <s-text key={ev.id} tone="subdued" fontSize="small">
-                      {ev.sourceOrderName} — {ev.eventType} ¥{Number(ev.amount).toLocaleString()}
-                    </s-text>
-                  ))}
-                  {preview.appliedVoucherAdjustments?.map((ev) => (
-                    <s-text key={ev.id} tone="subdued" fontSize="small">
-                      {ev.sourceOrderName} — 商品券釣有り ¥{Number(ev.voucherChangeAmount).toLocaleString()}
-                    </s-text>
+                <s-stack gap="none">
+                  <s-box paddingBlockEnd="small">
+                    <s-text fontWeight="bold" fontSize="small">適用済みイベント</s-text>
+                  </s-box>
+                  <s-divider />
+                  {eventRows.map((row, i) => (
+                    <SummaryRow
+                      key={row.key}
+                      label={row.label}
+                      value={row.value}
+                      divider={i < eventRows.length - 1}
+                    />
                   ))}
                 </s-stack>
               </s-box>
@@ -824,12 +871,22 @@ function ConfirmView({ preview, isInspection, printMode, loading, error, onExecu
             </s-text>
 
             <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="small">
-                <SummaryRow label="ロケーション" value={preview?.locationName ?? "-"} />
-                <SummaryRow label="対象日" value={preview?.targetDate ?? "-"} />
-                <SummaryRow label="総売上" value={`¥${Number(preview?.total ?? 0).toLocaleString()}`} bold />
-                <SummaryRow label="件数" value={`${preview?.orderCount ?? 0}件`} />
-                <SummaryRow label="印字方式" value={printModeLabel} />
+              <s-stack gap="none">
+                {[
+                  { label: "ロケーション", value: preview?.locationName ?? "-" },
+                  { label: "対象日", value: preview?.targetDate ?? "-" },
+                  { label: "総売上", value: `¥${Number(preview?.total ?? 0).toLocaleString()}`, valueBold: true },
+                  { label: "件数", value: `${preview?.orderCount ?? 0}件` },
+                  { label: "印字方式", value: printModeLabel },
+                ].map((row, i, arr) => (
+                  <SummaryRow
+                    key={row.label}
+                    label={row.label}
+                    value={row.value}
+                    valueBold={row.valueBold}
+                    divider={i < arr.length - 1}
+                  />
+                ))}
               </s-stack>
             </s-box>
 
@@ -895,17 +952,27 @@ function DoneView({ result, isInspection, onBack }) {
             )}
 
             <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="small">
-                <SummaryRow
-                  label="精算ID"
-                  value={result?.settlementId ? `…${result.settlementId.slice(-8)}` : "-"}
-                />
-                <SummaryRow label="対象日" value={result?.preview?.targetDate ?? "-"} />
-                <SummaryRow
-                  label="総売上"
-                  value={`¥${Number(result?.preview?.total ?? 0).toLocaleString()}`}
-                  bold
-                />
+              <s-stack gap="none">
+                {[
+                  {
+                    label: "精算ID",
+                    value: result?.settlementId ? `…${result.settlementId.slice(-8)}` : "-",
+                  },
+                  { label: "対象日", value: result?.preview?.targetDate ?? "-" },
+                  {
+                    label: "総売上",
+                    value: `¥${Number(result?.preview?.total ?? 0).toLocaleString()}`,
+                    valueBold: true,
+                  },
+                ].map((row, i, arr) => (
+                  <SummaryRow
+                    key={row.label}
+                    label={row.label}
+                    value={row.value}
+                    valueBold={row.valueBold}
+                    divider={i < arr.length - 1}
+                  />
+                ))}
               </s-stack>
             </s-box>
 
@@ -930,24 +997,33 @@ function HistoryDetailView({ item, onBack }) {
           ) : (
             <s-stack gap="small">
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <SummaryRow label="対象日" value={item.targetDate ?? "-"} />
-                  <SummaryRow label="総売上" value={`¥${Number(item.total ?? 0).toLocaleString()}`} bold />
-                  <SummaryRow label="件数" value={`${Number(item.orderCount ?? 0)}件`} />
-                  <SummaryRow label="点数" value={`${Number(item.itemCount ?? 0)}点`} />
-                  <SummaryRow
-                    label="種別"
-                    value={item.periodLabel?.startsWith("点検_") ? "点検" : "精算"}
-                  />
-                  <SummaryRow label="ステータス" value={item.status ?? "-"} />
-                  <SummaryRow
-                    label="印字方式"
-                    value={
-                      item.printMode === "order_based"
-                        ? `注文経由（${item.sourceOrderName ?? "-"}）`
-                        : "CloudPRNT"
-                    }
-                  />
+                <s-stack gap="none">
+                  {[
+                    { label: "対象日", value: item.targetDate ?? "-" },
+                    { label: "総売上", value: `¥${Number(item.total ?? 0).toLocaleString()}`, valueBold: true },
+                    { label: "件数", value: `${Number(item.orderCount ?? 0)}件` },
+                    { label: "点数", value: `${Number(item.itemCount ?? 0)}点` },
+                    {
+                      label: "種別",
+                      value: item.periodLabel?.startsWith("点検_") ? "点検" : "精算",
+                    },
+                    { label: "ステータス", value: item.status ?? "-" },
+                    {
+                      label: "印字方式",
+                      value:
+                        item.printMode === "order_based"
+                          ? `注文経由（${item.sourceOrderName ?? "-"}）`
+                          : "CloudPRNT",
+                    },
+                  ].map((row, i, arr) => (
+                    <SummaryRow
+                      key={row.label}
+                      label={row.label}
+                      value={row.value}
+                      valueBold={row.valueBold}
+                      divider={i < arr.length - 1}
+                    />
+                  ))}
                 </s-stack>
               </s-box>
             </s-stack>
@@ -962,11 +1038,41 @@ function HistoryDetailView({ item, onBack }) {
 }
 
 // ── ヘルパー ──────────────────────────────────────────────────────────────────
-function SummaryRow({ label, value, bold = false }) {
+/** 明細1行：左に項目名、右寄せに値。下に区切り線（最下行は divider=false） */
+function SummaryRow({
+  label,
+  value,
+  bold, // 旧 props 互換（valueBold と同じ意味）
+  valueBold = false,
+  labelBold = false,
+  divider = true,
+}) {
+  const vb = valueBold || bold;
   return (
-    <s-stack direction="horizontal" align="space-between">
-      <s-text tone="subdued" fontSize="small">{label}</s-text>
-      <s-text fontWeight={bold ? "bold" : undefined}>{value}</s-text>
+    <s-stack gap="none">
+      <s-stack
+        direction="inline"
+        justifyContent="space-between"
+        alignItems="center"
+        gap="small"
+        style={{ width: "100%", paddingBlock: "var(--s-space-extra-small, 6px)" }}
+      >
+        <s-box style={{ flex: "1 1 0", minInlineSize: 0, paddingInlineEnd: "small" }}>
+          <s-text
+            tone="subdued"
+            fontSize="small"
+            fontWeight={labelBold ? "bold" : undefined}
+          >
+            {label}
+          </s-text>
+        </s-box>
+        <s-box style={{ flex: "0 1 auto", minInlineSize: 0, textAlign: "end" }}>
+          <s-text fontWeight={vb ? "bold" : undefined} fontSize="small">
+            {value}
+          </s-text>
+        </s-box>
+      </s-stack>
+      {divider ? <s-divider /> : null}
     </s-stack>
   );
 }
