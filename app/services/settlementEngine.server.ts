@@ -642,16 +642,16 @@ export async function buildSettlementPreview(
   total = eventTotals.total;
   refundTotal = eventTotals.refundTotal;
 
-  // GAS 寄せ: 支払内訳の行合計（sale-refund）を total として税・純売上を再計算
-  const round2 = (n: number) => Math.round(n * 100) / 100;
-  const sectionsTotal = round2(
+  // 小数は不要運用のため、精算数値はすべて四捨五入（整数）で統一
+  const roundInt = (n: number) => Math.round(n);
+  const sectionsTotal = roundInt(
     paymentSections.reduce((sum, sec) => sum + Number(sec.net || 0) - Number(sec.refund || 0), 0)
   );
   total = Math.max(0, sectionsTotal);
   const settlementSettings = await getAppSetting<{ taxRatePercent?: number }>(shopId, SETTLEMENT_SETTINGS_KEY);
   const taxRatePercent = Number(settlementSettings?.taxRatePercent) || 10;
-  tax = round2((total * taxRatePercent) / (100 + taxRatePercent));
-  netSales = round2(total - tax);
+  tax = roundInt((total * taxRatePercent) / (100 + taxRatePercent));
+  netSales = roundInt(total - tax);
 
   for (const sec of paymentSections) {
     if (sec.label === sec.gateway) {
@@ -659,21 +659,27 @@ export async function buildSettlementPreview(
     }
   }
 
+  paymentSections = paymentSections.map((sec) => ({
+    ...sec,
+    net: roundInt(sec.net),
+    refund: roundInt(sec.refund),
+  }));
+
   return {
     locationId,
     locationName,
     targetDate,
     currency,
-    total: round2(total),
-    netSales: round2(netSales),
-    tax: round2(tax),
-    discounts: round2(discounts),
-    vipPointsUsed: round2(vipPointsUsed),
-    refundTotal: round2(refundTotal),
+    total: roundInt(total),
+    netSales: roundInt(netSales),
+    tax: roundInt(tax),
+    discounts: roundInt(discounts),
+    vipPointsUsed: roundInt(vipPointsUsed),
+    refundTotal: roundInt(refundTotal),
     orderCount: saleOrderSet.size,
     refundCount: Math.max(refundCount, refundOrderSet.size),
     itemCount,
-    voucherChangeAmount: round2(voucherChangeAmount),
+    voucherChangeAmount: roundInt(voucherChangeAmount),
     paymentSections,
     appliedSpecialRefundEvents: otherEvents.map((e) => ({
       id: e.id,

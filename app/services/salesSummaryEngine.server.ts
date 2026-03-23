@@ -8,7 +8,7 @@
  */
 import prisma from "../db.server";
 import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
-import { getRefundOverlayForDay } from "./settlementEngine.server";
+import { buildSettlementPreview } from "./settlementEngine.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,12 +35,22 @@ export interface DailySummaryRowDTO {
 interface SummaryRefund {
   createdAt?: string;
   totalRefundedSet: { shopMoney: { amount: string; currencyCode: string } };
+  refundLineItems?: { quantity: number }[];
+}
+
+interface SummaryTransaction {
+  id: string;
+  createdAt?: string;
+  kind: string;
+  status: string;
+  amountSet: { shopMoney: { amount: string; currencyCode: string } };
 }
 
 interface SummaryOrder {
   id: string;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   lineItems: { nodes: { quantity: number }[] };
+  transactions: SummaryTransaction[];
   refunds: SummaryRefund[];
   tags: string[];
   retailLocation?: { id: string } | null;
@@ -61,8 +71,18 @@ const SUMMARY_ORDERS_QUERY = `#graphql
         lineItems(first: 250) {
           nodes { quantity }
         }
+        transactions(first: 50) {
+          id
+          createdAt
+          kind
+          status
+          amountSet { shopMoney { amount currencyCode } }
+        }
         refunds {
           createdAt
+          refundLineItems(first: 250) {
+            nodes { quantity }
+          }
           totalRefundedSet { shopMoney { amount currencyCode } }
         }
         tags
@@ -119,11 +139,32 @@ async function fetchSummaryOrders(admin: AdminClient, query: string): Promise<Su
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
 
-    for (const node of nodes) {
+    for (const node of nodes as Array<SummaryOrder & {
+      refunds?: Array<SummaryRefund & { refundLineItems?: { nodes?: { quantity: number }[] } | { quantity: number }[] }>;
+    }>) {
       // タグ表記ゆれ（SETTLEMENT / settlement）に備えて大文字小文字無視で精算注文を除外
       const isSettlement = (node.tags ?? []).some((t) => String(t).toLowerCase() === "settlement");
       if (!isSettlement) {
-        orders.push(node);
+        orders.push({
+          ...node,
+          transactions: node.transactions ?? [],
+          refunds: (node.refunds ?? []).map((r) => {
+            const rawRefundLineItems = r.refundLineItems as unknown;
+            const normalizedRefundLineItems: { quantity: number }[] = Array.isArray(rawRefundLineItems)
+              ? rawRefundLineItems as { quantity: number }[]
+              : (
+                rawRefundLineItems &&
+                typeof rawRefundLineItems === "object" &&
+                "nodes" in rawRefundLineItems
+              )
+                ? ((rawRefundLineItems as { nodes?: { quantity: number }[] }).nodes ?? [])
+                : [];
+            return {
+              ...r,
+              refundLineItems: normalizedRefundLineItems,
+            };
+          }),
+        });
       }
     }
 
@@ -154,30 +195,18 @@ export async function computeAndCacheDailySummary(
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
 
-  // 精算注文・キャンセル済みを除外。source_name:pos で POS 注文のみに限定し、ロケーションなし（オンラインストア等）を除外
-  const shopifyQuery = `location_id:${locIdRaw} source_name:pos created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
-  const orders = await fetchSummaryOrders(admin, shopifyQuery);
-  const ordersAtLocation = filterSummaryOrdersByRetailLocation(orders, locationId, locIdRaw);
-
-  let gross = 0;
-  let refundsFromOrders = 0;
-  let orderCount = 0;
-  let itemCount = 0;
-  let currency = "JPY";
-
-  for (const order of ordersAtLocation) {
-    gross += Number(order.totalPriceSet.shopMoney.amount);
-    for (const r of order.refunds ?? []) {
-      refundsFromOrders += Number(r.totalRefundedSet?.shopMoney?.amount ?? 0);
-    }
-    currency = order.totalPriceSet.shopMoney.currencyCode;
-    orderCount += 1;
-    itemCount += order.lineItems.nodes.reduce((sum, n) => sum + n.quantity, 0);
-  }
-
-  const orderIdsCreatedInDay = new Set(ordersAtLocation.map((o) => o.id));
-  const overlay = await getRefundOverlayForDay(admin, locIdRaw, orderIdsCreatedInDay, dayRange);
-  const actual = Math.max(0, gross - refundsFromOrders - overlay.refundTotal);
+  // 売上サマリーの基礎数値は精算プレビューと同じ集計関数を使用し、差分をゼロにする
+  const preview = await buildSettlementPreview(
+    admin,
+    shopId,
+    locationId,
+    locationName,
+    targetDate
+  );
+  const actual = Number(preview.netSales);
+  const orderCount = Number(preview.orderCount);
+  const itemCount = Number(preview.itemCount);
+  const currency = preview.currency || "JPY";
 
   // 予算取得（複数の ID 形式に対応）
   const budget = await prisma.budget.findFirst({
