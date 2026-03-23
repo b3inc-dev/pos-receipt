@@ -23,6 +23,7 @@ import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { getDailySummary } from "../../common/salesSummaryApi.js";
+import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 
 // ── 今日の日付（YYYY-MM-DD） ────────────────────────────────────────────────
 function todayStr() {
@@ -46,6 +47,58 @@ function parseYearMonthFromTargetDate(targetDate) {
   const month = Number(m[2]);
   if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
   return { year, month };
+}
+
+/** 年月を数値で比較（a < b なら負） */
+function compareYearMonth(a, b) {
+  if (a.year !== b.year) return a.year - b.year;
+  return a.month - b.month;
+}
+
+/**
+ * 精算履歴に出てきた年月 ＋ その範囲から今日までの「カレンダー上ある」年月をすべて含める。
+ * 履歴ゼロのときは「今年の1月〜今月」まで選べる。
+ */
+function buildSelectableYearMonths(historyItems) {
+  const map = new Map();
+  for (const item of historyItems) {
+    const ym = parseYearMonthFromTargetDate(item?.targetDate);
+    if (!ym) continue;
+    const key = `${ym.year}-${String(ym.month).padStart(2, "0")}`;
+    if (!map.has(key)) map.set(key, ym);
+  }
+
+  const d = new Date();
+  const cur = { year: d.getFullYear(), month: d.getMonth() + 1 };
+
+  let rangeStart;
+  if (map.size === 0) {
+    rangeStart = { year: cur.year, month: 1 };
+  } else {
+    rangeStart = { year: cur.year, month: cur.month };
+    for (const ym of map.values()) {
+      if (compareYearMonth(ym, rangeStart) < 0) rangeStart = { year: ym.year, month: ym.month };
+    }
+  }
+
+  if (compareYearMonth(rangeStart, cur) > 0) {
+    rangeStart = { year: cur.year, month: cur.month };
+  }
+
+  let y = rangeStart.year;
+  let m = rangeStart.month;
+  for (;;) {
+    const key = `${y}-${String(m).padStart(2, "0")}`;
+    if (!map.has(key)) map.set(key, { year: y, month: m });
+    if (y === cur.year && m === cur.month) break;
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => (b.year - a.year) || (b.month - a.month));
 }
 
 export default async () => {
@@ -140,42 +193,36 @@ function SettlementModal() {
     loadAllHistory(selectedLocation?.locationId);
   }, [selectedLocation?.locationId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const historyYearMonths = useMemo(() => {
-    const map = new Map();
-    for (const item of allHistoryItems) {
-      const ym = parseYearMonthFromTargetDate(item?.targetDate);
-      if (!ym) continue;
-      const key = `${ym.year}-${String(ym.month).padStart(2, "0")}`;
-      if (!map.has(key)) map.set(key, ym);
-    }
-    return Array.from(map.values()).sort((a, b) => (b.year - a.year) || (b.month - a.month));
-  }, [allHistoryItems]);
+  const selectableYearMonths = useMemo(
+    () => buildSelectableYearMonths(allHistoryItems),
+    [allHistoryItems]
+  );
 
   const availableYears = useMemo(() => {
-    const set = new Set(historyYearMonths.map((x) => x.year));
+    const set = new Set(selectableYearMonths.map((x) => x.year));
     return Array.from(set).sort((a, b) => b - a);
-  }, [historyYearMonths]);
+  }, [selectableYearMonths]);
 
   const availableMonthsForYear = useMemo(() => {
     const set = new Set(
-      historyYearMonths.filter((x) => x.year === selectedYear).map((x) => x.month)
+      selectableYearMonths.filter((x) => x.year === selectedYear).map((x) => x.month)
     );
     return Array.from(set).sort((a, b) => b - a);
-  }, [historyYearMonths, selectedYear]);
+  }, [selectableYearMonths, selectedYear]);
 
   useEffect(() => {
     if (availableYears.length === 0) return;
     if (!availableYears.includes(selectedYear)) {
       const y = availableYears[0];
       setSelectedYear(y);
-      const months = historyYearMonths.filter((x) => x.year === y).map((x) => x.month).sort((a, b) => b - a);
+      const months = selectableYearMonths.filter((x) => x.year === y).map((x) => x.month).sort((a, b) => b - a);
       if (months.length > 0) setSelectedMonth(months[0]);
       return;
     }
     if (availableMonthsForYear.length > 0 && !availableMonthsForYear.includes(selectedMonth)) {
       setSelectedMonth(availableMonthsForYear[0]);
     }
-  }, [availableYears, availableMonthsForYear, selectedYear, selectedMonth, historyYearMonths]);
+  }, [availableYears, availableMonthsForYear, selectedYear, selectedMonth, selectableYearMonths]);
 
   const monthlyHistoryItems = useMemo(() => {
     return allHistoryItems
@@ -199,9 +246,12 @@ function SettlementModal() {
     setMonthDailyError("");
     try {
       const daysInMonth = new Date(year, month, 0).getDate();
+      const today = todayStr();
       const list = [];
       for (let day = 1; day <= daysInMonth; day++) {
         const targetDate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        // 「まだ来ていない日」（今日より未来）は一覧に出さない・API も呼ばない
+        if (targetDate > today) break;
         // Throttled(HTTP 500) 回避のため、日次APIは逐次呼び出しにする
         // （同時31本のリクエストを避ける）
         // eslint-disable-next-line no-await-in-loop
@@ -372,7 +422,7 @@ function SettlementModal() {
         onSelectLocation={(loc) => setSelectedLocation(loc)}
         onSelectYear={(year) => {
           setSelectedYear(year);
-          const months = historyYearMonths
+          const months = selectableYearMonths
             .filter((x) => x.year === year)
             .map((x) => x.month)
             .sort((a, b) => b - a);
@@ -488,8 +538,19 @@ function MainView({
 
   return (
     <s-page heading="精算">
-      <s-stack gap="none" blockSize="100%" inlineSize="100%" minBlockSize="0">
-        <s-box padding="base">
+      <s-stack
+        gap="none"
+        blockSize="100%"
+        inlineSize="100%"
+        minBlockSize="0"
+        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+      >
+        {/* POS Stock の setHeader 相当：sticky + 枠線（入庫モーダルヘッダーと同系統） */}
+        <s-box
+          padding="base"
+          border="base"
+          style={{ position: "sticky", top: 0, background: "var(--s-color-bg)", zIndex: 10 }}
+        >
           <s-stack gap="small">
             {locationLoadError ? (
               <s-stack gap="small">
@@ -499,162 +560,179 @@ function MainView({
                 </s-button>
               </s-stack>
             ) : (
-              <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
-                <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                  {locations.length > 1 ? (
-                    <s-select
-                      label=""
-                      value={selectedLocation?.locationId ?? ""}
-                      onChange={handleLocChange}
-                    >
-                      {locations.map((loc) => (
-                        <s-option key={loc.locationId} value={loc.locationId}>
-                          {loc.locationName}
-                        </s-option>
-                      ))}
-                    </s-select>
-                  ) : selectedLocation ? (
-                    <s-text fontWeight="bold">{selectedLocation.locationName}</s-text>
-                  ) : loading ? (
-                    <s-text tone="subdued">ロケーションを読み込み中…</s-text>
-                  ) : (
-                    <s-stack gap="small">
-                      <s-text tone="subdued">ロケーションが見つかりません</s-text>
-                      <s-button kind="plain" onClick={onRetryLocations}>再読み込み</s-button>
-                    </s-stack>
-                  )}
-                </s-box>
-                <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end">
-              <s-stack gap="extraSmall">
-                <s-button
-                  kind="secondary"
-                  onClick={() => {
-                    setMonthMenuOpen(false);
-                    setYearMenuOpen((v) => !v);
-                  }}
-                >
-                  {selectedYear}年
-                </s-button>
-              {yearMenuOpen ? (
-                <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="extraSmall">
-                    {availableYears.length === 0 ? (
-                      <s-text tone="subdued" fontSize="small">履歴のある年がありません</s-text>
+              <s-stack gap="small">
+                {/* 1行目のみ：ロケーション名（左）＋ 固定幅の年・月ボタン（右・同行） */}
+                <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+                  <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+                    {locations.length > 1 ? (
+                      <s-select
+                        label=""
+                        value={selectedLocation?.locationId ?? ""}
+                        onChange={handleLocChange}
+                      >
+                        {locations.map((loc) => (
+                          <s-option key={loc.locationId} value={loc.locationId}>
+                            {loc.locationName}
+                          </s-option>
+                        ))}
+                      </s-select>
+                    ) : selectedLocation ? (
+                      <s-text emphasis="bold" size="small">{selectedLocation.locationName}</s-text>
+                    ) : loading ? (
+                      <s-text tone="subdued" size="small">ロケーションを読み込み中…</s-text>
                     ) : (
-                      availableYears.map((y) => (
-                        <s-button
-                          key={`year-${y}`}
-                          kind={y === selectedYear ? "primary" : "secondary"}
-                          onClick={() => {
-                            onSelectYear(y);
-                            setYearMenuOpen(false);
-                            setError("");
-                          }}
-                        >
-                          {y}年
-                        </s-button>
-                      ))
+                      <s-stack gap="small">
+                        <s-text tone="subdued" size="small">ロケーションが見つかりません</s-text>
+                        <s-button kind="plain" onClick={onRetryLocations}>再読み込み</s-button>
+                      </s-stack>
                     )}
+                  </s-box>
+                  <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
+                    <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
+                      <s-button
+                        kind="secondary"
+                        style={{ width: "100%", maxInlineSize: "100%" }}
+                        onClick={() => {
+                          setMonthMenuOpen(false);
+                          setYearMenuOpen((v) => !v);
+                        }}
+                      >
+                        {selectedYear}年
+                      </s-button>
+                    </s-box>
+                    <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
+                      <s-button
+                        kind="secondary"
+                        style={{ width: "100%", maxInlineSize: "100%" }}
+                        onClick={() => {
+                          setYearMenuOpen(false);
+                          setMonthMenuOpen((v) => !v);
+                        }}
+                      >
+                        {selectedMonth}月
+                      </s-button>
+                    </s-box>
                   </s-stack>
-                </s-box>
-              ) : null}
-              </s-stack>
-              <s-stack gap="extraSmall">
-                <s-button
-                  kind="secondary"
-                  onClick={() => {
-                    setYearMenuOpen(false);
-                    setMonthMenuOpen((v) => !v);
-                  }}
-                >
-                  {selectedMonth}月
-                </s-button>
-              {monthMenuOpen ? (
-                <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="extraSmall">
-                    {availableMonthsForYear.length === 0 ? (
-                      <s-text tone="subdued" fontSize="small">履歴のある月がありません</s-text>
-                    ) : (
-                      availableMonthsForYear.map((m) => (
-                        <s-button
-                          key={`month-${m}`}
-                          kind={m === selectedMonth ? "primary" : "secondary"}
-                          onClick={() => {
-                            onSelectMonth(m);
-                            setMonthMenuOpen(false);
-                            setError("");
-                          }}
-                        >
-                          {m}月
-                        </s-button>
-                      ))
-                    )}
-                  </s-stack>
-                </s-box>
-              ) : null}
-              </s-stack>
                 </s-stack>
+                {/* 上の行の直下：年または月の選択リスト（同行には出さない） */}
+                {yearMenuOpen ? (
+                  <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                    <s-stack gap="extraSmall">
+                      {availableYears.length === 0 ? (
+                        <s-text tone="subdued" fontSize="small">選べる年がありません</s-text>
+                      ) : (
+                        availableYears.map((y) => (
+                          <s-button
+                            key={`year-${y}`}
+                            kind={y === selectedYear ? "primary" : "secondary"}
+                            onClick={() => {
+                              onSelectYear(y);
+                              setYearMenuOpen(false);
+                              setError("");
+                            }}
+                          >
+                            {y}年
+                          </s-button>
+                        ))
+                      )}
+                    </s-stack>
+                  </s-box>
+                ) : null}
+                {monthMenuOpen ? (
+                  <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                    <s-stack gap="extraSmall">
+                      {availableMonthsForYear.length === 0 ? (
+                        <s-text tone="subdued" fontSize="small">選べる月がありません</s-text>
+                      ) : (
+                        availableMonthsForYear.map((m) => (
+                          <s-button
+                            key={`month-${m}`}
+                            kind={m === selectedMonth ? "primary" : "secondary"}
+                            onClick={() => {
+                              onSelectMonth(m);
+                              setMonthMenuOpen(false);
+                              setError("");
+                            }}
+                          >
+                            {m}月
+                          </s-button>
+                        ))
+                      )}
+                    </s-stack>
+                  </s-box>
+                ) : null}
               </s-stack>
             )}
           </s-stack>
         </s-box>
-        <s-divider />
-        <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0">
+
+        {/* POS Stock の LossHistoryList と同型：外側 base パディング、行は small + 行下 divider */}
+        <s-scroll-box
+          blockSize="auto"
+          maxBlockSize="100%"
+          minBlockSize="0"
+          style={{ flex: "1 1 0", minHeight: 0 }}
+        >
           <s-box padding="base">
-            {dailyLoading ? (
-              <s-text tone="subdued">読み込み中…</s-text>
-            ) : dailyError ? (
-              <s-stack gap="small">
-                <s-text tone="critical">{dailyError}</s-text>
-                <s-button kind="secondary" onClick={onRetryDaily}>再読み込み</s-button>
-              </s-stack>
-            ) : (
-              <s-stack gap="small">
-                {dailyRows.map((row) => (
-                  <s-box key={row.targetDate}>
-                    <s-clickable onClick={() => onOpenDailyRow(row)}>
-                      <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+            <s-stack gap="base">
+              {dailyLoading ? (
+                <s-text tone="subdued" size="small">読み込み中…</s-text>
+              ) : dailyError ? (
+                <s-stack gap="small">
+                  <s-text tone="critical">{dailyError}</s-text>
+                  <s-button kind="secondary" onClick={onRetryDaily}>再読み込み</s-button>
+                </s-stack>
+              ) : dailyRows.length === 0 ? (
+                <s-text tone="subdued" size="small">表示できる日がありません</s-text>
+              ) : (
+                <s-stack gap="base">
+                  {dailyRows.map((row) => (
+                    <s-clickable key={row.targetDate} onClick={() => onOpenDailyRow(row)}>
+                      <s-box padding="small">
                         <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
-                          <s-box style={{ flex: "1 1 0", minInlineSize: 0, textAlign: "start" }}>
-                            <s-text fontWeight="bold">{row.targetDate}</s-text>
-                          </s-box>
-                          <s-box style={{ flex: "0 0 auto", textAlign: "end" }}>
-                            <s-text fontWeight="bold">¥{Number(row.netSales).toLocaleString()}</s-text>
-                          </s-box>
+                          <s-text
+                            emphasis="bold"
+                            size="small"
+                            style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                          >
+                            {row.targetDate}
+                          </s-text>
+                          <s-text fontWeight="bold" size="small" style={{ whiteSpace: "nowrap" }}>
+                            ¥{Number(row.netSales).toLocaleString()}
+                          </s-text>
                         </s-stack>
                       </s-box>
+                      <s-divider />
                     </s-clickable>
-                  </s-box>
-                ))}
-              </s-stack>
-            )}
+                  ))}
+                </s-stack>
+              )}
+            </s-stack>
           </s-box>
         </s-scroll-box>
-        <s-divider />
-        <s-box padding="base">
-          {error ? (
-            <s-box paddingBlockEnd="small">
-              <s-text tone="critical">{error}</s-text>
-            </s-box>
-          ) : null}
-          <s-stack direction="inline" gap="small" justifyContent="space-between" alignItems="center">
-            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-              <s-button kind="secondary" onClick={onPreview} loading={loading} disabled={!selectedLocation}>
-                精算プレビュー
-              </s-button>
-            </s-box>
-            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-              <s-button kind="secondary" onClick={onInspection} loading={loading} disabled={!selectedLocation}>
-                点検
-              </s-button>
-            </s-box>
-            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-              <s-button kind="primary" onClick={onSettle} loading={loading} disabled={!selectedLocation}>
-                精算
-              </s-button>
-            </s-box>
-          </s-stack>
-        </s-box>
+
+        {error ? (
+          <s-box padding="base" paddingBlockStart="none">
+            <s-text tone="critical">{error}</s-text>
+          </s-box>
+        ) : null}
+
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="精算プレビュー"
+          onLeft={onPreview}
+          leftDisabled={!selectedLocation}
+          leftLoading={loading}
+          middleLabel="点検"
+          onMiddle={onInspection}
+          middleDisabled={!selectedLocation}
+          middleLoading={loading}
+          rightLabel="精算"
+          onRight={onSettle}
+          rightTone="success"
+          rightDisabled={!selectedLocation}
+          rightLoading={loading}
+        />
       </s-stack>
     </s-page>
   );
@@ -748,8 +826,8 @@ function PreviewView({
         <s-box padding="base">
           <s-stack gap="base">
 
-            {/* ヘッダー */}
-            <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+            {/* ヘッダー（枠内は行ごと small パディング＋区切り＝リストと同系統） */}
+            <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
               <s-stack gap="none">
                 {headerRows.map((row, i) => (
                   <SummaryRow
@@ -764,7 +842,7 @@ function PreviewView({
             </s-box>
 
             {/* 集計サマリー */}
-            <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+            <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
               <s-stack gap="none">
                 {summaryRows.map((row, i) => (
                   <SummaryRow
@@ -779,7 +857,7 @@ function PreviewView({
             </s-box>
 
             {/* 件数・点数 */}
-            <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+            <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
               <s-stack gap="none">
                 {countRows.map((row, i) => (
                   <SummaryRow
@@ -794,9 +872,9 @@ function PreviewView({
 
             {/* 支払方法別内訳（売上額・返金額・件数） */}
             {paymentDetailRows.length > 0 ? (
-              <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="none">
-                  <s-box paddingBlockEnd="small">
+                  <s-box padding="small">
                     <s-text fontWeight="bold" fontSize="small">支払方法別内訳</s-text>
                   </s-box>
                   <s-divider />
@@ -815,9 +893,9 @@ function PreviewView({
 
             {/* 適用済み特殊返金・商品券調整 */}
             {eventRows.length > 0 ? (
-              <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="none">
-                  <s-box paddingBlockEnd="small">
+                  <s-box padding="small">
                     <s-text fontWeight="bold" fontSize="small">適用済みイベント</s-text>
                   </s-box>
                   <s-divider />
@@ -870,7 +948,7 @@ function ConfirmView({ preview, isInspection, printMode, loading, error, onExecu
               {isInspection ? "点検レシートを発行します" : "精算レシートを発行します"}
             </s-text>
 
-            <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+            <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
               <s-stack gap="none">
                 {[
                   { label: "ロケーション", value: preview?.locationName ?? "-" },
@@ -951,7 +1029,7 @@ function DoneView({ result, isInspection, onBack }) {
               </s-box>
             )}
 
-            <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+            <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
               <s-stack gap="none">
                 {[
                   {
@@ -995,8 +1073,8 @@ function HistoryDetailView({ item, onBack }) {
           {!item ? (
             <s-text tone="subdued">明細データがありません。</s-text>
           ) : (
-            <s-stack gap="small">
-              <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+            <s-stack gap="base">
+              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="none">
                   {[
                     { label: "対象日", value: item.targetDate ?? "-" },
@@ -1050,28 +1128,30 @@ function SummaryRow({
   const vb = valueBold || bold;
   return (
     <s-stack gap="none">
-      <s-stack
-        direction="inline"
-        justifyContent="space-between"
-        alignItems="center"
-        gap="small"
-        style={{ width: "100%", paddingBlock: "var(--s-space-extra-small, 6px)" }}
-      >
-        <s-box style={{ flex: "1 1 0", minInlineSize: 0, paddingInlineEnd: "small" }}>
-          <s-text
-            tone="subdued"
-            fontSize="small"
-            fontWeight={labelBold ? "bold" : undefined}
-          >
-            {label}
-          </s-text>
-        </s-box>
-        <s-box style={{ flex: "0 1 auto", minInlineSize: 0, textAlign: "end" }}>
-          <s-text fontWeight={vb ? "bold" : undefined} fontSize="small">
-            {value}
-          </s-text>
-        </s-box>
-      </s-stack>
+      <s-box padding="small">
+        <s-stack
+          direction="inline"
+          justifyContent="space-between"
+          alignItems="center"
+          gap="small"
+          style={{ width: "100%" }}
+        >
+          <s-box style={{ flex: "1 1 0", minInlineSize: 0, paddingInlineEnd: "small" }}>
+            <s-text
+              tone="subdued"
+              size="small"
+              fontWeight={labelBold ? "bold" : undefined}
+            >
+              {label}
+            </s-text>
+          </s-box>
+          <s-box style={{ flex: "0 1 auto", minInlineSize: 0, textAlign: "end" }}>
+            <s-text fontWeight={vb ? "bold" : undefined} size="small">
+              {value}
+            </s-text>
+          </s-box>
+        </s-stack>
+      </s-box>
       {divider ? <s-divider /> : null}
     </s-stack>
   );
