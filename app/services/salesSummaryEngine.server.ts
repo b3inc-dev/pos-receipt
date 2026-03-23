@@ -74,6 +74,14 @@ const SUMMARY_ORDERS_QUERY = `#graphql
 `;
 
 /** 注文を retailLocation が指定ロケーションと一致するもののみに絞る（ロケーションなし・オンライン等を除外） */
+function extractLocationNumericId(locationId: string | null | undefined): string | null {
+  if (!locationId) return null;
+  const s = String(locationId).trim();
+  if (/^\d+$/.test(s)) return s;
+  const m = s.match(/\/(\d+)$/);
+  return m?.[1] ?? null;
+}
+
 function filterSummaryOrdersByRetailLocation(
   orders: SummaryOrder[],
   locationId: string,
@@ -83,7 +91,8 @@ function filterSummaryOrdersByRetailLocation(
   return orders.filter((o) => {
     const rid = o.retailLocation?.id;
     if (!rid) return false;
-    return rid === locationGid || rid === locIdRaw || rid.endsWith(`/${locIdRaw}`);
+    const ridRaw = extractLocationNumericId(rid);
+    return rid === locationGid || ridRaw === locIdRaw;
   });
 }
 

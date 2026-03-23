@@ -61,6 +61,7 @@ export interface SettlementPreviewDTO {
 
 interface ShopifyTransaction {
   id: string;
+  createdAt?: string;
   kind: string;
   status: string;
   amountSet: { shopMoney: { amount: string; currencyCode: string } };
@@ -78,6 +79,7 @@ interface ShopifyRefund {
   id: string;
   createdAt?: string; // ISO (UTC); 返金日でフィルタするため
   totalRefundedSet: { shopMoney: { amount: string; currencyCode: string } };
+  refundLineItems?: { quantity: number }[];
   transactions: ShopifyRefundTransaction[];
 }
 
@@ -114,6 +116,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
         }
         transactions(first: 50) {
           id
+          createdAt
           kind
           status
           amountSet { shopMoney { amount currencyCode } }
@@ -122,6 +125,9 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
         refunds {
           id
           createdAt
+          refundLineItems(first: 250) {
+            nodes { quantity }
+          }
           totalRefundedSet { shopMoney { amount currencyCode } }
           transactions(first: 50) {
             nodes {
@@ -141,6 +147,14 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
 `;
 
 /** 注文を retailLocation が指定ロケーションと一致するもののみに絞る（ロケーションなし・オンライン等を除外） */
+function extractLocationNumericId(locationId: string | null | undefined): string | null {
+  if (!locationId) return null;
+  const s = String(locationId).trim();
+  if (/^\d+$/.test(s)) return s;
+  const m = s.match(/\/(\d+)$/);
+  return m?.[1] ?? null;
+}
+
 function filterOrdersByRetailLocation(
   orders: ShopifyOrder[],
   locationId: string,
@@ -150,7 +164,8 @@ function filterOrdersByRetailLocation(
   return orders.filter((o) => {
     const rid = o.retailLocation?.id;
     if (!rid) return false;
-    return rid === locationGid || rid === locIdRaw || rid.endsWith(`/${locIdRaw}`);
+    const ridRaw = extractLocationNumericId(rid);
+    return rid === locationGid || ridRaw === locIdRaw;
   });
 }
 
@@ -215,6 +230,7 @@ async function fetchAllOrders(admin: AdminClient, query: string): Promise<Shopif
           transactions: node.transactions ?? [],
           refunds: (node.refunds ?? []).map((r) => ({
             ...r,
+            refundLineItems: r.refundLineItems?.nodes ?? [],
             transactions: r.transactions?.nodes ?? [],
           })),
         };
@@ -247,7 +263,8 @@ function filterOrdersUpdatedByRetailLocation(
   return orders.filter((o) => {
     const rid = o.retailLocation?.id;
     if (!rid) return false;
-    return rid === locationGid || rid === locIdRaw || rid.endsWith(`/${locIdRaw}`);
+    const ridRaw = extractLocationNumericId(rid);
+    return rid === locationGid || ridRaw === locIdRaw;
   });
 }
 
@@ -393,9 +410,15 @@ function mergeRefundOverlay(
 
 async function calculatePaymentSections(
   orders: ShopifyOrder[],
-  shopId: string
+  shopId: string,
+  dayRange: { startUtc: Date; endUtc: Date }
 ): Promise<PaymentSectionDTO[]> {
   const sections: Record<string, { net: number; refund: number; txCount: number; refundCount: number }> = {};
+  const inDay = (iso?: string) => {
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
+    return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
+  };
 
   const ensure = (gateway: string) => {
     if (!sections[gateway]) {
@@ -405,7 +428,7 @@ async function calculatePaymentSections(
 
   for (const order of orders) {
     for (const tx of order.transactions) {
-      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS") {
+      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS" && inDay(tx.createdAt)) {
         const gw = tx.gateway ?? "";
         ensure(gw);
         sections[gw].net += Number(tx.amountSet.shopMoney.amount);
@@ -413,6 +436,7 @@ async function calculatePaymentSections(
       }
     }
     for (const refund of order.refunds) {
+      if (!inDay(refund.createdAt)) continue;
       for (const tx of refund.transactions) {
         if (tx.kind === "REFUND") {
           const gw = tx.gateway ?? "";
@@ -515,22 +539,57 @@ export async function buildSettlementPreview(
 
   const orderIdsCreatedInDay = new Set(ordersAtLocation.map((o) => o.id));
 
+  const inDay = (iso?: string) => {
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
+    return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
+  };
+
   let total = 0;
   let tax = 0;
   let discounts = 0;
   let refundTotal = 0;
   let itemCount = 0;
   let refundCount = 0;
+  const saleOrderSet = new Set<string>();
+  const refundOrderSet = new Set<string>();
   const currency = ordersAtLocation[0]?.totalPriceSet?.shopMoney?.currencyCode ?? "JPY";
 
   for (const order of ordersAtLocation) {
-    total += Number(order.totalPriceSet.shopMoney.amount);
+    let orderSaleToday = 0;
+    let orderRefundToday = 0;
+    for (const tx of order.transactions) {
+      if (!inDay(tx.createdAt)) continue;
+      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS") {
+        orderSaleToday += Number(tx.amountSet.shopMoney.amount);
+      }
+      if (tx.kind === "REFUND") {
+        orderRefundToday += Number(tx.amountSet.shopMoney.amount);
+      }
+    }
+
+    total += orderSaleToday;
     tax += Number(order.totalTaxSet.shopMoney.amount);
     discounts += Number(order.totalDiscountsSet.shopMoney.amount);
-    itemCount += order.lineItems.nodes.reduce((sum, n) => sum + n.quantity, 0);
+
+    if ((orderSaleToday - orderRefundToday) > 0) {
+      saleOrderSet.add(order.id);
+    }
+    if (orderRefundToday > 0) {
+      refundOrderSet.add(order.id);
+    }
+
+    if (orderSaleToday > 0) {
+      itemCount += order.lineItems.nodes.reduce((sum, n) => sum + n.quantity, 0);
+    }
+
     for (const refund of order.refunds) {
+      if (!inDay(refund.createdAt)) continue;
       refundTotal += Number(refund.totalRefundedSet.shopMoney.amount);
       refundCount += 1;
+      for (const ri of refund.refundLineItems ?? []) {
+        itemCount -= Number(ri.quantity ?? 0);
+      }
     }
   }
 
@@ -575,7 +634,7 @@ export async function buildSettlementPreview(
   const loyaltyUsageDisplayLabel =
     loyaltySettings?.loyaltyUsageDisplayLabel ?? DEFAULT_LOYALTY_SETTINGS.loyaltyUsageDisplayLabel;
 
-  let paymentSections = await calculatePaymentSections(ordersAtLocation, shopId);
+  let paymentSections = await calculatePaymentSections(ordersAtLocation, shopId, dayRange);
   mergeRefundOverlay(paymentSections, overlay, { refundTotal, refundCount });
   // 特殊返金イベントを totals オブジェクト経由で受け取り、ローカル変数に反映する
   const eventTotals = { total, refundTotal };
@@ -611,8 +670,8 @@ export async function buildSettlementPreview(
     discounts: round2(discounts),
     vipPointsUsed: round2(vipPointsUsed),
     refundTotal: round2(refundTotal),
-    orderCount: ordersAtLocation.length,
-    refundCount,
+    orderCount: saleOrderSet.size,
+    refundCount: Math.max(refundCount, refundOrderSet.size),
     itemCount,
     voucherChangeAmount: round2(voucherChangeAmount),
     paymentSections,
