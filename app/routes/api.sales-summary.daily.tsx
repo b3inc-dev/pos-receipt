@@ -12,6 +12,8 @@ import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { SALES_SUMMARY_SETTINGS_KEY, DEFAULT_SALES_SUMMARY_SETTINGS } from "../utils/appSettings.server";
 
+type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
+
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
@@ -35,7 +37,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return corsJson({ rows: [], totals: { actual: 0, orders: 0, items: 0, budget: null, visitors: null }, displayOptions: merged, targetDate });
     }
 
-    let allLocations = await prisma.location.findMany({
+    let allLocations: SalesSummaryLocationRow[] = await prisma.location.findMany({
       where: { shopId: shop.id, salesSummaryEnabled: true },
     });
 
@@ -61,9 +63,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       });
     }
 
-    let targetLocations =
+    let targetLocations: SalesSummaryLocationRow[] =
       locationIdsParam.length > 0
-        ? allLocations.filter((l) => {
+        ? allLocations.filter((l: SalesSummaryLocationRow) => {
             const lNum = l.shopifyLocationGid.replace("gid://shopify/Location/", "");
             if (!lNum) return false; // 空 GID は除外
             return locationIdsParam.some((id) => {
@@ -73,18 +75,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
           })
         : allLocations;
 
-    // locationIdsParam でフィルタした結果が空の場合は全ロケーションを対象にする
-    // (POS セッションの locationId が DB の GID と一致しないケースへの安全網)
-    if (locationIdsParam.length > 0 && targetLocations.length === 0) {
-      targetLocations = allLocations;
-    }
+    // locationIds 指定時は厳密一致のみ対象にする（不一致時に全店舗へフォールバックしない）
 
     if (merged.visibleLocationIds.length > 0) {
-      const filtered = targetLocations.filter((l) =>
+      const filtered = targetLocations.filter((l: SalesSummaryLocationRow) =>
         merged.visibleLocationIds.includes(l.shopifyLocationGid)
       );
-      // visibleLocationIds フィルタで空になった場合は無視してフィルタ前を使う
-      if (filtered.length > 0) targetLocations = filtered;
+      targetLocations = filtered;
     }
 
     if (targetLocations.length === 0) {
@@ -98,7 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // 日次は期間と同様、常に再計算してキャッシュを更新してから返す（キャッシュを読まず最新ロジックで計算）
     const rows: Array<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> = await Promise.all(
-      targetLocations.map(async (loc): Promise<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> => {
+      targetLocations.map(async (loc: SalesSummaryLocationRow): Promise<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> => {
         const row = await computeAndCacheDailySummary(
           admin,
           shop.id,

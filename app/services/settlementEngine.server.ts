@@ -355,7 +355,8 @@ export async function getRefundOverlayForDay(
   const startIso = dayRange.startUtc.toISOString().replace(/\.000Z$/, "Z");
   const endIso = dayRange.endUtc.toISOString();
   const locationGid = `gid://shopify/Location/${locIdRaw}`;
-  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement -status:cancelled`;
+  // GAS と同様に updated_at ベースの返金補足では cancelled も含める
+  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement`;
   const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
   const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationGid, locIdRaw);
   const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
@@ -534,7 +535,8 @@ export async function buildSettlementPreview(
   }
 
   // 返金再集計（別パス）: その日に処理された返金のうち、注文が「その日作成」でない分を追加（GAS overlayRefundsAndRecalc 相当）
-  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
+  // GAS と同様に updated_at ベースの返金補足では cancelled も含める
+  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement`;
   const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
   const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationId, locIdRaw);
   const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
@@ -573,7 +575,7 @@ export async function buildSettlementPreview(
   const loyaltyUsageDisplayLabel =
     loyaltySettings?.loyaltyUsageDisplayLabel ?? DEFAULT_LOYALTY_SETTINGS.loyaltyUsageDisplayLabel;
 
-  let paymentSections = await calculatePaymentSections(orders, shopId);
+  let paymentSections = await calculatePaymentSections(ordersAtLocation, shopId);
   mergeRefundOverlay(paymentSections, overlay, { refundTotal, refundCount });
   // 特殊返金イベントを totals オブジェクト経由で受け取り、ローカル変数に反映する
   const eventTotals = { total, refundTotal };
@@ -581,13 +583,16 @@ export async function buildSettlementPreview(
   total = eventTotals.total;
   refundTotal = eventTotals.refundTotal;
 
-  // 税・net の再計算（GAS_vs_APP_IMPLEMENTATION_GAP §7.2: 返金反映後の税込額から税・純売上を算出）
+  // GAS 寄せ: 支払内訳の行合計（sale-refund）を total として税・純売上を再計算
   const round2 = (n: number) => Math.round(n * 100) / 100;
-  const effectiveGross = Math.max(0, total - refundTotal - discounts);
+  const sectionsTotal = round2(
+    paymentSections.reduce((sum, sec) => sum + Number(sec.net || 0) - Number(sec.refund || 0), 0)
+  );
+  total = Math.max(0, sectionsTotal);
   const settlementSettings = await getAppSetting<{ taxRatePercent?: number }>(shopId, SETTLEMENT_SETTINGS_KEY);
   const taxRatePercent = Number(settlementSettings?.taxRatePercent) || 10;
-  tax = round2((effectiveGross * taxRatePercent) / (100 + taxRatePercent));
-  netSales = round2((total - refundTotal - discounts) - tax);
+  tax = round2((total * taxRatePercent) / (100 + taxRatePercent));
+  netSales = round2(total - tax);
 
   for (const sec of paymentSections) {
     if (sec.label === sec.gateway) {
@@ -606,7 +611,7 @@ export async function buildSettlementPreview(
     discounts: round2(discounts),
     vipPointsUsed: round2(vipPointsUsed),
     refundTotal: round2(refundTotal),
-    orderCount: orders.length,
+    orderCount: ordersAtLocation.length,
     refundCount,
     itemCount,
     voucherChangeAmount: round2(voucherChangeAmount),

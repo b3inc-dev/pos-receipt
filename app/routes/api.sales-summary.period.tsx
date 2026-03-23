@@ -12,6 +12,8 @@ import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { SALES_SUMMARY_SETTINGS_KEY, DEFAULT_SALES_SUMMARY_SETTINGS } from "../utils/appSettings.server";
 
+type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
+
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
@@ -35,7 +37,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const dateTo = url.searchParams.get("dateTo");
     const locationIdsParam = url.searchParams.getAll("locationIds[]");
 
-    let allLocations = await prisma.location.findMany({
+    let allLocations: SalesSummaryLocationRow[] = await prisma.location.findMany({
       where: { shopId: shop.id, salesSummaryEnabled: true },
     });
 
@@ -61,9 +63,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       });
     }
 
-    let targetLocations =
+    let targetLocations: SalesSummaryLocationRow[] =
       locationIdsParam.length > 0
-        ? allLocations.filter((l) => {
+        ? allLocations.filter((l: SalesSummaryLocationRow) => {
             const lNum = l.shopifyLocationGid.replace("gid://shopify/Location/", "");
             if (!lNum) return false; // 空 GID は除外
             return locationIdsParam.some((id) => {
@@ -73,16 +75,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
           })
         : allLocations;
 
-    // locationIdsParam でフィルタした結果が空の場合は全ロケーションを対象にする
-    if (locationIdsParam.length > 0 && targetLocations.length === 0) {
-      targetLocations = allLocations;
-    }
+    // locationIds 指定時は厳密一致のみ対象にする（不一致時に全店舗へフォールバックしない）
 
     if (merged.visibleLocationIds.length > 0) {
-      const filtered = targetLocations.filter((l) =>
+      const filtered = targetLocations.filter((l: SalesSummaryLocationRow) =>
         merged.visibleLocationIds.includes(l.shopifyLocationGid)
       );
-      if (filtered.length > 0) targetLocations = filtered;
+      targetLocations = filtered;
     }
 
     const locationGids = targetLocations.map((l) => l.shopifyLocationGid);
