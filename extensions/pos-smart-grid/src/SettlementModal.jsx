@@ -545,11 +545,16 @@ function MainView({
         minBlockSize="0"
         style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
       >
-        {/* POS Stock の setHeader 相当：sticky + 枠線（入庫モーダルヘッダーと同系統） */}
+        {/* POS Stock 入庫固定フッターと同型の枠線。リストとの境は下の s-divider */}
         <s-box
           padding="base"
           border="base"
-          style={{ position: "sticky", top: 0, background: "var(--s-color-bg)", zIndex: 10 }}
+          style={{
+            position: "sticky",
+            top: 0,
+            background: "var(--s-color-bg)",
+            zIndex: 10,
+          }}
         >
           <s-stack gap="small">
             {locationLoadError ? (
@@ -666,6 +671,8 @@ function MainView({
           </s-stack>
         </s-box>
 
+        <s-divider />
+
         {/* POS Stock の LossHistoryList と同型：外側 base パディング、行は small + 行下 divider */}
         <s-scroll-box
           blockSize="auto"
@@ -716,6 +723,8 @@ function MainView({
             <s-text tone="critical">{error}</s-text>
           </s-box>
         ) : null}
+
+        <s-divider />
 
         <FixedFooterNavBar
           centerAlignWithButtons

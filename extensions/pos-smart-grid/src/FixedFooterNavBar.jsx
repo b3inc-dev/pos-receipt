@@ -30,7 +30,16 @@ export function FixedFooterNavBar({
   const hasCenter = summaryCenter !== undefined && summaryCenter !== null && String(summaryCenter).trim() !== "";
   const hasMiddle = !!middleLabel && (typeof onMiddle === "function" || middleCommand);
   return (
-    <s-box padding="base" border="base" style={{ position: "sticky", bottom: 0, background: "var(--s-color-bg)", zIndex: 10 }}>
+    <s-box
+      padding="base"
+      border="base"
+      style={{
+        position: "sticky",
+        bottom: 0,
+        background: "var(--s-color-bg)",
+        zIndex: 10,
+      }}
+    >
       {centerAlignWithButtons ? (
         <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
           <s-button tone={leftTone} disabled={leftDisabled} loading={leftLoading} onClick={onLeft}>{leftLabel}</s-button>
