@@ -22,6 +22,7 @@ import { getAppUrl } from "../../common/appUrl.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
+import { getDailySummary } from "../../common/salesSummaryApi.js";
 
 // ── 今日の日付（YYYY-MM-DD） ────────────────────────────────────────────────
 function todayStr() {
@@ -67,6 +68,9 @@ function SettlementModal() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
+  const [monthDailyRows, setMonthDailyRows] = useState([]);
+  const [monthDailyLoading, setMonthDailyLoading] = useState(false);
+  const [monthDailyError, setMonthDailyError] = useState("");
 
   const initialYm = useMemo(() => todayYearMonth(), []);
   const [selectedYear, setSelectedYear] = useState(initialYm.year);
@@ -186,6 +190,57 @@ function SettlementModal() {
       });
   }, [allHistoryItems, selectedYear, selectedMonth]);
 
+  const loadMonthDailyRows = useCallback(async (locationId, year, month) => {
+    if (!locationId || !year || !month) {
+      setMonthDailyRows([]);
+      return;
+    }
+    setMonthDailyLoading(true);
+    setMonthDailyError("");
+    try {
+      const daysInMonth = new Date(year, month, 0).getDate();
+      const requests = [];
+      for (let day = 1; day <= daysInMonth; day++) {
+        const targetDate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        requests.push(
+          getDailySummary({ targetDate, locationIds: [locationId] }).then((res) => ({
+            targetDate,
+            row: Array.isArray(res?.rows) ? (res.rows[0] ?? null) : null,
+          }))
+        );
+      }
+      const list = await Promise.all(requests);
+      const latestSettlementByDate = new Map();
+      for (const item of monthlyHistoryItems) {
+        const key = String(item?.targetDate || "");
+        if (!key) continue;
+        const prev = latestSettlementByDate.get(key);
+        if (!prev) {
+          latestSettlementByDate.set(key, item);
+          continue;
+        }
+        const prevTime = new Date(prev?.createdAt ?? prev?.updatedAt ?? 0).getTime();
+        const curTime = new Date(item?.createdAt ?? item?.updatedAt ?? 0).getTime();
+        if (curTime > prevTime) latestSettlementByDate.set(key, item);
+      }
+      const rows = list
+        .map(({ targetDate, row }) => ({
+          targetDate,
+          actual: Number(row?.actual ?? 0),
+          orders: Number(row?.orders ?? 0),
+          items: Number(row?.items ?? 0),
+          settlement: latestSettlementByDate.get(targetDate) ?? null,
+        }))
+        .sort((a, b) => (a.targetDate < b.targetDate ? 1 : -1));
+      setMonthDailyRows(rows);
+    } catch (e) {
+      setMonthDailyRows([]);
+      setMonthDailyError(toUserMessage(e?.message) || "日別集計の取得に失敗しました");
+    } finally {
+      setMonthDailyLoading(false);
+    }
+  }, [monthlyHistoryItems]);
+
   const handlePreview = useCallback(
     async (inspection = false) => {
       if (!selectedLocation) return;
@@ -250,6 +305,33 @@ function SettlementModal() {
     }
   }, [selectedLocation, targetDate]);
 
+  const handleOpenDailyRow = useCallback(async (row) => {
+    const d = String(row?.targetDate || "").trim();
+    if (!d || !selectedLocation) return;
+    if (row?.settlement) {
+      setSelectedHistoryItem(row.settlement);
+      setStep("historyDetail");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setIsInspection(false);
+    try {
+      const res = await previewSettlement({
+        locationId: selectedLocation.locationId,
+        locationName: selectedLocation.locationName,
+        targetDate: d,
+      });
+      setTargetDate(d);
+      setPreview(res.preview);
+      setStep("preview");
+    } catch (e) {
+      setError(toUserMessage(e?.message) || "日別明細の取得に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedLocation]);
+
   const handleRecalculate = useCallback(async () => {
     if (!selectedLocation) return;
     setLoading(true);
@@ -268,6 +350,10 @@ function SettlementModal() {
     }
   }, [selectedLocation, targetDate]);
 
+  useEffect(() => {
+    loadMonthDailyRows(selectedLocation?.locationId, selectedYear, selectedMonth);
+  }, [selectedLocation?.locationId, selectedYear, selectedMonth, loadMonthDailyRows]);
+
   if (step === "main") {
     return (
       <MainView
@@ -277,9 +363,9 @@ function SettlementModal() {
         selectedMonth={selectedMonth}
         availableYears={availableYears}
         availableMonthsForYear={availableMonthsForYear}
-        historyItems={monthlyHistoryItems}
-        historyLoading={historyLoading}
-        historyError={historyError}
+        dailyRows={monthDailyRows}
+        dailyLoading={monthDailyLoading || historyLoading}
+        dailyError={monthDailyError || historyError}
         loading={loading}
         error={error}
         locationLoadError={locationLoadError}
@@ -304,12 +390,12 @@ function SettlementModal() {
         onPreview={() => handlePreview(false)}
         onInspection={() => handlePreview(true)}
         onSettle={handleDirectSettle}
-        onOpenHistoryItem={(item) => {
-          setSelectedHistoryItem(item);
-          setStep("historyDetail");
-        }}
+        onOpenDailyRow={handleOpenDailyRow}
         onRetryLocations={loadLocations}
-        onRetryHistory={() => loadAllHistory(selectedLocation?.locationId)}
+        onRetryDaily={() => {
+          loadAllHistory(selectedLocation?.locationId);
+          loadMonthDailyRows(selectedLocation?.locationId, selectedYear, selectedMonth);
+        }}
         setError={setError}
       />
     );
@@ -374,9 +460,9 @@ function MainView({
   selectedMonth,
   availableYears,
   availableMonthsForYear,
-  historyItems,
-  historyLoading,
-  historyError,
+  dailyRows,
+  dailyLoading,
+  dailyError,
   loading,
   error,
   locationLoadError,
@@ -386,9 +472,9 @@ function MainView({
   onPreview,
   onInspection,
   onSettle,
-  onOpenHistoryItem,
+  onOpenDailyRow,
   onRetryLocations,
-  onRetryHistory,
+  onRetryDaily,
   setError,
 }) {
   const [yearMenuOpen, setYearMenuOpen] = useState(false);
@@ -429,9 +515,6 @@ function MainView({
                 <s-stack gap="extraSmall">
                   <s-text tone="subdued" fontSize="small">ロケーション</s-text>
                   <s-text fontWeight="bold">{selectedLocation.locationName}</s-text>
-                  <s-text tone="subdued" fontSize="small">
-                    印字方式: {selectedLocation.printMode === "cloudprnt_direct" ? "CloudPRNT直印字" : "注文経由印字"}
-                  </s-text>
                 </s-stack>
               </s-box>
             ) : loading ? (
@@ -446,17 +529,19 @@ function MainView({
         </s-box>
 
         <s-box padding="base" paddingBlockStart="none">
-          <s-stack direction="horizontal" gap="small" align="start">
-            <s-stack gap="extraSmall">
-              <s-button
-                kind="secondary"
-                onClick={() => {
-                  setMonthMenuOpen(false);
-                  setYearMenuOpen((v) => !v);
-                }}
-              >
-                年: {selectedYear}
-              </s-button>
+          <s-stack direction="horizontal" align="space-between" blockAlignment="center" gap="small">
+            <s-text fontWeight="bold">{selectedLocation?.locationName ?? "ロケーション未選択"}</s-text>
+            <s-stack direction="horizontal" gap="small">
+              <s-stack gap="extraSmall">
+                <s-button
+                  kind="secondary"
+                  onClick={() => {
+                    setMonthMenuOpen(false);
+                    setYearMenuOpen((v) => !v);
+                  }}
+                >
+                  {selectedYear}年
+                </s-button>
               {yearMenuOpen ? (
                 <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                   <s-stack gap="extraSmall">
@@ -480,17 +565,17 @@ function MainView({
                   </s-stack>
                 </s-box>
               ) : null}
-            </s-stack>
-            <s-stack gap="extraSmall">
-              <s-button
-                kind="secondary"
-                onClick={() => {
-                  setYearMenuOpen(false);
-                  setMonthMenuOpen((v) => !v);
-                }}
-              >
-                月: {selectedMonth}月
-              </s-button>
+              </s-stack>
+              <s-stack gap="extraSmall">
+                <s-button
+                  kind="secondary"
+                  onClick={() => {
+                    setYearMenuOpen(false);
+                    setMonthMenuOpen((v) => !v);
+                  }}
+                >
+                  {selectedMonth}月
+                </s-button>
               {monthMenuOpen ? (
                 <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                   <s-stack gap="extraSmall">
@@ -514,55 +599,47 @@ function MainView({
                   </s-stack>
                 </s-box>
               ) : null}
+              </s-stack>
             </s-stack>
           </s-stack>
         </s-box>
         <s-divider />
         <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0">
           <s-box padding="base">
-            {historyLoading ? (
+            {dailyLoading ? (
               <s-text tone="subdued">読み込み中…</s-text>
-            ) : historyError ? (
+            ) : dailyError ? (
               <s-stack gap="small">
-                <s-text tone="critical">{historyError}</s-text>
-                <s-button kind="secondary" onClick={onRetryHistory}>再読み込み</s-button>
+                <s-text tone="critical">{dailyError}</s-text>
+                <s-button kind="secondary" onClick={onRetryDaily}>再読み込み</s-button>
               </s-stack>
-            ) : historyItems.length === 0 ? (
-              <s-text tone="subdued">
-                {selectedYear}年{selectedMonth}月の精算履歴はありません。
-              </s-text>
             ) : (
               <s-stack gap="small">
-                {historyItems.map((item) => (
-                  <s-box key={item.id}>
-                    <s-clickable onClick={() => onOpenHistoryItem(item)}>
+                {dailyRows.map((row) => (
+                  <s-box key={row.targetDate}>
+                    <s-clickable onClick={() => onOpenDailyRow(row)}>
                       <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                         <s-stack gap="extraSmall">
                           <s-stack direction="horizontal" align="space-between">
-                            <s-text fontWeight="bold">{item.targetDate}</s-text>
-                            <s-text fontWeight="bold">¥{Number(item.total).toLocaleString()}</s-text>
+                            <s-text fontWeight="bold">{row.targetDate}</s-text>
+                            <s-text fontWeight="bold">¥{Number(row.actual).toLocaleString()}</s-text>
                           </s-stack>
                           <s-stack direction="horizontal" align="space-between">
                             <s-text tone="subdued" fontSize="small">
-                              {item.orderCount}件 / {item.itemCount}点
-                              {item.periodLabel?.startsWith("点検_") ? " 【点検】" : ""}
+                              {row.orders}件 / {row.items}点
                             </s-text>
                             <s-text tone="subdued" fontSize="small">
-                              {item.status === "completed"
-                                ? "完了"
-                                : item.status === "printed"
-                                  ? "印刷済み"
-                                  : item.status === "failed"
-                                    ? "失敗"
-                                    : item.status === "draft"
-                                      ? "下書き"
-                                      : (item.status || "-")}
+                              {row.settlement
+                                ? (row.settlement.periodLabel?.startsWith("点検_") ? "点検済み" : "精算済み")
+                                : "未精算"}
                             </s-text>
                           </s-stack>
                           <s-text tone="subdued" fontSize="small">
-                            {item.printMode === "order_based"
-                              ? `注文: ${item.sourceOrderName ?? "-"}`
-                              : "CloudPRNT"}
+                            {row.settlement
+                              ? (row.settlement.printMode === "order_based"
+                                ? `注文: ${row.settlement.sourceOrderName ?? "-"}`
+                                : "CloudPRNT")
+                              : "タップで日別明細"}
                           </s-text>
                         </s-stack>
                       </s-box>
