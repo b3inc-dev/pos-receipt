@@ -93,13 +93,51 @@ export async function loader({ request }: LoaderFunctionArgs) {
       });
     }
 
-    // 日次は期間と同様、常に再計算してキャッシュを更新してから返す（キャッシュを読まず最新ロジックで計算）
+    const today = new Date().toISOString().slice(0, 10);
+    const isPastDate = targetDate < today;
+
+    // 精算側の「過去日=DB中心」方針に合わせる:
+    // - 過去日: まず日次キャッシュを優先利用（未キャッシュ時のみ再計算）
+    // - 当日以降: 毎回再計算して最新化
     const rows: Array<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> = await Promise.all(
       targetLocations.map(async (loc: SalesSummaryLocationRow): Promise<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> => {
+        const locationGid = loc.shopifyLocationGid;
+        const locationRawId = locationGid.replace("gid://shopify/Location/", "");
+
+        if (isPastDate) {
+          const cached = await prisma.salesSummaryCacheDaily.findFirst({
+            where: {
+              shopId: shop.id,
+              locationId: { in: [locationGid, locationRawId] },
+              targetDate,
+            },
+          });
+
+          if (cached) {
+            const cachedRow: DailySummaryRowDTO = {
+              locationId: locationGid,
+              locationName: loc.name,
+              targetDate,
+              actual: Number(cached.actual),
+              orders: cached.orders,
+              items: cached.items,
+              visitors: cached.visitors,
+              budget: cached.budget !== null ? Number(cached.budget) : null,
+              budgetRatio: cached.budgetRatio !== null ? Number(cached.budgetRatio) : null,
+              conv: cached.conv !== null ? Number(cached.conv) : null,
+              atv: cached.atv !== null ? Number(cached.atv) : null,
+              setRate: cached.setRate !== null ? Number(cached.setRate) : null,
+              unit: cached.unit !== null ? Number(cached.unit) : null,
+              currency: "JPY",
+            };
+            return { ...cachedRow, footfallReportingEnabled: loc.footfallReportingEnabled };
+          }
+        }
+
         const row = await computeAndCacheDailySummary(
           admin,
           shop.id,
-          loc.shopifyLocationGid,
+          locationGid,
           loc.name,
           targetDate
         );

@@ -90,13 +90,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return corsJson({ rows: [], totals: {}, dateFrom, dateTo, displayOptions: merged });
     }
 
-    // 期間表示時は先に日次キャッシュを再計算する（ロケーション除外ロジック変更後も正しい数字が出るように）
-    const MAX_DAYS_TO_REFRESH = 31;
+    // 期間表示時は先に日次キャッシュを再計算する。
+    // 純売上・客数・点数を精算と完全一致させるため、上限を設けず対象期間をすべて再計算する。
     if (dateFrom && dateTo) {
       const start = new Date(dateFrom + "T00:00:00Z").getTime();
       const end = new Date(dateTo + "T23:59:59Z").getTime();
       const days: string[] = [];
-      for (let t = start; t <= end && days.length < MAX_DAYS_TO_REFRESH; t += 86400000) {
+      for (let t = start; t <= end; t += 86400000) {
         days.push(new Date(t).toISOString().slice(0, 10));
       }
       await Promise.all(
