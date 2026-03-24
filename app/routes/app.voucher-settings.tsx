@@ -28,6 +28,7 @@ import {
   type VoucherSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
 
 const PRIORITY_OPTIONS = [
   { label: "手動優先", value: "manual_first" },
@@ -99,9 +100,12 @@ export default function VoucherSettingsPage() {
     <PolarisPageWrapper>
       <Page
         title="商品券設定"
-        backAction={{ content: "戻る", onAction: () => navigate("/app/settings" + q) }}
+        backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
+        <Card padding="0">
+          <TabGroupBar tabs={SETTINGS_TABS} />
+        </Card>
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
           <Layout.Section>

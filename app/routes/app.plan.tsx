@@ -21,6 +21,7 @@ import {
   Divider,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
+import { TabGroupBar, buildSystemTabs } from "../components/TabGroupBar";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
@@ -91,6 +92,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     liteFeatures: PLAN_FEATURES.lite,
     proFeatures: PLAN_FEATURES.pro,
     extraLocationPriceUsd: EXTRA_LOCATION_PRICE_USD,
+    memberCardEnabled: isInhouseMode(),
   };
 }
 
@@ -172,6 +174,7 @@ export default function PlanPage() {
     liteFeatures,
     proFeatures,
     extraLocationPriceUsd,
+    memberCardEnabled,
   } = useLoaderData<typeof loader>();
 
   const fetcher = useFetcher<typeof action>();
@@ -184,7 +187,10 @@ export default function PlanPage() {
 
   return (
     <PolarisPageWrapper>
-    <Page title="料金プラン" backAction={{ content: "戻る", onAction: () => navigate("/app" + q) }}>
+    <Page title="料金プラン" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
+      <Card padding="0">
+        <TabGroupBar tabs={buildSystemTabs(memberCardEnabled)} />
+      </Card>
       <Layout>
         {/* エラー */}
         {actionError && (

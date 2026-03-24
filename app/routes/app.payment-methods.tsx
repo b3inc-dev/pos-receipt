@@ -27,6 +27,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { TabGroupBar, MASTER_TABS } from "../components/TabGroupBar";
 
 const CATEGORY_OPTIONS = [
   { label: "現金", value: "cash" },
@@ -227,9 +228,12 @@ export default function PaymentMethodsPage() {
     <PolarisPageWrapper>
       <Page
         title="支払方法マスタ設定"
-        backAction={{ content: "戻る", onAction: to("/app/settings") }}
+        backAction={{ content: "ホーム", onAction: to("/app") }}
         primaryAction={{ content: "追加", onAction: openCreate }}
       >
+        <Card padding="0">
+          <TabGroupBar tabs={MASTER_TABS} />
+        </Card>
         <Layout>
           <Layout.Section>
             <Banner tone="info">

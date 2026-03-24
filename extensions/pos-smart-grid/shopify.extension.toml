@@ -22,6 +22,10 @@ target = "pos.home.modal.render"
 module = "./src/SpecialRefundOrderAction.jsx"
 target = "pos.order-details.action.menu-item.render"
 
+[[extensions.targeting]]
+module = "./src/VoucherOrderAction.jsx"
+target = "pos.order-details.action.menu-item.render"
+
 # ============================================================
 # 精算タイル（Phase 5 実装済み）
 # TODO: `shopify app generate extension` を実行して UID を取得後、

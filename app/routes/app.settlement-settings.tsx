@@ -27,6 +27,7 @@ import {
   type SettlementSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
 
 const TAX_DISPLAY_OPTIONS = [
   { label: "税込のみ", value: "inclusive_only" },
@@ -133,9 +134,12 @@ export default function SettlementSettingsPage() {
     <PolarisPageWrapper>
       <Page
         title="精算設定"
-        backAction={{ content: "戻る", onAction: () => navigate("/app/settings" + q) }}
+        backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
+        <Card padding="0">
+          <TabGroupBar tabs={SETTINGS_TABS} />
+        </Card>
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
           <Layout.Section>

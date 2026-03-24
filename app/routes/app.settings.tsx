@@ -30,6 +30,7 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { planLabel, getFullAccess, isInhouseMode, PLAN_FEATURES } from "../utils/planFeatures.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
 
 const LOCATIONS_QUERY = `#graphql
   query Locations {
@@ -279,19 +280,11 @@ export default function SettingsPage() {
     <PolarisPageWrapper>
     <Page
       title="設定"
-      primaryAction={{ content: "領収書テンプレート設定", onAction: to("/app/receipt-template") }}
-      secondaryActions={[
-        { content: "一般設定", onAction: to("/app/general-settings") },
-        { content: "精算設定", onAction: to("/app/settlement-settings") },
-        { content: "印字設定", onAction: to("/app/print-settings") },
-        { content: "売上サマリー設定", onAction: to("/app/sales-summary-settings") },
-        { content: "ポイント/会員施策設定", onAction: to("/app/loyalty-settings") },
-        { content: "商品券設定", onAction: to("/app/voucher-settings") },
-        { content: "特殊返金設定", onAction: to("/app/special-refund-settings") },
-        { content: "予算設定", onAction: to("/app/budget-settings") },
-      ]}
-      backAction={{ content: "戻る", onAction: to("/app") }}
+      backAction={{ content: "ホーム", onAction: to("/app") }}
     >
+      <Card padding="0">
+        <TabGroupBar tabs={SETTINGS_TABS} />
+      </Card>
       <Layout>
         {saveErr && (
           <Layout.Section>

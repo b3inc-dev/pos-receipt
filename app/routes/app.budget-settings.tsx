@@ -26,6 +26,7 @@ import {
   type BudgetSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
 
 const INPUT_UNIT_OPTIONS = [
   { label: "日別", value: "daily" },
@@ -89,13 +90,16 @@ export default function BudgetSettingsPage() {
     <PolarisPageWrapper>
       <Page
         title="予算設定"
-        backAction={{ content: "戻る", onAction: () => navigate("/app/settings" + q) }}
+        backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
+        <Card padding="0">
+          <TabGroupBar tabs={SETTINGS_TABS} />
+        </Card>
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
           <Layout.Section>
-            <Banner tone="info">予算の入力単位・適用モード・CSV操作・手動編集・一括編集の有無を設定します。実際の予算データは「予算管理」で登録・編集します。</Banner>
+            <Banner tone="info">予算の入力単位・適用モード・CSV操作・手動編集・一括編集の有無を設定します。実際の予算データは「レポート・履歴」の予算管理で登録・編集します。</Banner>
           </Layout.Section>
 
           <Layout.AnnotatedSection title="CSV操作" description="§11.2.1">

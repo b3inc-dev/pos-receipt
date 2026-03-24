@@ -28,6 +28,7 @@ import {
   type ReceiptTemplateData,
 } from "./api.settings.receipt-template";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { TabGroupBar, MASTER_TABS } from "../components/TabGroupBar";
 import { useState } from "react";
 
 function formDataToTemplate(formData: FormData): ReceiptTemplateData {
@@ -193,10 +194,13 @@ export default function ReceiptTemplatePage() {
     <PolarisPageWrapper>
       <Page
         title="領収書テンプレート設定"
-        backAction={{ content: "戻る", onAction: () => navigate("/app/settings" + q) }}
+        backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         subtitle={`バージョン: ${version}`}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
+        <Card padding="0">
+          <TabGroupBar tabs={MASTER_TABS} />
+        </Card>
         <Layout>
           {saved && (
             <Layout.Section>

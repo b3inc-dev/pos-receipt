@@ -22,6 +22,8 @@ import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import prisma from "../db.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { TabGroupBar, buildSystemTabs } from "../components/TabGroupBar";
+import { isInhouseMode } from "../utils/planFeatures.server";
 import { useState, useCallback, useRef } from "react";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -32,7 +34,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     select: { shopifyLocationGid: true, name: true },
     orderBy: { name: "asc" },
   });
-  return { locations };
+  return { locations, memberCardEnabled: isInhouseMode() };
 }
 
 function buildMonthOptions() {
@@ -63,7 +65,7 @@ function getDaysInMonth(ym: string): string[] {
 type DayResult = { targetDate: string; status: "pending" | "processing" | "done" | "skipped" | "error"; reason?: string };
 
 export default function BackfillPage() {
-  const { locations } = useLoaderData<typeof loader>();
+  const { locations, memberCardEnabled } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -153,8 +155,11 @@ export default function BackfillPage() {
     <PolarisPageWrapper>
       <Page
         title="過去データ一括取込"
-        backAction={{ content: "戻る", onAction: to("/app/sales-summary-settings") }}
+        backAction={{ content: "ホーム", onAction: to("/app") }}
       >
+        <Card padding="0">
+          <TabGroupBar tabs={buildSystemTabs(memberCardEnabled)} />
+        </Card>
         <Layout>
           <Layout.Section>
             <Banner tone="info">

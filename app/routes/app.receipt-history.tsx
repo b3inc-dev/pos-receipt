@@ -22,6 +22,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
 const PAGE_SIZE = 30;
 
@@ -136,6 +137,9 @@ export default function ReceiptHistoryPage() {
         title="領収書発行履歴"
         backAction={{ content: "戻る", onAction: to("/app") }}
       >
+        <Card padding="0">
+          <TabGroupBar tabs={REPORTS_TABS} />
+        </Card>
         <Layout>
           {/* フィルター */}
           <Layout.Section>

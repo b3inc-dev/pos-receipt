@@ -27,6 +27,7 @@ import {
   type PrintSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
 
 const PRINT_MODE_OPTIONS = [
   { label: "CloudPRNT 直印字", value: "cloudprnt_direct" },
@@ -96,9 +97,12 @@ export default function PrintSettingsPage() {
     <PolarisPageWrapper>
       <Page
         title="印字設定"
-        backAction={{ content: "戻る", onAction: () => navigate("/app/settings" + q) }}
+        backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
+        <Card padding="0">
+          <TabGroupBar tabs={SETTINGS_TABS} />
+        </Card>
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
           <Layout.Section>

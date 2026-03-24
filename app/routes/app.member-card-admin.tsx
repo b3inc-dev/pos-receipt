@@ -9,6 +9,7 @@ import { authenticate } from "../shopify.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { MemberBarcode } from "../components/MemberBarcode";
 import { isInhouseMode } from "../utils/planFeatures.server";
+import { TabGroupBar, buildSystemTabs } from "../components/TabGroupBar";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await authenticate.admin(request);
@@ -43,7 +44,10 @@ export default function MemberCardAdminPage() {
 
   return (
     <PolarisPageWrapper>
-      <Page title="会員証（LIFF）" backAction={{ content: "戻る", url: "/app" }}>
+      <Page title="会員証（LIFF）" backAction={{ content: "ホーム", url: "/app" }}>
+        <Card padding="0">
+          <TabGroupBar tabs={buildSystemTabs(true)} />
+        </Card>
         <Layout>
           <Layout.Section>
             <Card>

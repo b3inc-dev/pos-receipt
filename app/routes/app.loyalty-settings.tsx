@@ -29,6 +29,7 @@ import {
   type LoyaltyUsageSourceType,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
 
 const SOURCE_TYPE_OPTIONS: { label: string; value: LoyaltyUsageSourceType }[] = [
   { label: "使用しない", value: "manual_off" },
@@ -131,9 +132,12 @@ export default function LoyaltySettingsPage() {
     <PolarisPageWrapper>
       <Page
         title="ポイント/会員施策設定"
-        backAction={{ content: "戻る", onAction: () => navigate("/app/settings" + q) }}
+        backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
+        <Card padding="0">
+          <TabGroupBar tabs={SETTINGS_TABS} />
+        </Card>
         <Layout>
           {saved && (
             <Layout.Section>

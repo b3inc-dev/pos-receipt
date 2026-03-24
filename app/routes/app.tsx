@@ -60,27 +60,10 @@ export default function AppLayout() {
       {/* @ts-expect-error s-app-nav / s-link は polaris.js の Web コンポーネント */}
       <s-app-nav>
         <s-link href="/app" rel="home">ホーム</s-link>
-        <s-link href="/app/receipt-template">領収書テンプレート</s-link>
-        <s-link href="/app/payment-methods">支払方法マスタ</s-link>
-        <s-link href="/app/budget-management">予算管理</s-link>
-        <s-link href="/app/general-settings">一般設定</s-link>
-        <s-link href="/app/settlement-settings">精算設定</s-link>
-        <s-link href="/app/print-settings">印字設定</s-link>
-        <s-link href="/app/budget-settings">予算設定</s-link>
-        <s-link href="/app/sales-summary-settings">売上サマリー設定</s-link>
-        <s-link href="/app/loyalty-settings">ポイント/会員施策設定</s-link>
-        <s-link href="/app/voucher-settings">商品券設定</s-link>
-        <s-link href="/app/special-refund-settings">特殊返金設定</s-link>
-        <s-link href="/app/settlement-history">精算履歴</s-link>
-        <s-link href="/app/special-refund-history">特殊返金履歴</s-link>
-        <s-link href="/app/receipt-history">領収書履歴</s-link>
         <s-link href="/app/settings">設定</s-link>
-        <s-link href="/app/plan">料金プラン</s-link>
-        <s-link href="/app/diagnostics">システム診断</s-link>
-        <s-link href="/app/backfill">過去データ取込</s-link>
-        {memberCardEnabled && (
-          <s-link href="/app/member-card-admin">会員証（LIFF）</s-link>
-        )}
+        <s-link href="/app/receipt-template">マスタ管理</s-link>
+        <s-link href="/app/settlement-history">レポート・履歴</s-link>
+        <s-link href="/app/plan">システム</s-link>
       </s-app-nav>
       {/* 上部メニュー（s-app-nav が表示されない環境用・常に表示） */}
       <AppNavBar />

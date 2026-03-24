@@ -3,7 +3,7 @@
  * 要件書 §8, §23.3
  *
  * Steps:
- *   search   → 取引検索一覧
+ *   day_list → ロケーション・年月日ヘッダー＋その日の取引一覧（バッジ付き）
  *   form     → 宛名・但し書き入力
  *   preview  → 領収書プレビュー
  *   confirm  → 発行確認
@@ -12,10 +12,10 @@
  */
 import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
-import { searchOrders, getOrder } from "../../common/orderPickerApi.js";
+import { getOrder } from "../../common/orderPickerApi.js";
 import { previewReceipt, issueReceipt, getReceiptHistory } from "../../common/receiptApi.js";
-import { getSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
+import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 
 const STORAGE_KEY = "pos_receipt_order_id";
 
@@ -25,7 +25,7 @@ export default async () => {
 
 // ── Root ──────────────────────────────────────────────────────────────────────
 function ReceiptModal() {
-  const [step, setStep] = useState("search");
+  const [step, setStep] = useState("day_list");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [recipientName, setRecipientName] = useState("");
   const [proviso, setProviso] = useState("お買上品代として");
@@ -34,29 +34,36 @@ function ReceiptModal() {
   const [isReissue, setIsReissue] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [orderEntryLoading, setOrderEntryLoading] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState("");
 
   // 取引詳細画面から起動した場合
   useEffect(() => {
     const preId = sessionStorage.getItem(STORAGE_KEY);
     if (preId) {
       sessionStorage.removeItem(STORAGE_KEY);
-      setLoading(true);
+      setOrderEntryLoading(true);
+      setBootstrapError("");
       getOrder(preId)
-        .then((order) => { setSelectedOrder(order); setStep("form"); })
-        .catch((e) => setError(toUserMessage(e?.message) || "取得に失敗しました"))
-        .finally(() => setLoading(false));
+        .then((order) => {
+          setSelectedOrder(order);
+          setStep("form");
+        })
+        .catch((e) => setBootstrapError(toUserMessage(e?.message) || "取得に失敗しました"))
+        .finally(() => setOrderEntryLoading(false));
     }
   }, []);
 
   const handleOrderSelect = useCallback(async (orderId) => {
     setLoading(true);
     setError("");
+    setBootstrapError("");
     try {
       const order = await getOrder(orderId);
       setSelectedOrder(order);
       setStep("form");
     } catch (e) {
-      setError(toUserMessage(e?.message) || "取得に失敗しました");
+      setBootstrapError(toUserMessage(e?.message) || "取得に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -106,18 +113,33 @@ function ReceiptModal() {
     setPreview(null);
     setIssuedReceipt(null);
     setError("");
-    setStep("search");
+    setBootstrapError("");
+    setStep("day_list");
   }, []);
 
-  if (step === "search") {
+  if (orderEntryLoading) {
     return (
-      <SearchView
-        loading={loading}
-        error={error}
-        setError={setError}
-        setLoading={setLoading}
-        onSelect={handleOrderSelect}
-        onHistory={() => setStep("history")}
+      <s-page heading="領収書">
+        <s-box padding="base">
+          <s-text tone="subdued">取引を開いています…</s-text>
+        </s-box>
+      </s-page>
+    );
+  }
+
+  if (step === "day_list") {
+    return (
+      <OrderDayListScreen
+        pageHeading="領収書（取引を選択）"
+        badgeMode="receipt"
+        onSelectOrderId={handleOrderSelect}
+        noticeError={bootstrapError}
+        onDismissNotice={() => setBootstrapError("")}
+        headerTrailing={(
+          <s-button kind="secondary" onClick={() => setStep("history")}>
+            履歴
+          </s-button>
+        )}
       />
     );
   }
@@ -184,113 +206,10 @@ function ReceiptModal() {
   }
 
   if (step === "history") {
-    return <HistoryView onBack={() => setStep("search")} />;
+    return <HistoryView onBack={() => setStep("day_list")} />;
   }
 
   return null;
-}
-
-// ── 取引検索 ──────────────────────────────────────────────────────────────────
-function SearchView({ loading, error, setError, setLoading, onSelect, onHistory }) {
-  const [q, setQ] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [items, setItems] = useState([]);
-  const [nextCursor, setNextCursor] = useState(null);
-
-  const { locationIdParam } = getSessionLocation();
-  const onSearch = useCallback(async () => {
-    setError("");
-    setLoading(true);
-    try {
-      const res = await searchOrders({
-        q: q.trim() || undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        locationId: locationIdParam ?? undefined,
-        limit: 20,
-      });
-      setItems(res.items);
-      setNextCursor(res.nextCursor);
-    } catch (e) {
-      setError(toUserMessage(e?.message) || "検索に失敗しました");
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [q, dateFrom, dateTo, locationIdParam, setError, setLoading]);
-
-  const onLoadMore = useCallback(async () => {
-    if (!nextCursor) return;
-    setLoading(true);
-    try {
-      const res = await searchOrders({
-        q: q.trim() || undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        locationId: locationIdParam ?? undefined,
-        cursor: nextCursor,
-        limit: 20,
-      });
-      setItems((prev) => [...prev, ...res.items]);
-      setNextCursor(res.nextCursor);
-    } finally {
-      setLoading(false);
-    }
-  }, [q, dateFrom, dateTo, nextCursor, setLoading]);
-
-  return (
-    <s-page heading="取引を選択（領収書）">
-      <s-scroll-box>
-        <s-box padding="base">
-          <s-stack gap="base">
-            <s-text-field
-              label="注文番号・顧客名"
-              value={q}
-              onInput={(e) => setQ(e?.currentTarget?.value ?? "")}
-              placeholder="#1001 または 顧客名"
-            />
-            <s-text-field label="日付から" value={dateFrom} onInput={(e) => setDateFrom(e?.currentTarget?.value ?? "")} />
-            <s-text-field label="日付まで" value={dateTo} onInput={(e) => setDateTo(e?.currentTarget?.value ?? "")} />
-            <s-button kind="primary" onClick={onSearch} loading={loading}>検索</s-button>
-            {error ? <s-text tone="critical">{error}</s-text> : null}
-          </s-stack>
-        </s-box>
-
-        {items.length > 0 ? (
-          <s-box padding="base">
-            <s-text fontWeight="bold">検索結果 ({items.length}件)</s-text>
-            <s-stack gap="small" paddingBlockStart="small">
-              {items.map((order) => (
-                <s-pressable key={order.orderId} onPress={() => onSelect(order.orderId)}>
-                  <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                    <s-stack gap="extraSmall">
-                      <s-text fontWeight="bold">{order.orderName}</s-text>
-                      <s-text tone="subdued">{order.customerName || "顧客なし"} — ¥{Number(order.totalPrice).toLocaleString()}</s-text>
-                      <s-text tone="subdued" fontSize="small">
-                        {order.createdAt?.slice(0, 10)} {order.locationName ? `| ${order.locationName}` : ""}
-                      </s-text>
-                    </s-stack>
-                  </s-box>
-                </s-pressable>
-              ))}
-            </s-stack>
-            {nextCursor ? (
-              <s-box paddingBlockStart="base">
-                <s-button kind="secondary" onClick={onLoadMore} loading={loading}>さらに読み込む</s-button>
-              </s-box>
-            ) : null}
-          </s-box>
-        ) : !loading && (q || dateFrom || dateTo) ? (
-          <s-box padding="base"><s-text tone="subdued">該当する取引がありません。</s-text></s-box>
-        ) : null}
-
-        <s-box padding="base">
-          <s-button kind="plain" onClick={onHistory}>発行履歴を見る</s-button>
-        </s-box>
-      </s-scroll-box>
-    </s-page>
-  );
 }
 
 // ── 入力フォーム ──────────────────────────────────────────────────────────────
@@ -350,7 +269,7 @@ function FormView({
 
             <s-stack gap="small">
               <s-button kind="primary" onClick={handleNext} loading={loading}>プレビューを確認</s-button>
-              <s-button kind="plain" onClick={onBack} disabled={loading}>← 取引検索に戻る</s-button>
+              <s-button kind="plain" onClick={onBack} disabled={loading}>← 日付一覧に戻る</s-button>
             </s-stack>
           </s-stack>
         </s-box>

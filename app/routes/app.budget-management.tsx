@@ -28,6 +28,7 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
 const PAGE_SIZE = 50;
 
@@ -322,6 +323,9 @@ export default function BudgetManagementPage() {
           </Box>
         )}
 
+        <Card padding="0">
+          <TabGroupBar tabs={REPORTS_TABS} />
+        </Card>
         <Layout>
           {/* フィルター */}
           <Layout.Section>

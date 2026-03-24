@@ -5,25 +5,35 @@
  */
 import { Link, useLocation } from "react-router";
 
+/** グループに属するパス（アクティブ判定用） */
+const GROUP_PATHS: Record<string, string[]> = {
+  "/app/settings": [
+    "/app/settings",
+    "/app/general-settings",
+    "/app/print-settings",
+    "/app/settlement-settings",
+    "/app/sales-summary-settings",
+    "/app/loyalty-settings",
+    "/app/voucher-settings",
+    "/app/special-refund-settings",
+    "/app/budget-settings",
+  ],
+  "/app/receipt-template": ["/app/receipt-template", "/app/payment-methods"],
+  "/app/settlement-history": [
+    "/app/settlement-history",
+    "/app/special-refund-history",
+    "/app/receipt-history",
+    "/app/budget-management",
+  ],
+  "/app/plan": ["/app/plan", "/app/diagnostics", "/app/backfill", "/app/member-card-admin"],
+};
+
 const NAV_ITEMS = [
   { path: "/app", label: "ホーム" },
-  { path: "/app/receipt-template", label: "領収書テンプレート" },
-  { path: "/app/payment-methods", label: "支払方法マスタ" },
-  { path: "/app/budget-management", label: "予算管理" },
-  { path: "/app/general-settings", label: "一般設定" },
-  { path: "/app/settlement-settings", label: "精算設定" },
-  { path: "/app/print-settings", label: "印字設定" },
-  { path: "/app/budget-settings", label: "予算設定" },
-  { path: "/app/sales-summary-settings", label: "売上サマリー設定" },
-  { path: "/app/loyalty-settings", label: "ポイント/会員施策" },
-  { path: "/app/voucher-settings", label: "商品券設定" },
-  { path: "/app/special-refund-settings", label: "特殊返金設定" },
-  { path: "/app/settlement-history", label: "精算履歴" },
-  { path: "/app/special-refund-history", label: "特殊返金履歴" },
-  { path: "/app/receipt-history", label: "領収書履歴" },
   { path: "/app/settings", label: "設定" },
-  { path: "/app/plan", label: "料金プラン" },
-  { path: "/app/diagnostics", label: "システム診断" },
+  { path: "/app/receipt-template", label: "マスタ管理" },
+  { path: "/app/settlement-history", label: "レポート・履歴" },
+  { path: "/app/plan", label: "システム" },
 ];
 
 export function AppNavBar() {
@@ -51,7 +61,9 @@ export function AppNavBar() {
     >
       {NAV_ITEMS.map(({ path, label }) => {
         const to = path + search;
-        const isActive = location.pathname === path;
+        const groupPaths = GROUP_PATHS[path];
+        const isActive = location.pathname === path ||
+          (groupPaths !== undefined && groupPaths.includes(location.pathname));
         return (
           <Link
             key={path}

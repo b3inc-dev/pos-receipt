@@ -1,5 +1,5 @@
 /**
- * 取引詳細画面「特殊返金・商品券調整」アクション
+ * 取引詳細画面「特殊返金」アクション（明細画面から登録）
  */
 import { render } from "preact";
 
@@ -23,5 +23,5 @@ function SpecialRefundOrderAction() {
     }
   };
 
-  return <s-button onClick={onClick}>特殊返金・商品券調整</s-button>;
+  return <s-button onClick={onClick}>特殊返金</s-button>;
 }

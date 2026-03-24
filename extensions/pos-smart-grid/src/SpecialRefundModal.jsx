@@ -3,26 +3,41 @@
  * 要件書 §7, §23.2
  *
  * Steps:
- *   search      → 取引検索一覧
- *   order_view  → 取引選択後（イベント一覧 + アクション選択）
- *   form_refund → 特殊返金フォーム
- *   form_voucher→ 商品券調整フォーム
- *   confirm     → 確認画面
- *   success     → 完了
+ *   day_list     → ロケーション・年月日＋その日の取引一覧（バッジ）
+ *   order_detail → 取引サマリー＋イベント一覧＋固定フッターで特殊返金／商品券調整を選択
+ *   form_refund  → 特殊返金フォーム
+ *   form_voucher → 商品券調整フォーム
+ *
+ * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券調整」→ form_voucher へ直行
  */
 import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
-import { searchOrders, getOrder } from "../../common/orderPickerApi.js";
+import { getOrder } from "../../common/orderPickerApi.js";
 import {
   listSpecialRefunds,
   createSpecialRefund,
   createVoucherAdjustment,
   voidSpecialRefund,
 } from "../../common/specialRefundApi.js";
-import { getSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
+import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
+import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 
-const STORAGE_KEY = "pos_special_refund_order_id";
+const STORAGE_KEY_REFUND = "pos_special_refund_order_id";
+const STORAGE_KEY_VOUCHER = "pos_voucher_adjustment_order_id";
+
+function tryDismissModal() {
+  const dm = globalThis?.shopify?.action?.dismissModal;
+  if (typeof dm === "function") {
+    try {
+      dm();
+      return true;
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  return false;
+}
 
 // 特殊返金の event_type 選択肢（voucher_change_adjustment は商品券調整フォームで別途扱う）
 const REFUND_EVENT_TYPES = [
@@ -60,41 +75,52 @@ export default async () => {
 };
 
 function SpecialRefundModal() {
-  const [step, setStep] = useState("search");
+  const [step, setStep] = useState("day_list");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [bootstrapError, setBootstrapError] = useState("");
+  const [fromOrderEntry, setFromOrderEntry] = useState(false);
+  const [orderEntryLoading, setOrderEntryLoading] = useState(false);
 
-  // 取引詳細画面から起動した場合
+  // 取引詳細: 「特殊返金」または「商品券調整」から起動
   useEffect(() => {
-    const preId = sessionStorage.getItem(STORAGE_KEY);
-    if (preId) {
-      sessionStorage.removeItem(STORAGE_KEY);
-      setLoading(true);
-      getOrder(preId)
-        .then((order) => {
-          setSelectedOrder(order);
-          setStep("order_view");
-          return listSpecialRefunds(order.orderId ?? preId);
-        })
-        .then((res) => setEvents(res.items ?? []))
-        .catch((e) => setError(toUserMessage(e?.message) || "取得に失敗しました"))
-        .finally(() => setLoading(false));
-    }
+    const vid = sessionStorage.getItem(STORAGE_KEY_VOUCHER);
+    const rid = sessionStorage.getItem(STORAGE_KEY_REFUND);
+    const preId = vid || rid;
+    if (!preId) return;
+    if (vid) sessionStorage.removeItem(STORAGE_KEY_VOUCHER);
+    else sessionStorage.removeItem(STORAGE_KEY_REFUND);
+    const voucherShortcut = Boolean(vid);
+
+    setOrderEntryLoading(true);
+    setBootstrapError("");
+    getOrder(preId)
+      .then(async (order) => {
+        setSelectedOrder(order);
+        const res = await listSpecialRefunds(order.orderId ?? preId);
+        setEvents(res.items ?? []);
+        setFromOrderEntry(true);
+        setStep(voucherShortcut ? "form_voucher" : "order_detail");
+      })
+      .catch((e) => setBootstrapError(toUserMessage(e?.message) || "取得に失敗しました"))
+      .finally(() => setOrderEntryLoading(false));
   }, []);
 
   const handleOrderSelect = useCallback(async (orderId) => {
     setLoading(true);
     setError("");
+    setBootstrapError("");
     try {
       const order = await getOrder(orderId);
       setSelectedOrder(order);
       const res = await listSpecialRefunds(order.orderId ?? orderId);
       setEvents(res.items ?? []);
-      setStep("order_view");
+      setFromOrderEntry(false);
+      setStep("order_detail");
     } catch (e) {
-      setError(toUserMessage(e?.message) || "取得に失敗しました");
+      setBootstrapError(toUserMessage(e?.message) || "取得に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -126,26 +152,44 @@ function SpecialRefundModal() {
     }
   }, [selectedOrder]);
 
-  if (step === "search") {
+  if (orderEntryLoading) {
     return (
-      <OrderSearchView
-        loading={loading}
-        error={error}
-        setError={setError}
-        setLoading={setLoading}
-        onSelect={handleOrderSelect}
+      <s-page heading="返金・商品券">
+        <s-box padding="base">
+          <s-text tone="subdued">取引を開いています…</s-text>
+        </s-box>
+      </s-page>
+    );
+  }
+
+  if (step === "day_list") {
+    return (
+      <OrderDayListScreen
+        pageHeading="返金・商品券（取引を選択）"
+        badgeMode="specialRefund"
+        onSelectOrderId={handleOrderSelect}
+        noticeError={bootstrapError}
+        onDismissNotice={() => setBootstrapError("")}
       />
     );
   }
 
-  if (step === "order_view") {
+  if (step === "order_detail") {
     return (
-      <OrderView
+      <OrderDetailView
         order={selectedOrder}
         events={events}
         loading={loading}
         error={error}
-        onBack={() => { setSelectedOrder(null); setEvents([]); setStep("search"); }}
+        fromOrderEntry={fromOrderEntry}
+        onBack={() => {
+          if (fromOrderEntry && tryDismissModal()) return;
+          setSelectedOrder(null);
+          setEvents([]);
+          setFromOrderEntry(false);
+          setError("");
+          setStep("day_list");
+        }}
         onRefund={() => setStep("form_refund")}
         onVoucher={() => setStep("form_voucher")}
         onVoid={handleVoid}
@@ -161,10 +205,10 @@ function SpecialRefundModal() {
         error={error}
         setLoading={setLoading}
         setError={setError}
-        onBack={() => setStep("order_view")}
+        onBack={() => setStep("order_detail")}
         onSuccess={async () => {
           await refreshEvents();
-          setStep("order_view");
+          setStep("order_detail");
         }}
       />
     );
@@ -178,10 +222,10 @@ function SpecialRefundModal() {
         error={error}
         setLoading={setLoading}
         setError={setError}
-        onBack={() => setStep("order_view")}
+        onBack={() => setStep("order_detail")}
         onSuccess={async () => {
           await refreshEvents();
-          setStep("order_view");
+          setStep("order_detail");
         }}
       />
     );
@@ -191,200 +235,97 @@ function SpecialRefundModal() {
 }
 
 // ──────────────────────────────────────────────
-// 取引検索ビュー
+// 取引詳細（スクロール）＋固定フッターで処理選択
 // ──────────────────────────────────────────────
-function OrderSearchView({ loading, error, setError, setLoading, onSelect }) {
-  const [q, setQ] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [items, setItems] = useState([]);
-  const [nextCursor, setNextCursor] = useState(null);
-
-  const { locationIdParam } = getSessionLocation();
-  const onSearch = useCallback(async () => {
-    setError("");
-    setLoading(true);
-    try {
-      const res = await searchOrders({
-        q: q.trim() || undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        locationId: locationIdParam ?? undefined,
-        limit: 20,
-      });
-      setItems(res.items);
-      setNextCursor(res.nextCursor);
-    } catch (e) {
-      setError(toUserMessage(e?.message) || "検索に失敗しました");
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [q, dateFrom, dateTo, locationIdParam, setError, setLoading]);
-
-  const onLoadMore = useCallback(async () => {
-    if (!nextCursor) return;
-    setLoading(true);
-    try {
-      const res = await searchOrders({
-        q: q.trim() || undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        locationId: locationIdParam ?? undefined,
-        cursor: nextCursor,
-        limit: 20,
-      });
-      setItems((prev) => [...prev, ...res.items]);
-      setNextCursor(res.nextCursor);
-    } finally {
-      setLoading(false);
-    }
-  }, [q, dateFrom, dateTo, nextCursor, setLoading]);
-
-  return (
-    <s-page heading="取引を選択">
-      <s-scroll-box>
-        <s-box padding="base">
-          <s-stack gap="base">
-            <s-text-field
-              label="注文番号・顧客名"
-              value={q}
-              onInput={(e) => setQ(e?.currentTarget?.value ?? "")}
-              placeholder="#1001 または 顧客名"
-            />
-            <s-text-field
-              label="日付から (YYYY-MM-DD)"
-              value={dateFrom}
-              onInput={(e) => setDateFrom(e?.currentTarget?.value ?? "")}
-            />
-            <s-text-field
-              label="日付まで (YYYY-MM-DD)"
-              value={dateTo}
-              onInput={(e) => setDateTo(e?.currentTarget?.value ?? "")}
-            />
-            <s-button kind="primary" onClick={onSearch} loading={loading}>
-              検索
-            </s-button>
-            {error ? <s-text tone="critical">{error}</s-text> : null}
-          </s-stack>
-        </s-box>
-
-        {items.length > 0 ? (
-          <s-box padding="base">
-            <s-text fontWeight="bold">検索結果 ({items.length}件)</s-text>
-            <s-stack gap="small" paddingBlockStart="small">
-              {items.map((order) => (
-                <s-pressable key={order.orderId} onPress={() => onSelect(order.orderId)}>
-                  <s-box
-                    padding="small"
-                    borderWidth="base"
-                    borderRadius="base"
-                    borderColor="subdued"
-                  >
-                    <s-stack gap="extraSmall">
-                      <s-text fontWeight="bold">{order.orderName}</s-text>
-                      <s-text tone="subdued">
-                        {order.customerName || "顧客なし"} — ¥{Number(order.totalPrice).toLocaleString()}
-                      </s-text>
-                      <s-text tone="subdued" fontSize="small">
-                        {order.createdAt ? order.createdAt.slice(0, 10) : ""}
-                        {order.locationName ? ` | ${order.locationName}` : ""}
-                      </s-text>
-                    </s-stack>
-                  </s-box>
-                </s-pressable>
-              ))}
-            </s-stack>
-            {nextCursor ? (
-              <s-box paddingBlockStart="base">
-                <s-button kind="secondary" onClick={onLoadMore} loading={loading}>
-                  さらに読み込む
-                </s-button>
-              </s-box>
-            ) : null}
-          </s-box>
-        ) : !loading && (q || dateFrom || dateTo) ? (
-          <s-box padding="base">
-            <s-text tone="subdued">該当する取引がありません。</s-text>
-          </s-box>
-        ) : null}
-      </s-scroll-box>
-    </s-page>
-  );
-}
-
-// ──────────────────────────────────────────────
-// 取引詳細 + イベント一覧ビュー
-// ──────────────────────────────────────────────
-function OrderView({ order, events, loading, error, onBack, onRefund, onVoucher, onVoid }) {
+function OrderDetailView({
+  order,
+  events,
+  loading,
+  error,
+  fromOrderEntry,
+  onBack,
+  onRefund,
+  onVoucher,
+  onVoid,
+}) {
   const activeEvents = events.filter((e) => e.status === "active");
   const voidedEvents = events.filter((e) => e.status === "voided");
 
   return (
     <s-page heading="特殊返金・商品券調整">
-      <s-scroll-box>
-        {/* 取引情報 */}
-        <s-box padding="base" borderBlockEndWidth="base" borderColor="subdued">
+      <s-stack
+        gap="none"
+        blockSize="100%"
+        inlineSize="100%"
+        minBlockSize="0"
+        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+      >
+        <s-box
+          padding="base"
+          border="base"
+          style={{
+            position: "sticky",
+            top: 0,
+            background: "var(--s-color-bg)",
+            zIndex: 10,
+          }}
+        >
           <s-stack gap="extraSmall">
-            <s-text fontWeight="bold">{order?.orderName ?? "-"}</s-text>
-            <s-text tone="subdued">
+            <s-text fontWeight="bold" size="small">{order?.orderName ?? "-"}</s-text>
+            <s-text tone="subdued" size="small">
               {order?.customer?.displayName || "顧客なし"} —
               ¥{Number(order?.totalPrice?.amount ?? 0).toLocaleString()}
             </s-text>
-            {order?.location?.name ? (
-              <s-text tone="subdued" fontSize="small">{order.location.name}</s-text>
-            ) : null}
           </s-stack>
         </s-box>
 
-        {error ? (
-          <s-box padding="base">
-            <s-text tone="critical">{error}</s-text>
-          </s-box>
-        ) : null}
+        <s-divider />
 
-        {/* アクションボタン */}
-        <s-box padding="base">
-          <s-stack gap="small">
-            <s-button kind="primary" onClick={onRefund} disabled={loading}>
-              特殊返金を登録
-            </s-button>
-            <s-button kind="secondary" onClick={onVoucher} disabled={loading}>
-              商品券調整を登録
-            </s-button>
-          </s-stack>
-        </s-box>
-
-        {/* 登録済みイベント */}
-        {activeEvents.length > 0 ? (
+        <s-scroll-box
+          blockSize="auto"
+          maxBlockSize="100%"
+          minBlockSize="0"
+          style={{ flex: "1 1 0", minHeight: 0 }}
+        >
           <s-box padding="base">
-            <s-text fontWeight="bold">登録済みイベント ({activeEvents.length}件)</s-text>
-            <s-stack gap="small" paddingBlockStart="small">
-              {activeEvents.map((ev) => (
-                <EventCard key={ev.id} event={ev} onVoid={onVoid} loading={loading} />
-              ))}
+            <s-stack gap="base">
+              {activeEvents.length > 0 ? (
+                <s-stack gap="small">
+                  <s-text fontWeight="bold" size="small">登録済みイベント ({activeEvents.length}件)</s-text>
+                  {activeEvents.map((ev) => (
+                    <EventCard key={ev.id} event={ev} onVoid={onVoid} loading={loading} />
+                  ))}
+                </s-stack>
+              ) : (
+                <s-text tone="subdued" size="small">この取引のイベントはありません。</s-text>
+              )}
+
+              {voidedEvents.length > 0 ? (
+                <s-text tone="subdued" fontSize="small">
+                  無効化済み: {voidedEvents.length}件
+                </s-text>
+              ) : null}
+
+              {error ? <s-text tone="critical">{error}</s-text> : null}
             </s-stack>
           </s-box>
-        ) : (
-          <s-box padding="base">
-            <s-text tone="subdued">この取引のイベントはありません。</s-text>
-          </s-box>
-        )}
+        </s-scroll-box>
 
-        {/* 無効化済み */}
-        {voidedEvents.length > 0 ? (
-          <s-box padding="base">
-            <s-text tone="subdued" fontSize="small">
-              無効化済み: {voidedEvents.length}件
-            </s-text>
-          </s-box>
-        ) : null}
+        <s-divider />
 
-        {/* 戻るボタン */}
-        <s-box padding="base">
-          <s-button kind="plain" onClick={onBack}>← 取引検索に戻る</s-button>
-        </s-box>
-      </s-scroll-box>
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel={fromOrderEntry ? "閉じる" : "戻る"}
+          onLeft={onBack}
+          leftDisabled={loading}
+          middleLabel="特殊返金"
+          onMiddle={onRefund}
+          middleDisabled={loading}
+          rightLabel="商品券調整"
+          onRight={onVoucher}
+          rightDisabled={loading}
+        />
+      </s-stack>
     </s-page>
   );
 }
