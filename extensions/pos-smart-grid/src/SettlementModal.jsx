@@ -522,7 +522,11 @@ function MainView({
                 {/* 上の行の直下：年または月の選択リスト（同行には出さない） */}
                 {yearMenuOpen ? (
                   <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                    <s-stack gap="extraSmall">
+                    <s-stack
+                      direction="inline"
+                      gap="small"
+                      style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
+                    >
                       {availableYears.length === 0 ? (
                         <s-text tone="subdued" fontSize="small">選べる年がありません</s-text>
                       ) : (
@@ -530,6 +534,7 @@ function MainView({
                           <s-button
                             key={`year-${y}`}
                             kind={y === selectedYear ? "primary" : "secondary"}
+                            style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               onSelectYear(y);
                               setYearMenuOpen(false);
@@ -545,7 +550,11 @@ function MainView({
                 ) : null}
                 {monthMenuOpen ? (
                   <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                    <s-stack gap="extraSmall">
+                    <s-stack
+                      direction="inline"
+                      gap="small"
+                      style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
+                    >
                       {availableMonthsForYear.length === 0 ? (
                         <s-text tone="subdued" fontSize="small">選べる月がありません</s-text>
                       ) : (
@@ -553,6 +562,7 @@ function MainView({
                           <s-button
                             key={`month-${m}`}
                             kind={m === selectedMonth ? "primary" : "secondary"}
+                            style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               onSelectMonth(m);
                               setMonthMenuOpen(false);

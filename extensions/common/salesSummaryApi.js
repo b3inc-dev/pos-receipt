@@ -41,7 +41,9 @@ async function apiFetch(path, options = {}) {
 }
 
 /** 日次売上サマリー取得（算出・キャッシュ更新） */
-export async function getDailySummary({ targetDate, locationIds = [] } = {}) {
+export async function getDailySummary(options) {
+  const targetDate = options?.targetDate;
+  const locationIds = options?.locationIds ?? [];
   const params = new URLSearchParams();
   if (targetDate) params.set("targetDate", targetDate);
   for (const id of locationIds) params.append("locationIds[]", id);
@@ -49,12 +51,27 @@ export async function getDailySummary({ targetDate, locationIds = [] } = {}) {
 }
 
 /** 期間売上サマリー取得 */
-export async function getPeriodSummary({ dateFrom, dateTo, locationIds = [] } = {}) {
+export async function getPeriodSummary(options) {
+  const dateFrom = options?.dateFrom;
+  const dateTo = options?.dateTo;
+  const locationIds = options?.locationIds ?? [];
   const params = new URLSearchParams();
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
   for (const id of locationIds) params.append("locationIds[]", id);
   return apiFetch(`/api/sales-summary/period?${params.toString()}`);
+}
+
+/** 売上サマリー日別一覧用：月内の日ごとKPI（キャッシュベース） */
+export async function getSalesMonthDaily(options) {
+  const locationId = options?.locationId;
+  const year = options?.year;
+  const month = options?.month;
+  const params = new URLSearchParams();
+  if (locationId) params.set("locationId", locationId);
+  if (year != null) params.set("year", String(year));
+  if (month != null) params.set("month", String(month));
+  return apiFetch(`/api/sales-summary/month-daily?${params.toString()}`);
 }
 
 /** 入店数報告 */
