@@ -77,6 +77,7 @@ export default function AppLayout() {
         <s-link href="/app/settings">設定</s-link>
         <s-link href="/app/plan">料金プラン</s-link>
         <s-link href="/app/diagnostics">システム診断</s-link>
+        <s-link href="/app/backfill">過去データ取込</s-link>
         {memberCardEnabled && (
           <s-link href="/app/member-card-admin">会員証（LIFF）</s-link>
         )}

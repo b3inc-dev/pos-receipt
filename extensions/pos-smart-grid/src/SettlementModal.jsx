@@ -16,13 +16,13 @@ import {
   previewSettlement,
   createSettlement,
   recalculateSettlement,
-  getSettlementHistory,
+  getAvailableMonths,
+  getMonthRows,
 } from "../../common/settlementApi.js";
 import { getAppUrl } from "../../common/appUrl.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
-import { getDailySummary } from "../../common/salesSummaryApi.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 
 // ── 今日の日付（YYYY-MM-DD） ────────────────────────────────────────────────
@@ -37,68 +37,6 @@ function todayStr() {
 function todayYearMonth() {
   const d = new Date();
   return { year: d.getFullYear(), month: d.getMonth() + 1 };
-}
-
-function parseYearMonthFromTargetDate(targetDate) {
-  const s = String(targetDate || "").trim();
-  const m = s.match(/^(\d{4})-(\d{2})/);
-  if (!m) return null;
-  const year = Number(m[1]);
-  const month = Number(m[2]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
-  return { year, month };
-}
-
-/** 年月を数値で比較（a < b なら負） */
-function compareYearMonth(a, b) {
-  if (a.year !== b.year) return a.year - b.year;
-  return a.month - b.month;
-}
-
-/**
- * 精算履歴に出てきた年月 ＋ その範囲から今日までの「カレンダー上ある」年月をすべて含める。
- * 履歴ゼロのときは「今年の1月〜今月」まで選べる。
- */
-function buildSelectableYearMonths(historyItems) {
-  const map = new Map();
-  for (const item of historyItems) {
-    const ym = parseYearMonthFromTargetDate(item?.targetDate);
-    if (!ym) continue;
-    const key = `${ym.year}-${String(ym.month).padStart(2, "0")}`;
-    if (!map.has(key)) map.set(key, ym);
-  }
-
-  const d = new Date();
-  const cur = { year: d.getFullYear(), month: d.getMonth() + 1 };
-
-  let rangeStart;
-  if (map.size === 0) {
-    rangeStart = { year: cur.year, month: 1 };
-  } else {
-    rangeStart = { year: cur.year, month: cur.month };
-    for (const ym of map.values()) {
-      if (compareYearMonth(ym, rangeStart) < 0) rangeStart = { year: ym.year, month: ym.month };
-    }
-  }
-
-  if (compareYearMonth(rangeStart, cur) > 0) {
-    rangeStart = { year: cur.year, month: cur.month };
-  }
-
-  let y = rangeStart.year;
-  let m = rangeStart.month;
-  for (;;) {
-    const key = `${y}-${String(m).padStart(2, "0")}`;
-    if (!map.has(key)) map.set(key, { year: y, month: m });
-    if (y === cur.year && m === cur.month) break;
-    m += 1;
-    if (m > 12) {
-      m = 1;
-      y += 1;
-    }
-  }
-
-  return Array.from(map.values()).sort((a, b) => (b.year - a.year) || (b.month - a.month));
 }
 
 export default async () => {
@@ -117,13 +55,15 @@ function SettlementModal() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [locationLoadError, setLocationLoadError] = useState("");
-  const [allHistoryItems, setAllHistoryItems] = useState([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState("");
   const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
-  const [monthDailyRows, setMonthDailyRows] = useState([]);
-  const [monthDailyLoading, setMonthDailyLoading] = useState(false);
-  const [monthDailyError, setMonthDailyError] = useState("");
+
+  // 新しい月ナビゲーション用 state
+  const [availableMonths, setAvailableMonths] = useState([]);
+  const [monthsLoading, setMonthsLoading] = useState(false);
+  const [monthsError, setMonthsError] = useState("");
+  const [monthRows, setMonthRows] = useState([]);
+  const [monthRowsLoading, setMonthRowsLoading] = useState(false);
+  const [monthRowsError, setMonthRowsError] = useState("");
 
   const initialYm = useMemo(() => todayYearMonth(), []);
   const [selectedYear, setSelectedYear] = useState(initialYm.year);
@@ -164,21 +104,21 @@ function SettlementModal() {
       .finally(() => setLoading(false));
   }, []);
 
-  const loadAllHistory = useCallback(async (locationId) => {
+  const loadAvailableMonths = useCallback(async (locationId) => {
     if (!locationId) {
-      setAllHistoryItems([]);
+      setAvailableMonths([]);
       return;
     }
-    setHistoryLoading(true);
-    setHistoryError("");
+    setMonthsLoading(true);
+    setMonthsError("");
     try {
-      const res = await getSettlementHistory({ locationId, limit: 300 });
-      setAllHistoryItems(res?.items ?? []);
+      const res = await getAvailableMonths({ locationId });
+      setAvailableMonths(res?.months ?? []);
     } catch (e) {
-      setHistoryError(toUserMessage(e?.message) || "履歴の取得に失敗しました");
-      setAllHistoryItems([]);
+      setMonthsError(toUserMessage(e?.message) || "月一覧の取得に失敗しました");
+      setAvailableMonths([]);
     } finally {
-      setHistoryLoading(false);
+      setMonthsLoading(false);
     }
   }, []);
 
@@ -190,106 +130,62 @@ function SettlementModal() {
   }, [sessionReady, sessionLocationGid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    loadAllHistory(selectedLocation?.locationId);
+    loadAvailableMonths(selectedLocation?.locationId);
   }, [selectedLocation?.locationId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selectableYearMonths = useMemo(
-    () => buildSelectableYearMonths(allHistoryItems),
-    [allHistoryItems]
-  );
-
+  // availableMonths から年・月リストを導出
   const availableYears = useMemo(() => {
-    const set = new Set(selectableYearMonths.map((x) => x.year));
+    const set = new Set(
+      availableMonths.map((ym) => parseInt(ym.split("-")[0], 10)).filter(Boolean)
+    );
     return Array.from(set).sort((a, b) => b - a);
-  }, [selectableYearMonths]);
+  }, [availableMonths]);
 
   const availableMonthsForYear = useMemo(() => {
     const set = new Set(
-      selectableYearMonths.filter((x) => x.year === selectedYear).map((x) => x.month)
+      availableMonths
+        .filter((ym) => parseInt(ym.split("-")[0], 10) === selectedYear)
+        .map((ym) => parseInt(ym.split("-")[1], 10))
+        .filter(Boolean)
     );
     return Array.from(set).sort((a, b) => b - a);
-  }, [selectableYearMonths, selectedYear]);
+  }, [availableMonths, selectedYear]);
 
   useEffect(() => {
     if (availableYears.length === 0) return;
     if (!availableYears.includes(selectedYear)) {
       const y = availableYears[0];
       setSelectedYear(y);
-      const months = selectableYearMonths.filter((x) => x.year === y).map((x) => x.month).sort((a, b) => b - a);
+      const months = availableMonths
+        .filter((ym) => parseInt(ym.split("-")[0], 10) === y)
+        .map((ym) => parseInt(ym.split("-")[1], 10))
+        .filter(Boolean)
+        .sort((a, b) => b - a);
       if (months.length > 0) setSelectedMonth(months[0]);
       return;
     }
     if (availableMonthsForYear.length > 0 && !availableMonthsForYear.includes(selectedMonth)) {
       setSelectedMonth(availableMonthsForYear[0]);
     }
-  }, [availableYears, availableMonthsForYear, selectedYear, selectedMonth, selectableYearMonths]);
+  }, [availableYears, availableMonthsForYear, selectedYear, selectedMonth, availableMonths]);
 
-  const monthlyHistoryItems = useMemo(() => {
-    return allHistoryItems
-      .filter((item) => {
-        const ym = parseYearMonthFromTargetDate(item?.targetDate);
-        return ym && ym.year === selectedYear && ym.month === selectedMonth;
-      })
-      .sort((a, b) => {
-        const ta = new Date(a?.createdAt ?? a?.updatedAt ?? a?.targetDate ?? 0).getTime();
-        const tb = new Date(b?.createdAt ?? b?.updatedAt ?? b?.targetDate ?? 0).getTime();
-        return tb - ta;
-      });
-  }, [allHistoryItems, selectedYear, selectedMonth]);
-
-  const loadMonthDailyRows = useCallback(async (locationId, year, month) => {
+  const loadMonthRows = useCallback(async (locationId, year, month) => {
     if (!locationId || !year || !month) {
-      setMonthDailyRows([]);
+      setMonthRows([]);
       return;
     }
-    setMonthDailyLoading(true);
-    setMonthDailyError("");
+    setMonthRowsLoading(true);
+    setMonthRowsError("");
     try {
-      const daysInMonth = new Date(year, month, 0).getDate();
-      const today = todayStr();
-      const list = [];
-      for (let day = 1; day <= daysInMonth; day++) {
-        const targetDate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-        // 「まだ来ていない日」（今日より未来）は一覧に出さない・API も呼ばない
-        if (targetDate > today) break;
-        // Throttled(HTTP 500) 回避のため、日次APIは逐次呼び出しにする
-        // （同時31本のリクエストを避ける）
-        // eslint-disable-next-line no-await-in-loop
-        const res = await getDailySummary({ targetDate, locationIds: [locationId] });
-        list.push({
-          targetDate,
-          row: Array.isArray(res?.rows) ? (res.rows[0] ?? null) : null,
-        });
-      }
-      const latestSettlementByDate = new Map();
-      for (const item of monthlyHistoryItems) {
-        const key = String(item?.targetDate || "");
-        if (!key) continue;
-        const prev = latestSettlementByDate.get(key);
-        if (!prev) {
-          latestSettlementByDate.set(key, item);
-          continue;
-        }
-        const prevTime = new Date(prev?.createdAt ?? prev?.updatedAt ?? 0).getTime();
-        const curTime = new Date(item?.createdAt ?? item?.updatedAt ?? 0).getTime();
-        if (curTime > prevTime) latestSettlementByDate.set(key, item);
-      }
-      const rows = list
-        .map(({ targetDate, row }) => ({
-          targetDate,
-          // 日次APIの actual はサーバー上で純売上（netSales）として計算されている
-          netSales: Number(row?.actual ?? 0),
-          settlement: latestSettlementByDate.get(targetDate) ?? null,
-        }))
-        .sort((a, b) => (a.targetDate < b.targetDate ? 1 : -1));
-      setMonthDailyRows(rows);
+      const res = await getMonthRows({ locationId, year, month });
+      setMonthRows(res?.rows ?? []);
     } catch (e) {
-      setMonthDailyRows([]);
-      setMonthDailyError(toUserMessage(e?.message) || "日別集計の取得に失敗しました");
+      setMonthRows([]);
+      setMonthRowsError(toUserMessage(e?.message) || "日別集計の取得に失敗しました");
     } finally {
-      setMonthDailyLoading(false);
+      setMonthRowsLoading(false);
     }
-  }, [monthlyHistoryItems]);
+  }, []);
 
   const handlePreview = useCallback(
     async (inspection = false) => {
@@ -401,8 +297,8 @@ function SettlementModal() {
   }, [selectedLocation, targetDate]);
 
   useEffect(() => {
-    loadMonthDailyRows(selectedLocation?.locationId, selectedYear, selectedMonth);
-  }, [selectedLocation?.locationId, selectedYear, selectedMonth, loadMonthDailyRows]);
+    loadMonthRows(selectedLocation?.locationId, selectedYear, selectedMonth);
+  }, [selectedLocation?.locationId, selectedYear, selectedMonth, loadMonthRows]);
 
   if (step === "main") {
     return (
@@ -413,18 +309,19 @@ function SettlementModal() {
         selectedMonth={selectedMonth}
         availableYears={availableYears}
         availableMonthsForYear={availableMonthsForYear}
-        dailyRows={monthDailyRows}
-        dailyLoading={monthDailyLoading || historyLoading}
-        dailyError={monthDailyError || historyError}
+        dailyRows={monthRows}
+        dailyLoading={monthRowsLoading || monthsLoading}
+        dailyError={monthRowsError || monthsError}
         loading={loading}
         error={error}
         locationLoadError={locationLoadError}
         onSelectLocation={(loc) => setSelectedLocation(loc)}
         onSelectYear={(year) => {
           setSelectedYear(year);
-          const months = selectableYearMonths
-            .filter((x) => x.year === year)
-            .map((x) => x.month)
+          const months = availableMonths
+            .filter((ym) => parseInt(ym.split("-")[0], 10) === year)
+            .map((ym) => parseInt(ym.split("-")[1], 10))
+            .filter(Boolean)
             .sort((a, b) => b - a);
           if (months.length > 0) {
             setSelectedMonth(months[0]);
@@ -443,8 +340,8 @@ function SettlementModal() {
         onOpenDailyRow={handleOpenDailyRow}
         onRetryLocations={loadLocations}
         onRetryDaily={() => {
-          loadAllHistory(selectedLocation?.locationId);
-          loadMonthDailyRows(selectedLocation?.locationId, selectedYear, selectedMonth);
+          loadAvailableMonths(selectedLocation?.locationId);
+          loadMonthRows(selectedLocation?.locationId, selectedYear, selectedMonth);
         }}
         setError={setError}
       />

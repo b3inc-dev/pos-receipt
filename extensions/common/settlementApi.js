@@ -85,3 +85,19 @@ export async function markSettlementPrinted(settlementId) {
     body: JSON.stringify({ settlementId }),
   });
 }
+
+/** 月ナビゲーション用：利用可能な月一覧取得（DBのみ） */
+export async function getAvailableMonths({ locationId } = {}) {
+  const params = new URLSearchParams();
+  if (locationId) params.set("locationId", locationId);
+  return apiFetch(`/api/settlements/available-months?${params.toString()}`);
+}
+
+/** 月内日別データ一括取得（DBのみ、当日のみShopify API） */
+export async function getMonthRows({ locationId, year, month } = {}) {
+  const params = new URLSearchParams();
+  if (locationId) params.set("locationId", locationId);
+  if (year) params.set("year", String(year));
+  if (month) params.set("month", String(month));
+  return apiFetch(`/api/settlements/month-rows?${params.toString()}`);
+}
