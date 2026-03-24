@@ -357,7 +357,10 @@ function SettlementModal() {
         loading={loading}
         error={error}
         onRecalculate={handleRecalculate}
-        onConfirm={() => setStep("confirm")}
+        onConfirm={(inspection) => {
+          setIsInspection(!!inspection);
+          setStep("confirm");
+        }}
         onBack={() => setStep("main")}
       />
     );
@@ -728,113 +731,148 @@ function PreviewView({
 
   return (
     <s-page heading={isInspection ? "点検レシート プレビュー" : "精算プレビュー"}>
-      <s-scroll-box>
-        <s-box padding="base">
-          <s-stack gap="base">
-
-            {/* ヘッダー（枠内は行ごと small パディング＋区切り＝リストと同系統） */}
-            <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="none">
-                {headerRows.map((row, i) => (
-                  <SummaryRow
-                    key={row.label}
-                    label={row.label}
-                    value={row.value}
-                    valueBold={row.valueBold}
-                    divider={i < headerRows.length - 1}
-                  />
-                ))}
-              </s-stack>
+      <s-stack
+        gap="none"
+        blockSize="100%"
+        inlineSize="100%"
+        minBlockSize="0"
+        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+      >
+        <s-box
+          padding="base"
+          border="base"
+          style={{
+            position: "sticky",
+            top: 0,
+            background: "var(--s-color-bg)",
+            zIndex: 10,
+          }}
+        >
+          <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+              <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {preview.locationName ?? "-"}
+              </s-text>
             </s-box>
-
-            {/* 集計サマリー */}
-            <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="none">
-                {summaryRows.map((row, i) => (
-                  <SummaryRow
-                    key={row.label}
-                    label={row.label}
-                    value={row.value}
-                    valueBold={row.valueBold}
-                    divider={i < summaryRows.length - 1}
-                  />
-                ))}
-              </s-stack>
-            </s-box>
-
-            {/* 件数・点数 */}
-            <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="none">
-                {countRows.map((row, i) => (
-                  <SummaryRow
-                    key={row.label}
-                    label={row.label}
-                    value={row.value}
-                    divider={i < countRows.length - 1}
-                  />
-                ))}
-              </s-stack>
-            </s-box>
-
-            {/* 支払方法別内訳（売上額・返金額・件数） */}
-            {paymentDetailRows.length > 0 ? (
-              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="none">
-                  <s-box padding="small">
-                    <s-text fontWeight="bold" fontSize="small">支払方法別内訳</s-text>
-                  </s-box>
-                  <s-divider />
-                  {paymentDetailRows.map((row, i) => (
-                    <SummaryRow
-                      key={row.key}
-                      label={row.label}
-                      value={row.value}
-                      labelBold={row.labelBold}
-                      divider={i < paymentDetailRows.length - 1}
-                    />
-                  ))}
-                </s-stack>
-              </s-box>
-            ) : null}
-
-            {/* 適用済み特殊返金・商品券調整 */}
-            {eventRows.length > 0 ? (
-              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="none">
-                  <s-box padding="small">
-                    <s-text fontWeight="bold" fontSize="small">適用済みイベント</s-text>
-                  </s-box>
-                  <s-divider />
-                  {eventRows.map((row, i) => (
-                    <SummaryRow
-                      key={row.key}
-                      label={row.label}
-                      value={row.value}
-                      divider={i < eventRows.length - 1}
-                    />
-                  ))}
-                </s-stack>
-              </s-box>
-            ) : null}
-
-            {error ? <s-text tone="critical">{error}</s-text> : null}
-
-            {/* アクションボタン */}
-            <s-stack gap="small">
-              <s-button kind="primary" onClick={onConfirm} disabled={loading}>
-                {isInspection ? "点検レシートを発行する" : "精算レシートを発行する"}
-              </s-button>
+            <s-box style={{ flex: "0 0 auto" }}>
               <s-button kind="secondary" onClick={onRecalculate} loading={loading}>
-                再集計
+                更新
               </s-button>
-              <s-button kind="plain" onClick={onBack} disabled={loading}>
-                ← 戻る
-              </s-button>
-            </s-stack>
-
+            </s-box>
           </s-stack>
         </s-box>
-      </s-scroll-box>
+
+        <s-divider />
+
+        <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
+          <s-box padding="base">
+            <s-stack gap="base">
+              {/* プレビュー詳細 */}
+              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
+                <s-stack gap="none">
+                  {headerRows.map((row, i) => (
+                    <SummaryRow
+                      key={row.label}
+                      label={row.label}
+                      value={row.value}
+                      valueBold={row.valueBold}
+                      divider={i < headerRows.length - 1}
+                    />
+                  ))}
+                </s-stack>
+              </s-box>
+
+              {/* 集計サマリー */}
+              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
+                <s-stack gap="none">
+                  {summaryRows.map((row, i) => (
+                    <SummaryRow
+                      key={row.label}
+                      label={row.label}
+                      value={row.value}
+                      valueBold={row.valueBold}
+                      divider={i < summaryRows.length - 1}
+                    />
+                  ))}
+                </s-stack>
+              </s-box>
+
+              {/* 件数・点数 */}
+              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
+                <s-stack gap="none">
+                  {countRows.map((row, i) => (
+                    <SummaryRow
+                      key={row.label}
+                      label={row.label}
+                      value={row.value}
+                      divider={i < countRows.length - 1}
+                    />
+                  ))}
+                </s-stack>
+              </s-box>
+
+              {/* 支払方法別内訳（売上額・返金額・件数） */}
+              {paymentDetailRows.length > 0 ? (
+                <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
+                  <s-stack gap="none">
+                    <s-box padding="small">
+                      <s-text fontWeight="bold" fontSize="small">支払方法別内訳</s-text>
+                    </s-box>
+                    <s-divider />
+                    {paymentDetailRows.map((row, i) => (
+                      <SummaryRow
+                        key={row.key}
+                        label={row.label}
+                        value={row.value}
+                        labelBold={row.labelBold}
+                        divider={i < paymentDetailRows.length - 1}
+                      />
+                    ))}
+                  </s-stack>
+                </s-box>
+              ) : null}
+
+              {/* 適用済み特殊返金・商品券調整 */}
+              {eventRows.length > 0 ? (
+                <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
+                  <s-stack gap="none">
+                    <s-box padding="small">
+                      <s-text fontWeight="bold" fontSize="small">適用済みイベント</s-text>
+                    </s-box>
+                    <s-divider />
+                    {eventRows.map((row, i) => (
+                      <SummaryRow
+                        key={row.key}
+                        label={row.label}
+                        value={row.value}
+                        divider={i < eventRows.length - 1}
+                      />
+                    ))}
+                  </s-stack>
+                </s-box>
+              ) : null}
+
+              {error ? <s-text tone="critical">{error}</s-text> : null}
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+
+        <s-divider />
+
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={onBack}
+          leftDisabled={loading}
+          middleLabel="点検"
+          onMiddle={() => onConfirm(true)}
+          middleDisabled={loading}
+          rightLabel="精算"
+          onRight={() => onConfirm(false)}
+          rightTone="success"
+          rightDisabled={loading}
+        />
+      </s-stack>
     </s-page>
   );
 }
