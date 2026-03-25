@@ -9,7 +9,7 @@
  * - キャッシュは SalesChannelCacheDaily に保存
  */
 import prisma from "../db.server";
-import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
+import { getShopTimezoneForDaily, getDayRangeInUtc, getDayRangeShopifySearchIso } from "../utils/shopTimezone.server";
 import { getAppSetting, setAppSetting, SETTLEMENT_SETTINGS_KEY } from "../utils/appSettings.server";
 import { splitTaxInclusiveToNetAndTax } from "./settlementEngine.server";
 
@@ -177,6 +177,7 @@ export interface ChannelDailySummaryDTO {
 
 interface ChannelOrder {
   id: string;
+  createdAt: string;
   sourceName: string | null;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   lineItems: { nodes: { quantity: number }[] };
@@ -204,6 +205,7 @@ const CHANNEL_ORDERS_QUERY = `#graphql
     orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT) {
       nodes {
         id
+        createdAt
         sourceName
         totalPriceSet { shopMoney { amount currencyCode } }
         lineItems(first: 250) {
@@ -276,9 +278,24 @@ function filterBySourceNames<T extends { sourceName: string | null }>(
   });
 }
 
+/** Shopify 検索の取りこぼし・境界ずれ対策: 注文 createdAt が日次範囲内か（UTC 境界は getDayRangeInUtc と同一） */
+function orderCreatedAtInDayRange(
+  createdAt: string | null | undefined,
+  dayRange: { startUtc: Date; endUtc: Date }
+): boolean {
+  if (!createdAt) return false;
+  const t = new Date(createdAt).getTime();
+  if (Number.isNaN(t)) return false;
+  return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
+}
+
 // ── Fetch Helpers ──────────────────────────────────────────────────────────────
 
-async function fetchChannelOrders(admin: AdminClient, query: string): Promise<ChannelOrder[]> {
+async function fetchChannelOrders(
+  admin: AdminClient,
+  query: string,
+  dayRange?: { startUtc: Date; endUtc: Date }
+): Promise<ChannelOrder[]> {
   const orders: ChannelOrder[] = [];
   const seenIds = new Set<string>(); // ページネーション重複排除
   let cursor: string | null = null;
@@ -312,9 +329,12 @@ async function fetchChannelOrders(admin: AdminClient, query: string): Promise<Ch
       seenIds.add(node.id);
       const isSettlement = (node.tags ?? []).some((t) => String(t).toLowerCase() === "settlement");
       if (!isSettlement) {
+        const co = node as ChannelOrder;
+        if (dayRange && !orderCreatedAtInDayRange(co.createdAt, dayRange)) continue;
         orders.push({
           ...node,
-          sourceName: (node as ChannelOrder).sourceName ?? null,
+          createdAt: co.createdAt,
+          sourceName: co.sourceName ?? null,
           refunds: (node.refunds ?? []).map((r) => {
             const raw = r.refundLineItems as unknown;
             const refundLineItems: { quantity: number }[] = Array.isArray(raw)
@@ -463,17 +483,19 @@ export async function computeAndCacheChannelDailySummary(
 
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
+  const searchIso = getDayRangeShopifySearchIso(targetDate, timezone);
 
   // Pass 1: created_at ベース（当日注文）
   // source_name は Shopify GraphQL の query 引数では信頼性が低いため除外し、
   // フェッチ後に sourceName フィールドでメモリ内フィルタリングする
+  // 検索境界は GAS と同様 +09:00 壁時計（東京）を優先し、さらに createdAt で再フィルタする
   const createdQuery = buildChannelQuery(
     "created_at",
-    dayRange.startUtcIso,
-    dayRange.endUtcIso,
+    searchIso.start,
+    searchIso.end,
     ["tag_not:settlement", "-status:cancelled"]
   );
-  const allCreatedOrders = await fetchChannelOrders(admin, createdQuery);
+  const allCreatedOrders = await fetchChannelOrders(admin, createdQuery, dayRange);
   const orders = filterBySourceNames(allCreatedOrders, sourceNames);
   const orderIdsCreatedInDay = new Set(allCreatedOrders.map((o) => o.id)); // overlay 重複除外用は全件で持つ
   const { gross, refund: refundInDay, items, currency } = computeChannelTotalsFromOrders(orders, dayRange);
@@ -481,8 +503,8 @@ export async function computeAndCacheChannelDailySummary(
   // Pass 2: updated_at ベース返金 overlay（当日以外の注文から当日処理された返金）
   const updatedQuery = buildChannelQuery(
     "updated_at",
-    dayRange.startUtcIso,
-    dayRange.endUtcIso,
+    searchIso.start,
+    searchIso.end,
     ["tag_not:settlement"]
   );
   const allUpdatedOrders = await fetchChannelOrdersForRefundOverlay(admin, updatedQuery);

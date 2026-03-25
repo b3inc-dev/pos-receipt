@@ -11,7 +11,7 @@ import prisma from "../db.server";
 import { getPaymentMethodDisplayLabel } from "../utils/paymentMethod.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { LOYALTY_SETTINGS_KEY, DEFAULT_LOYALTY_SETTINGS, SETTLEMENT_SETTINGS_KEY } from "../utils/appSettings.server";
-import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
+import { getShopTimezoneForDaily, getDayRangeInUtc, getDayRangeShopifySearchIso } from "../utils/shopTimezone.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -547,9 +547,10 @@ export async function buildSettlementPreview(
   // ショップタイムゾーンで「その日」の UTC 範囲を算出（GAS_vs_APP_IMPLEMENTATION_GAP §5）
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
+  const searchIso = getDayRangeShopifySearchIso(targetDate, timezone);
 
   // GAS と同一: 精算注文・キャンセル済みをクエリ段階で除外。source_name:pos で POS 注文のみに限定し、ロケーションなし（オンラインストア等）を除外
-  const shopifyQuery = `location_id:${locIdRaw} source_name:pos created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
+  const shopifyQuery = `location_id:${locIdRaw} source_name:pos created_at:>=${searchIso.start} created_at:<=${searchIso.end} tag_not:settlement -status:cancelled`;
   const orders = await fetchAllOrders(admin, shopifyQuery);
   const ordersAtLocation = filterOrdersByRetailLocation(orders, locationId, locIdRaw);
 
@@ -611,7 +612,7 @@ export async function buildSettlementPreview(
 
   // 返金再集計（別パス）: その日に処理された返金のうち、注文が「その日作成」でない分を追加（GAS overlayRefundsAndRecalc 相当）
   // GAS と同様に updated_at ベースの返金補足では cancelled も含める
-  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement`;
+  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${searchIso.start} updated_at:<=${searchIso.end} tag_not:settlement`;
   const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
   const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationId, locIdRaw);
   const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);

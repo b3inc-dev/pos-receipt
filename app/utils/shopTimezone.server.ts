@@ -117,6 +117,25 @@ export function getDayRangeInUtc(dateStr: string, ianaTimezone: string): DayRang
 }
 
 /**
+ * Shopify Admin の orders 検索（GraphQL query の created_at / updated_at）向け境界文字列。
+ * UTC の Z 表記だけだと境界解釈がずれ前後日の注文が混ざる事例があるため、
+ * 日本店舗（Asia/Tokyo）は GAS / REST と同じ「現地日付 + +09:00」を使う。
+ */
+export function getDayRangeShopifySearchIso(
+  dateStr: string,
+  ianaTimezone: string,
+): { start: string; end: string } {
+  if (ianaTimezone === "Asia/Tokyo") {
+    return {
+      start: `${dateStr}T00:00:00+09:00`,
+      end: `${dateStr}T23:59:59.999+09:00`,
+    };
+  }
+  const { startUtcIso, endUtcIso } = getDayRangeInUtc(dateStr, ianaTimezone);
+  return { start: startUtcIso, end: endUtcIso };
+}
+
+/**
  * 指定した瞬間を、IANA タイムゾーン上の暦日 YYYY-MM-DD に変換する。
  * サーバが UTC のときでも店舗の「今日」と一致させる（売上サマリーの targetDate 既定・当日判定など）。
  */
