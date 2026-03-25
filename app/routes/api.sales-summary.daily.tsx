@@ -47,6 +47,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const url = new URL(request.url);
     const targetDate = url.searchParams.get("targetDate") ?? shopCalendarToday;
     const locationIdsParam = url.searchParams.getAll("locationIds[]");
+    /** 過去日でも日次キャッシュを使わず Shopify から取り直してキャッシュを上書きする */
+    const forceRecompute = url.searchParams.get("recompute") === "1";
 
     if (!merged.salesSummaryEnabled) {
       return corsJson({
@@ -127,7 +129,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const locationGid = loc.shopifyLocationGid;
       const locationRawId = locationGid.replace("gid://shopify/Location/", "");
 
-      if (isPastDate) {
+      if (isPastDate && !forceRecompute) {
         const cached = await prisma.salesSummaryCacheDaily.findFirst({
           where: {
             shopId: shop.id,
@@ -194,7 +196,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     await autoDiscoverChannels(admin, shop.id);
     const enabledChannels = await getEnabledSalesChannels(shop.id);
     const buildChannelRow = async (ch: Awaited<ReturnType<typeof getEnabledSalesChannels>>[number]): Promise<ChannelDailySummaryDTO> => {
-      if (isPastDate) {
+      if (isPastDate && !forceRecompute) {
         const cached = await prisma.salesChannelCacheDaily.findFirst({
           where: { shopId: shop.id, channelId: ch.id, targetDate },
         });

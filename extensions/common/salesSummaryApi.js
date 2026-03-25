@@ -44,8 +44,10 @@ async function apiFetch(path, options = {}) {
 export async function getDailySummary(options) {
   const targetDate = options?.targetDate;
   const locationIds = options?.locationIds ?? [];
+  const recompute = options?.recompute === true;
   const params = new URLSearchParams();
   if (targetDate) params.set("targetDate", targetDate);
+  if (recompute) params.set("recompute", "1");
   for (const id of locationIds) params.append("locationIds[]", id);
   return apiFetch(`/api/sales-summary/daily?${params.toString()}`);
 }

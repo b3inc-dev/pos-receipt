@@ -2,7 +2,7 @@
  * /app/sales-summary — 管理画面用 売上サマリー（閲覧専用）
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSearchParams } from "react-router";
+import { redirect, useLoaderData, useSearchParams } from "react-router";
 import { useMemo } from "react";
 import {
   Page,
@@ -15,6 +15,7 @@ import {
   Select,
   Box,
   DataTable,
+  Button,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -369,6 +370,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const targetMonth = url.searchParams.get("targetMonth") ?? targetDate.slice(0, 7);
     const selectedLocationId = url.searchParams.get("locationId") ?? "";
     const showChannels = url.searchParams.get("showChannels") !== "0";
+    const forceRecomputeDaily = url.searchParams.get("recompute") === "1";
+    const forceRecomputeChannelMonth = url.searchParams.get("recomputeChannelMonth") === "1";
 
     let syncWarning: string | null = null;
     try {
@@ -398,6 +401,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         targetMonth,
         selectedLocationId,
         showChannels,
+        calendarToday: shopCalendarToday,
+        recomputeDailyApplied: false,
+        recomputeChannelMonthApplied: false,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows: [] as Array<Record<string, string | number | null>>,
         channelRows: [] as Array<Record<string, string | number | null>>,
@@ -418,6 +424,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         targetMonth,
         selectedLocationId,
         showChannels,
+        calendarToday: shopCalendarToday,
+        recomputeDailyApplied: false,
+        recomputeChannelMonthApplied: false,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows: [] as Array<Record<string, string | number | null>>,
         channelRows: [] as Array<Record<string, string | number | null>>,
@@ -442,11 +451,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
             orderBy: { updatedAt: "desc" },
           });
-          if (cached) {
+          const skipLocationCache = targetDate < today && forceRecomputeDaily;
+          if (cached && !skipLocationCache) {
             rowsRaw.push(toDailyRowFromCache(loc.shopifyLocationGid, loc.name, targetDate, cached));
             continue;
           }
-          // 過去日はキャッシュ固定: キャッシュ未作成時のみ計算して埋める
+          // 過去日はキャッシュ固定: キャッシュ未作成時のみ計算して埋める（recompute=1 のときは常に再計算）
           if (!shouldRecompute && !cached) {
             rowsRaw.push(await computeWithRetry(admin, shop.id, loc.shopifyLocationGid, loc.name, targetDate));
             continue;
@@ -481,6 +491,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         return {
           hasAccess: true, planMessage: "", view, targetDate, targetMonth,
           selectedLocationId, showChannels,
+          calendarToday: shopCalendarToday,
+          recomputeDailyApplied: forceRecomputeDaily,
+          recomputeChannelMonthApplied: false,
           locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
           rows, channelRows: [],
           loadError: loadErrorDaily,
@@ -498,7 +511,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }> = [];
       for (const ch of enabledChannels) {
         try {
-          if (isPastDate) {
+          if (isPastDate && !forceRecomputeDaily) {
             const cached = await prisma.salesChannelCacheDaily.findFirst({
               where: { shopId: shop.id, channelId: ch.id, targetDate },
             });
@@ -530,6 +543,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         targetMonth,
         selectedLocationId,
         showChannels,
+        calendarToday: shopCalendarToday,
+        recomputeDailyApplied: forceRecomputeDaily,
+        recomputeChannelMonthApplied: false,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows,
         channelRows,
@@ -539,6 +555,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     const { dateFrom, dateTo } = monthRange(targetMonth);
+    const channelMonthRebuildNotice =
+      url.searchParams.get("channelNotice") === "channelMonthRebuilt";
+    if (forceRecomputeChannelMonth && showChannels) {
+      await prisma.salesChannelCacheDaily.deleteMany({
+        where: { shopId: shop.id, targetDate: { gte: dateFrom, lte: dateTo } },
+      });
+      const next = new URL(request.url);
+      next.searchParams.delete("recomputeChannelMonth");
+      next.searchParams.set("channelNotice", "channelMonthRebuilt");
+      return redirect(next.pathname + next.search);
+    }
     const failedLocationErrors = new Map<string, string>();
     const today = shopCalendarToday;
     const locationIdsForQuery = expandLocationIdsForCacheQuery(validTargetLocations);
@@ -691,6 +718,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return {
         hasAccess: true, planMessage: "", view, targetDate, targetMonth,
         selectedLocationId, showChannels,
+        calendarToday: shopCalendarToday,
+        recomputeDailyApplied: false,
+        recomputeChannelMonthApplied: channelMonthRebuildNotice,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows, channelRows: [],
         loadError: loadErrorPeriod,
@@ -806,6 +836,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       targetMonth,
       selectedLocationId,
       showChannels,
+      calendarToday: shopCalendarToday,
+      recomputeDailyApplied: false,
+      recomputeChannelMonthApplied: channelMonthRebuildNotice,
       locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
       rows,
       channelRows,
@@ -823,6 +856,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       targetMonth: today.slice(0, 7),
       selectedLocationId: "",
       showChannels: true,
+      calendarToday: today,
+      recomputeDailyApplied: false,
+      recomputeChannelMonthApplied: false,
       locations: [] as Array<{ id: string; name: string }>,
       rows: [] as Array<Record<string, string | number | null>>,
       channelRows: [] as Array<Record<string, string | number | null>>,
@@ -996,6 +1032,42 @@ export default function SalesSummaryAdminPage() {
               <Banner tone="warning">{data.loadWarning}</Banner>
             </Layout.Section>
           )}
+          {data.hasAccess && data.recomputeDailyApplied && (
+            <Layout.Section>
+              <Banner tone="success">
+                この日の店舗行とチャネル行を、保存済みのキャッシュを使わずに取り直しました。次にページを開くときは、またキャッシュが使われます。
+              </Banner>
+              <Box paddingBlockStart="200">
+                <Button
+                  onClick={() => {
+                    const next = new URLSearchParams(searchParams);
+                    next.delete("recompute");
+                    setSearchParams(next);
+                  }}
+                >
+                  通常表示に戻す
+                </Button>
+              </Box>
+            </Layout.Section>
+          )}
+          {data.hasAccess && data.recomputeChannelMonthApplied && (
+            <Layout.Section>
+              <Banner tone="success">
+                表示中の月について、チャネル用の日ごとの保存データをいったん消してから集計し直しました。月次の店舗行は従来どおりです。
+              </Banner>
+              <Box paddingBlockStart="200">
+                <Button
+                  onClick={() => {
+                    const next = new URLSearchParams(searchParams);
+                    next.delete("channelNotice");
+                    setSearchParams(next);
+                  }}
+                >
+                  通常表示に戻す
+                </Button>
+              </Box>
+            </Layout.Section>
+          )}
           {!data.hasAccess && (
             <Layout.Section>
               <Banner tone="warning">{data.planMessage}</Banner>
@@ -1053,6 +1125,22 @@ export default function SalesSummaryAdminPage() {
                         value={data.showChannels ? "1" : "0"}
                         onChange={(v) => setParam("showChannels", v)}
                       />
+                      {data.view === "daily" && data.targetDate < data.calendarToday && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => setParam("recompute", "1")}
+                        >
+                          この日を再取得（古い保存を使わない）
+                        </Button>
+                      )}
+                      {data.view === "period" && data.showChannels && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => setParam("recomputeChannelMonth", "1")}
+                        >
+                          この月のチャネルだけ保存を消してやり直す
+                        </Button>
+                      )}
                     </InlineStack>
                     <Text tone="subdued" as="p">
                       管理画面では閲覧専用です（入店数報告入力はPOSタイル側で実施）。
