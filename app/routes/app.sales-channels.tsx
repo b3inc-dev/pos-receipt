@@ -86,6 +86,29 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json({ ok: false, error: "チャネル名は必須です" }, { status: 400 });
     }
 
+    // 同じ source_name を持つ別チャネルが存在しないか確認（二重集計防止）
+    if (sourceNames.length > 0) {
+      const otherChannels = await prisma.salesChannel.findMany({
+        where: { shopId: shop.id, ...(id ? { id: { not: id } } : {}) },
+        select: { id: true, displayName: true, name: true, sourceNamesJson: true },
+      });
+      const duplicates: string[] = [];
+      for (const ch of otherChannels) {
+        let otherNames: string[] = [];
+        try { otherNames = JSON.parse(ch.sourceNamesJson) as string[]; } catch { /* ignore */ }
+        const overlap = sourceNames.filter((s) => otherNames.map((n) => n.toLowerCase()).includes(s.toLowerCase()));
+        if (overlap.length > 0) {
+          duplicates.push(`"${ch.displayName || ch.name}"（${overlap.join(", ")}）`);
+        }
+      }
+      if (duplicates.length > 0) {
+        return Response.json({
+          ok: false,
+          error: `以下のチャネルと source_name が重複しています（二重集計になります）: ${duplicates.join(" / ")}`,
+        }, { status: 400 });
+      }
+    }
+
     if (id) {
       const existing = await prisma.salesChannel.findFirst({ where: { id, shopId: shop.id } });
       if (!existing) return Response.json({ ok: false, error: "Not found" }, { status: 404 });

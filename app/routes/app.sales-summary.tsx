@@ -118,6 +118,21 @@ function toErrorMessage(err: unknown): string {
   return "不明なエラー";
 }
 
+/** ロケーション同期警告＋一部ロケーション失敗を1本の loadError 文字列にまとめる（const 配列の TDZ を避けるため明示的に組み立てる） */
+function buildLocationFailureLoadError(
+  syncWarning: string | null,
+  failedDetails: string[],
+): string | null {
+  const parts: string[] = [];
+  if (syncWarning) parts.push(syncWarning);
+  if (failedDetails.length > 0) {
+    parts.push(
+      `一部ロケーションの集計に失敗しました（${failedDetails.join(" / ")}）。`,
+    );
+  }
+  return parts.length > 0 ? parts.join(" ") : null;
+}
+
 function parseEnvInt(name: string, fallback: number, min = 1, max = 10000): number {
   const raw = process.env[name];
   const n = raw ? Number(raw) : NaN;
@@ -441,12 +456,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const failedDetailsDaily = Array.from(failedLocationErrors.entries()).map(
         ([name, reason]) => `${name}: ${reason}`,
       );
-      const loadErrorPartsDaily = [
-        syncWarning,
-        failedDetailsDaily.length > 0
-          ? `一部ロケーションの集計に失敗しました（${failedDetailsDaily.join(" / ")}）。`
-          : null,
-      ].filter((v): v is string => Boolean(v));
+      const loadErrorDaily = buildLocationFailureLoadError(syncWarning, failedDetailsDaily);
 
       // ── チャネル行集計（daily） ──────────────────────────────────────────────
       if (!showChannels) {
@@ -455,7 +465,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           selectedLocationId, showChannels,
           locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
           rows, channelRows: [],
-          loadError: loadErrorPartsDaily.length > 0 ? loadErrorPartsDaily.join(" ") : null,
+          loadError: loadErrorDaily,
           loadWarning: null,
         };
       }
@@ -505,7 +515,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows,
         channelRows,
-        loadError: loadErrorPartsDaily.length > 0 ? loadErrorPartsDaily.join(" ") : null,
+        loadError: loadErrorDaily,
         loadWarning: null,
       };
     }
@@ -637,12 +647,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const failedDetailsPeriodEarly = Array.from(failedLocationErrors.entries()).map(
       ([name, reason]) => `${name}: ${reason}`,
     );
-    const loadErrorPartsPeriod = [
-      syncWarning,
-      failedDetailsPeriodEarly.length > 0
-        ? `一部ロケーションの集計に失敗しました（${failedDetailsPeriodEarly.join(" / ")}）。`
-        : null,
-    ].filter((v): v is string => Boolean(v));
+    const loadErrorPeriod = buildLocationFailureLoadError(syncWarning, failedDetailsPeriodEarly);
 
     const loadWarningPeriodOnly =
       maxPeriod !== 0 && skippedLocation > 0
@@ -656,7 +661,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         selectedLocationId, showChannels,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows, channelRows: [],
-        loadError: loadErrorPartsPeriod.length > 0 ? loadErrorPartsPeriod.join(" ") : null,
+        loadError: loadErrorPeriod,
         loadWarning: loadWarningPeriodOnly,
       };
     }
@@ -772,7 +777,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
       rows,
       channelRows,
-      loadError: loadErrorPartsPeriod.length > 0 ? loadErrorPartsPeriod.join(" ") : null,
+      loadError: loadErrorPeriod,
       loadWarning,
     };
   } catch (err) {
