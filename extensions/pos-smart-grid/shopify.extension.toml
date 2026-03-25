@@ -18,12 +18,9 @@ target = "pos.home.tile.render"
 module = "./src/SpecialRefundModal.jsx"
 target = "pos.home.modal.render"
 
+# 注: 同一 [[extensions]] 内で pos.order-details.action.menu-item.render は1回のみ（CLI 重複エラー防止）
 [[extensions.targeting]]
-module = "./src/SpecialRefundOrderAction.jsx"
-target = "pos.order-details.action.menu-item.render"
-
-[[extensions.targeting]]
-module = "./src/VoucherOrderAction.jsx"
+module = "./src/SpecialRefundVoucherOrderActions.jsx"
 target = "pos.order-details.action.menu-item.render"
 
 # ============================================================

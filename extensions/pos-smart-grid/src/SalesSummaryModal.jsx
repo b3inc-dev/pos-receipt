@@ -88,7 +88,6 @@ function defaultDisplayOptions() {
     showMonthAchvRatio: true,
     showProgressToday: true,
     showProgressPrev: true,
-    showStoreTotals: true,
   };
 }
 
@@ -810,7 +809,7 @@ function HistoryDailyDetailView({
                   {locLoadErr}
                 </s-text>
               ) : null}
-              <s-stack direction="inline" justifyContent="space-between" alignItems="start" gap="small" style={{ width: "100%" }}>
+              <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" inlineSize="100%">
                 <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
                   <s-stack gap="extraSmall">
                     <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -826,9 +825,9 @@ function HistoryDailyDetailView({
                     ) : null}
                   </s-stack>
                 </s-box>
-                <s-box style={{ flex: "0 0 auto", alignSelf: "start" }}>
+                <s-box style={{ flex: "0 0 auto" }}>
                   <s-button
-                    kind={scope === "all" ? "primary" : "secondary"}
+                    variant={scope === "all" ? "primary" : "secondary"}
                     onClick={() => setScope(scope === "all" ? "single" : "all")}
                   >
                     全店舗表示
@@ -1322,7 +1321,7 @@ function SalesSummaryModal() {
                   {locLoadErr}
                 </s-text>
               ) : null}
-              <s-stack direction="inline" justifyContent="space-between" alignItems="start" gap="small" style={{ width: "100%" }}>
+              <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" inlineSize="100%">
                 <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
                   <s-stack gap="extraSmall">
                     <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -1335,9 +1334,9 @@ function SalesSummaryModal() {
                     ) : null}
                   </s-stack>
                 </s-box>
-                <s-box style={{ flex: "0 0 auto", alignSelf: "start" }}>
+                <s-box style={{ flex: "0 0 auto" }}>
                   <s-button
-                    kind={scope === "all" ? "primary" : "secondary"}
+                    variant={scope === "all" ? "primary" : "secondary"}
                     onClick={() => setScope(scope === "all" ? "single" : "all")}
                   >
                     全店舗表示
@@ -1345,20 +1344,19 @@ function SalesSummaryModal() {
                 </s-box>
               </s-stack>
 
-              <s-stack direction="inline" gap="small" alignItems="stretch" style={{ width: "100%" }}>
-                <s-box style={{ flex: "1 1 50%", minInlineSize: 0 }}>
+              {/* POS Stock 入庫モーダル（未入庫 / 入庫済み）と同型: gap-none + 50% + variant */}
+              <s-stack direction="inline" gap="none" inlineSize="100%">
+                <s-box inlineSize="50%">
                   <s-button
-                    kind={grain === "monthly" ? "primary" : "secondary"}
-                    style={{ width: "100%" }}
+                    variant={grain === "monthly" ? "primary" : "secondary"}
                     onClick={() => setGrain("monthly")}
                   >
                     月次
                   </s-button>
                 </s-box>
-                <s-box style={{ flex: "1 1 50%", minInlineSize: 0 }}>
+                <s-box inlineSize="50%">
                   <s-button
-                    kind={grain === "daily" ? "primary" : "secondary"}
-                    style={{ width: "100%" }}
+                    variant={grain === "daily" ? "primary" : "secondary"}
                     onClick={() => setGrain("daily")}
                   >
                     日次

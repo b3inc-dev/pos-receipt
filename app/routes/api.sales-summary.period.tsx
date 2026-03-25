@@ -9,10 +9,39 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import prisma from "../db.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
-import { getAppSetting } from "../utils/appSettings.server";
-import { SALES_SUMMARY_SETTINGS_KEY, DEFAULT_SALES_SUMMARY_SETTINGS } from "../utils/appSettings.server";
+import {
+  getAppSetting,
+  SALES_SUMMARY_SETTINGS_KEY,
+  mergeAndNormalizeSalesSummarySettings,
+  type SalesSummarySettings,
+} from "../utils/appSettings.server";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
+
+/** キャッシュの locationId が GID / 数値のどちらでも findMany にヒットするよう列挙 */
+function expandLocationIdsForCacheQuery(targetLocations: SalesSummaryLocationRow[]): string[] {
+  const s = new Set<string>();
+  for (const l of targetLocations) {
+    const g = l.shopifyLocationGid;
+    const raw = g.replace("gid://shopify/Location/", "");
+    s.add(g);
+    if (raw) s.add(raw);
+  }
+  return [...s];
+}
+
+/** キャッシュ行の locationId を店舗マスタ上の正規 GID に寄せる（期間集計のキーぶれ防止） */
+function resolveCanonicalLocationGid(
+  targetLocations: SalesSummaryLocationRow[],
+  rowLocationId: string,
+): string | null {
+  for (const l of targetLocations) {
+    const g = l.shopifyLocationGid;
+    const raw = g.replace("gid://shopify/Location/", "");
+    if (rowLocationId === g || rowLocationId === raw) return g;
+  }
+  return null;
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -26,8 +55,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
 
-    const settings = await getAppSetting<typeof DEFAULT_SALES_SUMMARY_SETTINGS>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
-    const merged = { ...DEFAULT_SALES_SUMMARY_SETTINGS, ...settings };
+    const settings = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
+    const merged = mergeAndNormalizeSalesSummarySettings(settings ?? undefined);
     if (!merged.salesSummaryEnabled) {
       return corsJson({ rows: [], totals: {}, dateFrom: null, dateTo: null, displayOptions: merged });
     }
@@ -85,13 +114,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     const locationGids = targetLocations.map((l) => l.shopifyLocationGid);
+    const locationIdsForQuery = expandLocationIdsForCacheQuery(targetLocations);
 
     if (locationGids.length === 0) {
       return corsJson({ rows: [], totals: {}, dateFrom, dateTo, displayOptions: merged });
     }
 
     // 期間表示時は先に日次キャッシュを再計算する。
-    // 純売上・客数・点数を精算と完全一致させるため、上限を設けず対象期間をすべて再計算する。
+    // 日ごとに全ロケーションを並列にし、日×店の同時 GraphQL を抑えてレート制限を避ける。
     if (dateFrom && dateTo) {
       const start = new Date(dateFrom + "T00:00:00Z").getTime();
       const end = new Date(dateTo + "T23:59:59Z").getTime();
@@ -99,13 +129,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       for (let t = start; t <= end; t += 86400000) {
         days.push(new Date(t).toISOString().slice(0, 10));
       }
-      await Promise.all(
-        targetLocations.flatMap((loc) =>
-          days.map((targetDate) =>
+      for (const targetDate of days) {
+        await Promise.all(
+          targetLocations.map((loc) =>
             computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, targetDate)
           )
-        )
-      );
+        );
+      }
     }
 
     // 日次キャッシュから集計
@@ -116,7 +146,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const dailyRows = await prisma.salesSummaryCacheDaily.findMany({
       where: {
         shopId: shop.id,
-        locationId: { in: locationGids },
+        locationId: { in: locationIdsForQuery },
         ...(Object.keys(whereTargetDate).length > 0 ? { targetDate: whereTargetDate } : {}),
       },
     });
@@ -142,10 +172,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     >();
 
     for (const row of dailyRows) {
-      if (!locationMap.has(row.locationId)) {
-        locationMap.set(row.locationId, {
-          locationId: row.locationId,
-          locationName: locNameMap.get(row.locationId) ?? row.locationId,
+      const canon = resolveCanonicalLocationGid(targetLocations, row.locationId);
+      if (!canon) continue;
+      if (!locationMap.has(canon)) {
+        locationMap.set(canon, {
+          locationId: canon,
+          locationName: locNameMap.get(canon) ?? canon,
           actualTotal: 0,
           budgetTotal: null,
           orders: 0,
@@ -154,7 +186,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           progressBudgetPrev: 0,
         });
       }
-      const entry = locationMap.get(row.locationId)!;
+      const entry = locationMap.get(canon)!;
       entry.actualTotal += Number(row.actual);
       entry.orders += row.orders;
       entry.items += row.items;

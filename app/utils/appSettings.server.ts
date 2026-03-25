@@ -98,6 +98,34 @@ export const DEFAULT_SALES_SUMMARY_SETTINGS: SalesSummarySettings = {
   footfallReportRequiresConfirmation: true,
 };
 
+/** DB の JSON に "true"/"false" 文字列が入っていると POS 側で KPI が誤判定されるため正規化する */
+const SALES_SUMMARY_BOOLEAN_KEYS = (
+  Object.entries(DEFAULT_SALES_SUMMARY_SETTINGS) as [keyof SalesSummarySettings, unknown][]
+)
+  .filter(([, v]) => typeof v === "boolean")
+  .map(([k]) => k);
+
+export function normalizeSalesSummaryMerged(merged: SalesSummarySettings): SalesSummarySettings {
+  const out: Record<string, unknown> = { ...merged };
+  for (const key of SALES_SUMMARY_BOOLEAN_KEYS) {
+    const v = out[key as string];
+    if (v === true || v === false) continue;
+    if (v === "true" || (typeof v === "string" && v.toLowerCase() === "true")) {
+      out[key as string] = true;
+    } else if (v === "false" || (typeof v === "string" && v.toLowerCase() === "false")) {
+      out[key as string] = false;
+    }
+  }
+  return out as SalesSummarySettings;
+}
+
+export function mergeAndNormalizeSalesSummarySettings(
+  saved: Partial<SalesSummarySettings> | null | undefined,
+): SalesSummarySettings {
+  const merged = { ...DEFAULT_SALES_SUMMARY_SETTINGS, ...(saved ?? {}) };
+  return normalizeSalesSummaryMerged(merged as SalesSummarySettings);
+}
+
 // ── ポイント/会員施策設定（要件 §9A） ───────────────────────────────────────
 
 export const LOYALTY_SETTINGS_KEY = "loyalty_settings";

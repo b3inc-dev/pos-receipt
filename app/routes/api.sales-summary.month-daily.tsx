@@ -9,8 +9,12 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import prisma from "../db.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
-import { getAppSetting } from "../utils/appSettings.server";
-import { SALES_SUMMARY_SETTINGS_KEY, DEFAULT_SALES_SUMMARY_SETTINGS } from "../utils/appSettings.server";
+import {
+  getAppSetting,
+  SALES_SUMMARY_SETTINGS_KEY,
+  mergeAndNormalizeSalesSummarySettings,
+  type SalesSummarySettings,
+} from "../utils/appSettings.server";
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
@@ -40,8 +44,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
 
-    const settings = await getAppSetting<typeof DEFAULT_SALES_SUMMARY_SETTINGS>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
-    const merged = { ...DEFAULT_SALES_SUMMARY_SETTINGS, ...settings };
+    const settings = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
+    const merged = mergeAndNormalizeSalesSummarySettings(settings ?? undefined);
 
     const url = new URL(request.url);
     const locationId = url.searchParams.get("locationId");

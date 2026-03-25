@@ -10,7 +10,11 @@ import prisma from "../db.server";
 import { computeAndCacheDailySummary, type DailySummaryRowDTO } from "../services/salesSummaryEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import { getAppSetting } from "../utils/appSettings.server";
-import { SALES_SUMMARY_SETTINGS_KEY, DEFAULT_SALES_SUMMARY_SETTINGS } from "../utils/appSettings.server";
+import {
+  SALES_SUMMARY_SETTINGS_KEY,
+  mergeAndNormalizeSalesSummarySettings,
+  type SalesSummarySettings,
+} from "../utils/appSettings.server";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
 
@@ -26,8 +30,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
 
-    const settings = await getAppSetting<typeof DEFAULT_SALES_SUMMARY_SETTINGS>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
-    const merged = { ...DEFAULT_SALES_SUMMARY_SETTINGS, ...settings };
+    const settings = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
+    const merged = mergeAndNormalizeSalesSummarySettings(settings ?? undefined);
     const url = new URL(request.url);
     const targetDate =
       url.searchParams.get("targetDate") ?? new Date().toISOString().slice(0, 10);
@@ -98,52 +102,58 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // 精算側の「過去日=DB中心」方針に合わせる:
     // - 過去日: まず日次キャッシュを優先利用（未キャッシュ時のみ再計算）
-    // - 当日以降: 毎回再計算して最新化
-    const rows: Array<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> = await Promise.all(
-      targetLocations.map(async (loc: SalesSummaryLocationRow): Promise<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> => {
-        const locationGid = loc.shopifyLocationGid;
-        const locationRawId = locationGid.replace("gid://shopify/Location/", "");
+    // - 当日: 毎回再計算。全店舗時は店舗を順に処理し GraphQL の同時実行を抑える。
+    const buildRow = async (
+      loc: SalesSummaryLocationRow,
+    ): Promise<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> => {
+      const locationGid = loc.shopifyLocationGid;
+      const locationRawId = locationGid.replace("gid://shopify/Location/", "");
 
-        if (isPastDate) {
-          const cached = await prisma.salesSummaryCacheDaily.findFirst({
-            where: {
-              shopId: shop.id,
-              locationId: { in: [locationGid, locationRawId] },
-              targetDate,
-            },
-          });
+      if (isPastDate) {
+        const cached = await prisma.salesSummaryCacheDaily.findFirst({
+          where: {
+            shopId: shop.id,
+            locationId: { in: [locationGid, locationRawId] },
+            targetDate,
+          },
+        });
 
-          if (cached) {
-            const cachedRow: DailySummaryRowDTO = {
-              locationId: locationGid,
-              locationName: loc.name,
-              targetDate,
-              actual: Number(cached.actual),
-              orders: cached.orders,
-              items: cached.items,
-              visitors: cached.visitors,
-              budget: cached.budget !== null ? Number(cached.budget) : null,
-              budgetRatio: cached.budgetRatio !== null ? Number(cached.budgetRatio) : null,
-              conv: cached.conv !== null ? Number(cached.conv) : null,
-              atv: cached.atv !== null ? Number(cached.atv) : null,
-              setRate: cached.setRate !== null ? Number(cached.setRate) : null,
-              unit: cached.unit !== null ? Number(cached.unit) : null,
-              currency: "JPY",
-            };
-            return { ...cachedRow, footfallReportingEnabled: loc.footfallReportingEnabled };
-          }
+        if (cached) {
+          const cachedRow: DailySummaryRowDTO = {
+            locationId: locationGid,
+            locationName: loc.name,
+            targetDate,
+            actual: Number(cached.actual),
+            orders: cached.orders,
+            items: cached.items,
+            visitors: cached.visitors,
+            budget: cached.budget !== null ? Number(cached.budget) : null,
+            budgetRatio: cached.budgetRatio !== null ? Number(cached.budgetRatio) : null,
+            conv: cached.conv !== null ? Number(cached.conv) : null,
+            atv: cached.atv !== null ? Number(cached.atv) : null,
+            setRate: cached.setRate !== null ? Number(cached.setRate) : null,
+            unit: cached.unit !== null ? Number(cached.unit) : null,
+            currency: "JPY",
+          };
+          return { ...cachedRow, footfallReportingEnabled: loc.footfallReportingEnabled };
         }
+      }
 
-        const row = await computeAndCacheDailySummary(
-          admin,
-          shop.id,
-          locationGid,
-          loc.name,
-          targetDate
-        );
-        return { ...row, footfallReportingEnabled: loc.footfallReportingEnabled };
-      })
-    );
+      const row = await computeAndCacheDailySummary(admin, shop.id, locationGid, loc.name, targetDate);
+      return { ...row, footfallReportingEnabled: loc.footfallReportingEnabled };
+    };
+
+    const useSequentialToday =
+      !isPastDate && targetLocations.length > 1;
+    let rows: Array<DailySummaryRowDTO & { footfallReportingEnabled: boolean }>;
+    if (useSequentialToday) {
+      rows = [];
+      for (const loc of targetLocations) {
+        rows.push(await buildRow(loc));
+      }
+    } else {
+      rows = await Promise.all(targetLocations.map((loc) => buildRow(loc)));
+    }
 
     // 合計
     const totals = {
