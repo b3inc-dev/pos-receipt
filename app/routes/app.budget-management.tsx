@@ -63,6 +63,52 @@ function daysInMonthFromKey(monthKey: string) {
   return new Date(y, m, 0).getDate();
 }
 
+function parseCsvRows(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (ch === '"') {
+      if (inQuotes && next === '"') {
+        cell += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === "," && !inQuotes) {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+    if ((ch === "\n" || ch === "\r") && !inQuotes) {
+      if (ch === "\r" && next === "\n") i++;
+      row.push(cell);
+      cell = "";
+      if (row.some((c) => c.length > 0)) rows.push(row);
+      row = [];
+      continue;
+    }
+    cell += ch;
+  }
+  row.push(cell);
+  if (row.some((c) => c.length > 0)) rows.push(row);
+  return rows;
+}
+
+function normalizeHeaderCell(v: string) {
+  return v.replace(/^\uFEFF/, "").trim().toLowerCase();
+}
+
+function normalizeLocationName(v: string) {
+  return v.replace(/\u3000/g, " ").trim().replace(/\s+/g, " ");
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
@@ -144,7 +190,7 @@ async function importBudgetsFromCsvText(params: {
   admin: { graphql: (query: string) => Promise<Response> };
 }) {
   const { text, shopId, admin } = params;
-  const lines = text.split(/\r?\n/).filter(Boolean);
+  const rows = parseCsvRows(text);
   let inserted = 0, updated = 0, skipped = 0;
   const errors: string[] = [];
 
@@ -153,11 +199,11 @@ async function importBudgetsFromCsvText(params: {
     data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
   };
   const activeLocations = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
-  const locationNameToId = new Map(activeLocations.map((l) => [l.name.trim(), l.id]));
+  const locationNameToId = new Map(activeLocations.map((l) => [normalizeLocationName(l.name), l.id]));
 
   // ヘッダー解析（DLテンプレート: ロケーション名,日付,予算 / 従来: locationId,targetDate,amount）
-  const header = lines[0]?.split(",").map((s) => s.trim()) ?? [];
-  const normalized = header.map((h) => h.toLowerCase());
+  const header = rows[0]?.map((s) => s.replace(/^\uFEFF/, "").trim()) ?? [];
+  const normalized = header.map((h) => normalizeHeaderCell(h));
   const idxLocName = header.findIndex((h) => h === "ロケーション名");
   const idxDateJa = header.findIndex((h) => h === "日付");
   const idxBudgetJa = header.findIndex((h) => h === "予算");
@@ -166,15 +212,14 @@ async function importBudgetsFromCsvText(params: {
   const idxAmount = normalized.findIndex((h) => h === "amount" || h === "budget");
   const hasHeader = [idxLocName, idxDateJa, idxBudgetJa, idxLocId, idxDate, idxAmount].some((i) => i >= 0);
 
-  const dataLines = hasHeader ? lines.slice(1) : lines;
-  for (const line of dataLines) {
-    const parts = line.split(",");
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  for (const parts of dataRows) {
     if (parts.length < 3) {
       skipped++;
       continue;
     }
 
-    const rawLocName = idxLocName >= 0 ? (parts[idxLocName] ?? "").trim() : "";
+    const rawLocName = idxLocName >= 0 ? normalizeLocationName(parts[idxLocName] ?? "") : "";
     const rawDateJa = idxDateJa >= 0 ? (parts[idxDateJa] ?? "").trim() : "";
     const rawBudgetJa = idxBudgetJa >= 0 ? (parts[idxBudgetJa] ?? "").trim() : "";
 
@@ -196,7 +241,7 @@ async function importBudgetsFromCsvText(params: {
     }
 
     if (!locationId || !targetDate || isNaN(amount)) {
-      errors.push(`無効な行: ${line}`);
+      errors.push(`無効な行: ${parts.join(",")}`);
       continue;
     }
     try {
@@ -210,7 +255,7 @@ async function importBudgetsFromCsvText(params: {
       });
       existing ? updated++ : inserted++;
     } catch (e) {
-      errors.push(`行エラー: ${line} - ${e instanceof Error ? e.message : "unknown"}`);
+      errors.push(`行エラー: ${parts.join(",")} - ${e instanceof Error ? e.message : "unknown"}`);
     }
   }
   return { ok: true, inserted, updated, skipped, errors };

@@ -22,6 +22,14 @@ function daysInMonthFromKey(monthKey: string) {
   return new Date(y, m, 0).getDate();
 }
 
+function escapeCsvCell(value: string | number) {
+  const s = String(value ?? "");
+  if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
@@ -97,7 +105,13 @@ export async function action({ request }: ActionFunctionArgs) {
     for (let day = 1; day <= dayCount; day++) {
       const targetDate = `${templateMonth}-${String(day).padStart(2, "0")}`;
       const amount = amountMap.get(`${locId}__${targetDate}`) ?? "";
-      rows.push(`${locName},${targetDate},${amount}`);
+      rows.push(
+        [
+          escapeCsvCell(locName),
+          escapeCsvCell(targetDate),
+          escapeCsvCell(amount),
+        ].join(",")
+      );
     }
   }
 
