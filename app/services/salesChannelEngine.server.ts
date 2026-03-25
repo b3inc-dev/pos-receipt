@@ -5,11 +5,13 @@
  * - POS ロケーションとは独立して動作する（retailLocation 照合なし）
  * - Shopify の source_name フィールドでチャネルを識別する
  * - 返金は updated_at ベースの 2 パスで集計（POS の settlementEngine と同方式）
+ * - 実績 actual は税込（注文 totalPriceSet − 当日返金）を精算設定の税率で税抜に換算（buildSettlementPreview の netSales と同一式）
  * - キャッシュは SalesChannelCacheDaily に保存
  */
 import prisma from "../db.server";
 import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
-import { getAppSetting, setAppSetting } from "../utils/appSettings.server";
+import { getAppSetting, setAppSetting, SETTLEMENT_SETTINGS_KEY } from "../utils/appSettings.server";
+import { splitTaxInclusiveToNetAndTax } from "./settlementEngine.server";
 
 // ── 既知の source_name → 表示名マッピング ────────────────────────────────────
 
@@ -487,7 +489,10 @@ export async function computeAndCacheChannelDailySummary(
   const ordersUpdated = filterBySourceNames(allUpdatedOrders, sourceNames);
   const refundOverlay = computeRefundOverlay(ordersUpdated, orderIdsCreatedInDay, dayRange);
 
-  const actual = gross - refundInDay - refundOverlay;
+  const inclusiveActual = gross - refundInDay - refundOverlay;
+  const settlementSettings = await getAppSetting<{ taxRatePercent?: number }>(shopId, SETTLEMENT_SETTINGS_KEY);
+  const taxRatePercent = Number(settlementSettings?.taxRatePercent) || 10;
+  const { netSales: actual } = splitTaxInclusiveToNetAndTax(inclusiveActual, taxRatePercent);
   const orderCount = orders.length;
 
   // 予算取得

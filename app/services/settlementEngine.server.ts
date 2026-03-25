@@ -514,6 +514,22 @@ function applySpecialRefundEventsToTotals(
   }
 }
 
+/**
+ * 税込の合計金額から税抜純売上と内税相当額を算出する。
+ * buildSettlementPreview の netSales / tax と同一の式（精算設定の税率％を税込ベースから逆算）。
+ * チャネル別売上など、注文 totalPriceSet ベースの税込実績を POS と同じ税抜に揃えるときに利用する。
+ */
+export function splitTaxInclusiveToNetAndTax(
+  inclusiveTotal: number,
+  taxRatePercent: number,
+): { netSales: number; tax: number } {
+  const roundInt = (n: number) => Math.round(n);
+  const total = Math.max(0, inclusiveTotal);
+  const tax = roundInt((total * taxRatePercent) / (100 + taxRatePercent));
+  const netSales = roundInt(total - tax);
+  return { netSales, tax };
+}
+
 // ── メインエントリ ─────────────────────────────────────────────────────────────
 
 export async function buildSettlementPreview(
@@ -650,8 +666,9 @@ export async function buildSettlementPreview(
   total = Math.max(0, sectionsTotal);
   const settlementSettings = await getAppSetting<{ taxRatePercent?: number }>(shopId, SETTLEMENT_SETTINGS_KEY);
   const taxRatePercent = Number(settlementSettings?.taxRatePercent) || 10;
-  tax = roundInt((total * taxRatePercent) / (100 + taxRatePercent));
-  netSales = roundInt(total - tax);
+  const split = splitTaxInclusiveToNetAndTax(total, taxRatePercent);
+  tax = split.tax;
+  netSales = split.netSales;
 
   for (const sec of paymentSections) {
     if (sec.label === sec.gateway) {
