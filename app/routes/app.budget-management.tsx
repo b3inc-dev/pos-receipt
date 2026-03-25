@@ -10,6 +10,7 @@ import {
   Card,
   Text,
   Badge,
+  Checkbox,
   Button,
   BlockStack,
   InlineStack,
