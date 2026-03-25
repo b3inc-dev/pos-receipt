@@ -146,7 +146,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
   }
 `;
 
-/** 注文を retailLocation が指定ロケーションと一致するもののみに絞る（ロケーションなし・オンライン等を除外） */
+/** GID または数値ロケーション ID から数値部分を取り出す */
 function extractLocationNumericId(locationId: string | null | undefined): string | null {
   if (!locationId) return null;
   const s = String(locationId).trim();
@@ -155,6 +155,11 @@ function extractLocationNumericId(locationId: string | null | undefined): string
   return m?.[1] ?? null;
 }
 
+/**
+ * 注文を対象ロケーションに絞る。
+ * Admin の orders 検索で既に location_id:（数値）を付けているため、retailLocation が GraphQL で null の POS 注文も拾う（さもないと売上・件数が大きく欠ける）。
+ * retailLocation があるときだけ厳密照合し、別店舗なら除外する。
+ */
 function filterOrdersByRetailLocation(
   orders: ShopifyOrder[],
   locationId: string,
@@ -163,7 +168,7 @@ function filterOrdersByRetailLocation(
   const locationGid = locationId.startsWith("gid://") ? locationId : `gid://shopify/Location/${locIdRaw}`;
   return orders.filter((o) => {
     const rid = o.retailLocation?.id;
-    if (!rid) return false;
+    if (!rid) return true;
     const ridRaw = extractLocationNumericId(rid);
     return rid === locationGid || ridRaw === locIdRaw;
   });
@@ -262,7 +267,7 @@ function filterOrdersUpdatedByRetailLocation(
   const locationGid = locationId.startsWith("gid://") ? locationId : `gid://shopify/Location/${locIdRaw}`;
   return orders.filter((o) => {
     const rid = o.retailLocation?.id;
-    if (!rid) return false;
+    if (!rid) return true;
     const ridRaw = extractLocationNumericId(rid);
     return rid === locationGid || ridRaw === locIdRaw;
   });

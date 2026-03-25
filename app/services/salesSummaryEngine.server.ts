@@ -94,7 +94,6 @@ const SUMMARY_ORDERS_QUERY = `#graphql
   }
 `;
 
-/** 注文を retailLocation が指定ロケーションと一致するもののみに絞る（ロケーションなし・オンライン等を除外） */
 function extractLocationNumericId(locationId: string | null | undefined): string | null {
   if (!locationId) return null;
   const s = String(locationId).trim();
@@ -103,6 +102,7 @@ function extractLocationNumericId(locationId: string | null | undefined): string
   return m?.[1] ?? null;
 }
 
+/** 精算エンジンと同じく、検索で location_id 済みなら retailLocation が null でも含める */
 function filterSummaryOrdersByRetailLocation(
   orders: SummaryOrder[],
   locationId: string,
@@ -111,7 +111,7 @@ function filterSummaryOrdersByRetailLocation(
   const locationGid = locationId.startsWith("gid://") ? locationId : `gid://shopify/Location/${locIdRaw}`;
   return orders.filter((o) => {
     const rid = o.retailLocation?.id;
-    if (!rid) return false;
+    if (!rid) return true;
     const ridRaw = extractLocationNumericId(rid);
     return rid === locationGid || ridRaw === locIdRaw;
   });
