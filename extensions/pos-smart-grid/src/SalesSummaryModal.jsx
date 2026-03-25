@@ -7,7 +7,8 @@
  * - スクロール: 全店舗時は先頭に全店合計、その下に店舗別のリスト行（精算プレビュー型）
  * - フッター左: 入店数報告ボタン（日次・この店のみ・対象店で表示／command で s-modal を開く）
  * - フッター右: 日別一覧（/api/sales-summary/month-daily・比較用KPI付きリスト）
- * - 日別一覧で日付タップ: メインの日付は据え置きで historyDaily へ。UIは日次TOPと同型（この店舗/全店舗・入店数報告可）
+ * - 日別一覧で日付タップ: メインの日付は据え置きで historyDaily へ（入店数報告は単一店・日次のみ）
+ * - 日別一覧の「戻る」は常に売上サマリーTOPへ
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from "preact/hooks";
 import { render } from "preact";
@@ -687,7 +688,6 @@ function HistoryDailyDetailView({
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [footfallInputs, setFootfallInputs] = useState({});
   const [footerFootfallInput, setFooterFootfallInput] = useState("");
   const [savingFootfall, setSavingFootfall] = useState(false);
   const [footfallErr, setFootfallErr] = useState("");
@@ -713,22 +713,15 @@ function HistoryDailyDetailView({
       }
       const result = await getDailySummary({ targetDate: viewDate, locationIds: locationIdsForApi });
       setData(result);
-      if (result?.rows) {
-        const inputs = {};
-        for (const row of result.rows) {
-          if (row.visitors !== null && row.visitors !== undefined) {
-            inputs[row.locationId] = String(row.visitors);
-          }
-        }
-        setFootfallInputs((prev) => ({ ...inputs, ...prev }));
-        const sessionRow = sessionGid
-          ? result.rows.find((r) => locationIdsMatch(r.locationId, sessionGid))
-          : null;
+      if (result?.rows && scope === "single" && sessionGid) {
+        const sessionRow = result.rows.find((r) => locationIdsMatch(r.locationId, sessionGid));
         if (sessionRow && sessionRow.visitors != null) {
           setFooterFootfallInput(String(sessionRow.visitors));
         } else {
           setFooterFootfallInput("");
         }
+      } else if (result?.rows) {
+        setFooterFootfallInput("");
       }
     } catch (err) {
       setError(toUserMessage(err?.message));
@@ -795,17 +788,6 @@ function HistoryDailyDetailView({
     }
   };
 
-  const handleSaveRowFootfall = async (locationId) => {
-    const visitors = parseInt(footfallInputs[locationId] ?? "0", 10);
-    if (isNaN(visitors)) return;
-    try {
-      await reportFootfall({ locationId, targetDate: viewDate, visitors });
-      await loadData();
-    } catch (err) {
-      setError(toUserMessage(err?.message) || "入店数の保存に失敗しました");
-    }
-  };
-
   const canPrevDay = viewDate > "2020-01-01";
   const canNextDay = viewDate < todayStr();
 
@@ -834,9 +816,6 @@ function HistoryDailyDetailView({
             }}
           >
             <s-stack gap="small">
-              <s-button kind="plain" onClick={onNavigateToDailyList}>
-                ← 日別一覧に戻る
-              </s-button>
               {locLoadErr ? (
                 <s-text tone="critical" size="small">
                   {locLoadErr}
@@ -940,24 +919,6 @@ function HistoryDailyDetailView({
                             <MetricBlock title={row.locationName ?? row.locationId}>
                               <DailyMetricRows row={row} o={o} />
                             </MetricBlock>
-                            {row.footfallReportingEnabled && scope === "all" ? (
-                              <s-box padding="none" paddingBlockStart="none">
-                                <s-stack direction="inline" gap="small" blockAlignment="end">
-                                  <s-text-field
-                                    label={`入店数（${row.locationName ?? ""}）`}
-                                    value={footfallInputs[row.locationId] ?? ""}
-                                    onChange={(e) =>
-                                      setFootfallInputs((s) => ({
-                                        ...s,
-                                        [row.locationId]:
-                                          e.detail?.value ?? e.target?.value ?? footfallInputs[row.locationId],
-                                      }))
-                                    }
-                                  />
-                                  <s-button onClick={() => handleSaveRowFootfall(row.locationId)}>保存</s-button>
-                                </s-stack>
-                              </s-box>
-                            ) : null}
                           </s-stack>
                         ))}
                       </>
@@ -1032,8 +993,6 @@ function HistoryDailyDetailView({
 function SalesSummaryModal() {
   const [step, setStep] = useState("main");
   const [historyDate, setHistoryDate] = useState(null);
-  /** 日別一覧をメインから開いたか / 履歴明細から開いたか（戻る先の切り替え用） */
-  const [dailyListSource, setDailyListSource] = useState("main");
   const [scope, setScope] = useState("single");
   const [grain, setGrain] = useState("daily");
   const [targetDate, setTargetDate] = useState(todayStr);
@@ -1056,7 +1015,6 @@ function SalesSummaryModal() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [footfallInputs, setFootfallInputs] = useState({});
   const [footerFootfallInput, setFooterFootfallInput] = useState("");
   const [savingFootfall, setSavingFootfall] = useState(false);
   const [footfallErr, setFootfallErr] = useState("");
@@ -1160,22 +1118,15 @@ function SalesSummaryModal() {
         result = await getPeriodSummary({ dateFrom, dateTo, locationIds: locationIdsForApi });
       }
       setData(result);
-      if (result?.rows && grain === "daily") {
-        const inputs = {};
-        for (const row of result.rows) {
-          if (row.visitors !== null && row.visitors !== undefined) {
-            inputs[row.locationId] = String(row.visitors);
-          }
-        }
-        setFootfallInputs((prev) => ({ ...inputs, ...prev }));
-        const sessionRow = sessionGid
-          ? result.rows.find((r) => locationIdsMatch(r.locationId, sessionGid))
-          : null;
+      if (result?.rows && grain === "daily" && scope === "single" && sessionGid) {
+        const sessionRow = result.rows.find((r) => locationIdsMatch(r.locationId, sessionGid));
         if (sessionRow && sessionRow.visitors != null) {
           setFooterFootfallInput(String(sessionRow.visitors));
         } else {
           setFooterFootfallInput("");
         }
+      } else if (result?.rows && grain === "daily") {
+        setFooterFootfallInput("");
       }
     } catch (err) {
       setError(toUserMessage(err?.message));
@@ -1259,17 +1210,6 @@ function SalesSummaryModal() {
     }
   };
 
-  const handleSaveRowFootfall = async (locationId) => {
-    const visitors = parseInt(footfallInputs[locationId] ?? "0", 10);
-    if (isNaN(visitors)) return;
-    try {
-      await reportFootfall({ locationId, targetDate, visitors });
-      await loadData();
-    } catch (err) {
-      setError(toUserMessage(err?.message) || "入店数の保存に失敗しました");
-    }
-  };
-
   const dailyListYearMonth = useMemo(() => {
     if (grain === "daily") {
       const y = parseInt(targetDate.slice(0, 4), 10);
@@ -1281,7 +1221,6 @@ function SalesSummaryModal() {
 
   const openDailyList = () => {
     if (!sessionGid) return;
-    setDailyListSource("main");
     setStep("dailyList");
   };
 
@@ -1298,10 +1237,7 @@ function SalesSummaryModal() {
         sessionGid={sessionGid}
         sessionLocationName={sessionLocationName}
         locLoadErr={locLoadErr}
-        onNavigateToDailyList={() => {
-          setDailyListSource("history");
-          setStep("dailyList");
-        }}
+        onNavigateToDailyList={() => setStep("dailyList")}
       />
     );
   }
@@ -1316,13 +1252,7 @@ function SalesSummaryModal() {
         initialYmYear={initialYm.year}
         availableMonths={availableMonths}
         monthsLoading={monthsLoading}
-        onBack={() => {
-          if (dailyListSource === "history" && historyDate) {
-            setStep("historyDaily");
-          } else {
-            setStep("main");
-          }
-        }}
+        onBack={() => setStep("main")}
         onPickDate={onPickDailyDate}
       />
     );
@@ -1582,24 +1512,6 @@ function SalesSummaryModal() {
                                 <PeriodMetricRows row={row} o={o} />
                               )}
                             </MetricBlock>
-                            {grain === "daily" && row.footfallReportingEnabled && scope === "all" ? (
-                              <s-box padding="none" paddingBlockStart="none">
-                                <s-stack direction="inline" gap="small" blockAlignment="end">
-                                  <s-text-field
-                                    label={`入店数（${row.locationName ?? ""}）`}
-                                    value={footfallInputs[row.locationId] ?? ""}
-                                    onChange={(e) =>
-                                      setFootfallInputs((s) => ({
-                                        ...s,
-                                        [row.locationId]:
-                                          e.detail?.value ?? e.target?.value ?? footfallInputs[row.locationId],
-                                      }))
-                                    }
-                                  />
-                                  <s-button onClick={() => handleSaveRowFootfall(row.locationId)}>保存</s-button>
-                                </s-stack>
-                              </s-box>
-                            ) : null}
                           </s-stack>
                         ))}
                       </>
