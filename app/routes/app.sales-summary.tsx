@@ -33,6 +33,10 @@ import {
   getSalesSummaryPeriodMaxComputes,
   needsLocationDayCompute,
 } from "../utils/salesSummaryPeriodCache.server";
+import {
+  getLocationBudgetAmountsForDayBatch,
+  sumLocationBudgetsForPeriodBatch,
+} from "../utils/salesSummaryBudgetFromDb.server";
 
 type AdminClient = {
   graphql: (query: string, opts?: { variables?: Record<string, unknown> }) => Promise<{ json: () => Promise<unknown> }>;
@@ -451,7 +455,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
           rowsRaw.push(null);
         }
       }
-      const rows = rowsRaw.filter((r): r is NonNullable<typeof r> => r !== null);
+      let rows = rowsRaw.filter((r): r is NonNullable<typeof r> => r !== null);
+
+      const budgetByLocDay = await getLocationBudgetAmountsForDayBatch(
+        shop.id,
+        rows.map((r) => r.locationId),
+        targetDate,
+      );
+      rows = rows.map((r) => {
+        const budget = budgetByLocDay.get(r.locationId) ?? null;
+        const budgetRatio = budget != null && budget > 0 ? r.actual / budget : null;
+        return { ...r, budget, budgetRatio };
+      });
 
       const failedDetailsDaily = Array.from(failedLocationErrors.entries()).map(
         ([name, reason]) => `${name}: ${reason}`,
@@ -615,12 +630,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
       if (row.visitors !== null) {
         entry.visitors = (entry.visitors ?? 0) + row.visitors;
       }
-      if (row.budget !== null) {
-        entry.budgetTotal = (entry.budgetTotal ?? 0) + Number(row.budget);
-        if (row.targetDate <= todayStrForPeriod) entry.progressBudgetToday += Number(row.budget);
-        if (row.targetDate <= yesterdayStrForPeriod) entry.progressBudgetPrev += Number(row.budget);
-      }
     }
+
+    const periodBudgetByLoc = await sumLocationBudgetsForPeriodBatch(
+      shop.id,
+      validTargetLocations.map((l) => l.shopifyLocationGid),
+      dateFrom,
+      dateTo,
+      todayStrForPeriod,
+      yesterdayStrForPeriod,
+    );
+    for (const loc of validTargetLocations) {
+      const entry = locationMap.get(loc.shopifyLocationGid);
+      if (!entry) continue;
+      const pb = periodBudgetByLoc.get(loc.shopifyLocationGid);
+      if (!pb) continue;
+      entry.budgetTotal = pb.budgetTotal;
+      entry.progressBudgetToday = pb.progressBudgetToday;
+      entry.progressBudgetPrev = pb.progressBudgetPrev;
+    }
+
     const rows = Array.from(locationMap.values()).map((entry) => ({
       locationId: entry.locationId,
       locationName: entry.locationName,

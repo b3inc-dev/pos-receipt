@@ -21,6 +21,7 @@ import {
   getSalesSummaryPeriodMaxComputes,
   needsLocationDayCompute,
 } from "../utils/salesSummaryPeriodCache.server";
+import { sumLocationBudgetsForPeriodBatch } from "../utils/salesSummaryBudgetFromDb.server";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
 
@@ -256,6 +257,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
     const locNameMap = new Map(targetLocations.map((l) => [l.shopifyLocationGid, l.name]));
+    const useDbBudgetForPeriod = Boolean(dateFrom && dateTo);
 
     // ロケーション別集計
     const locationMap = new Map<
@@ -296,10 +298,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
       if (row.visitors !== null) {
         entry.visitors = (entry.visitors ?? 0) + row.visitors;
       }
-      if (row.budget !== null) {
+      if (!useDbBudgetForPeriod && row.budget !== null) {
         entry.budgetTotal = (entry.budgetTotal ?? 0) + Number(row.budget);
         if (row.targetDate <= today) entry.progressBudgetToday += Number(row.budget);
         if (row.targetDate <= yesterday) entry.progressBudgetPrev += Number(row.budget);
+      }
+    }
+
+    if (useDbBudgetForPeriod) {
+      const periodBudgetByLoc = await sumLocationBudgetsForPeriodBatch(
+        shop.id,
+        targetLocations.map((l) => l.shopifyLocationGid),
+        dateFrom!,
+        dateTo!,
+        today,
+        yesterday,
+      );
+      for (const loc of targetLocations) {
+        const entry = locationMap.get(loc.shopifyLocationGid);
+        if (!entry) continue;
+        const pb = periodBudgetByLoc.get(loc.shopifyLocationGid);
+        if (!pb) continue;
+        entry.budgetTotal = pb.budgetTotal;
+        entry.progressBudgetToday = pb.progressBudgetToday;
+        entry.progressBudgetPrev = pb.progressBudgetPrev;
       }
     }
 

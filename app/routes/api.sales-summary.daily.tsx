@@ -22,6 +22,7 @@ import {
   isFootfallReportingAllowedForLocation,
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
+import { getLocationBudgetAmountsForDayBatch } from "../utils/salesSummaryBudgetFromDb.server";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
 
@@ -167,6 +168,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     } else {
       rows = await Promise.all(targetLocations.map((loc) => buildRow(loc)));
     }
+
+    const budgetByLocDay = await getLocationBudgetAmountsForDayBatch(
+      shop.id,
+      rows.map((r) => r.locationId),
+      targetDate,
+    );
+    rows = rows.map((r) => {
+      const budget = budgetByLocDay.get(r.locationId) ?? null;
+      const budgetRatio = budget != null && budget > 0 ? r.actual / budget : null;
+      return { ...r, budget, budgetRatio };
+    });
 
     // ── チャネル行集計 ────────────────────────────────────────────────────────
     await autoDiscoverChannels(admin, shop.id);

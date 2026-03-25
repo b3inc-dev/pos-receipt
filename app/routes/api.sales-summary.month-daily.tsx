@@ -15,6 +15,7 @@ import {
   mergeAndNormalizeSalesSummarySettings,
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
+import { getBudgetAmountsByDateForLocation } from "../utils/salesSummaryBudgetFromDb.server";
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
@@ -152,10 +153,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     }
 
+    const budgetByDate = await getBudgetAmountsByDateForLocation(
+      shop.id,
+      locationGid,
+      dateFrom,
+      effectiveDateTo,
+    );
+
     const days = buildDaysInMonth(year, month);
     const rows = days
       .map((targetDate) => {
         const c = cacheByDate.get(targetDate);
+        const budgetAmt = budgetByDate.get(targetDate);
         return {
           targetDate,
           netSales: c != null ? Number(c.actual) : null,
@@ -166,6 +175,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           atv: c?.atv != null ? Number(c.atv) : null,
           setRate: c?.setRate != null ? Number(c.setRate) : null,
           unit: c?.unit != null ? Number(c.unit) : null,
+          budget: budgetAmt !== undefined ? budgetAmt : null,
         };
       })
       .reverse();

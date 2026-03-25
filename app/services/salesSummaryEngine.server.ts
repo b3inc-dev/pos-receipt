@@ -8,6 +8,7 @@
  */
 import prisma from "../db.server";
 import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
+import { expandLocationIdsForBudgetQuery } from "../utils/salesSummaryBudgetFromDb.server";
 import { buildSettlementPreview } from "./settlementEngine.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -208,11 +209,13 @@ export async function computeAndCacheDailySummary(
   const itemCount = Number(preview.itemCount);
   const currency = preview.currency || "JPY";
 
+  const idVariants = expandLocationIdsForBudgetQuery(locationGid);
+
   // 予算取得（複数の ID 形式に対応）
   const budget = await prisma.budget.findFirst({
     where: {
       shopId,
-      locationId: { in: [locationId, locationGid, locIdRaw] },
+      locationId: { in: idVariants },
       targetDate,
     },
   });
@@ -221,7 +224,7 @@ export async function computeAndCacheDailySummary(
   const footfall = await prisma.footfallReport.findFirst({
     where: {
       shopId,
-      locationId: { in: [locationId, locationGid, locIdRaw] },
+      locationId: { in: idVariants },
       targetDate,
     },
   });
