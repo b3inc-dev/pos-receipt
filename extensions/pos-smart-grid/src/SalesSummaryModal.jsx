@@ -831,7 +831,6 @@ function HistoryDailyDetailView({
   }, [viewDate]);
 
   const o = useMemo(() => ({ ...defaultDisplayOptions(), ...(data?.displayOptions ?? {}) }), [data]);
-  const weekStartsOn = o.weekStartsOn === "sunday" ? "sunday" : "monday";
   const rows = data?.rows ?? [];
   const totals = data?.totals ?? {};
   const showLocationRows = o.showLocationRows !== false;
@@ -850,55 +849,6 @@ function HistoryDailyDetailView({
     if (!sessionGid || !rows.length) return null;
     return rows.find((r) => locationIdsMatch(r.locationId, sessionGid)) ?? null;
   }, [sessionGid, rows]);
-
-  const applyPeriodRange = useCallback((fromYmd, toYmd, options = {}) => {
-    const from = parseYmdLocal(fromYmd);
-    const to = clampDateToToday(parseYmdLocal(toYmd));
-    const safeTo = to < from ? from : to;
-    const nextFrom = ymd(from.getFullYear(), from.getMonth() + 1, from.getDate());
-    const nextTo = ymd(safeTo.getFullYear(), safeTo.getMonth() + 1, safeTo.getDate());
-
-    setPeriodStartYear(from.getFullYear());
-    setPeriodStartMonth(from.getMonth() + 1);
-    setPeriodStartDay(from.getDate());
-    setPeriodEndYear(safeTo.getFullYear());
-    setPeriodEndMonth(safeTo.getMonth() + 1);
-    setPeriodEndDay(safeTo.getDate());
-    if (options.apply) {
-      setPeriodAppliedFrom(nextFrom);
-      setPeriodAppliedTo(nextTo);
-    }
-  }, []);
-
-  const applyPeriodPreset = useCallback(
-    (preset, options = {}) => {
-      const base = parseYmdLocal(todayStr());
-      if (preset === "thisMonth") {
-        const from = new Date(base.getFullYear(), base.getMonth(), 1);
-        applyPeriodRange(toYmdLocal(from), toYmdLocal(base), options);
-        return;
-      }
-      if (preset === "lastMonth") {
-        const from = new Date(base.getFullYear(), base.getMonth() - 1, 1);
-        const to = new Date(base.getFullYear(), base.getMonth(), 0);
-        applyPeriodRange(toYmdLocal(from), toYmdLocal(to), options);
-        return;
-      }
-      if (preset === "lastWeek") {
-        const currentWeekStart = startOfWeek(base, weekStartsOn);
-        const from = new Date(currentWeekStart);
-        from.setDate(currentWeekStart.getDate() - 7);
-        const to = endOfWeek(from, weekStartsOn);
-        applyPeriodRange(toYmdLocal(from), toYmdLocal(to), options);
-        return;
-      }
-      const from = startOfWeek(base, weekStartsOn);
-      const to = endOfWeek(base, weekStartsOn);
-      applyPeriodRange(toYmdLocal(from), toYmdLocal(to), options);
-    },
-    [applyPeriodRange, weekStartsOn]
-  );
-
   const handleSaveFooterFootfall = async () => {
     if (!sessionGid) return;
     const raw = String(footerFootfallInput ?? "").trim();
@@ -1383,6 +1333,56 @@ function SalesSummaryModal() {
     if (!sessionGid || !rows.length) return null;
     return rows.find((r) => locationIdsMatch(r.locationId, sessionGid)) ?? null;
   }, [sessionGid, rows]);
+
+  const weekStartsOn = o.weekStartsOn === "sunday" ? "sunday" : "monday";
+
+  const applyPeriodRange = useCallback((fromYmd, toYmd, options = {}) => {
+    const from = parseYmdLocal(fromYmd);
+    const to = clampDateToToday(parseYmdLocal(toYmd));
+    const safeTo = to < from ? from : to;
+    const nextFrom = ymd(from.getFullYear(), from.getMonth() + 1, from.getDate());
+    const nextTo = ymd(safeTo.getFullYear(), safeTo.getMonth() + 1, safeTo.getDate());
+
+    setPeriodStartYear(from.getFullYear());
+    setPeriodStartMonth(from.getMonth() + 1);
+    setPeriodStartDay(from.getDate());
+    setPeriodEndYear(safeTo.getFullYear());
+    setPeriodEndMonth(safeTo.getMonth() + 1);
+    setPeriodEndDay(safeTo.getDate());
+    if (options.apply) {
+      setPeriodAppliedFrom(nextFrom);
+      setPeriodAppliedTo(nextTo);
+    }
+  }, []);
+
+  const applyPeriodPreset = useCallback(
+    (preset, options = {}) => {
+      const base = parseYmdLocal(todayStr());
+      if (preset === "thisMonth") {
+        const from = new Date(base.getFullYear(), base.getMonth(), 1);
+        applyPeriodRange(toYmdLocal(from), toYmdLocal(base), options);
+        return;
+      }
+      if (preset === "lastMonth") {
+        const from = new Date(base.getFullYear(), base.getMonth() - 1, 1);
+        const to = new Date(base.getFullYear(), base.getMonth(), 0);
+        applyPeriodRange(toYmdLocal(from), toYmdLocal(to), options);
+        return;
+      }
+      if (preset === "lastWeek") {
+        const currentWeekStart = startOfWeek(base, weekStartsOn);
+        const from = new Date(currentWeekStart);
+        from.setDate(currentWeekStart.getDate() - 7);
+        const to = endOfWeek(from, weekStartsOn);
+        applyPeriodRange(toYmdLocal(from), toYmdLocal(to), options);
+        return;
+      }
+      const from = startOfWeek(base, weekStartsOn);
+      const to = endOfWeek(base, weekStartsOn);
+      applyPeriodRange(toYmdLocal(from), toYmdLocal(to), options);
+    },
+    [applyPeriodRange, weekStartsOn]
+  );
 
   const handleSaveFooterFootfall = async () => {
     if (!sessionGid || grain !== "daily") return;
@@ -1934,7 +1934,7 @@ function SalesSummaryModal() {
                         setPeriodAppliedTo(periodDateTo);
                       }}
                     >
-                      期間を適用
+                      期間適用
                     </s-button>
                   </s-stack>
                 </s-stack>
