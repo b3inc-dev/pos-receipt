@@ -37,6 +37,11 @@ import {
   getLocationBudgetAmountsForDayBatch,
   sumLocationBudgetsForPeriodBatch,
 } from "../utils/salesSummaryBudgetFromDb.server";
+import {
+  getShopTimezoneForDaily,
+  getCalendarDateStringInTimeZone,
+  addCalendarDaysToIsoDate,
+} from "../utils/shopTimezone.server";
 
 type AdminClient = {
   graphql: (query: string, opts?: { variables?: Record<string, unknown> }) => Promise<{ json: () => Promise<unknown> }>;
@@ -349,20 +354,18 @@ function eachDay(dateFrom: string, dateTo: string) {
   return days;
 }
 
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { admin, session } = await authenticate.admin(request);
     const shop = await resolveShop(session.shop, admin);
+    const shopIanaTz = await getShopTimezoneForDaily(admin, shop.id);
+    const shopCalendarToday = getCalendarDateStringInTimeZone(new Date(), shopIanaTz);
     const fullAccess = await getFullAccess(admin, session);
     const access = checkPlanAccess(shop.planCode, "sales_summary", fullAccess);
 
     const url = new URL(request.url);
     const view = url.searchParams.get("view") === "period" ? "period" : "daily";
-    const targetDate = url.searchParams.get("targetDate") ?? new Date().toISOString().slice(0, 10);
+    const targetDate = url.searchParams.get("targetDate") ?? shopCalendarToday;
     const targetMonth = url.searchParams.get("targetMonth") ?? targetDate.slice(0, 7);
     const selectedLocationId = url.searchParams.get("locationId") ?? "";
     const showChannels = url.searchParams.get("showChannels") !== "0";
@@ -425,7 +428,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     if (view === "daily") {
       const failedLocationErrors = new Map<string, string>();
-      const today = todayStr();
+      const today = shopCalendarToday;
       const shouldRecompute = targetDate >= today;
       const rowsRaw: Array<Awaited<ReturnType<typeof computeAndCacheDailySummary>> | null> = [];
       for (const loc of validTargetLocations) {
@@ -537,7 +540,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const { dateFrom, dateTo } = monthRange(targetMonth);
     const failedLocationErrors = new Map<string, string>();
-    const today = todayStr();
+    const today = shopCalendarToday;
     const locationIdsForQuery = expandLocationIdsForCacheQuery(validTargetLocations);
     const daysInMonth = eachDay(dateFrom, dateTo);
 
@@ -590,8 +593,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         targetDate: { gte: dateFrom, lte: dateTo },
       },
     });
-    const todayStrForPeriod = todayStr();
-    const yesterdayStrForPeriod = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const todayStrForPeriod = shopCalendarToday;
+    const yesterdayStrForPeriod = addCalendarDaysToIsoDate(shopCalendarToday, -1);
     const locationMap = new Map<
       string,
       {

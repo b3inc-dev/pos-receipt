@@ -115,3 +115,33 @@ export function getDayRangeInUtc(dateStr: string, ianaTimezone: string): DayRang
     endUtc,
   };
 }
+
+/**
+ * 指定した瞬間を、IANA タイムゾーン上の暦日 YYYY-MM-DD に変換する。
+ * サーバが UTC のときでも店舗の「今日」と一致させる（売上サマリーの targetDate 既定・当日判定など）。
+ */
+export function getCalendarDateStringInTimeZone(date: Date, ianaTimezone: string): string {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: ianaTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(date);
+  const y = parts.find((p) => p.type === "year")?.value ?? "1970";
+  const m = parts.find((p) => p.type === "month")?.value ?? "01";
+  const d = parts.find((p) => p.type === "day")?.value ?? "01";
+  return `${y}-${m}-${d}`;
+}
+
+/** YYYY-MM-DD の暦日に整数日を加算（日次キーの前後関係・前日比用） */
+export function addCalendarDaysToIsoDate(isoDate: string, deltaDays: number): string {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  if (!y || !m || !d) return isoDate;
+  const base = new Date(Date.UTC(y, m - 1, d));
+  base.setUTCDate(base.getUTCDate() + deltaDays);
+  const yy = base.getUTCFullYear();
+  const mm = String(base.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(base.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}

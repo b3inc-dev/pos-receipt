@@ -22,6 +22,11 @@ import {
   needsLocationDayCompute,
 } from "../utils/salesSummaryPeriodCache.server";
 import { sumLocationBudgetsForPeriodBatch } from "../utils/salesSummaryBudgetFromDb.server";
+import {
+  getShopTimezoneForDaily,
+  getCalendarDateStringInTimeZone,
+  addCalendarDaysToIsoDate,
+} from "../utils/shopTimezone.server";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
 
@@ -137,6 +142,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     await autoDiscoverChannels(admin, shop.id);
     const enabledChannels = await getEnabledSalesChannels(shop.id);
+    const shopIanaTz = await getShopTimezoneForDaily(admin, shop.id);
+    const shopCalendarToday = getCalendarDateStringInTimeZone(new Date(), shopIanaTz);
 
     let periodCachePartial = false;
     let pendingComputeEstimate = 0;
@@ -148,7 +155,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       for (let t = start; t <= end; t += 86400000) {
         days.push(new Date(t).toISOString().slice(0, 10));
       }
-      const today = new Date().toISOString().slice(0, 10);
+      const today = shopCalendarToday;
 
       const prefetchLocationCaches = await prisma.salesSummaryCacheDaily.findMany({
         where: {
@@ -253,8 +260,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     });
 
-    const today = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const today = shopCalendarToday;
+    const yesterday = addCalendarDaysToIsoDate(shopCalendarToday, -1);
 
     const locNameMap = new Map(targetLocations.map((l) => [l.shopifyLocationGid, l.name]));
     const useDbBudgetForPeriod = Boolean(dateFrom && dateTo);

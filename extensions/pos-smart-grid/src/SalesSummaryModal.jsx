@@ -29,8 +29,10 @@ export default async () => {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** 端末のローカル暦での「今日」（UTC の toISOString は日本時間早朝に前日になるため使わない） */
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 function pad2(n) {
@@ -98,8 +100,10 @@ function addDays(ymd, delta) {
   return d.toISOString().slice(0, 10);
 }
 
-function isTodayDate(ymd) {
-  return ymd === todayStr();
+/** shopCalendarToday: API の calendarToday（店舗タイムゾーン）。無いときは端末ローカル今日。 */
+function isTodayDate(ymd, shopCalendarToday) {
+  const cap = shopCalendarToday != null && shopCalendarToday !== "" ? shopCalendarToday : todayStr();
+  return ymd === cap;
 }
 
 function formatUpdatedTimeLabel(dateObj) {
@@ -926,7 +930,8 @@ function HistoryDailyDetailView({
   };
 
   const canPrevDay = viewDate > "2020-01-01";
-  const canNextDay = viewDate < todayStr();
+  const historyTodayCap = data?.calendarToday ?? todayStr();
+  const canNextDay = viewDate < historyTodayCap;
 
   const historyDataFresh = loadedHistoryParamsKey === historyParamsKey;
   const historyShowLoading = loading || (!historyDataFresh && !error);
@@ -941,7 +946,7 @@ function HistoryDailyDetailView({
     !showTotalsSection &&
     rowsForUi.length === 0 &&
     !kpiHidden;
-  const showUpdatedBadge = isTodayDate(viewDate) && !!lastLoadedAt;
+  const showUpdatedBadge = isTodayDate(viewDate, data?.calendarToday) && !!lastLoadedAt;
 
   return (
     <>
@@ -1158,7 +1163,9 @@ function SalesSummaryModal() {
   const [historyDate, setHistoryDate] = useState(null);
   const [scope, setScope] = useState("single");
   const [grain, setGrain] = useState("daily");
-  const [targetDate, setTargetDate] = useState(todayStr);
+  const [targetDate, setTargetDate] = useState(() => todayStr());
+  /** 店舗の「今日」YYYY-MM-DD（日次 API の calendarToday。次へ日ボタン上限・更新バッジ用） */
+  const [shopCalendarDay, setShopCalendarDay] = useState(null);
   const initialYm = useMemo(() => {
     const d = new Date();
     return { year: d.getFullYear(), month: d.getMonth() + 1 };
@@ -1348,6 +1355,9 @@ function SalesSummaryModal() {
       setData(result);
       setLoadedSummaryParamsKey(keyForRequest);
       setLastLoadedAt(new Date());
+      if (grain === "daily" && result?.calendarToday) {
+        setShopCalendarDay(result.calendarToday);
+      }
       if (result?.rows && grain === "daily" && scope === "single" && sessionGid) {
         const sessionRow = result.rows.find((r) => locationIdsMatch(r.locationId, sessionGid));
         if (sessionRow && sessionRow.visitors != null) {
@@ -1409,7 +1419,8 @@ function SalesSummaryModal() {
     data &&
     rows.length > 0 &&
     (grain === "daily" ? !hasAnyDailyKpi(o) : !hasAnyPeriodKpi(o));
-  const showUpdatedBadge = grain === "daily" && isTodayDate(targetDate) && !!lastLoadedAt;
+  const showUpdatedBadge =
+    grain === "daily" && isTodayDate(targetDate, shopCalendarDay) && !!lastLoadedAt;
   const layoutEmpty =
     !loading &&
     summaryDataFresh &&
@@ -1548,7 +1559,8 @@ function SalesSummaryModal() {
   }
 
   const canPrevDay = targetDate > "2020-01-01";
-  const canNextDay = targetDate < todayStr();
+  const todayCap = shopCalendarDay ?? todayStr();
+  const canNextDay = targetDate < todayCap;
   const periodDateFrom = ymd(periodStartYear, periodStartMonth, periodStartDay);
   const periodDateTo = ymd(periodEndYear, periodEndMonth, periodEndDay);
   const periodRangeInvalid = periodDateFrom > periodDateTo;

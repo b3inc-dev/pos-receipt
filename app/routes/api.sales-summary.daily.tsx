@@ -23,6 +23,7 @@ import {
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
 import { getLocationBudgetAmountsForDayBatch } from "../utils/salesSummaryBudgetFromDb.server";
+import { getShopTimezoneForDaily, getCalendarDateStringInTimeZone } from "../utils/shopTimezone.server";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
 
@@ -38,15 +39,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
 
+    const shopIanaTz = await getShopTimezoneForDaily(admin, shop.id);
+    const shopCalendarToday = getCalendarDateStringInTimeZone(new Date(), shopIanaTz);
+
     const settings = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
     const merged = mergeAndNormalizeSalesSummarySettings(settings ?? undefined);
     const url = new URL(request.url);
-    const targetDate =
-      url.searchParams.get("targetDate") ?? new Date().toISOString().slice(0, 10);
+    const targetDate = url.searchParams.get("targetDate") ?? shopCalendarToday;
     const locationIdsParam = url.searchParams.getAll("locationIds[]");
 
     if (!merged.salesSummaryEnabled) {
-      return corsJson({ rows: [], totals: { actual: 0, orders: 0, items: 0, budget: null, visitors: null }, displayOptions: merged, targetDate });
+      return corsJson({
+        rows: [],
+        totals: { actual: 0, orders: 0, items: 0, budget: null, visitors: null },
+        displayOptions: merged,
+        targetDate,
+        calendarToday: shopCalendarToday,
+      });
     }
 
     let allLocations: SalesSummaryLocationRow[] = await prisma.location.findMany({
@@ -102,10 +111,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
         totals: { actual: 0, orders: 0, items: 0, budget: null, visitors: null },
         displayOptions: merged,
         targetDate,
+        calendarToday: shopCalendarToday,
       });
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = shopCalendarToday;
     const isPastDate = targetDate < today;
 
     // 精算側の「過去日=DB中心」方針に合わせる:
@@ -238,7 +248,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : null,
     };
 
-    return corsJson({ rows, channelRows, totals, targetDate, displayOptions: merged });
+    return corsJson({
+      rows,
+      channelRows,
+      totals,
+      targetDate,
+      calendarToday: shopCalendarToday,
+      displayOptions: merged,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
