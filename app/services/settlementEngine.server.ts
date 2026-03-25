@@ -476,7 +476,8 @@ async function calculatePaymentSections(
 
   for (const order of orders) {
     for (const tx of order.transactions) {
-      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS" && inDay(tx.createdAt)) {
+      // GAS と揃えるため tx.status を見ない
+      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && inDay(tx.createdAt)) {
         const gw = tx.gateway ?? "";
         ensure(gw);
         sections[gw].net += Number(tx.amountSet.shopMoney.amount);
@@ -631,7 +632,9 @@ export async function buildSettlementPreview(
     let orderRefundToday = 0;
     for (const tx of order.transactions) {
       if (!inDay(tx.createdAt)) continue;
-      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS") {
+      // GAS_精算レシート.md は transactions.kind だけで集計しており、tx.status === "SUCCESS" の条件がない。
+      // その差で App 側だけ売上・件数が少なくなる可能性があるため、status 条件を外して GAS と揃える。
+      if (tx.kind === "SALE" || tx.kind === "CAPTURE") {
         orderSaleToday += Number(tx.amountSet.shopMoney.amount);
       }
       if (tx.kind === "REFUND") {
