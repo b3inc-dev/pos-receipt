@@ -40,6 +40,11 @@ export interface SettlementPreviewDTO {
   itemCount: number;
   voucherChangeAmount: number;
   paymentSections: PaymentSectionDTO[];
+  /**
+   * recompute 時の原因切り分け用デバッグ情報。
+   * 通常時は入れない（重くなるため）。
+   */
+  debug?: SettlementPreviewDebugDTO;
   appliedSpecialRefundEvents: {
     id: string;
     eventType: string;
@@ -53,6 +58,21 @@ export interface SettlementPreviewDTO {
   }[];
   /** ポイント利用額の表示ラベル（設定から取得） */
   loyaltyUsageDisplayLabel: string;
+}
+
+export interface SettlementPreviewDebugDTO {
+  // Shopify 検索結果（売上集計用）の件数
+  ordersRawCount: number;
+  // sourceName で POS 相当だけ残した件数
+  ordersPosSourceMatchedCount: number;
+  // retailLocation（または null の許容）で対象ロケーションとして残った件数
+  ordersAtLocationCount: number;
+
+  // 返金オーバーレイ用（updated_at ベース）件数
+  ordersUpdatedRawCount: number;
+  ordersUpdatedPosSourceMatchedCount: number;
+  ordersUpdatedAtLocationCount: number;
+  overlayRefundCount: number;
 }
 
 // ── Gateway Labels（支払方法マスタ未設定時はフォールバックを paymentMethod.server で使用） ───
@@ -566,7 +586,9 @@ export async function buildSettlementPreview(
   locationId: string,
   locationName: string,
   targetDate: string,
+  opts?: { debug?: boolean },
 ): Promise<SettlementPreviewDTO> {
+  const debugEnabled = opts?.debug === true;
   const locIdRaw = locationId.replace("gid://shopify/Location/", "");
   if (!locIdRaw || !/^\d+$/.test(locIdRaw)) {
     throw new Error(`Invalid locationId: "${locationId}"`);
@@ -582,6 +604,9 @@ export async function buildSettlementPreview(
   const ordersRaw = await fetchAllOrders(admin, shopifyQuery);
   const orders = filterOrdersToPosSalesBySourceName(ordersRaw);
   const ordersAtLocation = filterOrdersByRetailLocation(orders, locationId, locIdRaw);
+  const ordersRawCount = ordersRaw.length;
+  const ordersPosSourceMatchedCount = orders.length;
+  const ordersAtLocationCount = ordersAtLocation.length;
 
   const orderIdsCreatedInDay = new Set(ordersAtLocation.map((o) => o.id));
 
@@ -646,6 +671,10 @@ export async function buildSettlementPreview(
   const ordersUpdated = ordersUpdatedRaw.filter((o) => isPosOrderSourceName(o.sourceName));
   const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationId, locIdRaw);
   const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
+  const ordersUpdatedRawCount = ordersUpdatedRaw.length;
+  const ordersUpdatedPosSourceMatchedCount = ordersUpdated.length;
+  const ordersUpdatedAtLocationCount = ordersUpdatedAtLocation.length;
+  const overlayRefundCount = overlay.refundCount;
 
   let netSales = total - discounts;
 
@@ -729,6 +758,17 @@ export async function buildSettlementPreview(
     itemCount,
     voucherChangeAmount: roundInt(voucherChangeAmount),
     paymentSections,
+    debug: debugEnabled
+      ? {
+          ordersRawCount,
+          ordersPosSourceMatchedCount,
+          ordersAtLocationCount,
+          ordersUpdatedRawCount,
+          ordersUpdatedPosSourceMatchedCount,
+          ordersUpdatedAtLocationCount,
+          overlayRefundCount,
+        }
+      : undefined,
     appliedSpecialRefundEvents: otherEvents.map((e) => ({
       id: e.id,
       eventType: e.eventType,

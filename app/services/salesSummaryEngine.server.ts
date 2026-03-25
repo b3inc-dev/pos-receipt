@@ -9,7 +9,7 @@
 import prisma from "../db.server";
 import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
 import { expandLocationIdsForBudgetQuery } from "../utils/salesSummaryBudgetFromDb.server";
-import { buildSettlementPreview } from "./settlementEngine.server";
+import { buildSettlementPreview, type SettlementPreviewDebugDTO } from "./settlementEngine.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,6 +29,7 @@ export interface DailySummaryRowDTO {
   unit: number | null;      // 一品単価 = actual / items
   currency: string;
   footfallReportingEnabled?: boolean;
+  debug?: SettlementPreviewDebugDTO;
 }
 
 // ── Shopify Types ─────────────────────────────────────────────────────────────
@@ -184,6 +185,7 @@ export async function computeAndCacheDailySummary(
   locationId: string,
   locationName: string,
   targetDate: string,
+  opts?: { debug?: boolean },
 ): Promise<DailySummaryRowDTO> {
   const locIdRaw = locationId.replace("gid://shopify/Location/", "");
   if (!locIdRaw || !/^\d+$/.test(locIdRaw)) {
@@ -202,7 +204,8 @@ export async function computeAndCacheDailySummary(
     shopId,
     locationId,
     locationName,
-    targetDate
+    targetDate,
+    { debug: opts?.debug === true }
   );
   const actual = Number(preview.netSales);
   const orderCount = Number(preview.orderCount);
@@ -277,5 +280,6 @@ export async function computeAndCacheDailySummary(
     setRate,
     unit,
     currency,
+    debug: preview.debug,
   };
 }

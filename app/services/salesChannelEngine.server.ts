@@ -179,6 +179,20 @@ export interface ChannelDailySummaryDTO {
   setRate: number | null;
   unit: number | null;
   currency: string;
+  debug?: ChannelDailySummaryDebugDTO;
+}
+
+export interface ChannelDailySummaryDebugDTO {
+  // Pass1 (created_at ベース）
+  allCreatedOrdersCount: number;
+  sourceNamesMatchedOrdersCount: number;
+  orderIdsCreatedInDayCount: number;
+
+  // Pass2 (updated_at ベース返金オーバーレイ）
+  allUpdatedOrdersCount: number;
+  sourceNamesMatchedUpdatedOrdersCount: number;
+  refundInDayCount: number;
+  refundOverlayRefundCount: number;
 }
 
 // ── Shopify Types ──────────────────────────────────────────────────────────────
@@ -422,9 +436,16 @@ async function fetchChannelOrdersForRefundOverlay(
 function computeChannelTotalsFromOrders(
   orders: ChannelOrder[],
   dayRange: { startUtc: Date; endUtc: Date }
-): { gross: number; refund: number; items: number; currency: string } {
+): {
+  gross: number;
+  refund: number;
+  refundCountInDay: number;
+  items: number;
+  currency: string;
+} {
   let gross = 0;
   let refund = 0;
+  let refundCountInDay = 0;
   let items = 0;
   let currency = "JPY";
 
@@ -441,11 +462,12 @@ function computeChannelTotalsFromOrders(
       const t = new Date(r.createdAt).getTime();
       if (t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime()) {
         refund += Number(r.totalRefundedSet?.shopMoney?.amount ?? 0);
+        refundCountInDay += 1;
       }
     }
   }
 
-  return { gross, refund, items, currency };
+  return { gross, refund, refundCountInDay, items, currency };
 }
 
 /**
@@ -456,8 +478,9 @@ function computeRefundOverlay(
   ordersUpdated: OrderForRefundOverlay[],
   orderIdsCreatedInDay: Set<string>,
   dayRange: { startUtc: Date; endUtc: Date }
-): number {
+): { overlay: number; overlayRefundCount: number } {
   let overlay = 0;
+  let overlayRefundCount = 0;
   for (const order of ordersUpdated) {
     if (orderIdsCreatedInDay.has(order.id)) continue;
     for (const r of order.refunds ?? []) {
@@ -465,10 +488,11 @@ function computeRefundOverlay(
       const t = new Date(r.createdAt).getTime();
       if (t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime()) {
         overlay += Number(r.totalRefundedSet?.shopMoney?.amount ?? 0);
+        overlayRefundCount += 1;
       }
     }
   }
-  return overlay;
+  return { overlay, overlayRefundCount };
 }
 
 // ── sourceNamesSnapshot によるキャッシュ有効性チェック ──────────────────────────
@@ -485,8 +509,10 @@ export async function computeAndCacheChannelDailySummary(
   channelId: string,
   channelName: string,
   sourceNames: string[],
-  targetDate: string
+  targetDate: string,
+  opts?: { debug?: boolean },
 ): Promise<ChannelDailySummaryDTO> {
+  const debugEnabled = opts?.debug === true;
   if (sourceNames.length === 0) {
     throw new Error(`SalesChannel "${channelName}" has no sourceNames configured.`);
   }
@@ -508,7 +534,7 @@ export async function computeAndCacheChannelDailySummary(
   const allCreatedOrders = await fetchChannelOrders(admin, createdQuery, dayRange);
   const orders = filterBySourceNames(allCreatedOrders, sourceNames);
   const orderIdsCreatedInDay = new Set(allCreatedOrders.map((o) => o.id)); // overlay 重複除外用は全件で持つ
-  const { gross, refund: refundInDay, items, currency } = computeChannelTotalsFromOrders(orders, dayRange);
+  const { gross, refund: refundInDay, refundCountInDay, items, currency } = computeChannelTotalsFromOrders(orders, dayRange);
 
   // Pass 2: updated_at ベース返金 overlay（当日以外の注文から当日処理された返金）
   const updatedQuery = buildChannelQuery(
@@ -519,9 +545,9 @@ export async function computeAndCacheChannelDailySummary(
   );
   const allUpdatedOrders = await fetchChannelOrdersForRefundOverlay(admin, updatedQuery);
   const ordersUpdated = filterBySourceNames(allUpdatedOrders, sourceNames);
-  const refundOverlay = computeRefundOverlay(ordersUpdated, orderIdsCreatedInDay, dayRange);
+  const { overlay: refundOverlayAmount, overlayRefundCount } = computeRefundOverlay(ordersUpdated, orderIdsCreatedInDay, dayRange);
 
-  const inclusiveActual = gross - refundInDay - refundOverlay;
+  const inclusiveActual = gross - refundInDay - refundOverlayAmount;
   const settlementSettings = await getAppSetting<{ taxRatePercent?: number }>(shopId, SETTLEMENT_SETTINGS_KEY);
   const taxRatePercent = Number(settlementSettings?.taxRatePercent) || 10;
   const { netSales: actual } = splitTaxInclusiveToNetAndTax(inclusiveActual, taxRatePercent);
@@ -578,7 +604,31 @@ export async function computeAndCacheChannelDailySummary(
     data: { sourceNamesSnapshot: sourceNamesJson },
   });
 
-  return { channelId, channelName, targetDate, actual, orders: orderCount, items, budget: budgetAmount, budgetRatio, atv, setRate, unit, currency };
+  return {
+    channelId,
+    channelName,
+    targetDate,
+    actual,
+    orders: orderCount,
+    items,
+    budget: budgetAmount,
+    budgetRatio,
+    atv,
+    setRate,
+    unit,
+    currency,
+    debug: debugEnabled
+      ? {
+          allCreatedOrdersCount: allCreatedOrders.length,
+          sourceNamesMatchedOrdersCount: orders.length,
+          orderIdsCreatedInDayCount: orderIdsCreatedInDay.size,
+          allUpdatedOrdersCount: allUpdatedOrders.length,
+          sourceNamesMatchedUpdatedOrdersCount: ordersUpdated.length,
+          refundInDayCount: refundCountInDay,
+          refundOverlayRefundCount: overlayRefundCount,
+        }
+      : undefined,
+  };
 }
 
 // ── キャッシュ読み取り（API エンドポイントから使用） ──────────────────────────────

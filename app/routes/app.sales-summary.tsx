@@ -193,11 +193,14 @@ async function computeWithRetry(
   locationGid: string,
   locationName: string,
   targetDate: string,
+  debugMode: boolean = false,
 ) {
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= SALES_SUMMARY_RETRY_MAX_ATTEMPTS; attempt++) {
     try {
-      return await computeAndCacheDailySummary(admin, shopId, locationGid, locationName, targetDate);
+      return await computeAndCacheDailySummary(admin, shopId, locationGid, locationName, targetDate, {
+        debug: debugMode,
+      });
     } catch (err) {
       lastError = err;
       const msg = toErrorMessage(err);
@@ -404,6 +407,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         calendarToday: shopCalendarToday,
         recomputeDailyApplied: false,
         recomputeChannelMonthApplied: false,
+        recomputeDebug: null,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows: [] as Array<Record<string, string | number | null>>,
         channelRows: [] as Array<Record<string, string | number | null>>,
@@ -427,6 +431,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         calendarToday: shopCalendarToday,
         recomputeDailyApplied: false,
         recomputeChannelMonthApplied: false,
+        recomputeDebug: null,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows: [] as Array<Record<string, string | number | null>>,
         channelRows: [] as Array<Record<string, string | number | null>>,
@@ -439,6 +444,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const failedLocationErrors = new Map<string, string>();
       const today = shopCalendarToday;
       const shouldRecompute = targetDate >= today;
+      const wantDebug = forceRecomputeDaily === true;
+      const recomputeDebugLocations: Array<unknown> = [];
       const rowsRaw: Array<Awaited<ReturnType<typeof computeAndCacheDailySummary>> | null> = [];
       for (const loc of validTargetLocations) {
         try {
@@ -460,11 +467,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
           }
           // 過去日はキャッシュ固定: キャッシュ未作成時のみ計算して埋める（recompute=1 のときは常に再計算）
           if (!shouldRecompute && !cached) {
-            rowsRaw.push(await computeWithRetry(admin, shop.id, loc.shopifyLocationGid, loc.name, targetDate));
+            const computed = await computeWithRetry(
+              admin,
+              shop.id,
+              loc.shopifyLocationGid,
+              loc.name,
+              targetDate,
+              wantDebug
+            );
+            if (wantDebug && (computed as any)?.debug) recomputeDebugLocations.push(computed);
+            rowsRaw.push(computed);
             continue;
           }
           // 当日/未来日(入力誤り含む)は最新化のため再計算
-          rowsRaw.push(await computeWithRetry(admin, shop.id, loc.shopifyLocationGid, loc.name, targetDate));
+          const computed = await computeWithRetry(
+            admin,
+            shop.id,
+            loc.shopifyLocationGid,
+            loc.name,
+            targetDate,
+            wantDebug
+          );
+          if (wantDebug && (computed as any)?.debug) recomputeDebugLocations.push(computed);
+          rowsRaw.push(computed);
         } catch (err) {
           failedLocationErrors.set(loc.name, toErrorMessage(err));
           rowsRaw.push(null);
@@ -496,6 +521,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           calendarToday: shopCalendarToday,
           recomputeDailyApplied: forceRecomputeDaily,
           recomputeChannelMonthApplied: false,
+          recomputeDebug: wantDebug ? { locations: recomputeDebugLocations } : null,
           locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
           rows, channelRows: [],
           loadError: loadErrorDaily,
@@ -505,11 +531,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       await autoDiscoverChannels(admin, shop.id);
       const enabledChannels = await getEnabledSalesChannels(shop.id);
       const isPastDate = targetDate < today;
+      const recomputeDebugChannels: Array<unknown> = [];
       const channelRows: Array<{
         channelId: string; channelName: string;
         actual: number; orders: number; items: number;
         budget: number | null; budgetRatio: number | null;
         atv: number | null; setRate: number | null; unit: number | null;
+        debug?: unknown;
       }> = [];
       for (const ch of enabledChannels) {
         try {
@@ -531,8 +559,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
             }
           }
           const row = await computeAndCacheChannelDailySummary(
-            admin, shop.id, ch.id, ch.displayName, ch.sourceNames, targetDate
+            admin,
+            shop.id,
+            ch.id,
+            ch.displayName,
+            ch.sourceNames,
+            targetDate,
+            { debug: wantDebug },
           );
+          if (wantDebug && (row as any)?.debug) recomputeDebugChannels.push(row);
           channelRows.push({ channelId: ch.id, channelName: ch.displayName, ...row });
         } catch { /* チャネル1件の失敗で全体を落とさない */ }
       }
@@ -548,6 +583,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         calendarToday: shopCalendarToday,
         recomputeDailyApplied: forceRecomputeDaily,
         recomputeChannelMonthApplied: false,
+        recomputeDebug: wantDebug ? { locations: recomputeDebugLocations, channels: recomputeDebugChannels } : null,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows,
         channelRows,
@@ -841,6 +877,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       calendarToday: shopCalendarToday,
       recomputeDailyApplied: false,
       recomputeChannelMonthApplied: channelMonthRebuildNotice,
+      recomputeDebug: null,
       locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
       rows,
       channelRows,
@@ -861,6 +898,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       calendarToday: today,
       recomputeDailyApplied: false,
       recomputeChannelMonthApplied: false,
+      recomputeDebug: null,
       locations: [] as Array<{ id: string; name: string }>,
       rows: [] as Array<Record<string, string | number | null>>,
       channelRows: [] as Array<Record<string, string | number | null>>,
@@ -873,6 +911,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function SalesSummaryAdminPage() {
   const data = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const recomputeDebug = (data as any).recomputeDebug as
+    | null
+    | { locations?: Array<any>; channels?: Array<any> };
+  const recomputeDebugLocations = recomputeDebug?.locations ?? [];
+  const recomputeDebugChannels = recomputeDebug?.channels ?? [];
 
   const setParam = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -1050,6 +1093,40 @@ export default function SalesSummaryAdminPage() {
                   通常表示に戻す
                 </Button>
               </Box>
+              {recomputeDebugLocations.length > 0 && (
+                <Box paddingBlockStart="200">
+                  <Text tone="subdued" as="p">
+                    POS（店舗行）再取得デバッグ（先頭5件）
+                  </Text>
+                  {recomputeDebugLocations.slice(0, 5).map((d: any) => (
+                    <Text key={d.locationId ?? d.locationName} as="p">
+                      {d.locationName}：Shopify取得 {d.debug?.ordersRawCount ?? "-"} → POS判定 {d.debug?.ordersPosSourceMatchedCount ?? "-"} → ロケーション一致 {d.debug?.ordersAtLocationCount ?? "-"} / 件数 {d.orders}件 / 売上 {fmtYen(Number(d.actual ?? 0))}
+                    </Text>
+                  ))}
+                  {recomputeDebugLocations.length > 5 && (
+                    <Text tone="subdued" as="p">
+                      ... {recomputeDebugLocations.length - 5}件分は省略しています
+                    </Text>
+                  )}
+                </Box>
+              )}
+              {recomputeDebugChannels.length > 0 && (
+                <Box paddingBlockStart="200">
+                  <Text tone="subdued" as="p">
+                    チャネル再取得デバッグ（先頭5件）
+                  </Text>
+                  {recomputeDebugChannels.slice(0, 5).map((d: any) => (
+                    <Text key={d.channelId ?? d.channelName} as="p">
+                      {d.channelName}：created {d.debug?.allCreatedOrdersCount ?? "-"} → source一致 {d.debug?.sourceNamesMatchedOrdersCount ?? "-"} / updated {d.debug?.allUpdatedOrdersCount ?? "-"} → source一致 {d.debug?.sourceNamesMatchedUpdatedOrdersCount ?? "-"} / overlay返金 {d.debug?.refundOverlayRefundCount ?? "-"} / 件数 {d.orders}件 / 売上 {fmtYen(Number(d.actual ?? 0))}
+                    </Text>
+                  ))}
+                  {recomputeDebugChannels.length > 5 && (
+                    <Text tone="subdued" as="p">
+                      ... {recomputeDebugChannels.length - 5}件分は省略しています
+                    </Text>
+                  )}
+                </Box>
+              )}
             </Layout.Section>
           )}
           {data.hasAccess && data.recomputeChannelMonthApplied && (
