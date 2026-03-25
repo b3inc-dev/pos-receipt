@@ -52,6 +52,17 @@ function addDays(ymd, delta) {
   return d.toISOString().slice(0, 10);
 }
 
+function isTodayDate(ymd) {
+  return ymd === todayStr();
+}
+
+function formatUpdatedTimeLabel(dateObj) {
+  if (!dateObj) return "";
+  const hh = pad2(dateObj.getHours());
+  const mm = pad2(dateObj.getMinutes());
+  return `${hh}:${mm}更新`;
+}
+
 function fmtNum(n, dec = 0) {
   if (n === null || n === undefined) return "—";
   return Number(n).toLocaleString("ja-JP", {
@@ -688,6 +699,7 @@ function HistoryDailyDetailView({
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [lastLoadedAt, setLastLoadedAt] = useState(null);
   const [footerFootfallInput, setFooterFootfallInput] = useState("");
   const [savingFootfall, setSavingFootfall] = useState(false);
   const [footfallErr, setFootfallErr] = useState("");
@@ -713,6 +725,7 @@ function HistoryDailyDetailView({
       }
       const result = await getDailySummary({ targetDate: viewDate, locationIds: locationIdsForApi });
       setData(result);
+      setLastLoadedAt(new Date());
       if (result?.rows && scope === "single" && sessionGid) {
         const sessionRow = result.rows.find((r) => locationIdsMatch(r.locationId, sessionGid));
         if (sessionRow && sessionRow.visitors != null) {
@@ -794,6 +807,7 @@ function HistoryDailyDetailView({
   const kpiHidden = !loading && data && rows.length > 0 && !hasAnyDailyKpi(o);
   const layoutEmpty =
     !loading && data && rows.length > 0 && !showTotalsSection && rowsForUi.length === 0;
+  const showUpdatedBadge = isTodayDate(viewDate) && !!lastLoadedAt;
 
   return (
     <>
@@ -838,12 +852,27 @@ function HistoryDailyDetailView({
                   </s-stack>
                 </s-box>
                 <s-box style={{ flex: "0 0 auto" }}>
-                  <s-button
-                    variant={scope === "all" ? "primary" : "secondary"}
-                    onClick={() => setScope(scope === "all" ? "single" : "all")}
-                  >
-                    全店舗表示
-                  </s-button>
+                  <s-stack gap="extraSmall" alignItems="end">
+                    {showUpdatedBadge ? (
+                      <s-box
+                        paddingInline="small"
+                        style={{
+                          border: "1px solid var(--s-color-border-subdued)",
+                          borderRadius: "9999px",
+                        }}
+                      >
+                        <s-text size="small" tone="subdued">
+                          {formatUpdatedTimeLabel(lastLoadedAt)}
+                        </s-text>
+                      </s-box>
+                    ) : null}
+                    <s-button
+                      variant={scope === "all" ? "primary" : "secondary"}
+                      onClick={() => setScope(scope === "all" ? "single" : "all")}
+                    >
+                      全店舗表示
+                    </s-button>
+                  </s-stack>
                 </s-box>
               </s-stack>
 
@@ -1014,6 +1043,7 @@ function SalesSummaryModal() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [lastLoadedAt, setLastLoadedAt] = useState(null);
 
   const [footerFootfallInput, setFooterFootfallInput] = useState("");
   const [savingFootfall, setSavingFootfall] = useState(false);
@@ -1118,6 +1148,7 @@ function SalesSummaryModal() {
         result = await getPeriodSummary({ dateFrom, dateTo, locationIds: locationIdsForApi });
       }
       setData(result);
+      setLastLoadedAt(new Date());
       if (result?.rows && grain === "daily" && scope === "single" && sessionGid) {
         const sessionRow = result.rows.find((r) => locationIdsMatch(r.locationId, sessionGid));
         if (sessionRow && sessionRow.visitors != null) {
@@ -1173,6 +1204,7 @@ function SalesSummaryModal() {
     data &&
     rows.length > 0 &&
     (grain === "daily" ? !hasAnyDailyKpi(o) : !hasAnyPeriodKpi(o));
+  const showUpdatedBadge = grain === "daily" && isTodayDate(targetDate) && !!lastLoadedAt;
   const layoutEmpty =
     !loading &&
     data &&
@@ -1304,12 +1336,27 @@ function SalesSummaryModal() {
                   </s-stack>
                 </s-box>
                 <s-box style={{ flex: "0 0 auto" }}>
-                  <s-button
-                    variant={scope === "all" ? "primary" : "secondary"}
-                    onClick={() => setScope(scope === "all" ? "single" : "all")}
-                  >
-                    全店舗表示
-                  </s-button>
+                  <s-stack gap="extraSmall" alignItems="end">
+                    {showUpdatedBadge ? (
+                      <s-box
+                        paddingInline="small"
+                        style={{
+                          border: "1px solid var(--s-color-border-subdued)",
+                          borderRadius: "9999px",
+                        }}
+                      >
+                        <s-text size="small" tone="subdued">
+                          {formatUpdatedTimeLabel(lastLoadedAt)}
+                        </s-text>
+                      </s-box>
+                    ) : null}
+                    <s-button
+                      variant={scope === "all" ? "primary" : "secondary"}
+                      onClick={() => setScope(scope === "all" ? "single" : "all")}
+                    >
+                      全店舗表示
+                    </s-button>
+                  </s-stack>
                 </s-box>
               </s-stack>
 
