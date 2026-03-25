@@ -5,6 +5,13 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import {
+  getAppSetting,
+  SALES_SUMMARY_SETTINGS_KEY,
+  mergeAndNormalizeSalesSummarySettings,
+  isFootfallReportingAllowedForLocation,
+  type SalesSummarySettings,
+} from "../utils/appSettings.server";
 
 const LOCATIONS_QUERY = `#graphql
   query {
@@ -64,6 +71,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const dbLocations = await prisma.location.findMany({ where: { shopId: shop.id } });
     const dbMap = new Map(dbLocations.map((l) => [l.shopifyLocationGid, l]));
 
+    const settings = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
+    const merged = mergeAndNormalizeSalesSummarySettings(settings ?? undefined);
+
     const locations = nodes
       .filter((node) => node.isActive)
       .map((node) => {
@@ -73,7 +83,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           locationName: node.name,
           printMode: db?.printMode ?? "order_based",
           salesSummaryEnabled: db?.salesSummaryEnabled ?? false,
-          footfallReportingEnabled: db?.footfallReportingEnabled ?? false,
+          footfallReportingEnabled: isFootfallReportingAllowedForLocation(merged, node.id),
         };
       });
 

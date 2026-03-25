@@ -3,7 +3,7 @@
  * 要件書 §10: 管理画面
  *
  * - プラン状態確認・アップグレード導線
- * - ロケーション別設定（印字方式・売上サマリー・入店数報告）
+ * - ロケーション別設定（印字方式・売上サマリー等。入店数報告は売上サマリー設定が正本）
  * - 領収書テンプレート設定リンク
  */
 import { useMemo, useEffect, useRef, useState } from "react";
@@ -69,7 +69,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       sortOrder: db?.sortOrder ?? 0,
       printMode: db?.printMode ?? "order_based",
       salesSummaryEnabled: db?.salesSummaryEnabled ?? false,
-      footfallReportingEnabled: db?.footfallReportingEnabled ?? false,
       settlementEnabled: db?.settlementEnabled ?? true,
       receiptEnabled: db?.receiptEnabled ?? true,
       specialRefundEnabled: db?.specialRefundEnabled ?? true,
@@ -82,7 +81,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       cloudprntEnabled: (db as { cloudprntEnabled?: boolean } | undefined)?.cloudprntEnabled ?? false,
       summaryTargetGroup: (db as { summaryTargetGroup?: string | null } | undefined)?.summaryTargetGroup ?? null,
       budgetTargetEnabled: (db as { budgetTargetEnabled?: boolean } | undefined)?.budgetTargetEnabled ?? false,
-      footfallTargetEnabled: (db as { footfallTargetEnabled?: boolean } | undefined)?.footfallTargetEnabled ?? false,
     };
   });
   // sort_order で並べ替え（要件 §4.2.1）
@@ -113,7 +111,6 @@ type LocationPayload = {
   sortOrder?: number;
   printMode?: string;
   salesSummaryEnabled?: boolean;
-  footfallReportingEnabled?: boolean;
   settlementEnabled?: boolean;
   receiptEnabled?: boolean;
   specialRefundEnabled?: boolean;
@@ -126,7 +123,6 @@ type LocationPayload = {
   cloudprntEnabled?: boolean;
   summaryTargetGroup?: string | null;
   budgetTargetEnabled?: boolean;
-  footfallTargetEnabled?: boolean;
 };
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -149,7 +145,6 @@ export async function action({ request }: ActionFunctionArgs) {
             sortOrder: loc.sortOrder ?? 0,
             printMode: loc.printMode ?? "order_based",
             salesSummaryEnabled: Boolean(loc.salesSummaryEnabled),
-            footfallReportingEnabled: Boolean(loc.footfallReportingEnabled),
             settlementEnabled: loc.settlementEnabled !== false,
             receiptEnabled: loc.receiptEnabled !== false,
             specialRefundEnabled: loc.specialRefundEnabled !== false,
@@ -162,7 +157,6 @@ export async function action({ request }: ActionFunctionArgs) {
             cloudprntEnabled: Boolean(loc.cloudprntEnabled),
             summaryTargetGroup: loc.summaryTargetGroup ?? null,
             budgetTargetEnabled: Boolean(loc.budgetTargetEnabled),
-            footfallTargetEnabled: Boolean(loc.footfallTargetEnabled),
           },
           create: {
             shopId: shop.id,
@@ -173,7 +167,6 @@ export async function action({ request }: ActionFunctionArgs) {
             sortOrder: loc.sortOrder ?? 0,
             printMode: loc.printMode ?? "order_based",
             salesSummaryEnabled: Boolean(loc.salesSummaryEnabled),
-            footfallReportingEnabled: Boolean(loc.footfallReportingEnabled),
             settlementEnabled: loc.settlementEnabled !== false,
             receiptEnabled: loc.receiptEnabled !== false,
             specialRefundEnabled: loc.specialRefundEnabled !== false,
@@ -186,7 +179,6 @@ export async function action({ request }: ActionFunctionArgs) {
             cloudprntEnabled: Boolean(loc.cloudprntEnabled),
             summaryTargetGroup: loc.summaryTargetGroup ?? null,
             budgetTargetEnabled: Boolean(loc.budgetTargetEnabled),
-            footfallTargetEnabled: Boolean(loc.footfallTargetEnabled),
           },
         });
       }
@@ -334,10 +326,17 @@ export default function SettingsPage() {
         {/* ── ロケーション設定（POS Stock 同様：設定用カードスタイル・固定フッターで保存） ── */}
         <Layout.AnnotatedSection
           title="ロケーション設定"
-          description="各店舗の印字方式と売上サマリー設定を管理します。売上サマリー・入店数報告はプロプランが必要です。"
+          description="各店舗の印字方式と売上サマリー設定を管理します。売上サマリーはプロプランが必要です。入店数報告のON/OFFと対象店は「売上サマリー設定」でまとめて設定します。"
         >
           <div style={SETTING_CARD_STYLE}>
             <BlockStack gap="400">
+              {isPro && (
+                <Banner tone="info">
+                  <Text as="p">
+                    入店数報告は、上部タブの「売上サマリー設定」内の「入店数報告」で制御します（ここでは設定しません）。
+                  </Text>
+                </Banner>
+              )}
               {locations.length === 0 && (
                 <Text tone="subdued" as="p">ロケーションが見つかりません。</Text>
               )}
@@ -442,14 +441,6 @@ export default function SettingsPage() {
                             handleLocationChange(loc.id, loc.name, "salesSummaryEnabled", v)
                           }
                         />
-                        <Checkbox
-                          label="入店数報告"
-                          checked={loc.footfallReportingEnabled}
-                          disabled={!isPro}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "footfallReportingEnabled", v)
-                          }
-                        />
                       </InlineStack>
 
                       <Text variant="bodySm" as="p" tone="subdued">集計・表示対象（§4.2.3）</Text>
@@ -512,13 +503,6 @@ export default function SettingsPage() {
                           checked={loc.budgetTargetEnabled}
                           onChange={(v) =>
                             handleLocationChange(loc.id, loc.name, "budgetTargetEnabled", v)
-                          }
-                        />
-                        <Checkbox
-                          label="入店数対象"
-                          checked={loc.footfallTargetEnabled}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "footfallTargetEnabled", v)
                           }
                         />
                       </InlineStack>

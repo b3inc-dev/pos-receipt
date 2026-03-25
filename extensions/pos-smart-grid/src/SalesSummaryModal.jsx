@@ -5,7 +5,7 @@
  * - スコープ: この店舗（セッションロケーション） / 全店舗（locationIds 省略＝API が有効店すべて）
  * - 粒度: 日次 / 月次（期間はその月の1日〜当日または月末）
  * - スクロール: 全店舗時は先頭に全店合計、その下に店舗別のリスト行（精算プレビュー型）
- * - フッター左: 入店数（日次・この店舗のみモーダルで報告／月次・全店はボタン無効）
+ * - フッター左: 入店数（日次・この店舗のみ・入店数報告ONの店でモーダル報告／月次・全店は非表示）
  * - フッター右: 日別一覧（/api/sales-summary/month-daily・比較用KPI付きリスト）
  * - 日別一覧で日付タップ: メインの日付は据え置きで historyDaily へ。UIは日次TOPと同型（この店舗/全店舗・入店数報告可）
  */
@@ -67,6 +67,17 @@ function fmtPct(n) {
 function fmtAmount(n) {
   if (n === null || n === undefined) return "—";
   return `¥${fmtNum(n)}`;
+}
+
+/** サマリー行の locationId と POS セッション GID を照合（数値のみ / GID 形式の差を吸収） */
+function locationIdsMatch(a, b) {
+  if (a == null || b == null) return false;
+  const na = String(a).trim();
+  const nb = String(b).trim();
+  if (na === nb) return true;
+  const ra = na.replace(/^gid:\/\/shopify\/Location\//i, "");
+  const rb = nb.replace(/^gid:\/\/shopify\/Location\//i, "");
+  return ra.length > 0 && ra === rb;
 }
 
 function defaultDisplayOptions() {
@@ -703,7 +714,9 @@ function HistoryDailyDetailView({
           }
         }
         setFootfallInputs((prev) => ({ ...inputs, ...prev }));
-        const sessionRow = sessionGid ? result.rows.find((r) => r.locationId === sessionGid) : null;
+        const sessionRow = sessionGid
+          ? result.rows.find((r) => locationIdsMatch(r.locationId, sessionGid))
+          : null;
         if (sessionRow && sessionRow.visitors != null) {
           setFooterFootfallInput(String(sessionRow.visitors));
         } else {
@@ -737,18 +750,27 @@ function HistoryDailyDetailView({
 
   let rowsForUi = [];
   if (showLocationRows) rowsForUi = rows;
-  else if (scope === "single") rowsForUi = sessionGid ? rows.filter((r) => r.locationId === sessionGid) : rows;
+  else if (scope === "single")
+    rowsForUi = sessionGid ? rows.filter((r) => locationIdsMatch(r.locationId, sessionGid)) : rows;
   else rowsForUi = [];
 
   const sessionRow = useMemo(() => {
     if (!sessionGid || !rows.length) return null;
-    return rows.find((r) => r.locationId === sessionGid) ?? null;
+    return rows.find((r) => locationIdsMatch(r.locationId, sessionGid)) ?? null;
   }, [sessionGid, rows]);
 
   const handleSaveFooterFootfall = async () => {
     if (!sessionGid) return;
-    const visitors = parseInt(footerFootfallInput ?? "0", 10);
-    if (isNaN(visitors)) return;
+    const raw = String(footerFootfallInput ?? "").trim();
+    if (raw === "") {
+      setFootfallErr("人数を入力してください");
+      return;
+    }
+    const visitors = parseInt(raw, 10);
+    if (Number.isNaN(visitors) || visitors < 0) {
+      setFootfallErr("0以上の整数を入力してください");
+      return;
+    }
     setSavingFootfall(true);
     setFootfallErr("");
     try {
@@ -949,11 +971,7 @@ function HistoryDailyDetailView({
           >
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
               <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                {scope === "all" ? (
-                  <s-button kind="secondary" disabled>
-                    入店数を報告
-                  </s-button>
-                ) : sessionRow?.footfallReportingEnabled ? (
+                {scope === "single" && sessionRow?.footfallReportingEnabled ? (
                   <s-stack gap="extraSmall">
                     <s-button
                       kind="secondary"
@@ -972,11 +990,7 @@ function HistoryDailyDetailView({
                       </s-text>
                     ) : null}
                   </s-stack>
-                ) : (
-                  <s-text tone="subdued" size="small">
-                    入店数報告なし
-                  </s-text>
-                )}
+                ) : null}
               </s-box>
               <s-box style={{ flex: "0 0 auto" }}>
                 <s-button kind="secondary" onClick={onNavigateToDailyList}>
@@ -1043,7 +1057,7 @@ function SalesSummaryModal() {
 
   const sessionLocationName = useMemo(() => {
     if (!sessionGid) return "";
-    const hit = shopLocations.find((l) => l.locationId === sessionGid);
+    const hit = shopLocations.find((l) => locationIdsMatch(l.locationId, sessionGid));
     return hit?.locationName ?? "";
   }, [sessionGid, shopLocations]);
 
@@ -1145,7 +1159,9 @@ function SalesSummaryModal() {
           }
         }
         setFootfallInputs((prev) => ({ ...inputs, ...prev }));
-        const sessionRow = sessionGid ? result.rows.find((r) => r.locationId === sessionGid) : null;
+        const sessionRow = sessionGid
+          ? result.rows.find((r) => locationIdsMatch(r.locationId, sessionGid))
+          : null;
         if (sessionRow && sessionRow.visitors != null) {
           setFooterFootfallInput(String(sessionRow.visitors));
         } else {
@@ -1184,7 +1200,8 @@ function SalesSummaryModal() {
 
   let rowsForUi = [];
   if (showLocationRows) rowsForUi = rows;
-  else if (scope === "single") rowsForUi = sessionGid ? rows.filter((r) => r.locationId === sessionGid) : rows;
+  else if (scope === "single")
+    rowsForUi = sessionGid ? rows.filter((r) => locationIdsMatch(r.locationId, sessionGid)) : rows;
   else rowsForUi = [];
 
   const kpiHidden =
@@ -1201,13 +1218,21 @@ function SalesSummaryModal() {
 
   const sessionRow = useMemo(() => {
     if (!sessionGid || !rows.length) return null;
-    return rows.find((r) => r.locationId === sessionGid) ?? null;
+    return rows.find((r) => locationIdsMatch(r.locationId, sessionGid)) ?? null;
   }, [sessionGid, rows]);
 
   const handleSaveFooterFootfall = async () => {
     if (!sessionGid || grain !== "daily") return;
-    const visitors = parseInt(footerFootfallInput ?? "0", 10);
-    if (isNaN(visitors)) return;
+    const raw = String(footerFootfallInput ?? "").trim();
+    if (raw === "") {
+      setFootfallErr("人数を入力してください");
+      return;
+    }
+    const visitors = parseInt(raw, 10);
+    if (Number.isNaN(visitors) || visitors < 0) {
+      setFootfallErr("0以上の整数を入力してください");
+      return;
+    }
     setSavingFootfall(true);
     setFootfallErr("");
     try {
@@ -1293,7 +1318,8 @@ function SalesSummaryModal() {
   const canPrevDay = targetDate > "2020-01-01";
   const canNextDay = targetDate < todayStr();
 
-  const footfallReportDisabled = grain === "monthly" || scope === "all";
+  const showFooterFootfallButton =
+    grain === "daily" && scope === "single" && sessionRow?.footfallReportingEnabled;
 
   return (
     <>
@@ -1585,32 +1611,26 @@ function SalesSummaryModal() {
           >
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
               <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                {sessionRow?.footfallReportingEnabled ? (
+                {showFooterFootfallButton ? (
                   <s-stack gap="extraSmall">
                     <s-button
                       kind="secondary"
-                      disabled={footfallReportDisabled}
                       onClick={() => {
-                        if (footfallReportDisabled) return;
                         setFootfallErr("");
                         setFootfallModalOpen(true);
                       }}
                     >
-                      {footerFootfallInput && !footfallReportDisabled
+                      {footerFootfallInput
                         ? `入店数を報告（${footerFootfallInput}人）`
                         : "入店数を報告"}
                     </s-button>
-                    {footfallErr && !footfallReportDisabled ? (
+                    {footfallErr ? (
                       <s-text tone="critical" size="small">
                         {footfallErr}
                       </s-text>
                     ) : null}
                   </s-stack>
-                ) : (
-                  <s-text tone="subdued" size="small">
-                    入店数報告なし
-                  </s-text>
-                )}
+                ) : null}
               </s-box>
               <s-box style={{ flex: "0 0 auto" }}>
                 <s-button kind="secondary" disabled={!sessionGid} onClick={openDailyList}>

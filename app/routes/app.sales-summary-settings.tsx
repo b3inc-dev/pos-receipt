@@ -298,7 +298,7 @@ export default function SalesSummarySettingsPage() {
           {/* §10.2.4 入店数報告 */}
           <Layout.AnnotatedSection
             title="入店数報告"
-            description="売上サマリー画面内の入店数入力の有無と対象ロケーション"
+            description="POS の売上サマリーで入店数を報告できるかどうかの正本です。全体のON/OFFと、対象に含める店舗（空ならすべて）をここで決めます。"
           >
             <Card>
               <BlockStack gap="400">

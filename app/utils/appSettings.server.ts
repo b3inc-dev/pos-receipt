@@ -126,6 +126,30 @@ export function mergeAndNormalizeSalesSummarySettings(
   return normalizeSalesSummaryMerged(merged as SalesSummarySettings);
 }
 
+/**
+ * 売上サマリー設定 §10.2.4 に基づき、そのロケーションで POS から入店数を報告できるか。
+ * （一般設定の Location.footfallReportingEnabled とは独立。設定の正本は AppSetting の sales_summary_settings）
+ */
+export function isFootfallReportingAllowedForLocation(
+  merged: SalesSummarySettings,
+  shopifyLocationGid: string,
+): boolean {
+  if (!merged.footfallReportingEnabled) return false;
+  const targets = merged.footfallTargetLocationIds ?? [];
+  const gid = shopifyLocationGid.startsWith("gid://")
+    ? shopifyLocationGid
+    : `gid://shopify/Location/${shopifyLocationGid}`;
+  const raw = gid.replace(/^gid:\/\/shopify\/Location\//, "");
+  if (targets.length === 0) return true;
+  return targets.some((t) => {
+    const s = String(t).trim();
+    if (!s) return false;
+    if (s === gid) return true;
+    const tr = s.replace(/^gid:\/\/shopify\/Location\//i, "");
+    return tr.length > 0 && tr === raw;
+  });
+}
+
 // ── ポイント/会員施策設定（要件 §9A） ───────────────────────────────────────
 
 export const LOYALTY_SETTINGS_KEY = "loyalty_settings";

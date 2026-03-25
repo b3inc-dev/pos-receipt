@@ -7,6 +7,13 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
+import {
+  getAppSetting,
+  SALES_SUMMARY_SETTINGS_KEY,
+  mergeAndNormalizeSalesSummarySettings,
+  isFootfallReportingAllowedForLocation,
+  type SalesSummarySettings,
+} from "../utils/appSettings.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method === "OPTIONS") return corsPreflightResponse(request);
@@ -38,15 +45,34 @@ export async function action({ request }: ActionFunctionArgs) {
       ? String(locationId)
       : `gid://shopify/Location/${locationId}`;
 
-    // footfall_reporting_enabled チェック
-    const loc = await prisma.location.findFirst({
-      where: { shopId: shop.id, shopifyLocationGid: locationGid },
-    });
-    if (!loc?.footfallReportingEnabled) {
+    const settings = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
+    const merged = mergeAndNormalizeSalesSummarySettings(settings ?? undefined);
+    if (!isFootfallReportingAllowedForLocation(merged, locationGid)) {
       return corsJson(
-        { ok: false, error: "Footfall reporting is not enabled for this location" },
+        {
+          ok: false,
+          error:
+            "入店数報告は売上サマリー設定でオフになっているか、このロケーションが対象に含まれていません。",
+        },
         { status: 403 }
       );
+    }
+
+    // ショップに属するロケーションか確認（DB 未登録時は Shopify 一覧で照合）
+    const dbLoc = await prisma.location.findFirst({
+      where: { shopId: shop.id, shopifyLocationGid: locationGid },
+    });
+    if (!dbLoc) {
+      const locRes = await admin.graphql(`#graphql
+        query { locations(first: 50, includeLegacy: false) { nodes { id } } }
+      `);
+      const locJson = (await locRes.json()) as {
+        data?: { locations?: { nodes?: { id: string }[] } };
+      };
+      const ids = locJson.data?.locations?.nodes?.map((n) => n.id) ?? [];
+      if (!ids.includes(locationGid)) {
+        return corsJson({ ok: false, error: "このショップのロケーションではありません" }, { status: 403 });
+      }
     }
 
     const targetDateStr = String(targetDate);

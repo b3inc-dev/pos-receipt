@@ -13,6 +13,7 @@ import { getAppSetting } from "../utils/appSettings.server";
 import {
   SALES_SUMMARY_SETTINGS_KEY,
   mergeAndNormalizeSalesSummarySettings,
+  isFootfallReportingAllowedForLocation,
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
 
@@ -135,12 +136,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
             unit: cached.unit !== null ? Number(cached.unit) : null,
             currency: "JPY",
           };
-          return { ...cachedRow, footfallReportingEnabled: loc.footfallReportingEnabled };
+          return {
+            ...cachedRow,
+            footfallReportingEnabled: isFootfallReportingAllowedForLocation(merged, locationGid),
+          };
         }
       }
 
       const row = await computeAndCacheDailySummary(admin, shop.id, locationGid, loc.name, targetDate);
-      return { ...row, footfallReportingEnabled: loc.footfallReportingEnabled };
+      return {
+        ...row,
+        footfallReportingEnabled: isFootfallReportingAllowedForLocation(merged, locationGid),
+      };
     };
 
     const useSequentialToday =
