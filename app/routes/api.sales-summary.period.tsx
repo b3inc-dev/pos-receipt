@@ -341,9 +341,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       });
 
-      const channelMap = new Map<string, { channelId: string; channelName: string; actualTotal: number; budgetTotal: number | null; orders: number; items: number }>();
+      const channelMap = new Map<
+        string,
+        {
+          channelId: string;
+          channelName: string;
+          actualTotal: number;
+          budgetTotal: number | null;
+          orders: number;
+          items: number;
+          progressBudgetToday: number;
+          progressBudgetPrev: number;
+        }
+      >();
       for (const ch of enabledChannels) {
-        channelMap.set(ch.id, { channelId: ch.id, channelName: ch.displayName, actualTotal: 0, budgetTotal: null, orders: 0, items: 0 });
+        channelMap.set(ch.id, {
+          channelId: ch.id,
+          channelName: ch.displayName,
+          actualTotal: 0,
+          budgetTotal: null,
+          orders: 0,
+          items: 0,
+          progressBudgetToday: 0,
+          progressBudgetPrev: 0,
+        });
       }
       for (const c of channelCaches) {
         const entry = channelMap.get(c.channelId);
@@ -351,12 +372,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
         entry.actualTotal += Number(c.actual);
         entry.orders += c.orders;
         entry.items += c.items;
-        if (c.budget !== null) entry.budgetTotal = (entry.budgetTotal ?? 0) + Number(c.budget);
+        if (c.budget !== null) {
+          entry.budgetTotal = (entry.budgetTotal ?? 0) + Number(c.budget);
+          if (c.targetDate <= today) entry.progressBudgetToday += Number(c.budget);
+          if (c.targetDate <= yesterday) entry.progressBudgetPrev += Number(c.budget);
+        }
       }
 
       return Array.from(channelMap.values()).map((entry) => ({
         ...entry,
         achievementRate: entry.budgetTotal && entry.budgetTotal > 0 ? entry.actualTotal / entry.budgetTotal : null,
+        progressRateToday:
+          entry.progressBudgetToday > 0 ? entry.actualTotal / entry.progressBudgetToday : null,
+        progressRatePrev:
+          entry.progressBudgetPrev > 0 ? entry.actualTotal / entry.progressBudgetPrev : null,
       }));
     })();
 
@@ -373,11 +402,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const totalItems =
       rows.reduce((s, r) => s + r.items, 0) +
       channelRows.reduce((s, r) => s + r.items, 0);
+
+    const grandForBudget = [...rows, ...channelRows];
+    const budgetTotal =
+      grandForBudget.length > 0 &&
+      grandForBudget.every((r) => r.budgetTotal !== null && r.budgetTotal !== undefined)
+        ? grandForBudget.reduce((s, r) => s + Number(r.budgetTotal ?? 0), 0)
+        : null;
+
+    const progressBudgetToday =
+      rows.reduce((s, r) => s + Number(r.progressBudgetToday ?? 0), 0) +
+      channelRows.reduce((s, r) => s + Number(r.progressBudgetToday ?? 0), 0);
+    const progressBudgetPrev =
+      rows.reduce((s, r) => s + Number(r.progressBudgetPrev ?? 0), 0) +
+      channelRows.reduce((s, r) => s + Number(r.progressBudgetPrev ?? 0), 0);
+
     const totals = {
       actualTotal: totalActual,
-      budgetTotal: rows.every((r) => r.budgetTotal !== null)
-        ? rows.reduce((s, r) => s + (r.budgetTotal ?? 0), 0)
-        : null,
+      budgetTotal,
+      progressBudgetToday,
+      progressBudgetPrev,
       orders: totalOrders,
       items: totalItems,
       visitors: storeVisitors,

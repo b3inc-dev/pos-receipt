@@ -209,14 +209,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     }
 
-    // ── 合計（全チャネルを含む） ──────────────────────────────────────────────
+    // ── 合計（全チャネルを含む・管理画面「総合計」と同じ予算ルール） ─────────────
+    const grandForBudget = [...rows, ...channelRows];
+    const budget =
+      grandForBudget.length > 0 &&
+      grandForBudget.every((r) => r.budget !== null && r.budget !== undefined)
+        ? grandForBudget.reduce((s, r) => s + Number(r.budget ?? 0), 0)
+        : null;
     const totals = {
       actual: rows.reduce((s, r) => s + r.actual, 0) + channelRows.reduce((s, r) => s + r.actual, 0),
       orders: rows.reduce((s, r) => s + r.orders, 0) + channelRows.reduce((s, r) => s + r.orders, 0),
       items: rows.reduce((s, r) => s + r.items, 0) + channelRows.reduce((s, r) => s + r.items, 0),
-      budget: rows.every((r) => r.budget !== null)
-        ? rows.reduce((s, r) => s + (r.budget ?? 0), 0)
-        : null,
+      budget,
       visitors: rows.some((r) => r.visitors !== null)
         ? rows.reduce((s, r) => s + (r.visitors ?? 0), 0)
         : null,

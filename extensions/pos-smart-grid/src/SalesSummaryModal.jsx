@@ -414,7 +414,10 @@ function totalsDailyRows(totals, o) {
   return rows;
 }
 
-/** locationRows で店舗行の遂行予算を合算し、全店合計に達成率・遂行を出す（API totals に無い項目の補完） */
+/**
+ * 期間の全店合計行。予算・達成率は API totals（店舗＋チャネル＝管理画面「総合計」と同じ）。
+ * 遂行予算は API が progressBudgetToday/Prev を返す場合はそれを使用（チャネル込み）、無ければ店舗行のみ合算。
+ */
 function totalsPeriodRows(totals, o, locationRows = []) {
   const rows = [];
   const actualTotal = Number(totals.actualTotal ?? 0);
@@ -427,8 +430,14 @@ function totalsPeriodRows(totals, o, locationRows = []) {
       value: fmtPct(actualTotal / totals.budgetTotal),
     });
   }
-  const progressBudgetToday = locationRows.reduce((s, r) => s + Number(r.progressBudgetToday ?? 0), 0);
-  const progressBudgetPrev = locationRows.reduce((s, r) => s + Number(r.progressBudgetPrev ?? 0), 0);
+  const progressBudgetToday =
+    totals.progressBudgetToday != null && totals.progressBudgetToday !== undefined
+      ? Number(totals.progressBudgetToday)
+      : locationRows.reduce((s, r) => s + Number(r.progressBudgetToday ?? 0), 0);
+  const progressBudgetPrev =
+    totals.progressBudgetPrev != null && totals.progressBudgetPrev !== undefined
+      ? Number(totals.progressBudgetPrev)
+      : locationRows.reduce((s, r) => s + Number(r.progressBudgetPrev ?? 0), 0);
   if (progressBudgetToday > 0 && o.showProgressToday) {
     rows.push({ label: "遂行予算(当日)", value: fmtAmount(progressBudgetToday) });
     rows.push({ label: "遂行率(当日)", value: fmtPct(actualTotal / progressBudgetToday) });
