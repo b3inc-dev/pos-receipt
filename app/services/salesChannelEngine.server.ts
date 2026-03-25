@@ -66,7 +66,7 @@ export async function autoDiscoverChannels(
 
   // 直近30日の注文から source_name を収集（POS・精算除外・最大500件）
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const shopifyQuery = `created_at:>=${since} -status:cancelled tag_not:settlement -source_name:pos`;
+  const shopifyQuery = `created_at:>=${since} -status:cancelled tag_not:settlement -source_name:pos -source_name:point_of_sale -source_name:shopify_pos`;
 
   const sourceNameMap = new Map<string, string>(); // sourceName → channelName(hint)
   let cursor: string | null = null;
@@ -90,7 +90,15 @@ export async function autoDiscoverChannels(
     const nodes = json.data?.orders?.nodes ?? [];
     for (const node of nodes) {
       const src = (node.sourceName ?? "").trim().toLowerCase();
-      if (src && src !== "pos" && !sourceNameMap.has(src)) {
+      if (
+        src &&
+        src !== "pos" &&
+        src !== "point_of_sale" &&
+        src !== "shopify_pos" &&
+        !src.includes("point_of_sale") &&
+        !src.includes("shopify_pos") &&
+        !sourceNameMap.has(src)
+      ) {
         const hint = node.channelInformation?.channelDefinition?.channelName ?? "";
         sourceNameMap.set(src, hint);
       }
@@ -258,8 +266,10 @@ function buildChannelQuery(
   extraFilters: string[] = []
 ): string {
   const parts: string[] = [];
-  // POS 注文はロケーションエンジンで別途集計するため除外する
+  // POS 系は店舗ロケーション集計で扱う。source_name の表記が店舗で異なるため複数除外する
   parts.push("-source_name:pos");
+  parts.push("-source_name:point_of_sale");
+  parts.push("-source_name:shopify_pos");
   parts.push(`${dateField}:>=${startIso}`);
   parts.push(`${dateField}:<=${endIso}`);
   parts.push(...extraFilters);

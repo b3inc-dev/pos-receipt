@@ -86,6 +86,7 @@ interface ShopifyRefund {
 interface ShopifyOrder {
   id: string;
   name: string;
+  sourceName?: string | null;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   totalTaxSet: { shopMoney: { amount: string } };
   totalDiscountsSet: { shopMoney: { amount: string } };
@@ -108,6 +109,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
       nodes {
         id
         name
+        sourceName
         totalPriceSet { shopMoney { amount currencyCode } }
         totalTaxSet { shopMoney { amount } }
         totalDiscountsSet { shopMoney { amount } }
@@ -174,12 +176,30 @@ function filterOrdersByRetailLocation(
   });
 }
 
+/**
+ * Shopify の注文は店舗・API 世代で sourceName が異なる（pos / point_of_sale / shopify_pos 等）。
+ * 検索を source_name:pos のみにすると取りこぼすため、広く取得したあとここで POS のみ残す。
+ */
+function isPosOrderSourceName(raw: string | null | undefined): boolean {
+  const s = (raw ?? "").trim().toLowerCase();
+  if (!s) return false;
+  if (s === "pos" || s === "shopify_pos" || s === "point_of_sale") return true;
+  if (s.includes("point_of_sale") || s.includes("point of sale")) return true;
+  if (s.includes("shopify_pos") || s === "shopifypossdk") return true;
+  return false;
+}
+
+function filterOrdersToPosSalesBySourceName(orders: ShopifyOrder[]): ShopifyOrder[] {
+  return orders.filter((o) => isPosOrderSourceName(o.sourceName));
+}
+
 /** 返金再集計用: updated_at でその日に更新された注文を取得（refunds.createdAt でフィルタするため） */
 const REFUNDS_ORDERS_QUERY = `#graphql
   query RefundsOrders($first: Int!, $after: String, $query: String) {
     orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
       nodes {
         id
+        sourceName
         tags
         retailLocation { id }
         refunds {
@@ -253,6 +273,7 @@ async function fetchAllOrders(admin: AdminClient, query: string): Promise<Shopif
 /** 返金再集計用: その日に updated された注文を取得（refunds に createdAt 含む） */
 interface OrderWithRefundsCreatedAt {
   id: string;
+  sourceName?: string | null;
   tags: string[];
   refunds: ShopifyRefund[];
   retailLocation?: { id: string } | null;
@@ -304,6 +325,7 @@ async function fetchOrdersUpdatedInDayRange(
       if (!isSettlement) {
         orders.push({
           id: node.id,
+          sourceName: (node as { sourceName?: string | null }).sourceName ?? null,
           tags: node.tags,
           retailLocation: (node as OrderWithRefundsCreatedAt).retailLocation,
           refunds: (node.refunds ?? []).map((r) => ({
@@ -377,9 +399,10 @@ export async function getRefundOverlayForDay(
   const startIso = dayRange.startUtc.toISOString().replace(/\.000Z$/, "Z");
   const endIso = dayRange.endUtc.toISOString();
   const locationGid = `gid://shopify/Location/${locIdRaw}`;
-  // GAS と同様に updated_at ベースの返金補足では cancelled も含める
-  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement`;
-  const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
+  // GAS と同様に updated_at ベースの返金補足では cancelled も含める（POS は sourceName で事後フィルタ）
+  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement`;
+  const ordersUpdatedRaw = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
+  const ordersUpdated = ordersUpdatedRaw.filter((o) => isPosOrderSourceName(o.sourceName));
   const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationGid, locIdRaw);
   const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
   return { refundTotal: overlay.refundTotal };
@@ -554,9 +577,10 @@ export async function buildSettlementPreview(
   const dayRange = getDayRangeInUtc(targetDate, timezone);
   const searchIso = getDayRangeShopifySearchIso(targetDate, timezone);
 
-  // GAS と同一: 精算注文・キャンセル済みをクエリ段階で除外。source_name:pos で POS 注文のみに限定し、ロケーションなし（オンラインストア等）を除外
-  const shopifyQuery = `location_id:${locIdRaw} source_name:pos created_at:>=${searchIso.start} created_at:<=${searchIso.end} tag_not:settlement -status:cancelled`;
-  const orders = await fetchAllOrders(admin, shopifyQuery);
+  // 精算注文・キャンセル除外。source_name は店舗で表記が異なるため検索に含めず、取得後に sourceName で POS のみ残す
+  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${searchIso.start} created_at:<=${searchIso.end} tag_not:settlement -status:cancelled`;
+  const ordersRaw = await fetchAllOrders(admin, shopifyQuery);
+  const orders = filterOrdersToPosSalesBySourceName(ordersRaw);
   const ordersAtLocation = filterOrdersByRetailLocation(orders, locationId, locIdRaw);
 
   const orderIdsCreatedInDay = new Set(ordersAtLocation.map((o) => o.id));
@@ -617,8 +641,9 @@ export async function buildSettlementPreview(
 
   // 返金再集計（別パス）: その日に処理された返金のうち、注文が「その日作成」でない分を追加（GAS overlayRefundsAndRecalc 相当）
   // GAS と同様に updated_at ベースの返金補足では cancelled も含める
-  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${searchIso.start} updated_at:<=${searchIso.end} tag_not:settlement`;
-  const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
+  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${searchIso.start} updated_at:<=${searchIso.end} tag_not:settlement`;
+  const ordersUpdatedRaw = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
+  const ordersUpdated = ordersUpdatedRaw.filter((o) => isPosOrderSourceName(o.sourceName));
   const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationId, locIdRaw);
   const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
 
