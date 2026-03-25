@@ -20,6 +20,7 @@ const GROUP_PATHS: Record<string, string[]> = {
   ],
   "/app/receipt-template": ["/app/receipt-template", "/app/payment-methods"],
   "/app/settlement-history": [
+    "/app/sales-summary",
     "/app/settlement-history",
     "/app/special-refund-history",
     "/app/receipt-history",

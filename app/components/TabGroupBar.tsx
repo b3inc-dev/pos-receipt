@@ -55,6 +55,7 @@ export const MASTER_TABS: TabItem[] = [
 ];
 
 export const REPORTS_TABS: TabItem[] = [
+  { path: "/app/sales-summary", label: "売上サマリー" },
   { path: "/app/settlement-history", label: "精算履歴" },
   { path: "/app/special-refund-history", label: "特殊返金履歴" },
   { path: "/app/receipt-history", label: "領収書履歴" },
