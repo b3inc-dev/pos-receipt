@@ -451,8 +451,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
             orderBy: { updatedAt: "desc" },
           });
-          const skipLocationCache = targetDate < today && forceRecomputeDaily;
-          if (cached && !skipLocationCache) {
+          // 過去日のみ DB キャッシュを読む。当日は常に再計算（以前は「当日かつキャッシュあり」で再計算に到達せず数値が永遠に更新されない不具合があった）
+          const useLocationDailyCache =
+            Boolean(cached) && !forceRecomputeDaily && targetDate < today;
+          if (useLocationDailyCache) {
             rowsRaw.push(toDailyRowFromCache(loc.shopifyLocationGid, loc.name, targetDate, cached));
             continue;
           }
