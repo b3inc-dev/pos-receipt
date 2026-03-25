@@ -125,6 +125,14 @@ export async function autoDiscoverChannels(
     const name = known?.name ?? (hint || src);
     const shortName = known?.shortName ?? src.slice(0, 4);
 
+    // upsert で race condition による重複登録を防ぐ（既存の場合は表示名・設定を上書きしない）
+    const existingForSrc = await prisma.salesChannel.findFirst({
+      where: { shopId, sourceNamesJson: JSON.stringify([src]) },
+    });
+    if (existingForSrc) {
+      registeredSources.add(src); // 今回のループ内での重複も防ぐ
+      continue;
+    }
     await prisma.salesChannel.create({
       data: {
         shopId,
@@ -270,6 +278,7 @@ function filterBySourceNames<T extends { sourceName: string | null }>(
 
 async function fetchChannelOrders(admin: AdminClient, query: string): Promise<ChannelOrder[]> {
   const orders: ChannelOrder[] = [];
+  const seenIds = new Set<string>(); // ページネーション重複排除
   let cursor: string | null = null;
   let hasNextPage = true;
 
@@ -297,6 +306,8 @@ async function fetchChannelOrders(admin: AdminClient, query: string): Promise<Ch
     const pageInfo = json.data?.orders?.pageInfo;
 
     for (const node of nodes) {
+      if (seenIds.has(node.id)) continue; // 重複スキップ
+      seenIds.add(node.id);
       const isSettlement = (node.tags ?? []).some((t) => String(t).toLowerCase() === "settlement");
       if (!isSettlement) {
         orders.push({
@@ -327,6 +338,7 @@ async function fetchChannelOrdersForRefundOverlay(
   query: string
 ): Promise<OrderForRefundOverlay[]> {
   const orders: OrderForRefundOverlay[] = [];
+  const seenIds = new Set<string>(); // ページネーション重複排除
   let cursor: string | null = null;
   let hasNextPage = true;
 
@@ -352,6 +364,8 @@ async function fetchChannelOrdersForRefundOverlay(
     const pageInfo = json.data?.orders?.pageInfo;
 
     for (const node of nodes) {
+      if (seenIds.has(node.id)) continue; // 重複スキップ
+      seenIds.add(node.id);
       const isSettlement = (node.tags ?? []).some((t) => String(t).toLowerCase() === "settlement");
       if (!isSettlement) {
         orders.push({
