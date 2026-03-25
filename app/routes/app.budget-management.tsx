@@ -109,6 +109,14 @@ function normalizeLocationName(v: string) {
   return v.replace(/\u3000/g, " ").trim().replace(/\s+/g, " ");
 }
 
+function parseBudgetAmount(raw: string): number | null {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.replace(/[¥,\s]/g, "");
+  const num = Number(normalized);
+  return Number.isFinite(num) ? num : null;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
@@ -200,6 +208,7 @@ async function importBudgetsFromCsvText(params: {
   };
   const activeLocations = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
   const locationNameToId = new Map(activeLocations.map((l) => [normalizeLocationName(l.name), l.id]));
+  const unknownLocationCounts = new Map<string, number>();
 
   // ヘッダー解析（DLテンプレート: ロケーション名,日付,予算 / 従来: locationId,targetDate,amount）
   const header = rows[0]?.map((s) => s.replace(/^\uFEFF/, "").trim()) ?? [];
@@ -229,7 +238,7 @@ async function importBudgetsFromCsvText(params: {
 
     const targetDate = rawDateJa || rawDate;
     const amountRaw = rawBudgetJa || rawAmount;
-    const amount = Number(amountRaw);
+    const amount = parseBudgetAmount(amountRaw);
 
     let locationId = "";
     if (rawLocName) {
@@ -240,7 +249,17 @@ async function importBudgetsFromCsvText(params: {
         : `gid://shopify/Location/${rawLocId}`;
     }
 
-    if (!locationId || !targetDate || isNaN(amount)) {
+    if (!locationId && rawLocName) {
+      unknownLocationCounts.set(rawLocName, (unknownLocationCounts.get(rawLocName) ?? 0) + 1);
+      errors.push(`ロケーション不一致: ${rawLocName}`);
+      continue;
+    }
+    if (amount === null) {
+      // 金額空欄は更新せずスキップ（テンプレート下書きを許容）
+      skipped++;
+      continue;
+    }
+    if (!locationId || !targetDate) {
       errors.push(`無効な行: ${parts.join(",")}`);
       continue;
     }
@@ -257,6 +276,12 @@ async function importBudgetsFromCsvText(params: {
     } catch (e) {
       errors.push(`行エラー: ${parts.join(",")} - ${e instanceof Error ? e.message : "unknown"}`);
     }
+  }
+  if (unknownLocationCounts.size > 0) {
+    const details = Array.from(unknownLocationCounts.entries())
+      .map(([name, count]) => `${name}(${count}行)`)
+      .join(" / ");
+    errors.push(`ロケーション名が一致しない行があります: ${details}`);
   }
   return { ok: true, inserted, updated, skipped, errors };
 }
