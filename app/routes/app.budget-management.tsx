@@ -56,6 +56,12 @@ function monthOptions() {
   return options;
 }
 
+function daysInMonthFromKey(monthKey: string) {
+  const [y, m] = monthKey.split("-").map(Number);
+  if (!y || !m) return 0;
+  return new Date(y, m, 0).getDate();
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
@@ -187,6 +193,61 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
 
+  if (intent === "download_template") {
+    const month = String(formData.get("month") ?? "");
+    const locationId = String(formData.get("locationId") ?? "");
+    if (!month || !locationId) {
+      return Response.json(
+        { ok: false, error: "month と locationId が必要です" },
+        { status: 400 }
+      );
+    }
+
+    const dayCount = daysInMonthFromKey(month);
+    if (dayCount <= 0) {
+      return Response.json(
+        { ok: false, error: "month の形式が不正です（YYYY-MM）" },
+        { status: 400 }
+      );
+    }
+
+    const dateFrom = `${month}-01`;
+    const dateTo = `${month}-${String(dayCount).padStart(2, "0")}`;
+    const budgets = await prisma.budget.findMany({
+      where: {
+        shopId: shop.id,
+        locationId,
+        targetDate: { gte: dateFrom, lte: dateTo },
+      },
+      select: { targetDate: true, amount: true },
+      orderBy: { targetDate: "asc" },
+    });
+    const amountMap = new Map(budgets.map((b) => [b.targetDate, b.amount.toString()]));
+
+    const locRes = await admin.graphql(LOCATIONS_QUERY);
+    const locJson = (await locRes.json()) as {
+      data?: { locations?: { nodes?: { id: string; name: string }[] } };
+    };
+    const locationName =
+      (locJson.data?.locations?.nodes ?? []).find((l) => l.id === locationId)?.name ??
+      locationId;
+
+    const rows = ["ロケーション名,日付,予算"];
+    for (let day = 1; day <= dayCount; day++) {
+      const targetDate = `${month}-${String(day).padStart(2, "0")}`;
+      const amount = amountMap.get(targetDate) ?? "";
+      rows.push(`${locationName},${targetDate},${amount}`);
+    }
+
+    return new Response(`${rows.join("\n")}\n`, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="budget-template-${month}.csv"`,
+      },
+    });
+  }
+
   if (intent === "upsert") {
     const locationId = String(formData.get("locationId") ?? "");
     const targetDate = String(formData.get("targetDate") ?? "");
@@ -231,6 +292,8 @@ export default function BudgetManagementPage() {
   const [newLocId, setNewLocId]   = useState(shopifyLocations[0]?.id ?? "");
   const [newDate, setNewDate]     = useState("");
   const [newAmount, setNewAmount] = useState("");
+  const [templateMonth, setTemplateMonth] = useState(month || monthOptions()[4]?.value || "");
+  const [templateLocId, setTemplateLocId] = useState(locationId || shopifyLocations[0]?.id || "");
   const [importError, setImportError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<string | null>(null);
 
@@ -269,14 +332,33 @@ export default function BudgetManagementPage() {
     fetcher.submit(fd, { method: "post" });
   };
 
-  const handleCsvDownload = () => {
-    const header = "locationId,targetDate,amount\n";
-    const rows = items.map((b) => `${b.locationId},${b.targetDate},${b.amount}`).join("\n");
-    const blob = new Blob([header + rows], { type: "text/csv" });
+  const handleCsvDownload = async () => {
+    if (!templateMonth || !templateLocId) {
+      setImportError("テンプレートDLには月とロケーションの指定が必要です。");
+      return;
+    }
+    setImportError(null);
+    const fd = new FormData();
+    fd.set("intent", "download_template");
+    fd.set("month", templateMonth);
+    fd.set("locationId", templateLocId);
+    const res = await fetch(location.pathname + location.search, { method: "POST", body: fd });
+    if (!res.ok) {
+      let message = "テンプレートのダウンロードに失敗しました";
+      try {
+        const json = (await res.json()) as { error?: string };
+        if (json.error) message = json.error;
+      } catch {
+        // noop
+      }
+      setImportError(message);
+      return;
+    }
+    const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "budgets.csv";
+    a.download = `budget-template-${templateMonth}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -313,7 +395,6 @@ export default function BudgetManagementPage() {
       <Page
         title="予算管理"
         backAction={{ content: "戻る", onAction: to("/app") }}
-        primaryAction={{ content: "CSVテンプレートDL", onAction: handleCsvDownload }}
       >
         {!hasAccess && (
           <Box paddingBlockEnd="400">
@@ -397,6 +478,38 @@ export default function BudgetManagementPage() {
           )}
 
           {/* CSVインポート */}
+          {hasAccess && (
+            <Layout.Section>
+              <Card>
+                <BlockStack gap="300">
+                  <Text variant="headingSm" as="h2">CSVテンプレートDL（日別）</Text>
+                  <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
+                    <Select
+                      label="対象月"
+                      options={monthOptions().filter((m) => m.value)}
+                      value={templateMonth}
+                      onChange={setTemplateMonth}
+                    />
+                    <Select
+                      label="ロケーション"
+                      options={shopifyLocations.map((l) => ({ label: l.name, value: l.id }))}
+                      value={templateLocId}
+                      onChange={setTemplateLocId}
+                    />
+                    <Box paddingBlockStart="500">
+                      <Button variant="primary" onClick={handleCsvDownload}>
+                        テンプレートをダウンロード
+                      </Button>
+                    </Box>
+                  </InlineGrid>
+                  <Text as="p" tone="subdued">
+                    ヘッダーは「ロケーション名,日付,予算」です。選択した月の日付を1日ずつ展開し、既存の日別予算があれば予算列に入ります。
+                  </Text>
+                </BlockStack>
+              </Card>
+            </Layout.Section>
+          )}
+
           {hasAccess && (
             <Layout.Section>
               <Card>
