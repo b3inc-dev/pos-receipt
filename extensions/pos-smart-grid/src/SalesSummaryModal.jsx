@@ -788,17 +788,26 @@ function HistoryDailyDetailView({
     return [];
   }, [scope, sessionGid]);
 
+  const historyParamsKey = useMemo(
+    () => JSON.stringify({ viewDate, scope, sessionGid: sessionGid ?? "", locIds: locationIdsForApi }),
+    [viewDate, scope, sessionGid, locationIdsForApi],
+  );
+  const [loadedHistoryParamsKey, setLoadedHistoryParamsKey] = useState(null);
+
   const loadData = useCallback(async () => {
+    const keyForRequest = historyParamsKey;
     setLoading(true);
     setError("");
     try {
       if (scope === "single" && !sessionGid) {
         setData(null);
+        setLoadedHistoryParamsKey(null);
         setError("ロケーションを取得できませんでした。POSで店舗を選択してから開き直してください。");
         return;
       }
       const result = await getDailySummary({ targetDate: viewDate, locationIds: locationIdsForApi });
       setData(result);
+      setLoadedHistoryParamsKey(keyForRequest);
       setLastLoadedAt(new Date());
       if (result?.rows && scope === "single" && sessionGid) {
         const sessionRow = result.rows.find((r) => locationIdsMatch(r.locationId, sessionGid));
@@ -813,10 +822,11 @@ function HistoryDailyDetailView({
     } catch (err) {
       setError(toUserMessage(err?.message));
       setData(null);
+      setLoadedHistoryParamsKey(null);
     } finally {
       setLoading(false);
     }
-  }, [viewDate, locationIdsForApi, scope, sessionGid]);
+  }, [viewDate, locationIdsForApi, scope, sessionGid, historyParamsKey]);
 
   useEffect(() => {
     loadData();
@@ -877,9 +887,18 @@ function HistoryDailyDetailView({
   const canPrevDay = viewDate > "2020-01-01";
   const canNextDay = viewDate < todayStr();
 
-  const kpiHidden = !loading && data && rows.length > 0 && !hasAnyDailyKpi(o);
+  const historyDataFresh = loadedHistoryParamsKey === historyParamsKey;
+  const historyShowLoading = loading || (!historyDataFresh && !error);
+
+  const kpiHidden =
+    !loading && historyDataFresh && data && rows.length > 0 && !hasAnyDailyKpi(o);
   const layoutEmpty =
-    !loading && data && rows.length > 0 && !showTotalsSection && rowsForUi.length === 0;
+    !loading &&
+    historyDataFresh &&
+    data &&
+    rows.length > 0 &&
+    !showTotalsSection &&
+    rowsForUi.length === 0;
   const showUpdatedBadge = isTodayDate(viewDate) && !!lastLoadedAt;
 
   return (
@@ -958,7 +977,7 @@ function HistoryDailyDetailView({
           >
             <s-box padding="base">
               <s-stack gap="base">
-                {loading ? (
+                {historyShowLoading ? (
                   <s-text tone="subdued" size="small">
                     読み込み中…
                   </s-text>
@@ -979,7 +998,7 @@ function HistoryDailyDetailView({
                   </s-banner>
                 ) : null}
 
-                {!loading && data && (
+                {!loading && data && historyDataFresh && (
                   <>
                     {rows.length === 0 ? (
                       <s-text tone="subdued" size="small">
@@ -1229,12 +1248,41 @@ function SalesSummaryModal() {
     return [];
   }, [scope, sessionGid]);
 
+  const summaryParamsKey = useMemo(
+    () =>
+      JSON.stringify({
+        scope,
+        sessionGid: sessionGid ?? "",
+        grain,
+        targetDate,
+        selectedYear,
+        selectedMonth,
+        periodAppliedFrom,
+        periodAppliedTo,
+        locationIds: locationIdsForApi,
+      }),
+    [
+      scope,
+      sessionGid,
+      grain,
+      targetDate,
+      selectedYear,
+      selectedMonth,
+      periodAppliedFrom,
+      periodAppliedTo,
+      locationIdsForApi,
+    ],
+  );
+  const [loadedSummaryParamsKey, setLoadedSummaryParamsKey] = useState(null);
+
   const loadData = useCallback(async () => {
+    const keyForRequest = summaryParamsKey;
     setLoading(true);
     setError("");
     try {
       if (scope === "single" && !sessionGid) {
         setData(null);
+        setLoadedSummaryParamsKey(null);
         setError("ロケーションを取得できませんでした。POSで店舗を選択してから開き直してください。");
         return;
       }
@@ -1249,12 +1297,14 @@ function SalesSummaryModal() {
         const dateTo = periodAppliedTo;
         if (dateFrom > dateTo) {
           setData(null);
+          setLoadedSummaryParamsKey(null);
           setError("開始日は終了日以前にしてください");
           return;
         }
         result = await getPeriodSummary({ dateFrom, dateTo, locationIds: locationIdsForApi });
       }
       setData(result);
+      setLoadedSummaryParamsKey(keyForRequest);
       setLastLoadedAt(new Date());
       if (result?.rows && grain === "daily" && scope === "single" && sessionGid) {
         const sessionRow = result.rows.find((r) => locationIdsMatch(r.locationId, sessionGid));
@@ -1269,20 +1319,11 @@ function SalesSummaryModal() {
     } catch (err) {
       setError(toUserMessage(err?.message));
       setData(null);
+      setLoadedSummaryParamsKey(null);
     } finally {
       setLoading(false);
     }
-  }, [
-    scope,
-    sessionGid,
-    grain,
-    targetDate,
-    selectedYear,
-    selectedMonth,
-    periodAppliedFrom,
-    periodAppliedTo,
-    locationIdsForApi,
-  ]);
+  }, [summaryParamsKey, scope, sessionGid, grain, targetDate, selectedYear, selectedMonth, periodAppliedFrom, periodAppliedTo, locationIdsForApi]);
 
   useEffect(() => {
     if (sessionReady) {
@@ -1316,14 +1357,20 @@ function SalesSummaryModal() {
     rowsForUi = sessionGid ? rows.filter((r) => locationIdsMatch(r.locationId, sessionGid)) : rows;
   else rowsForUi = [];
 
+  const summaryDataFresh = loadedSummaryParamsKey === summaryParamsKey;
+  const summaryShowLoading =
+    loading || (sessionReady && !summaryDataFresh && !error);
+
   const kpiHidden =
     !loading &&
+    summaryDataFresh &&
     data &&
     rows.length > 0 &&
     (grain === "daily" ? !hasAnyDailyKpi(o) : !hasAnyPeriodKpi(o));
   const showUpdatedBadge = grain === "daily" && isTodayDate(targetDate) && !!lastLoadedAt;
   const layoutEmpty =
     !loading &&
+    summaryDataFresh &&
     data &&
     rows.length > 0 &&
     !(showTotalsSectionDaily || showTotalsSectionMonthly) &&
@@ -1952,7 +1999,7 @@ function SalesSummaryModal() {
           >
             <s-box padding="base">
               <s-stack gap="base">
-                {loading ? (
+                {summaryShowLoading ? (
                   <s-text tone="subdued" size="small">
                     読み込み中…
                   </s-text>
@@ -1976,7 +2023,7 @@ function SalesSummaryModal() {
                   </s-banner>
                 ) : null}
 
-                {!loading && data && (
+                {!loading && data && summaryDataFresh && (
                   <>
                     {rows.length === 0 ? (
                       <s-text tone="subdued" size="small">
