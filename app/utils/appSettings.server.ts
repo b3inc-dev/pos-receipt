@@ -65,6 +65,7 @@ export interface SalesSummarySettings {
   footfallTargetLocationIds: string[];
   footfallReportEditableAfterSubmit: boolean;
   footfallReportRequiresConfirmation: boolean;
+  weekStartsOn: "monday" | "sunday";
 }
 
 export const DEFAULT_SALES_SUMMARY_SETTINGS: SalesSummarySettings = {
@@ -96,6 +97,7 @@ export const DEFAULT_SALES_SUMMARY_SETTINGS: SalesSummarySettings = {
   footfallTargetLocationIds: [],
   footfallReportEditableAfterSubmit: false,
   footfallReportRequiresConfirmation: true,
+  weekStartsOn: "monday",
 };
 
 /** DB の JSON に "true"/"false" 文字列が入っていると POS 側で KPI が誤判定されるため正規化する */

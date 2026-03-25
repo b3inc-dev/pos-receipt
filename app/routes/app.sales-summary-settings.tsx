@@ -16,6 +16,7 @@ import {
   Banner,
   Box,
   InlineStack,
+  ChoiceList,
 } from "@shopify/polaris";
 import { useState } from "react";
 import { authenticate } from "../shopify.server";
@@ -94,6 +95,7 @@ function formDataToSettings(formData: FormData, locations: { id: string }[]): Sa
     footfallTargetLocationIds: footfallIds ? (JSON.parse(footfallIds as string) as string[]) : [],
     footfallReportEditableAfterSubmit: bool("footfallReportEditableAfterSubmit", false),
     footfallReportRequiresConfirmation: bool("footfallReportRequiresConfirmation", true),
+    weekStartsOn: get("weekStartsOn") === "sunday" ? "sunday" : "monday",
   };
 }
 
@@ -215,6 +217,17 @@ export default function SalesSummarySettingsPage() {
                   label="期間サマリーを許可"
                   checked={form.allowDateRangeSummary}
                   onChange={(v) => set("allowDateRangeSummary", v)}
+                />
+                <ChoiceList
+                  title="週の始まり（期間指定の初期値・今週/先週に使用）"
+                  selected={[form.weekStartsOn]}
+                  choices={[
+                    { label: "月曜始まり（日曜終わり）", value: "monday" },
+                    { label: "日曜始まり（土曜終わり）", value: "sunday" },
+                  ]}
+                  onChange={(selected) =>
+                    set("weekStartsOn", (selected?.[0] === "sunday" ? "sunday" : "monday"))
+                  }
                 />
               </BlockStack>
             </Card>

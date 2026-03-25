@@ -46,6 +46,52 @@ function monthRange(year, month) {
   return { dateFrom, dateTo };
 }
 
+function daysInMonth(year, month) {
+  return new Date(year, month, 0).getDate();
+}
+
+function clampDay(year, month, day) {
+  const max = daysInMonth(year, month);
+  const n = Number(day);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  if (n > max) return max;
+  return n;
+}
+
+function ymd(year, month, day) {
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+function parseYmdLocal(ymdStr) {
+  const [y, m, d] = String(ymdStr || "").split("-").map((v) => parseInt(v, 10));
+  if (!y || !m || !d) return new Date();
+  return new Date(y, m - 1, d);
+}
+
+function toYmdLocal(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function startOfWeek(date, weekStartsOn) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = d.getDay(); // 0=Sun ... 6=Sat
+  const startOffset = weekStartsOn === "sunday" ? day : (day + 6) % 7;
+  d.setDate(d.getDate() - startOffset);
+  return d;
+}
+
+function endOfWeek(date, weekStartsOn) {
+  const s = startOfWeek(date, weekStartsOn);
+  const e = new Date(s);
+  e.setDate(s.getDate() + 6);
+  return e;
+}
+
+function clampDateToToday(date) {
+  const t = parseYmdLocal(todayStr());
+  return date > t ? t : date;
+}
+
 function addDays(ymd, delta) {
   const d = new Date(ymd + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + delta);
@@ -785,6 +831,7 @@ function HistoryDailyDetailView({
   }, [viewDate]);
 
   const o = useMemo(() => ({ ...defaultDisplayOptions(), ...(data?.displayOptions ?? {}) }), [data]);
+  const weekStartsOn = o.weekStartsOn === "sunday" ? "sunday" : "monday";
   const rows = data?.rows ?? [];
   const totals = data?.totals ?? {};
   const showLocationRows = o.showLocationRows !== false;
@@ -803,6 +850,43 @@ function HistoryDailyDetailView({
     if (!sessionGid || !rows.length) return null;
     return rows.find((r) => locationIdsMatch(r.locationId, sessionGid)) ?? null;
   }, [sessionGid, rows]);
+
+  const applyPeriodRange = useCallback((fromYmd, toYmd) => {
+    const from = parseYmdLocal(fromYmd);
+    const to = clampDateToToday(parseYmdLocal(toYmd));
+    const safeTo = to < from ? from : to;
+
+    setPeriodStartYear(from.getFullYear());
+    setPeriodStartMonth(from.getMonth() + 1);
+    setPeriodStartDay(from.getDate());
+    setPeriodEndYear(safeTo.getFullYear());
+    setPeriodEndMonth(safeTo.getMonth() + 1);
+    setPeriodEndDay(safeTo.getDate());
+  }, []);
+
+  const applyPeriodPreset = useCallback(
+    (preset) => {
+      const base = parseYmdLocal(todayStr());
+      if (preset === "thisMonth") {
+        const from = new Date(base.getFullYear(), base.getMonth(), 1);
+        applyPeriodRange(toYmdLocal(from), toYmdLocal(base));
+        return;
+      }
+      if (preset === "lastWeek") {
+        const currentWeekStart = startOfWeek(base, weekStartsOn);
+        const from = new Date(currentWeekStart);
+        from.setDate(currentWeekStart.getDate() - 7);
+        const to = endOfWeek(from, weekStartsOn);
+        applyPeriodRange(toYmdLocal(from), toYmdLocal(to));
+        return;
+      }
+      // thisWeek
+      const from = startOfWeek(base, weekStartsOn);
+      const to = endOfWeek(base, weekStartsOn);
+      applyPeriodRange(toYmdLocal(from), toYmdLocal(to));
+    },
+    [applyPeriodRange, weekStartsOn]
+  );
 
   const handleSaveFooterFootfall = async () => {
     if (!sessionGid) return;
@@ -1061,6 +1145,18 @@ function SalesSummaryModal() {
   const [selectedMonth, setSelectedMonth] = useState(initialYm.month);
   const [yearMenuOpen, setYearMenuOpen] = useState(false);
   const [monthMenuOpen, setMonthMenuOpen] = useState(false);
+  const [periodStartYear, setPeriodStartYear] = useState(initialYm.year);
+  const [periodStartMonth, setPeriodStartMonth] = useState(initialYm.month);
+  const [periodStartDay, setPeriodStartDay] = useState(1);
+  const [periodEndYear, setPeriodEndYear] = useState(initialYm.year);
+  const [periodEndMonth, setPeriodEndMonth] = useState(initialYm.month);
+  const [periodEndDay, setPeriodEndDay] = useState(new Date().getDate());
+  const [periodStartYearMenuOpen, setPeriodStartYearMenuOpen] = useState(false);
+  const [periodStartMonthMenuOpen, setPeriodStartMonthMenuOpen] = useState(false);
+  const [periodStartDayMenuOpen, setPeriodStartDayMenuOpen] = useState(false);
+  const [periodEndYearMenuOpen, setPeriodEndYearMenuOpen] = useState(false);
+  const [periodEndMonthMenuOpen, setPeriodEndMonthMenuOpen] = useState(false);
+  const [periodEndDayMenuOpen, setPeriodEndDayMenuOpen] = useState(false);
 
   const [shopLocations, setShopLocations] = useState([]);
   const [locLoadErr, setLocLoadErr] = useState("");
@@ -1152,6 +1248,14 @@ function SalesSummaryModal() {
     }
   }, [availableMonthsForYear, selectedMonth]);
 
+  useEffect(() => {
+    setPeriodStartDay((d) => clampDay(periodStartYear, periodStartMonth, d));
+  }, [periodStartYear, periodStartMonth]);
+
+  useEffect(() => {
+    setPeriodEndDay((d) => clampDay(periodEndYear, periodEndMonth, d));
+  }, [periodEndYear, periodEndMonth]);
+
   const locationIdsForApi = useMemo(() => {
     if (scope === "single") {
       return sessionGid ? [sessionGid] : [];
@@ -1171,8 +1275,17 @@ function SalesSummaryModal() {
       let result;
       if (grain === "daily") {
         result = await getDailySummary({ targetDate, locationIds: locationIdsForApi });
-      } else {
+      } else if (grain === "monthly") {
         const { dateFrom, dateTo } = monthRange(selectedYear, selectedMonth);
+        result = await getPeriodSummary({ dateFrom, dateTo, locationIds: locationIdsForApi });
+      } else {
+        const dateFrom = ymd(periodStartYear, periodStartMonth, periodStartDay);
+        const dateTo = ymd(periodEndYear, periodEndMonth, periodEndDay);
+        if (dateFrom > dateTo) {
+          setData(null);
+          setError("開始日は終了日以前にしてください");
+          return;
+        }
         result = await getPeriodSummary({ dateFrom, dateTo, locationIds: locationIdsForApi });
       }
       setData(result);
@@ -1193,7 +1306,21 @@ function SalesSummaryModal() {
     } finally {
       setLoading(false);
     }
-  }, [scope, sessionGid, grain, targetDate, selectedYear, selectedMonth, locationIdsForApi]);
+  }, [
+    scope,
+    sessionGid,
+    grain,
+    targetDate,
+    selectedYear,
+    selectedMonth,
+    periodStartYear,
+    periodStartMonth,
+    periodStartDay,
+    periodEndYear,
+    periodEndMonth,
+    periodEndDay,
+    locationIdsForApi,
+  ]);
 
   useEffect(() => {
     if (sessionReady) {
@@ -1219,7 +1346,7 @@ function SalesSummaryModal() {
   const totalsDaily = totalsDailyRows(totals, o);
   const totalsPeriod = totalsPeriodRows(totals, o);
   const showTotalsSectionDaily = showAllTotals && grain === "daily" && totalsDaily.length > 0;
-  const showTotalsSectionMonthly = showAllTotals && grain === "monthly" && totalsPeriod.length > 0;
+  const showTotalsSectionMonthly = showAllTotals && grain !== "daily" && totalsPeriod.length > 0;
 
   let rowsForUi = [];
   if (showLocationRows) rowsForUi = rows;
@@ -1320,6 +1447,9 @@ function SalesSummaryModal() {
 
   const canPrevDay = targetDate > "2020-01-01";
   const canNextDay = targetDate < todayStr();
+  const periodDateFrom = ymd(periodStartYear, periodStartMonth, periodStartDay);
+  const periodDateTo = ymd(periodEndYear, periodEndMonth, periodEndDay);
+  const periodRangeInvalid = periodDateFrom > periodDateTo;
 
   const showFooterFootfallButton =
     grain === "daily" && scope === "single" && sessionRow?.footfallReportingEnabled;
@@ -1375,18 +1505,49 @@ function SalesSummaryModal() {
 
               {/* POS Stock 入庫モーダル（未入庫 / 入庫済み）と同型: gap-none + 50% + variant */}
               <s-stack direction="inline" gap="none" inlineSize="100%">
-                <s-box inlineSize="50%">
+                <s-box inlineSize="33.33%">
                   <s-button
                     variant={grain === "monthly" ? "primary" : "secondary"}
-                    onClick={() => setGrain("monthly")}
+                    onClick={() => {
+                      setGrain("monthly");
+                      setPeriodStartYearMenuOpen(false);
+                      setPeriodStartMonthMenuOpen(false);
+                      setPeriodStartDayMenuOpen(false);
+                      setPeriodEndYearMenuOpen(false);
+                      setPeriodEndMonthMenuOpen(false);
+                      setPeriodEndDayMenuOpen(false);
+                    }}
                   >
                     月次
                   </s-button>
                 </s-box>
-                <s-box inlineSize="50%">
+                <s-box inlineSize="33.33%">
+                  <s-button
+                    variant={grain === "period" ? "primary" : "secondary"}
+                    onClick={() => {
+                      setGrain("period");
+                      setYearMenuOpen(false);
+                      setMonthMenuOpen(false);
+                      applyPeriodPreset("thisWeek");
+                    }}
+                  >
+                    期間指定
+                  </s-button>
+                </s-box>
+                <s-box inlineSize="33.33%">
                   <s-button
                     variant={grain === "daily" ? "primary" : "secondary"}
-                    onClick={() => setGrain("daily")}
+                    onClick={() => {
+                      setGrain("daily");
+                      setYearMenuOpen(false);
+                      setMonthMenuOpen(false);
+                      setPeriodStartYearMenuOpen(false);
+                      setPeriodStartMonthMenuOpen(false);
+                      setPeriodStartDayMenuOpen(false);
+                      setPeriodEndYearMenuOpen(false);
+                      setPeriodEndMonthMenuOpen(false);
+                      setPeriodEndDayMenuOpen(false);
+                    }}
                   >
                     日次
                   </s-button>
@@ -1405,7 +1566,7 @@ function SalesSummaryModal() {
                     翌日
                   </s-button>
                 </s-stack>
-              ) : (
+              ) : grain === "monthly" ? (
                 <s-stack gap="small">
                   <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
                     <s-box style={{ flex: "0 0 auto" }}>
@@ -1493,6 +1654,261 @@ function SalesSummaryModal() {
                     </s-box>
                   ) : null}
                 </s-stack>
+              ) : (
+                <s-stack gap="small">
+                  <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%" }}>
+                    <s-button kind="secondary" onClick={() => applyPeriodPreset("thisWeek")}>
+                      今週
+                    </s-button>
+                    <s-button kind="secondary" onClick={() => applyPeriodPreset("lastWeek")}>
+                      先週
+                    </s-button>
+                    <s-button kind="secondary" onClick={() => applyPeriodPreset("thisMonth")}>
+                      今月
+                    </s-button>
+                  </s-stack>
+                  <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+                    <s-box style={{ flex: "0 0 auto" }}>
+                      <s-text tone="subdued" size="small">
+                        開始日
+                      </s-text>
+                    </s-box>
+                    <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
+                      <s-box style={{ inlineSize: "4.75rem", flex: "0 0 4.75rem" }}>
+                        <s-button
+                          kind="secondary"
+                          style={{ width: "100%", maxInlineSize: "100%" }}
+                          onClick={() => {
+                            setPeriodStartMonthMenuOpen(false);
+                            setPeriodStartDayMenuOpen(false);
+                            setPeriodEndYearMenuOpen(false);
+                            setPeriodEndMonthMenuOpen(false);
+                            setPeriodEndDayMenuOpen(false);
+                            setPeriodStartYearMenuOpen((v) => !v);
+                          }}
+                        >
+                          {periodStartYear}年
+                        </s-button>
+                      </s-box>
+                      <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
+                        <s-button
+                          kind="secondary"
+                          style={{ width: "100%", maxInlineSize: "100%" }}
+                          onClick={() => {
+                            setPeriodStartYearMenuOpen(false);
+                            setPeriodStartDayMenuOpen(false);
+                            setPeriodEndYearMenuOpen(false);
+                            setPeriodEndMonthMenuOpen(false);
+                            setPeriodEndDayMenuOpen(false);
+                            setPeriodStartMonthMenuOpen((v) => !v);
+                          }}
+                        >
+                          {periodStartMonth}月
+                        </s-button>
+                      </s-box>
+                      <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
+                        <s-button
+                          kind="secondary"
+                          style={{ width: "100%", maxInlineSize: "100%" }}
+                          onClick={() => {
+                            setPeriodStartYearMenuOpen(false);
+                            setPeriodStartMonthMenuOpen(false);
+                            setPeriodEndYearMenuOpen(false);
+                            setPeriodEndMonthMenuOpen(false);
+                            setPeriodEndDayMenuOpen(false);
+                            setPeriodStartDayMenuOpen((v) => !v);
+                          }}
+                        >
+                          {periodStartDay}日
+                        </s-button>
+                      </s-box>
+                    </s-stack>
+                  </s-stack>
+                  {periodStartYearMenuOpen ? (
+                    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                      <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
+                        {availableYears.map((y) => (
+                          <s-button
+                            key={`ps-y-${y}`}
+                            kind={y === periodStartYear ? "primary" : "secondary"}
+                            style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
+                            onClick={() => {
+                              setPeriodStartYear(y);
+                              setPeriodStartYearMenuOpen(false);
+                            }}
+                          >
+                            {y}年
+                          </s-button>
+                        ))}
+                      </s-stack>
+                    </s-box>
+                  ) : null}
+                  {periodStartMonthMenuOpen ? (
+                    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                      <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
+                        {monthsLoading ? (
+                          <s-text tone="subdued" size="small">
+                            月一覧を読み込み中…
+                          </s-text>
+                        ) : (
+                          Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                            <s-button
+                              key={`ps-m-${m}`}
+                              kind={m === periodStartMonth ? "primary" : "secondary"}
+                              style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
+                              onClick={() => {
+                                setPeriodStartMonth(m);
+                                setPeriodStartMonthMenuOpen(false);
+                              }}
+                            >
+                              {m}月
+                            </s-button>
+                          ))
+                        )}
+                      </s-stack>
+                    </s-box>
+                  ) : null}
+                  {periodStartDayMenuOpen ? (
+                    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                      <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
+                        {Array.from({ length: daysInMonth(periodStartYear, periodStartMonth) }, (_, i) => i + 1).map((d) => (
+                          <s-button
+                            key={`ps-d-${d}`}
+                            kind={d === periodStartDay ? "primary" : "secondary"}
+                            style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
+                            onClick={() => {
+                              setPeriodStartDay(d);
+                              setPeriodStartDayMenuOpen(false);
+                            }}
+                          >
+                            {d}日
+                          </s-button>
+                        ))}
+                      </s-stack>
+                    </s-box>
+                  ) : null}
+
+                  <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+                    <s-box style={{ flex: "0 0 auto" }}>
+                      <s-text tone="subdued" size="small">
+                        終了日
+                      </s-text>
+                    </s-box>
+                    <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
+                      <s-box style={{ inlineSize: "4.75rem", flex: "0 0 4.75rem" }}>
+                        <s-button
+                          kind="secondary"
+                          style={{ width: "100%", maxInlineSize: "100%" }}
+                          onClick={() => {
+                            setPeriodEndMonthMenuOpen(false);
+                            setPeriodEndDayMenuOpen(false);
+                            setPeriodStartYearMenuOpen(false);
+                            setPeriodStartMonthMenuOpen(false);
+                            setPeriodStartDayMenuOpen(false);
+                            setPeriodEndYearMenuOpen((v) => !v);
+                          }}
+                        >
+                          {periodEndYear}年
+                        </s-button>
+                      </s-box>
+                      <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
+                        <s-button
+                          kind="secondary"
+                          style={{ width: "100%", maxInlineSize: "100%" }}
+                          onClick={() => {
+                            setPeriodEndYearMenuOpen(false);
+                            setPeriodEndDayMenuOpen(false);
+                            setPeriodStartYearMenuOpen(false);
+                            setPeriodStartMonthMenuOpen(false);
+                            setPeriodStartDayMenuOpen(false);
+                            setPeriodEndMonthMenuOpen((v) => !v);
+                          }}
+                        >
+                          {periodEndMonth}月
+                        </s-button>
+                      </s-box>
+                      <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
+                        <s-button
+                          kind="secondary"
+                          style={{ width: "100%", maxInlineSize: "100%" }}
+                          onClick={() => {
+                            setPeriodEndYearMenuOpen(false);
+                            setPeriodEndMonthMenuOpen(false);
+                            setPeriodStartYearMenuOpen(false);
+                            setPeriodStartMonthMenuOpen(false);
+                            setPeriodStartDayMenuOpen(false);
+                            setPeriodEndDayMenuOpen((v) => !v);
+                          }}
+                        >
+                          {periodEndDay}日
+                        </s-button>
+                      </s-box>
+                    </s-stack>
+                  </s-stack>
+                  {periodEndYearMenuOpen ? (
+                    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                      <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
+                        {availableYears.map((y) => (
+                          <s-button
+                            key={`pe-y-${y}`}
+                            kind={y === periodEndYear ? "primary" : "secondary"}
+                            style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
+                            onClick={() => {
+                              setPeriodEndYear(y);
+                              setPeriodEndYearMenuOpen(false);
+                            }}
+                          >
+                            {y}年
+                          </s-button>
+                        ))}
+                      </s-stack>
+                    </s-box>
+                  ) : null}
+                  {periodEndMonthMenuOpen ? (
+                    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                      <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
+                        {monthsLoading ? (
+                          <s-text tone="subdued" size="small">
+                            月一覧を読み込み中…
+                          </s-text>
+                        ) : (
+                          Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                            <s-button
+                              key={`pe-m-${m}`}
+                              kind={m === periodEndMonth ? "primary" : "secondary"}
+                              style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
+                              onClick={() => {
+                                setPeriodEndMonth(m);
+                                setPeriodEndMonthMenuOpen(false);
+                              }}
+                            >
+                              {m}月
+                            </s-button>
+                          ))
+                        )}
+                      </s-stack>
+                    </s-box>
+                  ) : null}
+                  {periodEndDayMenuOpen ? (
+                    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                      <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
+                        {Array.from({ length: daysInMonth(periodEndYear, periodEndMonth) }, (_, i) => i + 1).map((d) => (
+                          <s-button
+                            key={`pe-d-${d}`}
+                            kind={d === periodEndDay ? "primary" : "secondary"}
+                            style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
+                            onClick={() => {
+                              setPeriodEndDay(d);
+                              setPeriodEndDayMenuOpen(false);
+                            }}
+                          >
+                            {d}日
+                          </s-button>
+                        ))}
+                      </s-stack>
+                    </s-box>
+                  ) : null}
+                </s-stack>
               )}
             </s-stack>
           </s-box>
@@ -1514,6 +1930,9 @@ function SalesSummaryModal() {
                 ) : null}
                 {error ? (
                   <s-banner status="critical">{error}</s-banner>
+                ) : null}
+                {grain === "period" && periodRangeInvalid ? (
+                  <s-banner status="critical">開始日が終了日より後になっています。日付を見直してください。</s-banner>
                 ) : null}
 
                 {kpiHidden ? (
