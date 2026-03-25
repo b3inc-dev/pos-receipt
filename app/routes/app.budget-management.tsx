@@ -22,7 +22,7 @@ import {
   Divider,
   InlineGrid,
 } from "@shopify/polaris";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
@@ -195,10 +195,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === "download_template") {
     const month = String(formData.get("month") ?? "");
-    const locationId = String(formData.get("locationId") ?? "");
-    if (!month || !locationId) {
+    const locationIdsRaw = String(formData.get("locationIds") ?? "[]");
+    const requestedLocationIds = JSON.parse(locationIdsRaw) as string[];
+    if (!month) {
       return Response.json(
-        { ok: false, error: "month と locationId が必要です" },
+        { ok: false, error: "month が必要です" },
         { status: 400 }
       );
     }
@@ -211,32 +212,47 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
+    const locRes = await admin.graphql(LOCATIONS_QUERY);
+    const locJson = (await locRes.json()) as {
+      data?: { locations?: { nodes?: { id: string; name: string }[] } };
+    };
+    const activeLocations = (locJson.data?.locations?.nodes ?? []);
+    const selectedLocationIds = (
+      requestedLocationIds.length > 0
+        ? requestedLocationIds
+        : activeLocations.map((l) => l.id)
+    ).filter((id) => activeLocations.some((l) => l.id === id));
+    if (selectedLocationIds.length === 0) {
+      return Response.json(
+        { ok: false, error: "対象ロケーションを1つ以上選択してください" },
+        { status: 400 }
+      );
+    }
+    const locationNameMap = new Map(activeLocations.map((l) => [l.id, l.name]));
+
     const dateFrom = `${month}-01`;
     const dateTo = `${month}-${String(dayCount).padStart(2, "0")}`;
     const budgets = await prisma.budget.findMany({
       where: {
         shopId: shop.id,
-        locationId,
+        locationId: { in: selectedLocationIds },
         targetDate: { gte: dateFrom, lte: dateTo },
       },
-      select: { targetDate: true, amount: true },
-      orderBy: { targetDate: "asc" },
+      select: { locationId: true, targetDate: true, amount: true },
+      orderBy: [{ locationId: "asc" }, { targetDate: "asc" }],
     });
-    const amountMap = new Map(budgets.map((b) => [b.targetDate, b.amount.toString()]));
-
-    const locRes = await admin.graphql(LOCATIONS_QUERY);
-    const locJson = (await locRes.json()) as {
-      data?: { locations?: { nodes?: { id: string; name: string }[] } };
-    };
-    const locationName =
-      (locJson.data?.locations?.nodes ?? []).find((l) => l.id === locationId)?.name ??
-      locationId;
+    const amountMap = new Map(
+      budgets.map((b) => [`${b.locationId}__${b.targetDate}`, b.amount.toString()])
+    );
 
     const rows = ["ロケーション名,日付,予算"];
-    for (let day = 1; day <= dayCount; day++) {
-      const targetDate = `${month}-${String(day).padStart(2, "0")}`;
-      const amount = amountMap.get(targetDate) ?? "";
-      rows.push(`${locationName},${targetDate},${amount}`);
+    for (const locId of selectedLocationIds) {
+      const locName = locationNameMap.get(locId) ?? locId;
+      for (let day = 1; day <= dayCount; day++) {
+        const targetDate = `${month}-${String(day).padStart(2, "0")}`;
+        const amount = amountMap.get(`${locId}__${targetDate}`) ?? "";
+        rows.push(`${locName},${targetDate},${amount}`);
+      }
     }
 
     return new Response(`${rows.join("\n")}\n`, {
@@ -293,11 +309,43 @@ export default function BudgetManagementPage() {
   const [newDate, setNewDate]     = useState("");
   const [newAmount, setNewAmount] = useState("");
   const [templateMonth, setTemplateMonth] = useState(month || monthOptions()[4]?.value || "");
-  const [templateLocId, setTemplateLocId] = useState(locationId || shopifyLocations[0]?.id || "");
+  const [templateLocationIds, setTemplateLocationIds] = useState<string[]>(
+    locationId ? [locationId] : shopifyLocations.map((l) => l.id)
+  );
   const [importError, setImportError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<string | null>(null);
 
   const totalPages = Math.ceil(total / pageSize);
+  const allTemplateLocationIds = shopifyLocations.map((l) => l.id);
+  const isAllTemplateLocationsChecked =
+    allTemplateLocationIds.length > 0 &&
+    templateLocationIds.length === allTemplateLocationIds.length;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedMonth = localStorage.getItem("budgetTemplateMonth");
+    const savedLocationIds = localStorage.getItem("budgetTemplateLocationIds");
+    if (savedMonth) setTemplateMonth(savedMonth);
+    if (savedLocationIds) {
+      try {
+        const parsed = JSON.parse(savedLocationIds) as string[];
+        const valid = parsed.filter((id) => allTemplateLocationIds.includes(id));
+        if (valid.length > 0) setTemplateLocationIds(valid);
+      } catch {
+        // ignore broken localStorage
+      }
+    }
+  }, [allTemplateLocationIds.join(",")]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("budgetTemplateMonth", templateMonth);
+  }, [templateMonth]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("budgetTemplateLocationIds", JSON.stringify(templateLocationIds));
+  }, [templateLocationIds]);
 
   const handleFilter = (key: string, value: string) => {
     const params = new URLSearchParams(location.search);
@@ -333,7 +381,7 @@ export default function BudgetManagementPage() {
   };
 
   const handleCsvDownload = async () => {
-    if (!templateMonth || !templateLocId) {
+    if (!templateMonth || templateLocationIds.length === 0) {
       setImportError("テンプレートDLには月とロケーションの指定が必要です。");
       return;
     }
@@ -341,7 +389,7 @@ export default function BudgetManagementPage() {
     const fd = new FormData();
     fd.set("intent", "download_template");
     fd.set("month", templateMonth);
-    fd.set("locationId", templateLocId);
+    fd.set("locationIds", JSON.stringify(templateLocationIds));
     const res = await fetch(location.pathname + location.search, { method: "POST", body: fd });
     if (!res.ok) {
       let message = "テンプレートのダウンロードに失敗しました";
@@ -387,6 +435,11 @@ export default function BudgetManagementPage() {
     { label: "すべて", value: "" },
     ...shopifyLocations.map((l) => ({ label: l.name, value: l.id })),
   ];
+  const toggleTemplateLocation = (locId: string) => {
+    setTemplateLocationIds((prev) =>
+      prev.includes(locId) ? prev.filter((id) => id !== locId) : [...prev, locId]
+    );
+  };
 
   const resourceName = { singular: "予算", plural: "予算" };
 
@@ -490,13 +543,45 @@ export default function BudgetManagementPage() {
                       value={templateMonth}
                       onChange={setTemplateMonth}
                     />
-                    <Select
-                      label="ロケーション"
-                      options={shopifyLocations.map((l) => ({ label: l.name, value: l.id }))}
-                      value={templateLocId}
-                      onChange={setTemplateLocId}
-                    />
-                    <Box paddingBlockStart="500">
+                    <Box>
+                      <BlockStack gap="200">
+                        <Text as="p" variant="bodySm" fontWeight="semibold">
+                          ロケーション（複数選択可）
+                        </Text>
+                        <InlineStack gap="200" wrap>
+                          <Button
+                            size="slim"
+                            onClick={() => setTemplateLocationIds(allTemplateLocationIds)}
+                            disabled={isAllTemplateLocationsChecked}
+                          >
+                            全選択
+                          </Button>
+                          <Button
+                            size="slim"
+                            onClick={() => setTemplateLocationIds([])}
+                            disabled={templateLocationIds.length === 0}
+                          >
+                            全解除
+                          </Button>
+                        </InlineStack>
+                        <BlockStack gap="100">
+                          {shopifyLocations.map((l) => (
+                            <Checkbox
+                              key={`template-loc-${l.id}`}
+                              label={l.name}
+                              checked={templateLocationIds.includes(l.id)}
+                              onChange={() => toggleTemplateLocation(l.id)}
+                            />
+                          ))}
+                        </BlockStack>
+                      </BlockStack>
+                    </Box>
+                    <Box>
+                      <Text as="p" tone="subdued">
+                        選択中: {templateLocationIds.length}件
+                      </Text>
+                    </Box>
+                    <Box>
                       <Button variant="primary" onClick={handleCsvDownload}>
                         テンプレートをダウンロード
                       </Button>
