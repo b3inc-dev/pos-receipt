@@ -68,87 +68,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shop = await resolveShop(session.shop, admin);
 
   const url = new URL(request.url);
-  const intent = url.searchParams.get("intent") ?? "";
   const month      = url.searchParams.get("month")      ?? "";
   const locationId = url.searchParams.get("locationId") ?? "";
   const page       = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
-
-  if (intent === "download_template") {
-    const templateMonth = url.searchParams.get("templateMonth") ?? "";
-    const locationIdsRaw = url.searchParams.get("templateLocationIds") ?? "[]";
-    let requestedLocationIds: string[] = [];
-    try {
-      const parsed = JSON.parse(locationIdsRaw) as unknown;
-      if (Array.isArray(parsed)) requestedLocationIds = parsed.map((v) => String(v));
-    } catch {
-      requestedLocationIds = [];
-    }
-
-    if (!templateMonth) {
-      return Response.json(
-        { ok: false, error: "templateMonth が必要です" },
-        { status: 400 }
-      );
-    }
-    const dayCount = daysInMonthFromKey(templateMonth);
-    if (dayCount <= 0) {
-      return Response.json(
-        { ok: false, error: "templateMonth の形式が不正です（YYYY-MM）" },
-        { status: 400 }
-      );
-    }
-
-    const locRes = await admin.graphql(LOCATIONS_QUERY);
-    const locJson = (await locRes.json()) as {
-      data?: { locations?: { nodes?: { id: string; name: string }[] } };
-    };
-    const activeLocations = (locJson.data?.locations?.nodes ?? []);
-    const selectedLocationIds = (
-      requestedLocationIds.length > 0
-        ? requestedLocationIds
-        : activeLocations.map((l) => l.id)
-    ).filter((id) => activeLocations.some((l) => l.id === id));
-    if (selectedLocationIds.length === 0) {
-      return Response.json(
-        { ok: false, error: "対象ロケーションを1つ以上選択してください" },
-        { status: 400 }
-      );
-    }
-    const locationNameMap = new Map(activeLocations.map((l) => [l.id, l.name]));
-
-    const dateFrom = `${templateMonth}-01`;
-    const dateTo = `${templateMonth}-${String(dayCount).padStart(2, "0")}`;
-    const budgets = await prisma.budget.findMany({
-      where: {
-        shopId: shop.id,
-        locationId: { in: selectedLocationIds },
-        targetDate: { gte: dateFrom, lte: dateTo },
-      },
-      select: { locationId: true, targetDate: true, amount: true },
-      orderBy: [{ locationId: "asc" }, { targetDate: "asc" }],
-    });
-    const amountMap = new Map(
-      budgets.map((b) => [`${b.locationId}__${b.targetDate}`, b.amount.toString()])
-    );
-
-    const rows = ["ロケーション名,日付,予算"];
-    for (const locId of selectedLocationIds) {
-      const locName = locationNameMap.get(locId) ?? locId;
-      for (let day = 1; day <= dayCount; day++) {
-        const targetDate = `${templateMonth}-${String(day).padStart(2, "0")}`;
-        const amount = amountMap.get(`${locId}__${targetDate}`) ?? "";
-        rows.push(`${locName},${targetDate},${amount}`);
-      }
-    }
-
-    return new Response(`${rows.join("\n")}\n`, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="budget-template-${templateMonth}.csv"`,
-      },
-    });
-  }
 
   // Shopify ロケーション一覧
   const locRes  = await admin.graphql(LOCATIONS_QUERY);
@@ -271,89 +193,6 @@ export async function action({ request }: ActionFunctionArgs) {
   // 手動 upsert
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
-
-  if (intent === "download_template") {
-    const month = String(formData.get("month") ?? "");
-    const locationIdsRaw = String(formData.get("locationIds") ?? "[]");
-    const legacyLocationId = String(formData.get("locationId") ?? "");
-    let requestedLocationIds: string[] = [];
-    try {
-      const parsed = JSON.parse(locationIdsRaw) as unknown;
-      if (Array.isArray(parsed)) {
-        requestedLocationIds = parsed.map((v) => String(v));
-      }
-    } catch {
-      requestedLocationIds = [];
-    }
-    if (requestedLocationIds.length === 0 && legacyLocationId) {
-      requestedLocationIds = [legacyLocationId];
-    }
-    if (!month) {
-      return Response.json(
-        { ok: false, error: "month が必要です" },
-        { status: 400 }
-      );
-    }
-
-    const dayCount = daysInMonthFromKey(month);
-    if (dayCount <= 0) {
-      return Response.json(
-        { ok: false, error: "month の形式が不正です（YYYY-MM）" },
-        { status: 400 }
-      );
-    }
-
-    const locRes = await admin.graphql(LOCATIONS_QUERY);
-    const locJson = (await locRes.json()) as {
-      data?: { locations?: { nodes?: { id: string; name: string }[] } };
-    };
-    const activeLocations = (locJson.data?.locations?.nodes ?? []);
-    const selectedLocationIds = (
-      requestedLocationIds.length > 0
-        ? requestedLocationIds
-        : activeLocations.map((l) => l.id)
-    ).filter((id) => activeLocations.some((l) => l.id === id));
-    if (selectedLocationIds.length === 0) {
-      return Response.json(
-        { ok: false, error: "対象ロケーションを1つ以上選択してください" },
-        { status: 400 }
-      );
-    }
-    const locationNameMap = new Map(activeLocations.map((l) => [l.id, l.name]));
-
-    const dateFrom = `${month}-01`;
-    const dateTo = `${month}-${String(dayCount).padStart(2, "0")}`;
-    const budgets = await prisma.budget.findMany({
-      where: {
-        shopId: shop.id,
-        locationId: { in: selectedLocationIds },
-        targetDate: { gte: dateFrom, lte: dateTo },
-      },
-      select: { locationId: true, targetDate: true, amount: true },
-      orderBy: [{ locationId: "asc" }, { targetDate: "asc" }],
-    });
-    const amountMap = new Map(
-      budgets.map((b) => [`${b.locationId}__${b.targetDate}`, b.amount.toString()])
-    );
-
-    const rows = ["ロケーション名,日付,予算"];
-    for (const locId of selectedLocationIds) {
-      const locName = locationNameMap.get(locId) ?? locId;
-      for (let day = 1; day <= dayCount; day++) {
-        const targetDate = `${month}-${String(day).padStart(2, "0")}`;
-        const amount = amountMap.get(`${locId}__${targetDate}`) ?? "";
-        rows.push(`${locName},${targetDate},${amount}`);
-      }
-    }
-
-    return new Response(`${rows.join("\n")}\n`, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="budget-template-${month}.csv"`,
-      },
-    });
-  }
 
   if (intent === "upsert") {
     const locationId = String(formData.get("locationId") ?? "");
@@ -479,51 +318,32 @@ export default function BudgetManagementPage() {
     fetcher.submit(fd, { method: "post" });
   };
 
-  const handleCsvDownload = async () => {
+  const handleCsvDownload = () => {
     if (!templateMonth || templateLocationIds.length === 0) {
       setImportError("テンプレートDLには月とロケーションの指定が必要です。");
       return;
     }
     setImportError(null);
-    const params = new URLSearchParams(location.search);
-    params.set("intent", "download_template");
-    params.set("templateMonth", templateMonth);
-    params.set("templateLocationIds", JSON.stringify(templateLocationIds));
-    const downloadUrl = `${location.pathname}?${params.toString()}`;
-    const res = await fetch(downloadUrl, { method: "GET" });
-    if (!res.ok) {
-      let message = "テンプレートのダウンロードに失敗しました";
-      try {
-        const json = (await res.json()) as { error?: string };
-        if (json.error) message = json.error;
-      } catch {
-        // noop
-      }
-      setImportError(message);
-      return;
-    }
-    const contentType = res.headers.get("content-type") ?? "";
-    if (!contentType.includes("text/csv")) {
-      const raw = await res.text();
-      let message = "CSV以外のレスポンスが返されました";
-      try {
-        const json = JSON.parse(raw) as { error?: string; message?: string };
-        message = json.error || json.message || message;
-      } catch {
-        if (raw.trim()) {
-          message = raw.slice(0, 200);
-        }
-      }
-      setImportError(`CSV取得に失敗しました: ${message}`);
-      return;
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `budget-template-${templateMonth}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    // POS Stock と同じく、CSV専用ルートへ通常フォームPOSTでダウンロードする。
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = `/app/budget-template-csv${location.search || ""}`;
+
+    const monthInput = document.createElement("input");
+    monthInput.type = "hidden";
+    monthInput.name = "templateMonth";
+    monthInput.value = templateMonth;
+    form.appendChild(monthInput);
+
+    const locationsInput = document.createElement("input");
+    locationsInput.type = "hidden";
+    locationsInput.name = "templateLocationIds";
+    locationsInput.value = JSON.stringify(templateLocationIds);
+    form.appendChild(locationsInput);
+
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
   };
 
   const handleCsvUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
