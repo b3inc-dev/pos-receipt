@@ -61,9 +61,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const url = new URL(request.url);
     const days = Math.min(90, Math.max(1, parseInt(url.searchParams.get("days") ?? "30", 10) || 30));
     const limit = Math.min(250, Math.max(1, parseInt(url.searchParams.get("limit") ?? "250", 10) || 250));
+    // testSourceName が指定された場合は source_name フィルターの動作を直接検証する
+    // 例: ?testSourceName=web&days=7
+    const testSourceName = url.searchParams.get("testSourceName");
 
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-    const shopifyQuery = `created_at:>=${since} -status:cancelled tag_not:settlement`;
+    const shopifyQuery = testSourceName
+      ? `source_name:${testSourceName} created_at:>=${since} -status:cancelled tag_not:settlement`
+      : `created_at:>=${since} -status:cancelled tag_not:settlement`;
 
     // 最大2ページ（500件）まで取得してサンプルとする
     const allOrders: OrderNode[] = [];
@@ -148,6 +153,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         queriedDays: days,
         totalOrdersScanned: allOrders.length,
         since,
+        appliedQuery: shopifyQuery,
+        testSourceName: testSourceName ?? null,
       },
       breakdown,
     });

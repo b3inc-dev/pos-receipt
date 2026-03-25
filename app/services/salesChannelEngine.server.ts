@@ -135,6 +135,7 @@ async function fetchChannelOrders(admin: AdminClient, query: string): Promise<Ch
       variables: { first: 100, after: cursor, query },
     });
     const json = await response.json() as {
+      errors?: { message: string }[];
       data?: {
         orders?: {
           nodes?: Array<ChannelOrder & {
@@ -144,6 +145,10 @@ async function fetchChannelOrders(admin: AdminClient, query: string): Promise<Ch
         };
       };
     };
+
+    if (json.errors?.length) {
+      throw new Error(`[salesChannelEngine] GraphQL error (query="${query}"): ${json.errors.map((e) => e.message).join(", ")}`);
+    }
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
@@ -186,6 +191,7 @@ async function fetchChannelOrdersForRefundOverlay(
       variables: { first: 100, after: cursor, query },
     });
     const json = await response.json() as {
+      errors?: { message: string }[];
       data?: {
         orders?: {
           nodes?: OrderForRefundOverlay[];
@@ -193,6 +199,10 @@ async function fetchChannelOrdersForRefundOverlay(
         };
       };
     };
+
+    if (json.errors?.length) {
+      throw new Error(`[salesChannelEngine] GraphQL error (refund overlay, query="${query}"): ${json.errors.map((e) => e.message).join(", ")}`);
+    }
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
