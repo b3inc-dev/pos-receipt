@@ -153,7 +153,12 @@ function hasAnyPeriodKpi(o) {
     o.showProgressToday ||
     o.showProgressPrev ||
     o.showOrders ||
-    o.showItems
+    o.showVisitors ||
+    o.showConv ||
+    o.showAtv ||
+    o.showSetRate ||
+    o.showItems ||
+    o.showUnitPrice
   );
 }
 
@@ -314,7 +319,14 @@ function periodKpiRows(row, o) {
     rows.push({ label: "遂行率(前日)", value: fmtPct(row.progressRatePrev) });
   }
   if (o.showOrders) rows.push({ label: "件数", value: `${fmtNum(row.orders)}件` });
+  if (o.showVisitors && row.visitors !== null)
+    rows.push({ label: "入店数", value: `${fmtNum(row.visitors)}人` });
+  if (o.showConv && row.conv !== null) rows.push({ label: "購買率", value: fmtPct(row.conv) });
+  if (o.showAtv && row.atv !== null) rows.push({ label: "客単価", value: fmtAmount(row.atv) });
+  if (o.showSetRate && row.setRate !== null)
+    rows.push({ label: "セット率", value: fmtNum(row.setRate, 2) });
   if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
+  if (o.showUnitPrice && row.unit !== null) rows.push({ label: "一品単価", value: fmtAmount(row.unit) });
   return rows;
 }
 
@@ -348,7 +360,14 @@ function totalsPeriodRows(totals, o) {
   if (o.showMonthBudget && totals.budgetTotal !== null)
     rows.push({ label: "月予算", value: fmtAmount(totals.budgetTotal) });
   if (o.showOrders) rows.push({ label: "件数", value: `${fmtNum(totals.orders)}件` });
+  if (o.showVisitors && totals.visitors !== null)
+    rows.push({ label: "入店数", value: `${fmtNum(totals.visitors)}人` });
+  if (o.showConv && totals.conv !== null) rows.push({ label: "購買率", value: fmtPct(totals.conv) });
+  if (o.showAtv && totals.atv !== null) rows.push({ label: "客単価", value: fmtAmount(totals.atv) });
+  if (o.showSetRate && totals.setRate !== null)
+    rows.push({ label: "セット率", value: fmtNum(totals.setRate, 2) });
   if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
+  if (o.showUnitPrice && totals.unit !== null) rows.push({ label: "一品単価", value: fmtAmount(totals.unit) });
   return rows;
 }
 

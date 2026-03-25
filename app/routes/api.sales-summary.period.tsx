@@ -173,6 +173,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         budgetTotal: number | null;
         orders: number;
         items: number;
+        visitors: number | null;
         progressBudgetToday: number;
         progressBudgetPrev: number;
       }
@@ -189,6 +190,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           budgetTotal: null,
           orders: 0,
           items: 0,
+          visitors: null,
           progressBudgetToday: 0,
           progressBudgetPrev: 0,
         });
@@ -197,6 +199,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       entry.actualTotal += Number(row.actual);
       entry.orders += row.orders;
       entry.items += row.items;
+      if (row.visitors !== null) {
+        entry.visitors = (entry.visitors ?? 0) + row.visitors;
+      }
       if (row.budget !== null) {
         entry.budgetTotal = (entry.budgetTotal ?? 0) + Number(row.budget);
         if (row.targetDate <= today) entry.progressBudgetToday += Number(row.budget);
@@ -218,6 +223,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
         entry.progressBudgetPrev > 0
           ? entry.actualTotal / entry.progressBudgetPrev
           : null,
+      conv:
+        entry.visitors !== null && entry.visitors > 0
+          ? entry.orders / entry.visitors
+          : null,
+      atv: entry.orders > 0 ? entry.actualTotal / entry.orders : null,
+      setRate: entry.orders > 0 ? entry.items / entry.orders : null,
+      unit: entry.items > 0 ? entry.actualTotal / entry.items : null,
     }));
 
     // ── チャネル集計（キャッシュから取得） ──────────────────────────────────
@@ -255,13 +267,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })();
 
     const channelsInTotals = channelRows.filter((_, i) => enabledChannels[i]?.includeInOverallTotals);
+    const storeOrders = rows.reduce((s, r) => s + r.orders, 0);
+    const storeVisitors = rows.some((r) => r.visitors !== null)
+      ? rows.reduce((s, r) => s + (r.visitors ?? 0), 0)
+      : null;
+    const totalActual =
+      rows.reduce((s, r) => s + r.actualTotal, 0) +
+      channelsInTotals.reduce((s, r) => s + r.actualTotal, 0);
+    const totalOrders =
+      rows.reduce((s, r) => s + r.orders, 0) +
+      channelsInTotals.reduce((s, r) => s + r.orders, 0);
+    const totalItems =
+      rows.reduce((s, r) => s + r.items, 0) +
+      channelsInTotals.reduce((s, r) => s + r.items, 0);
     const totals = {
-      actualTotal: rows.reduce((s, r) => s + r.actualTotal, 0) + channelsInTotals.reduce((s, r) => s + r.actualTotal, 0),
+      actualTotal: totalActual,
       budgetTotal: rows.every((r) => r.budgetTotal !== null)
         ? rows.reduce((s, r) => s + (r.budgetTotal ?? 0), 0)
         : null,
-      orders: rows.reduce((s, r) => s + r.orders, 0) + channelsInTotals.reduce((s, r) => s + r.orders, 0),
-      items: rows.reduce((s, r) => s + r.items, 0) + channelsInTotals.reduce((s, r) => s + r.items, 0),
+      orders: totalOrders,
+      items: totalItems,
+      visitors: storeVisitors,
+      conv: storeVisitors !== null && storeVisitors > 0 ? storeOrders / storeVisitors : null,
+      atv: totalOrders > 0 ? totalActual / totalOrders : null,
+      setRate: totalOrders > 0 ? totalItems / totalOrders : null,
+      unit: totalItems > 0 ? totalActual / totalItems : null,
     };
 
     return corsJson({ rows, channelRows, totals, dateFrom, dateTo, displayOptions: merged });
