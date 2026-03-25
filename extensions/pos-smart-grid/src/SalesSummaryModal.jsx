@@ -851,10 +851,12 @@ function HistoryDailyDetailView({
     return rows.find((r) => locationIdsMatch(r.locationId, sessionGid)) ?? null;
   }, [sessionGid, rows]);
 
-  const applyPeriodRange = useCallback((fromYmd, toYmd) => {
+  const applyPeriodRange = useCallback((fromYmd, toYmd, options = {}) => {
     const from = parseYmdLocal(fromYmd);
     const to = clampDateToToday(parseYmdLocal(toYmd));
     const safeTo = to < from ? from : to;
+    const nextFrom = ymd(from.getFullYear(), from.getMonth() + 1, from.getDate());
+    const nextTo = ymd(safeTo.getFullYear(), safeTo.getMonth() + 1, safeTo.getDate());
 
     setPeriodStartYear(from.getFullYear());
     setPeriodStartMonth(from.getMonth() + 1);
@@ -862,14 +864,24 @@ function HistoryDailyDetailView({
     setPeriodEndYear(safeTo.getFullYear());
     setPeriodEndMonth(safeTo.getMonth() + 1);
     setPeriodEndDay(safeTo.getDate());
+    if (options.apply) {
+      setPeriodAppliedFrom(nextFrom);
+      setPeriodAppliedTo(nextTo);
+    }
   }, []);
 
   const applyPeriodPreset = useCallback(
-    (preset) => {
+    (preset, options = {}) => {
       const base = parseYmdLocal(todayStr());
       if (preset === "thisMonth") {
         const from = new Date(base.getFullYear(), base.getMonth(), 1);
-        applyPeriodRange(toYmdLocal(from), toYmdLocal(base));
+        applyPeriodRange(toYmdLocal(from), toYmdLocal(base), options);
+        return;
+      }
+      if (preset === "lastMonth") {
+        const from = new Date(base.getFullYear(), base.getMonth() - 1, 1);
+        const to = new Date(base.getFullYear(), base.getMonth(), 0);
+        applyPeriodRange(toYmdLocal(from), toYmdLocal(to), options);
         return;
       }
       if (preset === "lastWeek") {
@@ -877,13 +889,12 @@ function HistoryDailyDetailView({
         const from = new Date(currentWeekStart);
         from.setDate(currentWeekStart.getDate() - 7);
         const to = endOfWeek(from, weekStartsOn);
-        applyPeriodRange(toYmdLocal(from), toYmdLocal(to));
+        applyPeriodRange(toYmdLocal(from), toYmdLocal(to), options);
         return;
       }
-      // thisWeek
       const from = startOfWeek(base, weekStartsOn);
       const to = endOfWeek(base, weekStartsOn);
-      applyPeriodRange(toYmdLocal(from), toYmdLocal(to));
+      applyPeriodRange(toYmdLocal(from), toYmdLocal(to), options);
     },
     [applyPeriodRange, weekStartsOn]
   );
@@ -1151,6 +1162,11 @@ function SalesSummaryModal() {
   const [periodEndYear, setPeriodEndYear] = useState(initialYm.year);
   const [periodEndMonth, setPeriodEndMonth] = useState(initialYm.month);
   const [periodEndDay, setPeriodEndDay] = useState(new Date().getDate());
+  const [periodAppliedFrom, setPeriodAppliedFrom] = useState(() => {
+    const now = new Date();
+    return ymd(now.getFullYear(), now.getMonth() + 1, 1);
+  });
+  const [periodAppliedTo, setPeriodAppliedTo] = useState(todayStr());
   const [periodStartYearMenuOpen, setPeriodStartYearMenuOpen] = useState(false);
   const [periodStartMonthMenuOpen, setPeriodStartMonthMenuOpen] = useState(false);
   const [periodStartDayMenuOpen, setPeriodStartDayMenuOpen] = useState(false);
@@ -1279,8 +1295,8 @@ function SalesSummaryModal() {
         const { dateFrom, dateTo } = monthRange(selectedYear, selectedMonth);
         result = await getPeriodSummary({ dateFrom, dateTo, locationIds: locationIdsForApi });
       } else {
-        const dateFrom = ymd(periodStartYear, periodStartMonth, periodStartDay);
-        const dateTo = ymd(periodEndYear, periodEndMonth, periodEndDay);
+        const dateFrom = periodAppliedFrom;
+        const dateTo = periodAppliedTo;
         if (dateFrom > dateTo) {
           setData(null);
           setError("開始日は終了日以前にしてください");
@@ -1313,12 +1329,8 @@ function SalesSummaryModal() {
     targetDate,
     selectedYear,
     selectedMonth,
-    periodStartYear,
-    periodStartMonth,
-    periodStartDay,
-    periodEndYear,
-    periodEndMonth,
-    periodEndDay,
+    periodAppliedFrom,
+    periodAppliedTo,
     locationIdsForApi,
   ]);
 
@@ -1450,6 +1462,8 @@ function SalesSummaryModal() {
   const periodDateFrom = ymd(periodStartYear, periodStartMonth, periodStartDay);
   const periodDateTo = ymd(periodEndYear, periodEndMonth, periodEndDay);
   const periodRangeInvalid = periodDateFrom > periodDateTo;
+  const periodDirty =
+    periodDateFrom !== periodAppliedFrom || periodDateTo !== periodAppliedTo;
 
   const showFooterFootfallButton =
     grain === "daily" && scope === "single" && sessionRow?.footfallReportingEnabled;
@@ -1528,7 +1542,7 @@ function SalesSummaryModal() {
                       setGrain("period");
                       setYearMenuOpen(false);
                       setMonthMenuOpen(false);
-                      applyPeriodPreset("thisWeek");
+                      applyPeriodPreset("thisWeek", { apply: true });
                     }}
                   >
                     期間指定
@@ -1656,17 +1670,6 @@ function SalesSummaryModal() {
                 </s-stack>
               ) : (
                 <s-stack gap="small">
-                  <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%" }}>
-                    <s-button kind="secondary" onClick={() => applyPeriodPreset("thisWeek")}>
-                      今週
-                    </s-button>
-                    <s-button kind="secondary" onClick={() => applyPeriodPreset("lastWeek")}>
-                      先週
-                    </s-button>
-                    <s-button kind="secondary" onClick={() => applyPeriodPreset("thisMonth")}>
-                      今月
-                    </s-button>
-                  </s-stack>
                   <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
                     <s-box style={{ flex: "0 0 auto" }}>
                       <s-text tone="subdued" size="small">
@@ -1908,6 +1911,32 @@ function SalesSummaryModal() {
                       </s-stack>
                     </s-box>
                   ) : null}
+                  <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%", flexWrap: "wrap" }}>
+                    <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap" }}>
+                      <s-button kind="secondary" onClick={() => applyPeriodPreset("thisWeek")}>
+                        今週
+                      </s-button>
+                      <s-button kind="secondary" onClick={() => applyPeriodPreset("lastWeek")}>
+                        先週
+                      </s-button>
+                      <s-button kind="secondary" onClick={() => applyPeriodPreset("thisMonth")}>
+                        今月
+                      </s-button>
+                      <s-button kind="secondary" onClick={() => applyPeriodPreset("lastMonth")}>
+                        先月
+                      </s-button>
+                    </s-stack>
+                    <s-button
+                      kind="primary"
+                      disabled={!periodDirty || periodRangeInvalid}
+                      onClick={() => {
+                        setPeriodAppliedFrom(periodDateFrom);
+                        setPeriodAppliedTo(periodDateTo);
+                      }}
+                    >
+                      期間を適用
+                    </s-button>
+                  </s-stack>
                 </s-stack>
               )}
             </s-stack>
