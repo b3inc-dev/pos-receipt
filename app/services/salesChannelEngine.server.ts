@@ -31,6 +31,7 @@ export interface ChannelDailySummaryDTO {
 
 interface ChannelOrder {
   id: string;
+  sourceName: string | null;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   lineItems: { nodes: { quantity: number }[] };
   refunds: ChannelRefund[];
@@ -45,6 +46,7 @@ interface ChannelRefund {
 
 interface OrderForRefundOverlay {
   id: string;
+  sourceName: string | null;
   tags: string[];
   refunds: ChannelRefund[];
 }
@@ -60,6 +62,7 @@ const CHANNEL_ORDERS_QUERY = `#graphql
     orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT) {
       nodes {
         id
+        sourceName
         totalPriceSet { shopMoney { amount currencyCode } }
         lineItems(first: 250) {
           nodes { quantity }
@@ -83,6 +86,7 @@ const CHANNEL_REFUNDS_QUERY = `#graphql
     orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
       nodes {
         id
+        sourceName
         tags
         refunds {
           createdAt
@@ -97,30 +101,37 @@ const CHANNEL_REFUNDS_QUERY = `#graphql
 // ── Query Builder ──────────────────────────────────────────────────────────────
 
 /**
- * source_name フィルターを含む Shopify クエリ文字列を構築する。
- * 複数 source_name は OR 条件で結合する。
+ * チャネル注文取得用 Shopify クエリ文字列を構築する。
+ *
+ * source_name によるフィルタリングは Shopify GraphQL の query 引数では
+ * 信頼性が低いため、クエリレベルでは POS を除外するのみとし、
+ * source_name の照合はフェッチ後にメモリ内で行う。
  */
 function buildChannelQuery(
-  sourceNames: string[],
   dateField: "created_at" | "updated_at",
   startIso: string,
   endIso: string,
   extraFilters: string[] = []
 ): string {
   const parts: string[] = [];
-
-  if (sourceNames.length === 1) {
-    parts.push(`source_name:${sourceNames[0]}`);
-  } else if (sourceNames.length > 1) {
-    // Shopify の OR クエリ構文
-    parts.push(`(${sourceNames.map((s) => `source_name:${s}`).join(" OR ")})`);
-  }
-
+  // POS 注文はロケーションエンジンで別途集計するため除外する
+  parts.push("-source_name:pos");
   parts.push(`${dateField}:>=${startIso}`);
   parts.push(`${dateField}:<=${endIso}`);
   parts.push(...extraFilters);
-
   return parts.join(" ");
+}
+
+/** メモリ内 source_name フィルター（設定された sourceNames に一致する注文のみ返す） */
+function filterBySourceNames<T extends { sourceName: string | null }>(
+  orders: T[],
+  sourceNames: string[]
+): T[] {
+  const nameSet = new Set(sourceNames.map((s) => s.toLowerCase()));
+  return orders.filter((o) => {
+    const src = (o.sourceName ?? "").toLowerCase();
+    return nameSet.has(src);
+  });
 }
 
 // ── Fetch Helpers ──────────────────────────────────────────────────────────────
@@ -158,6 +169,7 @@ async function fetchChannelOrders(admin: AdminClient, query: string): Promise<Ch
       if (!isSettlement) {
         orders.push({
           ...node,
+          sourceName: (node as ChannelOrder).sourceName ?? null,
           refunds: (node.refunds ?? []).map((r) => {
             const raw = r.refundLineItems as unknown;
             const refundLineItems: { quantity: number }[] = Array.isArray(raw)
@@ -210,7 +222,12 @@ async function fetchChannelOrdersForRefundOverlay(
     for (const node of nodes) {
       const isSettlement = (node.tags ?? []).some((t) => String(t).toLowerCase() === "settlement");
       if (!isSettlement) {
-        orders.push({ id: node.id, tags: node.tags, refunds: node.refunds ?? [] });
+        orders.push({
+          id: node.id,
+          sourceName: (node as OrderForRefundOverlay).sourceName ?? null,
+          tags: node.tags,
+          refunds: node.refunds ?? [],
+        });
       }
     }
 
@@ -300,26 +317,28 @@ export async function computeAndCacheChannelDailySummary(
   const dayRange = getDayRangeInUtc(targetDate, timezone);
 
   // Pass 1: created_at ベース（当日注文）
+  // source_name は Shopify GraphQL の query 引数では信頼性が低いため除外し、
+  // フェッチ後に sourceName フィールドでメモリ内フィルタリングする
   const createdQuery = buildChannelQuery(
-    sourceNames,
     "created_at",
     dayRange.startUtcIso,
     dayRange.endUtcIso,
     ["tag_not:settlement", "-status:cancelled"]
   );
-  const orders = await fetchChannelOrders(admin, createdQuery);
-  const orderIdsCreatedInDay = new Set(orders.map((o) => o.id));
+  const allCreatedOrders = await fetchChannelOrders(admin, createdQuery);
+  const orders = filterBySourceNames(allCreatedOrders, sourceNames);
+  const orderIdsCreatedInDay = new Set(allCreatedOrders.map((o) => o.id)); // overlay 重複除外用は全件で持つ
   const { gross, refund: refundInDay, items, currency } = computeChannelTotalsFromOrders(orders, dayRange);
 
   // Pass 2: updated_at ベース返金 overlay（当日以外の注文から当日処理された返金）
   const updatedQuery = buildChannelQuery(
-    sourceNames,
     "updated_at",
     dayRange.startUtcIso,
     dayRange.endUtcIso,
     ["tag_not:settlement"]
   );
-  const ordersUpdated = await fetchChannelOrdersForRefundOverlay(admin, updatedQuery);
+  const allUpdatedOrders = await fetchChannelOrdersForRefundOverlay(admin, updatedQuery);
+  const ordersUpdated = filterBySourceNames(allUpdatedOrders, sourceNames);
   const refundOverlay = computeRefundOverlay(ordersUpdated, orderIdsCreatedInDay, dayRange);
 
   const actual = gross - refundInDay - refundOverlay;
