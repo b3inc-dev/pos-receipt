@@ -825,14 +825,19 @@ export default function SalesSummaryAdminPage() {
           : buildPeriodTotalRowCells(grandRows, "総合計"))
       : null;
 
-    // テーブル行を構築: POS合計 → POS行 → チャネル合計 → チャネル行 → 総合計
+    // テーブル行を構築
+    // チャネルあり: 総合計 → POS合計 → POS行 → チャネル合計 → チャネル行
+    // チャネルなし: POS合計 → POS行
     const result: string[][] = [];
-    if (posTotal && locationBody.length > 0) result.push(posTotal);
-    result.push(...locationBody);
     if (channelBody.length > 0) {
+      if (grandTotal) result.push(grandTotal);
+      if (posTotal && locationBody.length > 0) result.push(posTotal);
+      result.push(...locationBody);
       if (channelTotal) result.push(channelTotal);
       result.push(...channelBody);
-      if (grandTotal) result.push(grandTotal);
+    } else {
+      if (posTotal && locationBody.length > 0) result.push(posTotal);
+      result.push(...locationBody);
     }
     return result;
   }, [data.hasAccess, data.view, data.rows, data.channelRows]);
