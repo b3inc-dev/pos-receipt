@@ -5,7 +5,7 @@
  * - スコープ: この店舗（セッションロケーション） / 全店舗（locationIds 省略＝API が有効店すべて）
  * - 粒度: 日次 / 月次（期間はその月の1日〜当日または月末）
  * - スクロール: 全店舗時は先頭に全店合計、その下に店舗別のリスト行（精算プレビュー型）
- * - フッター左: 入店数（日次・この店舗のみ・入店数報告ONの店でモーダル報告／月次・全店は非表示）
+ * - フッター左: 入店数報告ボタン（日次・この店のみ・対象店で表示／command で s-modal を開く）
  * - フッター右: 日別一覧（/api/sales-summary/month-daily・比較用KPI付きリスト）
  * - 日別一覧で日付タップ: メインの日付は据え置きで historyDaily へ。UIは日次TOPと同型（この店舗/全店舗・入店数報告可）
  */
@@ -80,6 +80,17 @@ function locationIdsMatch(a, b) {
   return ra.length > 0 && ra === rb;
 }
 
+/** POS Stock と同様: command="--show" / commandFor={id} で開く（showOverlay だけだと未マウントで失敗しやすい） */
+const FOOTFALL_MODAL_ID_MAIN = "pos-receipt-footfall-modal-main";
+const FOOTFALL_MODAL_ID_HISTORY = "pos-receipt-footfall-modal-history";
+
+function hideFootfallModal(modalRef) {
+  try {
+    modalRef?.current?.hideOverlay?.();
+    modalRef?.current?.hide?.();
+  } catch (_) {}
+}
+
 function defaultDisplayOptions() {
   return {
     showLocationRows: true,
@@ -129,9 +140,9 @@ function hasAnyPeriodKpi(o) {
   );
 }
 
-/** 入店数入力（s-modal + ref でオーバーレイ表示） */
+/** 入店数入力（POS Stock 同型: s-modal に id を付け command で開閉） */
 function FootfallReportModalHost({
-  open,
+  modalId,
   onRequestClose,
   heading,
   dateLine,
@@ -142,17 +153,8 @@ function FootfallReportModalHost({
   footfallErr,
   modalRef,
 }) {
-  useEffect(() => {
-    const el = modalRef.current;
-    if (!el) return;
-    try {
-      if (open) el.showOverlay?.();
-      else el.hideOverlay?.();
-    } catch (_) {}
-  }, [open, modalRef]);
-
   return (
-    <s-modal ref={modalRef} heading={heading}>
+    <s-modal id={modalId} ref={modalRef} heading={heading}>
       <s-box padding="base">
         <s-stack gap="base">
           {dateLine ? (
@@ -163,6 +165,7 @@ function FootfallReportModalHost({
           <s-text-field
             label="入店数（人）"
             value={value}
+            onInput={(e) => onChange(e.detail?.value ?? e.target?.value ?? value)}
             onChange={(e) => onChange(e.detail?.value ?? e.target?.value ?? value)}
           />
           {footfallErr ? (
@@ -172,7 +175,12 @@ function FootfallReportModalHost({
           ) : null}
         </s-stack>
       </s-box>
-      <s-button slot="secondary-actions" onClick={onRequestClose}>
+      <s-button
+        slot="secondary-actions"
+        command="--hide"
+        commandFor={modalId}
+        onClick={onRequestClose}
+      >
         閉じる
       </s-button>
       <s-button slot="primary-action" onClick={onSave} loading={saving}>
@@ -683,7 +691,6 @@ function HistoryDailyDetailView({
   const [footerFootfallInput, setFooterFootfallInput] = useState("");
   const [savingFootfall, setSavingFootfall] = useState(false);
   const [footfallErr, setFootfallErr] = useState("");
-  const [footfallModalOpen, setFootfallModalOpen] = useState(false);
   const historyFootfallModalRef = useRef(null);
 
   useEffect(() => {
@@ -736,8 +743,12 @@ function HistoryDailyDetailView({
   }, [loadData]);
 
   useEffect(() => {
-    setFootfallModalOpen(false);
+    hideFootfallModal(historyFootfallModalRef);
   }, [scope]);
+
+  useEffect(() => {
+    hideFootfallModal(historyFootfallModalRef);
+  }, [viewDate]);
 
   const o = useMemo(() => ({ ...defaultDisplayOptions(), ...(data?.displayOptions ?? {}) }), [data]);
   const rows = data?.rows ?? [];
@@ -776,7 +787,7 @@ function HistoryDailyDetailView({
     try {
       await reportFootfall({ locationId: sessionGid, targetDate: viewDate, visitors });
       await loadData();
-      setFootfallModalOpen(false);
+      hideFootfallModal(historyFootfallModalRef);
     } catch (err) {
       setFootfallErr(toUserMessage(err?.message) || "保存に失敗しました");
     } finally {
@@ -975,14 +986,13 @@ function HistoryDailyDetailView({
                   <s-stack gap="extraSmall">
                     <s-button
                       kind="secondary"
-                      onClick={() => {
-                        setFootfallErr("");
-                        setFootfallModalOpen(true);
-                      }}
+                      command="--show"
+                      commandFor={FOOTFALL_MODAL_ID_HISTORY}
+                      onClick={() => setFootfallErr("")}
                     >
                       {footerFootfallInput
-                        ? `入店数を報告（${footerFootfallInput}人）`
-                        : "入店数を報告"}
+                        ? `入店数報告（${footerFootfallInput}人）`
+                        : "入店数報告"}
                     </s-button>
                     {footfallErr ? (
                       <s-text tone="critical" size="small">
@@ -1002,10 +1012,10 @@ function HistoryDailyDetailView({
         </s-stack>
       </s-page>
       <FootfallReportModalHost
+        modalId={FOOTFALL_MODAL_ID_HISTORY}
         modalRef={historyFootfallModalRef}
-        open={footfallModalOpen}
-        onRequestClose={() => setFootfallModalOpen(false)}
-        heading="入店数の報告"
+        onRequestClose={() => setFootfallErr("")}
+        heading="入店数報告"
         dateLine={`対象日: ${viewDate}`}
         value={footerFootfallInput}
         onChange={(v) => setFooterFootfallInput(v)}
@@ -1050,7 +1060,6 @@ function SalesSummaryModal() {
   const [footerFootfallInput, setFooterFootfallInput] = useState("");
   const [savingFootfall, setSavingFootfall] = useState(false);
   const [footfallErr, setFootfallErr] = useState("");
-  const [footfallModalOpen, setFootfallModalOpen] = useState(false);
   const mainFootfallModalRef = useRef(null);
 
   const { locationGid: sessionGid, isReady: sessionReady } = useSessionLocation();
@@ -1183,8 +1192,12 @@ function SalesSummaryModal() {
   }, [sessionReady, loadData]);
 
   useEffect(() => {
-    setFootfallModalOpen(false);
+    hideFootfallModal(mainFootfallModalRef);
   }, [grain, scope]);
+
+  useEffect(() => {
+    hideFootfallModal(mainFootfallModalRef);
+  }, [targetDate]);
 
   const o = useMemo(() => ({ ...defaultDisplayOptions(), ...(data?.displayOptions ?? {}) }), [data]);
 
@@ -1238,7 +1251,7 @@ function SalesSummaryModal() {
     try {
       await reportFootfall({ locationId: sessionGid, targetDate, visitors });
       await loadData();
-      setFootfallModalOpen(false);
+      hideFootfallModal(mainFootfallModalRef);
     } catch (err) {
       setFootfallErr(toUserMessage(err?.message) || "保存に失敗しました");
     } finally {
@@ -1615,14 +1628,13 @@ function SalesSummaryModal() {
                   <s-stack gap="extraSmall">
                     <s-button
                       kind="secondary"
-                      onClick={() => {
-                        setFootfallErr("");
-                        setFootfallModalOpen(true);
-                      }}
+                      command="--show"
+                      commandFor={FOOTFALL_MODAL_ID_MAIN}
+                      onClick={() => setFootfallErr("")}
                     >
                       {footerFootfallInput
-                        ? `入店数を報告（${footerFootfallInput}人）`
-                        : "入店数を報告"}
+                        ? `入店数報告（${footerFootfallInput}人）`
+                        : "入店数報告"}
                     </s-button>
                     {footfallErr ? (
                       <s-text tone="critical" size="small">
@@ -1642,10 +1654,10 @@ function SalesSummaryModal() {
         </s-stack>
       </s-page>
       <FootfallReportModalHost
+        modalId={FOOTFALL_MODAL_ID_MAIN}
         modalRef={mainFootfallModalRef}
-        open={footfallModalOpen}
-        onRequestClose={() => setFootfallModalOpen(false)}
-        heading="入店数の報告"
+        onRequestClose={() => setFootfallErr("")}
+        heading="入店数報告"
         dateLine={`対象日: ${targetDate}`}
         value={footerFootfallInput}
         onChange={(v) => setFooterFootfallInput(v)}
