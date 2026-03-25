@@ -138,6 +138,84 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
+async function importBudgetsFromCsvText(params: {
+  text: string;
+  shopId: string;
+  admin: { graphql: (query: string) => Promise<Response> };
+}) {
+  const { text, shopId, admin } = params;
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  let inserted = 0, updated = 0, skipped = 0;
+  const errors: string[] = [];
+
+  const locRes = await admin.graphql(LOCATIONS_QUERY);
+  const locJson = await locRes.json() as {
+    data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
+  };
+  const activeLocations = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
+  const locationNameToId = new Map(activeLocations.map((l) => [l.name.trim(), l.id]));
+
+  // ヘッダー解析（DLテンプレート: ロケーション名,日付,予算 / 従来: locationId,targetDate,amount）
+  const header = lines[0]?.split(",").map((s) => s.trim()) ?? [];
+  const normalized = header.map((h) => h.toLowerCase());
+  const idxLocName = header.findIndex((h) => h === "ロケーション名");
+  const idxDateJa = header.findIndex((h) => h === "日付");
+  const idxBudgetJa = header.findIndex((h) => h === "予算");
+  const idxLocId = normalized.findIndex((h) => h === "locationid" || h === "location");
+  const idxDate = normalized.findIndex((h) => h === "targetdate" || h === "date");
+  const idxAmount = normalized.findIndex((h) => h === "amount" || h === "budget");
+  const hasHeader = [idxLocName, idxDateJa, idxBudgetJa, idxLocId, idxDate, idxAmount].some((i) => i >= 0);
+
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+  for (const line of dataLines) {
+    const parts = line.split(",");
+    if (parts.length < 3) {
+      skipped++;
+      continue;
+    }
+
+    const rawLocName = idxLocName >= 0 ? (parts[idxLocName] ?? "").trim() : "";
+    const rawDateJa = idxDateJa >= 0 ? (parts[idxDateJa] ?? "").trim() : "";
+    const rawBudgetJa = idxBudgetJa >= 0 ? (parts[idxBudgetJa] ?? "").trim() : "";
+
+    const rawLocId = idxLocId >= 0 ? (parts[idxLocId] ?? "").trim() : (parts[0] ?? "").trim();
+    const rawDate = idxDate >= 0 ? (parts[idxDate] ?? "").trim() : (parts[1] ?? "").trim();
+    const rawAmount = idxAmount >= 0 ? (parts[idxAmount] ?? "").trim() : (parts[2] ?? "").trim();
+
+    const targetDate = rawDateJa || rawDate;
+    const amountRaw = rawBudgetJa || rawAmount;
+    const amount = Number(amountRaw);
+
+    let locationId = "";
+    if (rawLocName) {
+      locationId = locationNameToId.get(rawLocName) ?? "";
+    } else if (rawLocId) {
+      locationId = rawLocId.startsWith("gid://")
+        ? rawLocId
+        : `gid://shopify/Location/${rawLocId}`;
+    }
+
+    if (!locationId || !targetDate || isNaN(amount)) {
+      errors.push(`無効な行: ${line}`);
+      continue;
+    }
+    try {
+      const existing = await prisma.budget.findUnique({
+        where: { shopId_locationId_targetDate: { shopId, locationId, targetDate } },
+      });
+      await prisma.budget.upsert({
+        where: { shopId_locationId_targetDate: { shopId, locationId, targetDate } },
+        update: { amount },
+        create: { shopId, locationId, targetDate, amount },
+      });
+      existing ? updated++ : inserted++;
+    } catch (e) {
+      errors.push(`行エラー: ${line} - ${e instanceof Error ? e.message : "unknown"}`);
+    }
+  }
+  return { ok: true, inserted, updated, skipped, errors };
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
@@ -153,75 +231,21 @@ export async function action({ request }: ActionFunctionArgs) {
   // CSV インポート
   if (contentType.includes("text/csv") || contentType.includes("application/octet-stream")) {
     const text = await request.text();
-    const lines = text.split(/\r?\n/).filter(Boolean);
-    let inserted = 0, updated = 0, skipped = 0;
-    const errors: string[] = [];
-    const locRes = await admin.graphql(LOCATIONS_QUERY);
-    const locJson = await locRes.json() as {
-      data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
-    };
-    const activeLocations = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
-    const locationNameToId = new Map(activeLocations.map((l) => [l.name.trim(), l.id]));
+    return Response.json(await importBudgetsFromCsvText({ text, shopId: shop.id, admin }));
+  }
 
-    // ヘッダー解析（DLテンプレート: ロケーション名,日付,予算 / 従来: locationId,targetDate,amount）
-    const header = lines[0]?.split(",").map((s) => s.trim()) ?? [];
-    const normalized = header.map((h) => h.toLowerCase());
-    const idxLocName = header.findIndex((h) => h === "ロケーション名");
-    const idxDateJa = header.findIndex((h) => h === "日付");
-    const idxBudgetJa = header.findIndex((h) => h === "予算");
-    const idxLocId = normalized.findIndex((h) => h === "locationid" || h === "location");
-    const idxDate = normalized.findIndex((h) => h === "targetdate" || h === "date");
-    const idxAmount = normalized.findIndex((h) => h === "amount" || h === "budget");
-    const hasHeader = [idxLocName, idxDateJa, idxBudgetJa, idxLocId, idxDate, idxAmount].some((i) => i >= 0);
-
-    const dataLines = hasHeader ? lines.slice(1) : lines;
-    for (const line of dataLines) {
-      const parts = line.split(",");
-      if (parts.length < 3) {
-        skipped++;
-        continue;
+  // multipart/form-data インポート（管理画面 fetcher.submit 用）
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await request.formData();
+    const intent = String(formData.get("intent") ?? "");
+    if (intent === "csv_import") {
+      const file = formData.get("csvFile");
+      if (!(file instanceof File)) {
+        return Response.json({ ok: false, error: "CSVファイルが見つかりません" }, { status: 400 });
       }
-
-      const rawLocName = idxLocName >= 0 ? (parts[idxLocName] ?? "").trim() : "";
-      const rawDateJa = idxDateJa >= 0 ? (parts[idxDateJa] ?? "").trim() : "";
-      const rawBudgetJa = idxBudgetJa >= 0 ? (parts[idxBudgetJa] ?? "").trim() : "";
-
-      const rawLocId = idxLocId >= 0 ? (parts[idxLocId] ?? "").trim() : (parts[0] ?? "").trim();
-      const rawDate = idxDate >= 0 ? (parts[idxDate] ?? "").trim() : (parts[1] ?? "").trim();
-      const rawAmount = idxAmount >= 0 ? (parts[idxAmount] ?? "").trim() : (parts[2] ?? "").trim();
-
-      const targetDate = rawDateJa || rawDate;
-      const amountRaw = rawBudgetJa || rawAmount;
-      const amount = Number(amountRaw);
-
-      let locationId = "";
-      if (rawLocName) {
-        locationId = locationNameToId.get(rawLocName) ?? "";
-      } else if (rawLocId) {
-        locationId = rawLocId.startsWith("gid://")
-          ? rawLocId
-          : `gid://shopify/Location/${rawLocId}`;
-      }
-
-      if (!locationId || !targetDate || isNaN(amount)) {
-        errors.push(`無効な行: ${line}`);
-        continue;
-      }
-      try {
-        const existing = await prisma.budget.findUnique({
-          where: { shopId_locationId_targetDate: { shopId: shop.id, locationId, targetDate } },
-        });
-        await prisma.budget.upsert({
-          where: { shopId_locationId_targetDate: { shopId: shop.id, locationId, targetDate } },
-          update: { amount },
-          create: { shopId: shop.id, locationId, targetDate, amount },
-        });
-        existing ? updated++ : inserted++;
-      } catch (e) {
-        errors.push(`行エラー: ${line} - ${e instanceof Error ? e.message : "unknown"}`);
-      }
+      const text = await file.text();
+      return Response.json(await importBudgetsFromCsvText({ text, shopId: shop.id, admin }));
     }
-    return Response.json({ ok: true, inserted, updated, skipped, errors });
   }
 
   // 手動 upsert
@@ -265,7 +289,14 @@ export default function BudgetManagementPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<{
+    ok?: boolean;
+    inserted?: number;
+    updated?: number;
+    skipped?: number;
+    errors?: string[];
+    error?: string;
+  }>();
   const q = location.search || "";
   const to = (path: string) => () => navigate(path + q);
 
@@ -280,6 +311,23 @@ export default function BudgetManagementPage() {
   const [importResult, setImportResult] = useState<string | null>(null);
   const [selectedCsvFile, setSelectedCsvFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    const json = fetcher.data;
+    if (json.ok) {
+      setImportResult(
+        `インポート完了: 追加 ${json.inserted ?? 0}件 / 更新 ${json.updated ?? 0}件 / スキップ ${json.skipped ?? 0}件 / エラー ${json.errors?.length ?? 0}件`
+      );
+      setImportError(null);
+      setSelectedCsvFile(null);
+      setUploading(false);
+      navigate(location.pathname + location.search);
+    } else if (json.error) {
+      setImportError(json.error);
+      setUploading(false);
+    }
+  }, [fetcher.state, fetcher.data, navigate, location.pathname, location.search]);
+
 
   const totalPages = Math.ceil(total / pageSize);
   const allTemplateLocationIds = shopifyLocations.map((l) => l.id);
@@ -399,35 +447,10 @@ export default function BudgetManagementPage() {
     setUploading(true);
     setImportError(null);
     setImportResult(null);
-    try {
-      const text = await selectedCsvFile.text();
-      const res = await fetch(location.pathname + location.search, {
-        method: "POST",
-        headers: { "Content-Type": "text/csv" },
-        body: text,
-      });
-      const json = await res.json() as {
-        ok: boolean;
-        inserted?: number;
-        updated?: number;
-        skipped?: number;
-        errors?: string[];
-        error?: string;
-      };
-      if (json.ok) {
-        setImportResult(
-          `インポート完了: 追加 ${json.inserted ?? 0}件 / 更新 ${json.updated ?? 0}件 / スキップ ${json.skipped ?? 0}件 / エラー ${json.errors?.length ?? 0}件`
-        );
-        setSelectedCsvFile(null);
-        navigate(location.pathname + location.search); // reload
-      } else {
-        setImportError(json.error ?? "インポートに失敗しました");
-      }
-    } catch (e) {
-      setImportError(e instanceof Error ? e.message : "インポート中に不明なエラーが発生しました");
-    } finally {
-      setUploading(false);
-    }
+    const fd = new FormData();
+    fd.set("intent", "csv_import");
+    fd.set("csvFile", selectedCsvFile);
+    fetcher.submit(fd, { method: "post", encType: "multipart/form-data" });
   };
 
   const locationOptions = [
