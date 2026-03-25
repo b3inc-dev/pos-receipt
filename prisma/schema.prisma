@@ -51,6 +51,8 @@ model Shop {
   footfallReports  FootfallReport[]
   salesSummaryCacheDaily   SalesSummaryCacheDaily[]
   salesSummaryCachePeriod  SalesSummaryCachePeriod[]
+  salesChannels            SalesChannel[]
+  salesChannelCacheDaily   SalesChannelCacheDaily[]
 }
 
 // ========== 20.2 ロケーション（印字方式・サマリー設定）要件 §4 ==========
@@ -303,4 +305,52 @@ model SalesSummaryCachePeriod {
 
   @@unique([shopId, locationId, periodType, periodKey])
   @@index([shopId])
+}
+
+// ========== 20.12 チャネル（仮想ロケーション）==========
+model SalesChannel {
+  id                     String   @id @default(cuid())
+  shopId                 String
+  shop                   Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name                   String   // 管理用名称: "楽天市場", "Amazon", "TikTok Shop"
+  displayName            String?  // 表示名（未設定時は name を使用）
+  shortName              String?  // 短縮表示名
+  sortOrder              Int      @default(0)
+  salesSummaryEnabled    Boolean  @default(false)
+  includeInOverallTotals Boolean  @default(true)
+  // Shopify の source_name 値（複数指定可、JSON 配列文字列）
+  // 例: ["web"] | ["amazon","amazon_marketplace"] | ["tiktok"]
+  sourceNamesJson        String   @default("[]")
+  // キャッシュ無効化用: 最後にキャッシュ計算した時点の sourceNamesJson のスナップショット
+  sourceNamesSnapshot    String   @default("[]")
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  cacheDaily SalesChannelCacheDaily[]
+
+  @@index([shopId])
+}
+
+// ========== 20.13 チャネル日次キャッシュ ==========
+model SalesChannelCacheDaily {
+  id          String       @id @default(cuid())
+  shopId      String
+  shop        Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  channelId   String
+  channel     SalesChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  targetDate  String       // YYYY-MM-DD
+  actual      Decimal      @db.Decimal(18, 2)
+  orders      Int
+  items       Int
+  budget      Decimal?     @db.Decimal(18, 2)
+  budgetRatio Decimal?     @db.Decimal(10, 4)
+  atv         Decimal?     @db.Decimal(18, 2) // 客単価
+  setRate     Decimal?     @db.Decimal(10, 4) // セット率
+  unit        Decimal?     @db.Decimal(18, 2) // 一品単価
+  currency    String       @default("JPY")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([shopId, channelId, targetDate])
+  @@index([shopId, targetDate])
 }

@@ -8,6 +8,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
+import { computeAndCacheChannelDailySummary, getEnabledSalesChannels } from "../services/salesChannelEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import {
   getAppSetting,
@@ -122,6 +123,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // 期間表示時は先に日次キャッシュを再計算する。
     // 日ごとに全ロケーションを並列にし、日×店の同時 GraphQL を抑えてレート制限を避ける。
+    const enabledChannels = await getEnabledSalesChannels(shop.id);
     if (dateFrom && dateTo) {
       const start = new Date(dateFrom + "T00:00:00Z").getTime();
       const end = new Date(dateTo + "T23:59:59Z").getTime();
@@ -130,11 +132,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
         days.push(new Date(t).toISOString().slice(0, 10));
       }
       for (const targetDate of days) {
+        // POS ロケーション（並列）
         await Promise.all(
           targetLocations.map((loc) =>
             computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, targetDate)
           )
         );
+        // チャネル（逐次: レート制限対策）
+        for (const ch of enabledChannels) {
+          await computeAndCacheChannelDailySummary(admin, shop.id, ch.id, ch.displayName, ch.sourceNames, targetDate);
+        }
       }
     }
 
@@ -213,16 +220,51 @@ export async function loader({ request }: LoaderFunctionArgs) {
           : null,
     }));
 
+    // ── チャネル集計（キャッシュから取得） ──────────────────────────────────
+    const channelRows = await (async () => {
+      if (enabledChannels.length === 0 || !dateFrom || !dateTo) return [];
+
+      const channelCaches = await prisma.salesChannelCacheDaily.findMany({
+        where: {
+          shopId: shop.id,
+          channelId: { in: enabledChannels.map((c) => c.id) },
+          targetDate: {
+            ...(dateFrom ? { gte: dateFrom } : {}),
+            ...(dateTo ? { lte: dateTo } : {}),
+          },
+        },
+      });
+
+      const channelMap = new Map<string, { channelId: string; channelName: string; actualTotal: number; budgetTotal: number | null; orders: number; items: number }>();
+      for (const ch of enabledChannels) {
+        channelMap.set(ch.id, { channelId: ch.id, channelName: ch.displayName, actualTotal: 0, budgetTotal: null, orders: 0, items: 0 });
+      }
+      for (const c of channelCaches) {
+        const entry = channelMap.get(c.channelId);
+        if (!entry) continue;
+        entry.actualTotal += Number(c.actual);
+        entry.orders += c.orders;
+        entry.items += c.items;
+        if (c.budget !== null) entry.budgetTotal = (entry.budgetTotal ?? 0) + Number(c.budget);
+      }
+
+      return Array.from(channelMap.values()).map((entry) => ({
+        ...entry,
+        achievementRate: entry.budgetTotal && entry.budgetTotal > 0 ? entry.actualTotal / entry.budgetTotal : null,
+      }));
+    })();
+
+    const channelsInTotals = channelRows.filter((_, i) => enabledChannels[i]?.includeInOverallTotals);
     const totals = {
-      actualTotal: rows.reduce((s, r) => s + r.actualTotal, 0),
+      actualTotal: rows.reduce((s, r) => s + r.actualTotal, 0) + channelsInTotals.reduce((s, r) => s + r.actualTotal, 0),
       budgetTotal: rows.every((r) => r.budgetTotal !== null)
         ? rows.reduce((s, r) => s + (r.budgetTotal ?? 0), 0)
         : null,
-      orders: rows.reduce((s, r) => s + r.orders, 0),
-      items: rows.reduce((s, r) => s + r.items, 0),
+      orders: rows.reduce((s, r) => s + r.orders, 0) + channelsInTotals.reduce((s, r) => s + r.orders, 0),
+      items: rows.reduce((s, r) => s + r.items, 0) + channelsInTotals.reduce((s, r) => s + r.items, 0),
     };
 
-    return corsJson({ rows, totals, dateFrom, dateTo, displayOptions: merged });
+    return corsJson({ rows, channelRows, totals, dateFrom, dateTo, displayOptions: merged });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);

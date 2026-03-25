@@ -42,6 +42,7 @@ export const SETTINGS_TABS: TabItem[] = [
   { path: "/app/print-settings", label: "印字設定" },
   { path: "/app/settlement-settings", label: "精算設定" },
   { path: "/app/sales-summary-settings", label: "売上サマリー" },
+  { path: "/app/sales-channels", label: "チャネル管理" },
   { path: "/app/loyalty-settings", label: "ポイント/会員施策" },
   { path: "/app/voucher-settings", label: "商品券設定" },
   { path: "/app/special-refund-settings", label: "特殊返金設定" },

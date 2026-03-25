@@ -8,6 +8,11 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { computeAndCacheDailySummary, type DailySummaryRowDTO } from "../services/salesSummaryEngine.server";
+import {
+  computeAndCacheChannelDailySummary,
+  getEnabledSalesChannels,
+  type ChannelDailySummaryDTO,
+} from "../services/salesChannelEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import {
@@ -162,11 +167,52 @@ export async function loader({ request }: LoaderFunctionArgs) {
       rows = await Promise.all(targetLocations.map((loc) => buildRow(loc)));
     }
 
-    // 合計
+    // ── チャネル行集計 ────────────────────────────────────────────────────────
+    const enabledChannels = await getEnabledSalesChannels(shop.id);
+    const buildChannelRow = async (ch: Awaited<ReturnType<typeof getEnabledSalesChannels>>[number]): Promise<ChannelDailySummaryDTO> => {
+      if (isPastDate) {
+        const cached = await prisma.salesChannelCacheDaily.findFirst({
+          where: { shopId: shop.id, channelId: ch.id, targetDate },
+        });
+        // sourceNamesSnapshot が現在設定と一致していればキャッシュを使用
+        if (cached && ch.sourceNamesJson === ch.sourceNamesSnapshot) {
+          return {
+            channelId: ch.id,
+            channelName: ch.displayName,
+            targetDate,
+            actual: Number(cached.actual),
+            orders: cached.orders,
+            items: cached.items,
+            budget: cached.budget !== null ? Number(cached.budget) : null,
+            budgetRatio: cached.budgetRatio !== null ? Number(cached.budgetRatio) : null,
+            atv: cached.atv !== null ? Number(cached.atv) : null,
+            setRate: cached.setRate !== null ? Number(cached.setRate) : null,
+            unit: cached.unit !== null ? Number(cached.unit) : null,
+            currency: cached.currency,
+          };
+        }
+      }
+      return computeAndCacheChannelDailySummary(admin, shop.id, ch.id, ch.displayName, ch.sourceNames, targetDate);
+    };
+
+    let channelRows: ChannelDailySummaryDTO[] = [];
+    if (enabledChannels.length > 0) {
+      if (!isPastDate && enabledChannels.length > 1) {
+        // 当日・複数チャネルは逐次処理でレート制限を抑える
+        for (const ch of enabledChannels) {
+          channelRows.push(await buildChannelRow(ch));
+        }
+      } else {
+        channelRows = await Promise.all(enabledChannels.map(buildChannelRow));
+      }
+    }
+
+    // ── 合計（includeInOverallTotals=true のチャネルを含む） ─────────────────
+    const channelsInTotals = channelRows.filter((_, i) => enabledChannels[i]?.includeInOverallTotals);
     const totals = {
-      actual: rows.reduce((s, r) => s + r.actual, 0),
-      orders: rows.reduce((s, r) => s + r.orders, 0),
-      items: rows.reduce((s, r) => s + r.items, 0),
+      actual: rows.reduce((s, r) => s + r.actual, 0) + channelsInTotals.reduce((s, r) => s + r.actual, 0),
+      orders: rows.reduce((s, r) => s + r.orders, 0) + channelsInTotals.reduce((s, r) => s + r.orders, 0),
+      items: rows.reduce((s, r) => s + r.items, 0) + channelsInTotals.reduce((s, r) => s + r.items, 0),
       budget: rows.every((r) => r.budget !== null)
         ? rows.reduce((s, r) => s + (r.budget ?? 0), 0)
         : null,
@@ -175,7 +221,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : null,
     };
 
-    return corsJson({ rows, totals, targetDate, displayOptions: merged });
+    return corsJson({ rows, channelRows, totals, targetDate, displayOptions: merged });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
