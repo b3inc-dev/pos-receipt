@@ -229,26 +229,18 @@ function fmtDecimal(n: number | null, decimals: number) {
   });
 }
 
-/** 表示中の店舗行から日次の合計セル（先頭列は「合計」） */
-function buildDailyTotalRowCells(rows: Array<Record<string, unknown>>): string[] | null {
+/** 日次合計セルを生成する（visitorsを持たない行は visitors=null として扱われる） */
+function buildDailyTotalRowCells(rows: Array<Record<string, unknown>>, label = "POS合計"): string[] | null {
   if (rows.length === 0) return null;
-  let actual = 0;
-  let orders = 0;
-  let items = 0;
-  let visitorsAcc = 0;
-  let haveVisitors = false;
-  let allBudget = true;
-  let budgetSum = 0;
+  let actual = 0, orders = 0, items = 0, visitorsAcc = 0, budgetSum = 0;
+  let haveVisitors = false, allBudget = true;
   for (const r of rows) {
     actual += Number(r.actual ?? 0);
     orders += Number(r.orders ?? 0);
     items += Number(r.items ?? 0);
     if (r.budget === null || r.budget === undefined) allBudget = false;
     else budgetSum += Number(r.budget);
-    if (r.visitors != null) {
-      haveVisitors = true;
-      visitorsAcc += Number(r.visitors);
-    }
+    if (r.visitors != null) { haveVisitors = true; visitorsAcc += Number(r.visitors); }
   }
   const budget = allBudget ? budgetSum : null;
   const budgetRatio = budget != null && budget > 0 ? actual / budget : null;
@@ -258,7 +250,7 @@ function buildDailyTotalRowCells(rows: Array<Record<string, unknown>>): string[]
   const setRate = orders > 0 ? items / orders : null;
   const unit = items > 0 ? actual / items : null;
   return [
-    "合計",
+    label,
     fmtYen(actual),
     budget != null ? fmtYen(budget) : "-",
     fmtPct(budgetRatio),
@@ -272,18 +264,12 @@ function buildDailyTotalRowCells(rows: Array<Record<string, unknown>>): string[]
   ];
 }
 
-/** 表示中の店舗行から月次の合計セル */
-function buildPeriodTotalRowCells(rows: Array<Record<string, unknown>>): string[] | null {
+/** 月次合計セルを生成する */
+function buildPeriodTotalRowCells(rows: Array<Record<string, unknown>>, label = "POS合計"): string[] | null {
   if (rows.length === 0) return null;
-  let actualTotal = 0;
-  let orders = 0;
-  let items = 0;
-  let progressBudgetToday = 0;
-  let progressBudgetPrev = 0;
-  let allBudget = true;
-  let budgetSum = 0;
-  let visitorsAcc = 0;
-  let haveVisitors = false;
+  let actualTotal = 0, orders = 0, items = 0;
+  let progressBudgetToday = 0, progressBudgetPrev = 0, budgetSum = 0;
+  let visitorsAcc = 0, haveVisitors = false, allBudget = true;
   for (const r of rows) {
     actualTotal += Number(r.actualTotal ?? 0);
     orders += Number(r.orders ?? 0);
@@ -292,10 +278,7 @@ function buildPeriodTotalRowCells(rows: Array<Record<string, unknown>>): string[
     progressBudgetPrev += Number(r.progressBudgetPrev ?? 0);
     if (r.budgetTotal === null || r.budgetTotal === undefined) allBudget = false;
     else budgetSum += Number(r.budgetTotal);
-    if (r.visitors != null) {
-      haveVisitors = true;
-      visitorsAcc += Number(r.visitors);
-    }
+    if (r.visitors != null) { haveVisitors = true; visitorsAcc += Number(r.visitors); }
   }
   const budgetTotal = allBudget ? budgetSum : null;
   const achievementRate = budgetTotal != null && budgetTotal > 0 ? actualTotal / budgetTotal : null;
@@ -307,7 +290,7 @@ function buildPeriodTotalRowCells(rows: Array<Record<string, unknown>>): string[
   const setRate = orders > 0 ? items / orders : null;
   const unit = items > 0 ? actualTotal / items : null;
   return [
-    "合計",
+    label,
     fmtYen(actualTotal),
     budgetTotal != null ? fmtYen(budgetTotal) : "-",
     fmtPct(achievementRate),
@@ -358,6 +341,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const targetDate = url.searchParams.get("targetDate") ?? new Date().toISOString().slice(0, 10);
     const targetMonth = url.searchParams.get("targetMonth") ?? targetDate.slice(0, 7);
     const selectedLocationId = url.searchParams.get("locationId") ?? "";
+    const showChannels = url.searchParams.get("showChannels") !== "0";
 
     let syncWarning: string | null = null;
     try {
@@ -386,6 +370,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         targetDate,
         targetMonth,
         selectedLocationId,
+        showChannels,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows: [] as Array<Record<string, string | number | null>>,
         channelRows: [] as Array<Record<string, string | number | null>>,
@@ -404,6 +389,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         targetDate,
         targetMonth,
         selectedLocationId,
+        showChannels,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows: [] as Array<Record<string, string | number | null>>,
         channelRows: [] as Array<Record<string, string | number | null>>,
@@ -446,6 +432,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const rows = rowsRaw.filter((r): r is NonNullable<typeof r> => r !== null);
 
       // ── チャネル行集計（daily） ──────────────────────────────────────────────
+      if (!showChannels) {
+        return {
+          hasAccess: true, planMessage: "", view, targetDate, targetMonth,
+          selectedLocationId, showChannels,
+          locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
+          rows, channelRows: [],
+          loadError: loadErrorParts.length > 0 ? loadErrorParts.join(" ") : null,
+        };
+      }
       await autoDiscoverChannels(admin, shop.id);
       const enabledChannels = await getEnabledSalesChannels(shop.id);
       const isPastDate = targetDate < today;
@@ -497,6 +492,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         targetDate,
         targetMonth,
         selectedLocationId,
+        showChannels,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows,
         channelRows,
@@ -611,6 +607,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }));
 
     // ── チャネル行集計（period） ─────────────────────────────────────────────
+    if (!showChannels) {
+      return {
+        hasAccess: true, planMessage: "", view, targetDate, targetMonth,
+        selectedLocationId, showChannels,
+        locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
+        rows, channelRows: [],
+        loadError: loadErrorParts.length > 0 ? loadErrorParts.join(" ") : null,
+      };
+    }
     await autoDiscoverChannels(admin, shop.id);
     const enabledChannelsPeriod = await getEnabledSalesChannels(shop.id);
     // 月内各日のチャネルキャッシュを補完
@@ -696,6 +701,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       targetDate,
       targetMonth,
       selectedLocationId,
+      showChannels,
       locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
       rows,
       channelRows,
@@ -711,6 +717,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       targetDate: today,
       targetMonth: today.slice(0, 7),
       selectedLocationId: "",
+      showChannels: true,
       locations: [] as Array<{ id: string; name: string }>,
       rows: [] as Array<Record<string, string | number | null>>,
       channelRows: [] as Array<Record<string, string | number | null>>,
@@ -765,23 +772,24 @@ export default function SalesSummaryAdminPage() {
             fmtYen((r.unit as number | null) ?? null),
           ]);
 
+    const channelRows = data.channelRows ?? [];
+
     // チャネル行（POS以外のチャネル集計）
     const channelBody =
       data.view === "daily"
-        ? (data.channelRows ?? []).map((r) => [
+        ? channelRows.map((r) => [
             `[${String(r.channelName ?? "")}]`,
             fmtYen((r.actual as number) ?? 0),
             fmtYen((r.budget as number | null) ?? null),
             fmtPct((r.budgetRatio as number | null) ?? null),
             `${Number(r.orders ?? 0).toLocaleString("ja-JP")}件`,
-            "-", // 入店数なし
-            "-", // 購買率なし
+            "-", "-",
             fmtYen((r.atv as number | null) ?? null),
             fmtDecimal((r.setRate as number | null) ?? null, 2),
             `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
             fmtYen((r.unit as number | null) ?? null),
           ])
-        : (data.channelRows ?? []).map((r) => [
+        : channelRows.map((r) => [
             `[${String(r.channelName ?? "")}]`,
             fmtYen((r.actualTotal as number) ?? 0),
             r.budgetTotal != null ? fmtYen(Number(r.budgetTotal)) : "-",
@@ -791,21 +799,42 @@ export default function SalesSummaryAdminPage() {
             (r.progressBudgetPrev as number) > 0 ? fmtYen(Number(r.progressBudgetPrev)) : "-",
             fmtPct((r.progressRatePrev as number | null) ?? null),
             `${Number(r.orders ?? 0).toLocaleString("ja-JP")}件`,
-            "-", // 入店数なし
-            "-", // 購買率なし
+            "-", "-",
             fmtYen((r.atv as number | null) ?? null),
             fmtDecimal((r.setRate as number | null) ?? null, 2),
             `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
             fmtYen((r.unit as number | null) ?? null),
           ]);
 
-    const body = [...locationBody, ...channelBody];
-    const totalRow =
-      data.view === "daily"
-        ? buildDailyTotalRowCells(data.rows as Array<Record<string, unknown>>)
-        : buildPeriodTotalRowCells(data.rows as Array<Record<string, unknown>>);
-    if (!totalRow || body.length === 0) return body;
-    return [totalRow, ...body];
+    // 各合計行
+    const posRows = data.rows as Array<Record<string, unknown>>;
+    const chRows = channelRows as Array<Record<string, unknown>>;
+    const grandRows = [...posRows, ...chRows];
+
+    const posTotal = data.view === "daily"
+      ? buildDailyTotalRowCells(posRows, "POS合計")
+      : buildPeriodTotalRowCells(posRows, "POS合計");
+    const channelTotal = channelBody.length > 0
+      ? (data.view === "daily"
+          ? buildDailyTotalRowCells(chRows, "チャネル合計")
+          : buildPeriodTotalRowCells(chRows, "チャネル合計"))
+      : null;
+    const grandTotal = channelBody.length > 0 && locationBody.length > 0
+      ? (data.view === "daily"
+          ? buildDailyTotalRowCells(grandRows, "総合計")
+          : buildPeriodTotalRowCells(grandRows, "総合計"))
+      : null;
+
+    // テーブル行を構築: POS合計 → POS行 → チャネル合計 → チャネル行 → 総合計
+    const result: string[][] = [];
+    if (posTotal && locationBody.length > 0) result.push(posTotal);
+    result.push(...locationBody);
+    if (channelBody.length > 0) {
+      if (channelTotal) result.push(channelTotal);
+      result.push(...channelBody);
+      if (grandTotal) result.push(grandTotal);
+    }
+    return result;
   }, [data.hasAccess, data.view, data.rows, data.channelRows]);
 
   const dailyHeadings = [
@@ -898,6 +927,15 @@ export default function SalesSummaryAdminPage() {
                         ]}
                         value={data.selectedLocationId}
                         onChange={(v) => setParam("locationId", v)}
+                      />
+                      <Select
+                        label="チャネル行"
+                        options={[
+                          { label: "表示する", value: "1" },
+                          { label: "非表示", value: "0" },
+                        ]}
+                        value={data.showChannels ? "1" : "0"}
+                        onChange={(v) => setParam("showChannels", v)}
                       />
                     </InlineStack>
                     <Text tone="subdued" as="p">
