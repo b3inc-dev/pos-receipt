@@ -9,6 +9,7 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import prisma from "../db.server";
 import { computeAndCacheDailySummary, type DailySummaryRowDTO } from "../services/salesSummaryEngine.server";
 import {
+  autoDiscoverChannels,
   computeAndCacheChannelDailySummary,
   getEnabledSalesChannels,
   type ChannelDailySummaryDTO,
@@ -168,6 +169,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     // ── チャネル行集計 ────────────────────────────────────────────────────────
+    await autoDiscoverChannels(admin, shop.id);
     const enabledChannels = await getEnabledSalesChannels(shop.id);
     const buildChannelRow = async (ch: Awaited<ReturnType<typeof getEnabledSalesChannels>>[number]): Promise<ChannelDailySummaryDTO> => {
       if (isPastDate) {

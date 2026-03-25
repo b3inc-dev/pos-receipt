@@ -9,6 +9,142 @@
  */
 import prisma from "../db.server";
 import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
+import { getAppSetting, setAppSetting } from "../utils/appSettings.server";
+
+// ── 既知の source_name → 表示名マッピング ────────────────────────────────────
+
+const KNOWN_CHANNEL_DISPLAY: Record<string, { name: string; shortName: string }> = {
+  web:                      { name: "オンラインストア",    shortName: "EC"  },
+  shop_app:                 { name: "Shop アプリ",        shortName: "Shop" },
+  shopify_draft_orders:     { name: "下書き注文",          shortName: "下書" },
+  android:                  { name: "Android アプリ",     shortName: "AND" },
+  iphone:                   { name: "iPhone アプリ",      shortName: "iOS" },
+  subscription_contract:    { name: "定期購入",            shortName: "定期" },
+};
+
+const CHANNEL_AUTO_DISCOVER_LAST_RUN_KEY = "channel_auto_discover_last_run";
+const AUTO_DISCOVER_INTERVAL_MS = 60 * 60 * 1000; // 1時間に1回
+
+const DISCOVER_SOURCE_NAMES_QUERY = `#graphql
+  query DiscoverSourceNames($first: Int!, $after: String, $query: String) {
+    orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+      nodes {
+        sourceName
+        channelInformation {
+          channelDefinition { channelName }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+type AdminClient = {
+  graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }>;
+};
+
+/**
+ * 直近の注文から source_name を自動検出し、未登録チャネルを DB に追加する。
+ * 既存のチャネル設定（displayName・有効/無効など）は上書きしない。
+ * 1時間以内に実行済みの場合はスキップ（forceScan=true で強制実行）。
+ */
+export async function autoDiscoverChannels(
+  admin: AdminClient,
+  shopId: string,
+  { forceScan = false }: { forceScan?: boolean } = {},
+): Promise<{ discovered: string[] }> {
+  // スロットル: 最終実行から interval 未満ならスキップ
+  if (!forceScan) {
+    const lastRun = await getAppSetting<string>(shopId, CHANNEL_AUTO_DISCOVER_LAST_RUN_KEY);
+    if (lastRun) {
+      const elapsed = Date.now() - new Date(lastRun).getTime();
+      if (elapsed < AUTO_DISCOVER_INTERVAL_MS) return { discovered: [] };
+    }
+  }
+
+  // 直近30日の注文から source_name を収集（POS・精算除外・最大500件）
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const shopifyQuery = `created_at:>=${since} -status:cancelled tag_not:settlement -source_name:pos`;
+
+  const sourceNameMap = new Map<string, string>(); // sourceName → channelName(hint)
+  let cursor: string | null = null;
+  let pages = 0;
+
+  while (pages < 5) {
+    const res = await admin.graphql(DISCOVER_SOURCE_NAMES_QUERY, {
+      variables: { first: 100, after: cursor, query: shopifyQuery },
+    });
+    const json = await res.json() as {
+      data?: {
+        orders?: {
+          nodes?: Array<{
+            sourceName: string | null;
+            channelInformation?: { channelDefinition?: { channelName?: string } | null } | null;
+          }>;
+          pageInfo?: { hasNextPage: boolean; endCursor: string };
+        };
+      };
+    };
+    const nodes = json.data?.orders?.nodes ?? [];
+    for (const node of nodes) {
+      const src = (node.sourceName ?? "").trim().toLowerCase();
+      if (src && src !== "pos" && !sourceNameMap.has(src)) {
+        const hint = node.channelInformation?.channelDefinition?.channelName ?? "";
+        sourceNameMap.set(src, hint);
+      }
+    }
+    const pageInfo = json.data?.orders?.pageInfo;
+    if (!pageInfo?.hasNextPage) break;
+    cursor = pageInfo.endCursor;
+    pages++;
+  }
+
+  if (sourceNameMap.size === 0) {
+    await setAppSetting(shopId, CHANNEL_AUTO_DISCOVER_LAST_RUN_KEY, new Date().toISOString());
+    return { discovered: [] };
+  }
+
+  // 既存チャネルの sourceNamesJson を収集（重複登録を避ける）
+  const existing = await prisma.salesChannel.findMany({ where: { shopId } });
+  const registeredSources = new Set<string>();
+  for (const ch of existing) {
+    try {
+      const names = JSON.parse(ch.sourceNamesJson) as string[];
+      for (const n of names) registeredSources.add(n.toLowerCase());
+    } catch { /* ignore */ }
+  }
+
+  // 新規 source_name を登録
+  const discovered: string[] = [];
+  let nextSortOrder = existing.length > 0 ? Math.max(...existing.map((c) => c.sortOrder)) + 10 : 10;
+
+  for (const [src, hint] of sourceNameMap.entries()) {
+    if (registeredSources.has(src)) continue;
+
+    const known = KNOWN_CHANNEL_DISPLAY[src];
+    const name = known?.name ?? hint || src;
+    const shortName = known?.shortName ?? src.slice(0, 4);
+
+    await prisma.salesChannel.create({
+      data: {
+        shopId,
+        name,
+        displayName: name,
+        shortName,
+        sortOrder: nextSortOrder,
+        salesSummaryEnabled: true,
+        includeInOverallTotals: false, // デフォルトはPOS合計に含めない（ユーザーが判断）
+        sourceNamesJson: JSON.stringify([src]),
+        sourceNamesSnapshot: "",
+      },
+    });
+    discovered.push(src);
+    nextSortOrder += 10;
+  }
+
+  await setAppSetting(shopId, CHANNEL_AUTO_DISCOVER_LAST_RUN_KEY, new Date().toISOString());
+  return { discovered };
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -50,10 +186,6 @@ interface OrderForRefundOverlay {
   tags: string[];
   refunds: ChannelRefund[];
 }
-
-type AdminClient = {
-  graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }>;
-};
 
 // ── GraphQL Queries ────────────────────────────────────────────────────────────
 

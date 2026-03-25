@@ -8,7 +8,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
-import { computeAndCacheChannelDailySummary, getEnabledSalesChannels } from "../services/salesChannelEngine.server";
+import { autoDiscoverChannels, computeAndCacheChannelDailySummary, getEnabledSalesChannels } from "../services/salesChannelEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import {
   getAppSetting,
@@ -123,6 +123,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // 期間表示時は先に日次キャッシュを再計算する。
     // 日ごとに全ロケーションを並列にし、日×店の同時 GraphQL を抑えてレート制限を避ける。
+    await autoDiscoverChannels(admin, shop.id);
     const enabledChannels = await getEnabledSalesChannels(shop.id);
     if (dateFrom && dateTo) {
       const start = new Date(dateFrom + "T00:00:00Z").getTime();

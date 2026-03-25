@@ -24,6 +24,7 @@ import { useState, useCallback } from "react";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import prisma from "../db.server";
+import { autoDiscoverChannels } from "../services/salesChannelEngine.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
 
@@ -121,6 +122,11 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
     return Response.json({ ok: true });
+  }
+
+  if (intent === "auto-discover") {
+    const result = await autoDiscoverChannels(admin, shop.id, { forceScan: true });
+    return Response.json({ ok: true, discovered: result.discovered });
   }
 
   if (intent === "delete") {
@@ -300,6 +306,8 @@ export default function SalesChannelsPage() {
   const [addingNew, setAddingNew] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedBanner, setSavedBanner] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<string | null>(null);
 
   const handleSave = useCallback(
     (data: Omit<ChannelRow, "id"> & { id?: string }) => {
@@ -333,6 +341,22 @@ export default function SalesChannelsPage() {
     },
     [submit]
   );
+
+  const handleAutoDiscover = useCallback(async () => {
+    setIsScanning(true);
+    setScanResult(null);
+    const formData = new FormData();
+    formData.set("intent", "auto-discover");
+    const res = await fetch(window.location.pathname, { method: "POST", body: formData });
+    const json = await res.json() as { ok: boolean; discovered?: string[] };
+    setIsScanning(false);
+    if (json.ok) {
+      const count = json.discovered?.length ?? 0;
+      setScanResult(count > 0 ? `${count} 件の新しいチャネルを検出しました（${json.discovered?.join(", ")}）。ページを更新してください。` : "新しいチャネルは見つかりませんでした。");
+    } else {
+      setScanResult("スキャン中にエラーが発生しました。");
+    }
+  }, []);
 
   const handleDelete = useCallback(
     (id: string) => {
@@ -369,9 +393,18 @@ export default function SalesChannelsPage() {
                   登録チャネル
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  各チャネルの <code>source_name</code> を設定してください。実際の値は{" "}
-                  <code>/api/debug/channel-sources</code> で確認できます。
+                  直近の注文から販売チャネルを自動検出できます。検出後は各チャネルを編集して表示名や集計設定を調整してください。
                 </Text>
+                <InlineStack gap="300" blockAlign="center">
+                  <Button onClick={handleAutoDiscover} loading={isScanning}>
+                    チャネルを自動検出
+                  </Button>
+                </InlineStack>
+                {scanResult && (
+                  <Banner tone="info" onDismiss={() => setScanResult(null)}>
+                    {scanResult}
+                  </Banner>
+                )}
 
                 {channels.length === 0 && !addingNew && (
                   <EmptyState
