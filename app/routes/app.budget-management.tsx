@@ -403,6 +403,21 @@ export default function BudgetManagementPage() {
       setImportError(message);
       return;
     }
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/csv")) {
+      const raw = await res.text();
+      let message = "CSV以外のレスポンスが返されました";
+      try {
+        const json = JSON.parse(raw) as { error?: string; message?: string };
+        message = json.error || json.message || message;
+      } catch {
+        if (raw.trim()) {
+          message = raw.slice(0, 200);
+        }
+      }
+      setImportError(`CSV取得に失敗しました: ${message}`);
+      return;
+    }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
