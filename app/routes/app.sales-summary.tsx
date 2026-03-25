@@ -3,6 +3,7 @@
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useSearchParams } from "react-router";
+import { useMemo } from "react";
 import {
   Page,
   Layout,
@@ -20,35 +21,77 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
-import {
-  getAppSetting,
-  SALES_SUMMARY_SETTINGS_KEY,
-  mergeAndNormalizeSalesSummarySettings,
-  type SalesSummarySettings,
-} from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
 type AdminClient = {
-  graphql: (query: string) => Promise<{ json: () => Promise<unknown> }>;
+  graphql: (query: string, opts?: { variables?: Record<string, unknown> }) => Promise<{ json: () => Promise<unknown> }>;
 };
 
+type LocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
+
+/** 日次キャッシュの locationId が GID / 数値のどちらでもクエリにヒットするよう列挙 */
+function expandLocationIdsForCacheQuery(targetLocations: LocationRow[]): string[] {
+  const s = new Set<string>();
+  for (const l of targetLocations) {
+    const g = l.shopifyLocationGid;
+    const raw = g.replace("gid://shopify/Location/", "");
+    s.add(g);
+    if (raw) s.add(raw);
+  }
+  return [...s];
+}
+
+/** キャッシュ行の locationId を店舗マスタ上の正規 GID に寄せる（期間集計のキーぶれ防止） */
+function resolveCanonicalLocationGid(targetLocations: LocationRow[], rowLocationId: string): string | null {
+  for (const l of targetLocations) {
+    const g = l.shopifyLocationGid;
+    const raw = g.replace("gid://shopify/Location/", "");
+    if (rowLocationId === g || rowLocationId === raw) return g;
+  }
+  return null;
+}
+
 async function syncActiveLocationsForSalesSummary(admin: AdminClient, shopId: string) {
-  const locRes = await admin.graphql(`#graphql
-    query {
-      locations(first: 250, includeLegacy: false) {
-        nodes {
-          id
-          name
-          isActive
+  const activeLocations: { id: string; name: string; isActive: boolean }[] = [];
+  let cursor: string | null = null;
+  let hasNextPage = true;
+  let guard = 0;
+  while (hasNextPage && guard < 100) {
+    guard += 1;
+    const locRes = await admin.graphql(
+      `#graphql
+      query LocationsSync($first: Int!, $after: String) {
+        locations(first: $first, after: $after, includeLegacy: false) {
+          nodes {
+            id
+            name
+            isActive
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
         }
       }
-    }
-  `);
-  const locJson = (await locRes.json()) as {
-    data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
-  };
-  const activeLocations = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
+    `,
+      { variables: { first: 100, after: cursor } },
+    );
+    const locJson = (await locRes.json()) as {
+      data?: {
+        locations?: {
+          nodes?: { id: string; name: string; isActive: boolean }[];
+          pageInfo?: { hasNextPage: boolean; endCursor: string };
+        };
+      };
+    };
+    const nodes = locJson.data?.locations?.nodes ?? [];
+    const pageInfo = locJson.data?.locations?.pageInfo;
+    // アクティブ／非アクティブどちらもマスタに載せ、管理画面で取りこぼさない
+    activeLocations.push(...nodes);
+    hasNextPage = pageInfo?.hasNextPage ?? false;
+    cursor = pageInfo?.endCursor ?? null;
+  }
 
   for (const loc of activeLocations) {
     await prisma.location.upsert({
@@ -173,6 +216,110 @@ function fmtPct(n: number | null) {
   if (n === null) return "-";
   return `${(n * 100).toFixed(1)}%`;
 }
+function fmtDecimal(n: number | null, decimals: number) {
+  if (n === null || n === undefined) return "-";
+  return Number(n).toLocaleString("ja-JP", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+/** 表示中の店舗行から日次の合計セル（先頭列は「合計」） */
+function buildDailyTotalRowCells(rows: Array<Record<string, unknown>>): string[] | null {
+  if (rows.length === 0) return null;
+  let actual = 0;
+  let orders = 0;
+  let items = 0;
+  let visitorsAcc = 0;
+  let haveVisitors = false;
+  let allBudget = true;
+  let budgetSum = 0;
+  for (const r of rows) {
+    actual += Number(r.actual ?? 0);
+    orders += Number(r.orders ?? 0);
+    items += Number(r.items ?? 0);
+    if (r.budget === null || r.budget === undefined) allBudget = false;
+    else budgetSum += Number(r.budget);
+    if (r.visitors != null) {
+      haveVisitors = true;
+      visitorsAcc += Number(r.visitors);
+    }
+  }
+  const budget = allBudget ? budgetSum : null;
+  const budgetRatio = budget != null && budget > 0 ? actual / budget : null;
+  const visitors = haveVisitors ? visitorsAcc : null;
+  const conv = visitors != null && visitors > 0 ? orders / visitors : null;
+  const atv = orders > 0 ? actual / orders : null;
+  const setRate = orders > 0 ? items / orders : null;
+  const unit = items > 0 ? actual / items : null;
+  return [
+    "合計",
+    fmtYen(actual),
+    budget != null ? fmtYen(budget) : "-",
+    fmtPct(budgetRatio),
+    `${orders.toLocaleString("ja-JP")}件`,
+    visitors != null ? `${visitors.toLocaleString("ja-JP")}人` : "-",
+    fmtPct(conv),
+    fmtYen(atv),
+    fmtDecimal(setRate, 2),
+    `${items.toLocaleString("ja-JP")}点`,
+    fmtYen(unit),
+  ];
+}
+
+/** 表示中の店舗行から月次の合計セル */
+function buildPeriodTotalRowCells(rows: Array<Record<string, unknown>>): string[] | null {
+  if (rows.length === 0) return null;
+  let actualTotal = 0;
+  let orders = 0;
+  let items = 0;
+  let progressBudgetToday = 0;
+  let progressBudgetPrev = 0;
+  let allBudget = true;
+  let budgetSum = 0;
+  let visitorsAcc = 0;
+  let haveVisitors = false;
+  for (const r of rows) {
+    actualTotal += Number(r.actualTotal ?? 0);
+    orders += Number(r.orders ?? 0);
+    items += Number(r.items ?? 0);
+    progressBudgetToday += Number(r.progressBudgetToday ?? 0);
+    progressBudgetPrev += Number(r.progressBudgetPrev ?? 0);
+    if (r.budgetTotal === null || r.budgetTotal === undefined) allBudget = false;
+    else budgetSum += Number(r.budgetTotal);
+    if (r.visitors != null) {
+      haveVisitors = true;
+      visitorsAcc += Number(r.visitors);
+    }
+  }
+  const budgetTotal = allBudget ? budgetSum : null;
+  const achievementRate = budgetTotal != null && budgetTotal > 0 ? actualTotal / budgetTotal : null;
+  const progressRateToday = progressBudgetToday > 0 ? actualTotal / progressBudgetToday : null;
+  const progressRatePrev = progressBudgetPrev > 0 ? actualTotal / progressBudgetPrev : null;
+  const visitors = haveVisitors ? visitorsAcc : null;
+  const conv = visitors != null && visitors > 0 ? orders / visitors : null;
+  const atv = orders > 0 ? actualTotal / orders : null;
+  const setRate = orders > 0 ? items / orders : null;
+  const unit = items > 0 ? actualTotal / items : null;
+  return [
+    "合計",
+    fmtYen(actualTotal),
+    budgetTotal != null ? fmtYen(budgetTotal) : "-",
+    fmtPct(achievementRate),
+    progressBudgetToday > 0 ? fmtYen(progressBudgetToday) : "-",
+    fmtPct(progressRateToday),
+    progressBudgetPrev > 0 ? fmtYen(progressBudgetPrev) : "-",
+    fmtPct(progressRatePrev),
+    `${orders.toLocaleString("ja-JP")}件`,
+    visitors != null ? `${visitors.toLocaleString("ja-JP")}人` : "-",
+    fmtPct(conv),
+    fmtYen(atv),
+    fmtDecimal(setRate, 2),
+    `${items.toLocaleString("ja-JP")}点`,
+    fmtYen(unit),
+  ];
+}
+
 function monthRange(month: string) {
   const [y, m] = month.split("-").map(Number);
   const dateFrom = `${month}-01`;
@@ -214,16 +361,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       syncWarning = "ロケーション同期に失敗したため、DB登録済みデータのみ表示しています。";
     }
 
+    // 管理画面は Shopify 上の全店舗を一覧できるよう、salesSummaryEnabled で除外しない
     const allLocations = await prisma.location.findMany({
-      where: { shopId: shop.id, salesSummaryEnabled: true },
+      where: { shopId: shop.id },
       orderBy: { name: "asc" },
     });
-    const settings = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
-    const merged = mergeAndNormalizeSalesSummarySettings(settings ?? undefined);
-    const visibleLocations =
-      merged.visibleLocationIds.length > 0
-        ? allLocations.filter((l) => merged.visibleLocationIds.includes(l.shopifyLocationGid))
-        : allLocations;
+    // 管理画面は閲覧用のため、POS 向けの visibleLocationIds では絞り込まない（全ロケーションを表示）
+    const visibleLocations = allLocations;
     const targetLocations =
       selectedLocationId.length > 0
         ? visibleLocations.filter((l) => l.shopifyLocationGid === selectedLocationId)
@@ -344,33 +488,81 @@ export async function loader({ request }: LoaderFunctionArgs) {
         }
       }
     }
+    const locationIdsForQuery = expandLocationIdsForCacheQuery(validTargetLocations);
     const cacheRows = await prisma.salesSummaryCacheDaily.findMany({
       where: {
         shopId: shop.id,
-        locationId: { in: validTargetLocations.map((l) => l.shopifyLocationGid) },
+        locationId: { in: locationIdsForQuery },
         targetDate: { gte: dateFrom, lte: dateTo },
       },
     });
-    const aggMap = new Map<string, { locationName: string; actual: number; budget: number | null; orders: number; items: number }>();
+    const todayStrForPeriod = todayStr();
+    const yesterdayStrForPeriod = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const locationMap = new Map<
+      string,
+      {
+        locationId: string;
+        locationName: string;
+        actualTotal: number;
+        budgetTotal: number | null;
+        orders: number;
+        items: number;
+        visitors: number | null;
+        progressBudgetToday: number;
+        progressBudgetPrev: number;
+      }
+    >();
     for (const loc of validTargetLocations) {
-      aggMap.set(loc.shopifyLocationGid, { locationName: loc.name, actual: 0, budget: 0, orders: 0, items: 0 });
+      locationMap.set(loc.shopifyLocationGid, {
+        locationId: loc.shopifyLocationGid,
+        locationName: loc.name,
+        actualTotal: 0,
+        budgetTotal: null,
+        orders: 0,
+        items: 0,
+        visitors: null,
+        progressBudgetToday: 0,
+        progressBudgetPrev: 0,
+      });
     }
     for (const row of cacheRows) {
-      const hit = aggMap.get(row.locationId);
-      if (!hit) continue;
-      hit.actual += Number(row.actual);
-      hit.orders += row.orders;
-      hit.items += row.items;
-      if (row.budget !== null) hit.budget = (hit.budget ?? 0) + Number(row.budget);
+      const canon = resolveCanonicalLocationGid(validTargetLocations, row.locationId);
+      if (!canon) continue;
+      const entry = locationMap.get(canon);
+      if (!entry) continue;
+      entry.actualTotal += Number(row.actual);
+      entry.orders += row.orders;
+      entry.items += row.items;
+      if (row.visitors !== null) {
+        entry.visitors = (entry.visitors ?? 0) + row.visitors;
+      }
+      if (row.budget !== null) {
+        entry.budgetTotal = (entry.budgetTotal ?? 0) + Number(row.budget);
+        if (row.targetDate <= todayStrForPeriod) entry.progressBudgetToday += Number(row.budget);
+        if (row.targetDate <= yesterdayStrForPeriod) entry.progressBudgetPrev += Number(row.budget);
+      }
     }
-    const rows = Array.from(aggMap.entries()).map(([locationId, v]) => ({
-      locationId,
-      locationName: v.locationName,
-      actual: v.actual,
-      budget: v.budget,
-      budgetRatio: v.budget && v.budget > 0 ? v.actual / v.budget : null,
-      orders: v.orders,
-      items: v.items,
+    const rows = Array.from(locationMap.values()).map((entry) => ({
+      locationId: entry.locationId,
+      locationName: entry.locationName,
+      actualTotal: entry.actualTotal,
+      budgetTotal: entry.budgetTotal,
+      achievementRate:
+        entry.budgetTotal && entry.budgetTotal > 0 ? entry.actualTotal / entry.budgetTotal : null,
+      progressBudgetToday: entry.progressBudgetToday,
+      progressRateToday:
+        entry.progressBudgetToday > 0 ? entry.actualTotal / entry.progressBudgetToday : null,
+      progressBudgetPrev: entry.progressBudgetPrev,
+      progressRatePrev:
+        entry.progressBudgetPrev > 0 ? entry.actualTotal / entry.progressBudgetPrev : null,
+      orders: entry.orders,
+      items: entry.items,
+      visitors: entry.visitors,
+      conv:
+        entry.visitors !== null && entry.visitors > 0 ? entry.orders / entry.visitors : null,
+      atv: entry.orders > 0 ? entry.actualTotal / entry.orders : null,
+      setRate: entry.orders > 0 ? entry.items / entry.orders : null,
+      unit: entry.items > 0 ? entry.actualTotal / entry.items : null,
     }));
     const failedDetails = Array.from(failedLocationErrors.entries()).map(
       ([name, reason]) => `${name}: ${reason}`
@@ -421,14 +613,78 @@ export default function SalesSummaryAdminPage() {
     setSearchParams(next);
   };
 
-  const tableRows = data.rows.map((r) => [
-    String(r.locationName ?? ""),
-    fmtYen((r.actual as number) ?? 0),
-    fmtYen((r.budget as number | null) ?? null),
-    fmtPct((r.budgetRatio as number | null) ?? null),
-    `${Number(r.orders ?? 0).toLocaleString("ja-JP")}件`,
-    `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
-  ]);
+  const tableRows = useMemo(() => {
+    if (!data.hasAccess) return [];
+    const body =
+      data.view === "daily"
+        ? data.rows.map((r) => [
+            String(r.locationName ?? ""),
+            fmtYen((r.actual as number) ?? 0),
+            fmtYen((r.budget as number | null) ?? null),
+            fmtPct((r.budgetRatio as number | null) ?? null),
+            `${Number(r.orders ?? 0).toLocaleString("ja-JP")}件`,
+            r.visitors != null ? `${Number(r.visitors).toLocaleString("ja-JP")}人` : "-",
+            fmtPct((r.conv as number | null) ?? null),
+            fmtYen((r.atv as number | null) ?? null),
+            fmtDecimal((r.setRate as number | null) ?? null, 2),
+            `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
+            fmtYen((r.unit as number | null) ?? null),
+          ])
+        : data.rows.map((r) => [
+            String(r.locationName ?? ""),
+            fmtYen((r.actualTotal as number) ?? 0),
+            r.budgetTotal != null ? fmtYen(Number(r.budgetTotal)) : "-",
+            fmtPct((r.achievementRate as number | null) ?? null),
+            (r.progressBudgetToday as number) > 0 ? fmtYen(Number(r.progressBudgetToday)) : "-",
+            fmtPct((r.progressRateToday as number | null) ?? null),
+            (r.progressBudgetPrev as number) > 0 ? fmtYen(Number(r.progressBudgetPrev)) : "-",
+            fmtPct((r.progressRatePrev as number | null) ?? null),
+            `${Number(r.orders ?? 0).toLocaleString("ja-JP")}件`,
+            r.visitors != null ? `${Number(r.visitors).toLocaleString("ja-JP")}人` : "-",
+            fmtPct((r.conv as number | null) ?? null),
+            fmtYen((r.atv as number | null) ?? null),
+            fmtDecimal((r.setRate as number | null) ?? null, 2),
+            `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
+            fmtYen((r.unit as number | null) ?? null),
+          ]);
+    const totalRow =
+      data.view === "daily"
+        ? buildDailyTotalRowCells(data.rows as Array<Record<string, unknown>>)
+        : buildPeriodTotalRowCells(data.rows as Array<Record<string, unknown>>);
+    if (!totalRow || body.length === 0) return body;
+    return [totalRow, ...body];
+  }, [data.hasAccess, data.view, data.rows]);
+
+  const dailyHeadings = [
+    "ロケーション",
+    "実績",
+    "予算",
+    "予算比",
+    "件数",
+    "入店数",
+    "購買率",
+    "客単価",
+    "セット率",
+    "点数",
+    "一品単価",
+  ];
+  const periodHeadings = [
+    "ロケーション",
+    "月実績",
+    "月予算",
+    "達成率",
+    "遂行予算(当日)",
+    "遂行率(当日)",
+    "遂行予算(前日)",
+    "遂行率(前日)",
+    "件数",
+    "入店数",
+    "購買率",
+    "客単価",
+    "セット率",
+    "点数",
+    "一品単価",
+  ];
 
   return (
     <PolarisPageWrapper>
@@ -502,11 +758,17 @@ export default function SalesSummaryAdminPage() {
                   {tableRows.length === 0 ? (
                     <Text tone="subdued" as="p">表示対象データがありません。</Text>
                   ) : (
-                    <DataTable
-                      columnContentTypes={["text", "numeric", "numeric", "numeric", "numeric", "numeric"]}
-                      headings={["ロケーション", "実績", "予算", "予算比", "件数", "点数"]}
-                      rows={tableRows}
-                    />
+                    <Box overflowX="scroll" maxWidth="100%">
+                      <DataTable
+                        columnContentTypes={
+                          data.view === "daily"
+                            ? (["text", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric"] as const)
+                            : (["text", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric"] as const)
+                        }
+                        headings={data.view === "daily" ? dailyHeadings : periodHeadings}
+                        rows={tableRows}
+                      />
+                    </Box>
                   )}
                 </Card>
               </Layout.Section>

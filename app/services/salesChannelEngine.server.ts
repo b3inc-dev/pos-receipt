@@ -122,7 +122,7 @@ export async function autoDiscoverChannels(
     if (registeredSources.has(src)) continue;
 
     const known = KNOWN_CHANNEL_DISPLAY[src];
-    const name = known?.name ?? hint || src;
+    const name = known?.name ?? (hint || src);
     const shortName = known?.shortName ?? src.slice(0, 4);
 
     await prisma.salesChannel.create({
