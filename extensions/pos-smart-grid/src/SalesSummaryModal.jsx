@@ -393,18 +393,50 @@ function totalsDailyRows(totals, o) {
   const rows = [];
   if (o.showActual) rows.push({ label: "実績", value: fmtAmount(totals.actual), valueBold: true });
   if (o.showBudget && totals.budget !== null) rows.push({ label: "予算", value: fmtAmount(totals.budget) });
+  const budgetRatio =
+    totals.budget != null && totals.budget > 0 ? totals.actual / totals.budget : null;
+  if (o.showBudgetRatio && budgetRatio !== null) {
+    rows.push({ label: "予算比", value: fmtPct(budgetRatio) });
+  }
   if (o.showOrders) rows.push({ label: "件数", value: `${fmtNum(totals.orders)}件` });
   if (o.showVisitors && totals.visitors !== null)
     rows.push({ label: "入店数", value: `${fmtNum(totals.visitors)}人` });
+  const conv =
+    totals.visitors != null && totals.visitors > 0 ? totals.orders / totals.visitors : null;
+  if (o.showConv && conv !== null) rows.push({ label: "購買率", value: fmtPct(conv) });
+  const atv = totals.orders > 0 ? totals.actual / totals.orders : null;
+  if (o.showAtv && atv !== null) rows.push({ label: "客単価", value: fmtAmount(atv) });
+  const setRate = totals.orders > 0 ? totals.items / totals.orders : null;
+  if (o.showSetRate && setRate !== null) rows.push({ label: "セット率", value: fmtNum(setRate, 2) });
   if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
+  const unit = totals.items > 0 ? totals.actual / totals.items : null;
+  if (o.showUnitPrice && unit !== null) rows.push({ label: "一品単価", value: fmtAmount(unit) });
   return rows;
 }
 
-function totalsPeriodRows(totals, o) {
+/** locationRows で店舗行の遂行予算を合算し、全店合計に達成率・遂行を出す（API totals に無い項目の補完） */
+function totalsPeriodRows(totals, o, locationRows = []) {
   const rows = [];
+  const actualTotal = Number(totals.actualTotal ?? 0);
   if (o.showMonthActual) rows.push({ label: "月実績", value: fmtAmount(totals.actualTotal), valueBold: true });
   if (o.showMonthBudget && totals.budgetTotal !== null)
     rows.push({ label: "月予算", value: fmtAmount(totals.budgetTotal) });
+  if (o.showMonthAchvRatio && totals.budgetTotal != null && totals.budgetTotal > 0) {
+    rows.push({
+      label: "達成率",
+      value: fmtPct(actualTotal / totals.budgetTotal),
+    });
+  }
+  const progressBudgetToday = locationRows.reduce((s, r) => s + Number(r.progressBudgetToday ?? 0), 0);
+  const progressBudgetPrev = locationRows.reduce((s, r) => s + Number(r.progressBudgetPrev ?? 0), 0);
+  if (progressBudgetToday > 0 && o.showProgressToday) {
+    rows.push({ label: "遂行予算(当日)", value: fmtAmount(progressBudgetToday) });
+    rows.push({ label: "遂行率(当日)", value: fmtPct(actualTotal / progressBudgetToday) });
+  }
+  if (progressBudgetPrev > 0 && o.showProgressPrev) {
+    rows.push({ label: "遂行予算(前日)", value: fmtAmount(progressBudgetPrev) });
+    rows.push({ label: "遂行率(前日)", value: fmtPct(actualTotal / progressBudgetPrev) });
+  }
   if (o.showOrders) rows.push({ label: "件数", value: `${fmtNum(totals.orders)}件` });
   if (o.showVisitors && totals.visitors !== null)
     rows.push({ label: "入店数", value: `${fmtNum(totals.visitors)}人` });
@@ -898,7 +930,8 @@ function HistoryDailyDetailView({
     data &&
     rows.length > 0 &&
     !showTotalsSection &&
-    rowsForUi.length === 0;
+    rowsForUi.length === 0 &&
+    !kpiHidden;
   const showUpdatedBadge = isTodayDate(viewDate) && !!lastLoadedAt;
 
   return (
@@ -1347,7 +1380,7 @@ function SalesSummaryModal() {
   const showStoreTotalsFlag = o.showStoreTotals !== false;
   const showAllTotals = scope === "all" && rows.length >= 1 && showStoreTotalsFlag;
   const totalsDaily = totalsDailyRows(totals, o);
-  const totalsPeriod = totalsPeriodRows(totals, o);
+  const totalsPeriod = totalsPeriodRows(totals, o, rows);
   const showTotalsSectionDaily = showAllTotals && grain === "daily" && totalsDaily.length > 0;
   const showTotalsSectionMonthly = showAllTotals && grain !== "daily" && totalsPeriod.length > 0;
 
@@ -1374,7 +1407,8 @@ function SalesSummaryModal() {
     data &&
     rows.length > 0 &&
     !(showTotalsSectionDaily || showTotalsSectionMonthly) &&
-    rowsForUi.length === 0;
+    rowsForUi.length === 0 &&
+    !kpiHidden;
 
   const sessionRow = useMemo(() => {
     if (!sessionGid || !rows.length) return null;
