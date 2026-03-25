@@ -267,20 +267,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }));
     })();
 
-    const channelsInTotals = channelRows.filter((_, i) => enabledChannels[i]?.includeInOverallTotals);
     const storeOrders = rows.reduce((s, r) => s + r.orders, 0);
     const storeVisitors = rows.some((r) => r.visitors !== null)
       ? rows.reduce((s, r) => s + (r.visitors ?? 0), 0)
       : null;
     const totalActual =
       rows.reduce((s, r) => s + r.actualTotal, 0) +
-      channelsInTotals.reduce((s, r) => s + r.actualTotal, 0);
+      channelRows.reduce((s, r) => s + r.actualTotal, 0);
     const totalOrders =
       rows.reduce((s, r) => s + r.orders, 0) +
-      channelsInTotals.reduce((s, r) => s + r.orders, 0);
+      channelRows.reduce((s, r) => s + r.orders, 0);
     const totalItems =
       rows.reduce((s, r) => s + r.items, 0) +
-      channelsInTotals.reduce((s, r) => s + r.items, 0);
+      channelRows.reduce((s, r) => s + r.items, 0);
     const totals = {
       actualTotal: totalActual,
       budgetTotal: rows.every((r) => r.budgetTotal !== null)

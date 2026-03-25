@@ -123,6 +123,26 @@ function parseEnvInt(name: string, fallback: number, min = 1, max = 10000): numb
   return i;
 }
 
+/** 環境変数が 0 のときは「無制限」（月次の計算件数バッチ用） */
+function parseEnvIntWithZeroUnlimited(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  const n = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  const i = Math.trunc(n);
+  if (i === 0) return 0;
+  if (i < min) return min;
+  if (i > max) return max;
+  return i;
+}
+
+/** 月次1リクエストあたりの Shopify 集計（compute）の最大回数。ロケーション日次＋チャネル日次で共通の残り枠を使う。0=無制限 */
+const SALES_SUMMARY_PERIOD_MAX_COMPUTES = parseEnvIntWithZeroUnlimited(
+  "SALES_SUMMARY_PERIOD_MAX_COMPUTES",
+  48,
+  1,
+  500,
+);
+
 const SALES_SUMMARY_RETRY_MAX_ATTEMPTS = parseEnvInt(
   "SALES_SUMMARY_RETRY_MAX_ATTEMPTS",
   3,
@@ -325,6 +345,33 @@ function eachDay(dateFrom: string, dateTo: string) {
   return days;
 }
 
+/** 月次用: 既存キャッシュの (正規ロケーションGID, 日付) を Set で保持 */
+function buildLocationDayCacheSet(
+  rows: Array<{ locationId: string; targetDate: string }>,
+  validTargetLocations: LocationRow[],
+): Set<string> {
+  const set = new Set<string>();
+  for (const r of rows) {
+    const canon = resolveCanonicalLocationGid(validTargetLocations, r.locationId);
+    if (!canon) continue;
+    set.add(`${canon}|${r.targetDate}`);
+  }
+  return set;
+}
+
+/** 月次ローダーと同じ条件で、その日×店の再計算が必要か */
+function needsLocationDayCompute(
+  day: string,
+  locGid: string,
+  today: string,
+  cacheSet: Set<string>,
+): boolean {
+  const hasCache = cacheSet.has(`${locGid}|${day}`);
+  const shouldRecompute = day >= today;
+  if (!shouldRecompute && hasCache) return false;
+  return true;
+}
+
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -375,6 +422,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         rows: [] as Array<Record<string, string | number | null>>,
         channelRows: [] as Array<Record<string, string | number | null>>,
         loadError: null as string | null,
+        loadWarning: null as string | null,
       };
     }
 
@@ -394,6 +442,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         rows: [] as Array<Record<string, string | number | null>>,
         channelRows: [] as Array<Record<string, string | number | null>>,
         loadError: null as string | null,
+        loadWarning: null as string | null,
       };
     }
 
@@ -431,6 +480,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
       const rows = rowsRaw.filter((r): r is NonNullable<typeof r> => r !== null);
 
+      const failedDetailsDaily = Array.from(failedLocationErrors.entries()).map(
+        ([name, reason]) => `${name}: ${reason}`,
+      );
+      const loadErrorPartsDaily = [
+        syncWarning,
+        failedDetailsDaily.length > 0
+          ? `一部ロケーションの集計に失敗しました（${failedDetailsDaily.join(" / ")}）。`
+          : null,
+      ].filter((v): v is string => Boolean(v));
+
       // ── チャネル行集計（daily） ──────────────────────────────────────────────
       if (!showChannels) {
         return {
@@ -438,7 +497,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           selectedLocationId, showChannels,
           locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
           rows, channelRows: [],
-          loadError: loadErrorParts.length > 0 ? loadErrorParts.join(" ") : null,
+          loadError: loadErrorPartsDaily.length > 0 ? loadErrorPartsDaily.join(" ") : null,
+          loadWarning: null,
         };
       }
       await autoDiscoverChannels(admin, shop.id);
@@ -476,15 +536,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         } catch { /* チャネル1件の失敗で全体を落とさない */ }
       }
 
-      const failedDetails = Array.from(failedLocationErrors.entries()).map(
-        ([name, reason]) => `${name}: ${reason}`
-      );
-      const loadErrorParts = [
-        syncWarning,
-        failedDetails.length > 0
-          ? `一部ロケーションの集計に失敗しました（${failedDetails.join(" / ")}）。`
-          : null,
-      ].filter((v): v is string => Boolean(v));
       return {
         hasAccess: true,
         planMessage: "",
@@ -496,40 +547,55 @@ export async function loader({ request }: LoaderFunctionArgs) {
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows,
         channelRows,
-        loadError: loadErrorParts.length > 0 ? loadErrorParts.join(" ") : null,
+        loadError: loadErrorPartsDaily.length > 0 ? loadErrorPartsDaily.join(" ") : null,
+        loadWarning: null,
       };
     }
 
     const { dateFrom, dateTo } = monthRange(targetMonth);
     const failedLocationErrors = new Map<string, string>();
     const today = todayStr();
-    for (const day of eachDay(dateFrom, dateTo)) {
+    const locationIdsForQuery = expandLocationIdsForCacheQuery(validTargetLocations);
+    const daysInMonth = eachDay(dateFrom, dateTo);
+
+    const prefetchLocationCaches = await prisma.salesSummaryCacheDaily.findMany({
+      where: {
+        shopId: shop.id,
+        locationId: { in: locationIdsForQuery },
+        targetDate: { gte: dateFrom, lte: dateTo },
+      },
+      select: { locationId: true, targetDate: true },
+    });
+    const locationCacheSet = buildLocationDayCacheSet(prefetchLocationCaches, validTargetLocations);
+
+    const locationWork: Array<{ day: string; loc: LocationRow }> = [];
+    for (const day of daysInMonth) {
       for (const loc of validTargetLocations) {
-        try {
-          const candidates = buildLocationIdCandidates(loc.shopifyLocationGid);
-          const cached = await prisma.salesSummaryCacheDaily.findFirst({
-            where: {
-              shopId: shop.id,
-              locationId: { in: candidates },
-              targetDate: day,
-            },
-            select: { id: true },
-          });
-          // 月次は過去日をキャッシュ固定。当日以降のみ最新化のため再計算。
-          const shouldRecompute = day >= today;
-          if (!cached || shouldRecompute) {
-            await computeWithRetry(admin, shop.id, loc.shopifyLocationGid, loc.name, day);
-          }
-        } catch (err) {
-          // 月次は日ごとに同じ店舗が失敗し得るため、最初の理由のみ保持
-          if (!failedLocationErrors.has(loc.name)) {
-            failedLocationErrors.set(loc.name, toErrorMessage(err));
-          }
-          // 1店舗の失敗で全体を落とさない
-        }
+        if (!needsLocationDayCompute(day, loc.shopifyLocationGid, today, locationCacheSet)) continue;
+        locationWork.push({ day, loc });
       }
     }
-    const locationIdsForQuery = expandLocationIdsForCacheQuery(validTargetLocations);
+    locationWork.sort(
+      (a, b) => a.day.localeCompare(b.day) || a.loc.name.localeCompare(b.loc.name),
+    );
+
+    const maxPeriod = SALES_SUMMARY_PERIOD_MAX_COMPUTES;
+    let budget = maxPeriod === 0 ? Number.MAX_SAFE_INTEGER : maxPeriod;
+    let locationAttempts = 0;
+    for (const { day, loc } of locationWork) {
+      if (budget <= 0) break;
+      locationAttempts += 1;
+      try {
+        await computeWithRetry(admin, shop.id, loc.shopifyLocationGid, loc.name, day);
+      } catch (err) {
+        if (!failedLocationErrors.has(loc.name)) {
+          failedLocationErrors.set(loc.name, toErrorMessage(err));
+        }
+      }
+      budget -= 1;
+    }
+    const skippedLocation = Math.max(0, locationWork.length - locationAttempts);
+
     const cacheRows = await prisma.salesSummaryCacheDaily.findMany({
       where: {
         shopId: shop.id,
@@ -606,6 +672,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
       unit: entry.items > 0 ? entry.actualTotal / entry.items : null,
     }));
 
+    const failedDetailsPeriodEarly = Array.from(failedLocationErrors.entries()).map(
+      ([name, reason]) => `${name}: ${reason}`,
+    );
+    const loadErrorPartsPeriod = [
+      syncWarning,
+      failedDetailsPeriodEarly.length > 0
+        ? `一部ロケーションの集計に失敗しました（${failedDetailsPeriodEarly.join(" / ")}）。`
+        : null,
+    ].filter((v): v is string => Boolean(v));
+
+    const loadWarningPeriodOnly =
+      maxPeriod !== 0 && skippedLocation > 0
+        ? `月次表示では1回の読み込みで実行する計算件数に上限があります（残りおおよそ${skippedLocation}件）。ページを再読み込みすると続きが埋まります。まとめて取得する場合はアプリのバックフィル画面で月単位の取得が使えます。`
+        : null;
+
     // ── チャネル行集計（period） ─────────────────────────────────────────────
     if (!showChannels) {
       return {
@@ -613,35 +694,69 @@ export async function loader({ request }: LoaderFunctionArgs) {
         selectedLocationId, showChannels,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows, channelRows: [],
-        loadError: loadErrorParts.length > 0 ? loadErrorParts.join(" ") : null,
+        loadError: loadErrorPartsPeriod.length > 0 ? loadErrorPartsPeriod.join(" ") : null,
+        loadWarning: loadWarningPeriodOnly,
       };
     }
     await autoDiscoverChannels(admin, shop.id);
     const enabledChannelsPeriod = await getEnabledSalesChannels(shop.id);
-    // 月内各日のチャネルキャッシュを補完
-    for (const day of eachDay(dateFrom, dateTo)) {
+    const prefetchChannelCaches =
+      enabledChannelsPeriod.length === 0
+        ? []
+        : await prisma.salesChannelCacheDaily.findMany({
+            where: {
+              shopId: shop.id,
+              channelId: { in: enabledChannelsPeriod.map((c) => c.id) },
+              targetDate: { gte: dateFrom, lte: dateTo },
+            },
+            select: { channelId: true, targetDate: true },
+          });
+    const channelCachePresence = new Set(
+      prefetchChannelCaches.map((r) => `${r.channelId}|${r.targetDate}`),
+    );
+
+    type EnabledCh = (typeof enabledChannelsPeriod)[number];
+    const channelWork: Array<{ day: string; ch: EnabledCh }> = [];
+    for (const day of daysInMonth) {
       const shouldRecompute = day >= todayStrForPeriod;
       for (const ch of enabledChannelsPeriod) {
-        try {
-          const cached = await prisma.salesChannelCacheDaily.findFirst({
-            where: { shopId: shop.id, channelId: ch.id, targetDate: day },
-            select: { id: true },
-          });
-          if (!cached || shouldRecompute) {
-            await computeAndCacheChannelDailySummary(
-              admin, shop.id, ch.id, ch.displayName, ch.sourceNames, day
-            );
-          }
-        } catch { /* 1日1チャネルの失敗で全体を落とさない */ }
+        const hasCache = channelCachePresence.has(`${ch.id}|${day}`);
+        if (!shouldRecompute && hasCache) continue;
+        channelWork.push({ day, ch });
       }
     }
-    const channelCacheRows = await prisma.salesChannelCacheDaily.findMany({
-      where: {
-        shopId: shop.id,
-        channelId: { in: enabledChannelsPeriod.map((c) => c.id) },
-        targetDate: { gte: dateFrom, lte: dateTo },
-      },
-    });
+    channelWork.sort(
+      (a, b) =>
+        a.day.localeCompare(b.day) || a.ch.displayName.localeCompare(b.ch.displayName),
+    );
+
+    let channelAttempts = 0;
+    for (const { day, ch } of channelWork) {
+      if (budget <= 0) break;
+      channelAttempts += 1;
+      try {
+        await computeAndCacheChannelDailySummary(
+          admin, shop.id, ch.id, ch.displayName, ch.sourceNames, day
+        );
+      } catch { /* 1日1チャネルの失敗で全体を落とさない */ }
+      budget -= 1;
+    }
+    const skippedChannel = Math.max(0, channelWork.length - channelAttempts);
+    const skippedTotal = skippedLocation + skippedChannel;
+    const loadWarning =
+      maxPeriod !== 0 && skippedTotal > 0
+        ? `月次表示では1回の読み込みで実行する計算件数に上限があります（残りおおよそ${skippedTotal}件）。ページを再読み込みすると続きが埋まります。まとめて取得する場合はアプリのバックフィル画面で月単位の取得が使えます。`
+        : null;
+    const channelCacheRows =
+      enabledChannelsPeriod.length === 0
+        ? []
+        : await prisma.salesChannelCacheDaily.findMany({
+            where: {
+              shopId: shop.id,
+              channelId: { in: enabledChannelsPeriod.map((c) => c.id) },
+              targetDate: { gte: dateFrom, lte: dateTo },
+            },
+          });
     const channelMap = new Map<string, {
       channelId: string; channelName: string;
       actualTotal: number; budgetTotal: number | null;
@@ -684,16 +799,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       unit: entry.items > 0 ? entry.actualTotal / entry.items : null,
     }));
 
-    const failedDetails = Array.from(failedLocationErrors.entries()).map(
-      ([name, reason]) => `${name}: ${reason}`
-    );
-    const loadErrorParts = [
-      syncWarning,
-      failedDetails.length > 0
-        ? `一部ロケーションの集計に失敗しました（${failedDetails.join(" / ")}）。`
-        : null,
-    ].filter((v): v is string => Boolean(v));
-
     return {
       hasAccess: true,
       planMessage: "",
@@ -705,7 +810,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
       rows,
       channelRows,
-      loadError: loadErrorParts.length > 0 ? loadErrorParts.join(" ") : null,
+      loadError: loadErrorPartsPeriod.length > 0 ? loadErrorPartsPeriod.join(" ") : null,
+      loadWarning,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "売上サマリーの読み込みに失敗しました";
@@ -722,6 +828,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       rows: [] as Array<Record<string, string | number | null>>,
       channelRows: [] as Array<Record<string, string | number | null>>,
       loadError: message,
+      loadWarning: null,
     };
   }
 }
@@ -883,6 +990,11 @@ export default function SalesSummaryAdminPage() {
           {data.loadError && (
             <Layout.Section>
               <Banner tone="critical">売上サマリー読込エラー: {data.loadError}</Banner>
+            </Layout.Section>
+          )}
+          {data.loadWarning && (
+            <Layout.Section>
+              <Banner tone="warning">{data.loadWarning}</Banner>
             </Layout.Section>
           )}
           {!data.hasAccess && (
