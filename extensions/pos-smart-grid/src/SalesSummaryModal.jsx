@@ -5,11 +5,11 @@
  * - スコープ: この店舗（セッションロケーション） / 全店舗（locationIds 省略＝API が有効店すべて）
  * - 粒度: 日次 / 月次（期間はその月の1日〜当日または月末）
  * - スクロール: 全店舗時は先頭に全店合計、その下に店舗別のリスト行（精算プレビュー型）
- * - フッター左: 入店数（月次はグレーアウト、日次は入力または全店計表示）
+ * - フッター左: 入店数（日次・この店舗のみモーダルで報告／月次・全店はボタン無効）
  * - フッター右: 日別一覧（/api/sales-summary/month-daily・比較用KPI付きリスト）
  * - 日別一覧で日付タップ: メインの日付は据え置きで historyDaily へ。UIは日次TOPと同型（この店舗/全店舗・入店数報告可）
  */
-import { useState, useEffect, useCallback, useMemo } from "preact/hooks";
+import { useState, useEffect, useCallback, useMemo, useRef } from "preact/hooks";
 import { render } from "preact";
 import {
   getDailySummary,
@@ -71,6 +71,8 @@ function fmtAmount(n) {
 
 function defaultDisplayOptions() {
   return {
+    showLocationRows: true,
+    showStoreTotals: true,
     showBudget: true,
     showActual: true,
     showBudgetRatio: true,
@@ -88,6 +90,86 @@ function defaultDisplayOptions() {
     showProgressPrev: true,
     showStoreTotals: true,
   };
+}
+
+function hasAnyDailyKpi(o) {
+  return (
+    o.showActual ||
+    o.showBudget ||
+    o.showBudgetRatio ||
+    o.showOrders ||
+    o.showVisitors ||
+    o.showConv ||
+    o.showAtv ||
+    o.showSetRate ||
+    o.showItems ||
+    o.showUnitPrice
+  );
+}
+
+function hasAnyPeriodKpi(o) {
+  return (
+    o.showMonthActual ||
+    o.showMonthBudget ||
+    o.showMonthAchvRatio ||
+    o.showProgressToday ||
+    o.showProgressPrev ||
+    o.showOrders ||
+    o.showItems
+  );
+}
+
+/** 入店数入力（s-modal + ref でオーバーレイ表示） */
+function FootfallReportModalHost({
+  open,
+  onRequestClose,
+  heading,
+  dateLine,
+  value,
+  onChange,
+  onSave,
+  saving,
+  footfallErr,
+  modalRef,
+}) {
+  useEffect(() => {
+    const el = modalRef.current;
+    if (!el) return;
+    try {
+      if (open) el.showOverlay?.();
+      else el.hideOverlay?.();
+    } catch (_) {}
+  }, [open, modalRef]);
+
+  return (
+    <s-modal ref={modalRef} heading={heading}>
+      <s-box padding="base">
+        <s-stack gap="base">
+          {dateLine ? (
+            <s-text tone="subdued" size="small">
+              {dateLine}
+            </s-text>
+          ) : null}
+          <s-text-field
+            label="入店数（人）"
+            value={value}
+            onChange={(e) => onChange(e.detail?.value ?? e.target?.value ?? value)}
+          />
+          {footfallErr ? (
+            <s-text tone="critical" size="small">
+              {footfallErr}
+            </s-text>
+          ) : null}
+        </s-stack>
+      </s-box>
+      <s-button slot="secondary-actions" onClick={onRequestClose}>
+        閉じる
+      </s-button>
+      <s-button slot="primary-action" onClick={onSave} loading={saving}>
+        保存
+      </s-button>
+    </s-modal>
+  );
 }
 
 // ── Summary 1行（精算プレビューと同型）──────────────────────────────────────────
@@ -591,6 +673,8 @@ function HistoryDailyDetailView({
   const [footerFootfallInput, setFooterFootfallInput] = useState("");
   const [savingFootfall, setSavingFootfall] = useState(false);
   const [footfallErr, setFootfallErr] = useState("");
+  const [footfallModalOpen, setFootfallModalOpen] = useState(false);
+  const historyFootfallModalRef = useRef(null);
 
   useEffect(() => {
     setViewDate(entryDate);
@@ -639,10 +723,23 @@ function HistoryDailyDetailView({
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    setFootfallModalOpen(false);
+  }, [scope]);
+
   const o = useMemo(() => ({ ...defaultDisplayOptions(), ...(data?.displayOptions ?? {}) }), [data]);
   const rows = data?.rows ?? [];
   const totals = data?.totals ?? {};
-  const showAllTotals = scope === "all" && rows.length > 1 && o.showStoreTotals !== false;
+  const showLocationRows = o.showLocationRows !== false;
+  const showStoreTotalsFlag = o.showStoreTotals !== false;
+  const showAllTotals = scope === "all" && rows.length >= 1 && showStoreTotalsFlag;
+  const totalsDaily = totalsDailyRows(totals, o);
+  const showTotalsSection = showAllTotals && totalsDaily.length > 0;
+
+  let rowsForUi = [];
+  if (showLocationRows) rowsForUi = rows;
+  else if (scope === "single") rowsForUi = sessionGid ? rows.filter((r) => r.locationId === sessionGid) : rows;
+  else rowsForUi = [];
 
   const sessionRow = useMemo(() => {
     if (!sessionGid || !rows.length) return null;
@@ -658,6 +755,7 @@ function HistoryDailyDetailView({
     try {
       await reportFootfall({ locationId: sessionGid, targetDate: viewDate, visitors });
       await loadData();
+      setFootfallModalOpen(false);
     } catch (err) {
       setFootfallErr(toUserMessage(err?.message) || "保存に失敗しました");
     } finally {
@@ -679,201 +777,230 @@ function HistoryDailyDetailView({
   const canPrevDay = viewDate > "2020-01-01";
   const canNextDay = viewDate < todayStr();
 
-  return (
-    <s-page heading="売上サマリー">
-      <s-stack
-        gap="none"
-        blockSize="100%"
-        inlineSize="100%"
-        minBlockSize="0"
-        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
-      >
-        <s-box
-          padding="base"
-          border="base"
-          style={{
-            position: "sticky",
-            top: 0,
-            background: "var(--s-color-bg)",
-            zIndex: 10,
-          }}
-        >
-          <s-stack gap="small">
-            <s-button kind="plain" onClick={onNavigateToDailyList}>
-              ← 日別一覧に戻る
-            </s-button>
-            {locLoadErr ? (
-              <s-text tone="critical" size="small">
-                {locLoadErr}
-              </s-text>
-            ) : null}
-            <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {sessionLocationName || "店舗名を取得中…"}
-            </s-text>
-            <s-text tone="subdued" size="small">
-              日次（履歴） {viewDate}
-            </s-text>
-            {scope === "all" ? (
-              <s-text tone="subdued" size="small">
-                表示: 全店舗
-              </s-text>
-            ) : null}
+  const kpiHidden = !loading && data && rows.length > 0 && !hasAnyDailyKpi(o);
+  const layoutEmpty =
+    !loading && data && rows.length > 0 && !showTotalsSection && rowsForUi.length === 0;
 
-            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
-              <s-stack direction="inline" gap="extraSmall" alignItems="center">
-                <s-button
-                  kind={scope === "single" ? "primary" : "secondary"}
-                  onClick={() => setScope("single")}
-                >
-                  この店舗
+  return (
+    <>
+      <s-page heading="売上サマリー">
+        <s-stack
+          gap="none"
+          blockSize="100%"
+          inlineSize="100%"
+          minBlockSize="0"
+          style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+        >
+          <s-box
+            padding="base"
+            border="base"
+            style={{
+              position: "sticky",
+              top: 0,
+              background: "var(--s-color-bg)",
+              zIndex: 10,
+            }}
+          >
+            <s-stack gap="small">
+              <s-button kind="plain" onClick={onNavigateToDailyList}>
+                ← 日別一覧に戻る
+              </s-button>
+              {locLoadErr ? (
+                <s-text tone="critical" size="small">
+                  {locLoadErr}
+                </s-text>
+              ) : null}
+              <s-stack direction="inline" justifyContent="space-between" alignItems="start" gap="small" style={{ width: "100%" }}>
+                <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+                  <s-stack gap="extraSmall">
+                    <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {sessionLocationName || "店舗名を取得中…"}
+                    </s-text>
+                    <s-text tone="subdued" size="small">
+                      日次（履歴） {viewDate}
+                    </s-text>
+                    {scope === "all" ? (
+                      <s-text tone="subdued" size="small">
+                        表示: 全店舗
+                      </s-text>
+                    ) : null}
+                  </s-stack>
+                </s-box>
+                <s-box style={{ flex: "0 0 auto", alignSelf: "start" }}>
+                  <s-button
+                    kind={scope === "all" ? "primary" : "secondary"}
+                    onClick={() => setScope(scope === "all" ? "single" : "all")}
+                  >
+                    全店舗表示
+                  </s-button>
+                </s-box>
+              </s-stack>
+
+              <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
+                <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setViewDate(addDays(viewDate, -1))}>
+                  前日
                 </s-button>
-                <s-button kind={scope === "all" ? "primary" : "secondary"} onClick={() => setScope("all")}>
-                  全店舗
+                <s-text emphasis="bold" size="small">
+                  {viewDate}
+                </s-text>
+                <s-button kind="secondary" disabled={!canNextDay} onClick={() => setViewDate(addDays(viewDate, 1))}>
+                  翌日
                 </s-button>
               </s-stack>
             </s-stack>
+          </s-box>
 
-            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
-              <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setViewDate(addDays(viewDate, -1))}>
-                前日
-              </s-button>
-              <s-text emphasis="bold" size="small">
-                {viewDate}
-              </s-text>
-              <s-button kind="secondary" disabled={!canNextDay} onClick={() => setViewDate(addDays(viewDate, 1))}>
-                翌日
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </s-box>
+          <s-divider />
 
-        <s-divider />
+          <s-scroll-box
+            blockSize="auto"
+            maxBlockSize="100%"
+            minBlockSize="0"
+            style={{ flex: "1 1 0", minHeight: 0 }}
+          >
+            <s-box padding="base">
+              <s-stack gap="base">
+                {loading ? (
+                  <s-text tone="subdued" size="small">
+                    読み込み中…
+                  </s-text>
+                ) : null}
+                {error ? (
+                  <s-banner status="critical">{error}</s-banner>
+                ) : null}
 
-        <s-scroll-box
-          blockSize="auto"
-          maxBlockSize="100%"
-          minBlockSize="0"
-          style={{ flex: "1 1 0", minHeight: 0 }}
-        >
-          <s-box padding="base">
-            <s-stack gap="base">
-              {loading ? (
-                <s-text tone="subdued" size="small">
-                  読み込み中…
-                </s-text>
-              ) : null}
-              {error ? (
-                <s-banner status="critical">{error}</s-banner>
-              ) : null}
+                {kpiHidden ? (
+                  <s-banner status="info">
+                    表示する数字の項目がすべてOFFです。管理画面の売上サマリー設定で、実績や件数などをONにしてください。
+                  </s-banner>
+                ) : null}
 
-              {!loading && data && (
-                <>
-                  {rows.length === 0 ? (
-                    <s-text tone="subdued" size="small">
-                      売上サマリーが有効な店舗がありません。管理画面でロケーション設定を確認してください。
-                    </s-text>
-                  ) : (
-                    <>
-                      {showAllTotals ? (
-                        <MetricBlock title="全店合計">
-                          {totalsDailyRows(totals, o).map((r, i, arr) => (
-                            <SummaryRow
-                              key={r.label}
-                              label={r.label}
-                              value={r.value}
-                              valueBold={r.valueBold}
-                              divider={i < arr.length - 1}
-                            />
-                          ))}
-                        </MetricBlock>
-                      ) : null}
+                {layoutEmpty ? (
+                  <s-banner status="info">
+                    店舗ごとの一覧と店舗合計の両方が非表示です。管理画面で「ロケーション行を表示」または「店舗合計を表示」をONにしてください。
+                  </s-banner>
+                ) : null}
 
-                      {rows.map((row) => (
-                        <s-stack key={row.locationId} gap="small">
-                          <MetricBlock title={row.locationName ?? row.locationId}>
-                            <DailyMetricRows row={row} o={o} />
+                {!loading && data && (
+                  <>
+                    {rows.length === 0 ? (
+                      <s-text tone="subdued" size="small">
+                        売上サマリーが有効な店舗がありません。管理画面でロケーション設定を確認してください。
+                      </s-text>
+                    ) : (
+                      <>
+                        {showTotalsSection ? (
+                          <MetricBlock title="全店合計">
+                            {totalsDaily.map((r, i, arr) => (
+                              <SummaryRow
+                                key={r.label}
+                                label={r.label}
+                                value={r.value}
+                                valueBold={r.valueBold}
+                                divider={i < arr.length - 1}
+                              />
+                            ))}
                           </MetricBlock>
-                          {row.footfallReportingEnabled && scope === "all" ? (
-                            <s-box padding="none" paddingBlockStart="none">
-                              <s-stack direction="inline" gap="small" blockAlignment="end">
-                                <s-text-field
-                                  label={`入店数（${row.locationName ?? ""}）`}
-                                  value={footfallInputs[row.locationId] ?? ""}
-                                  onChange={(e) =>
-                                    setFootfallInputs((s) => ({
-                                      ...s,
-                                      [row.locationId]:
-                                        e.detail?.value ?? e.target?.value ?? footfallInputs[row.locationId],
-                                    }))
-                                  }
-                                />
-                                <s-button onClick={() => handleSaveRowFootfall(row.locationId)}>保存</s-button>
-                              </s-stack>
-                            </s-box>
-                          ) : null}
-                        </s-stack>
-                      ))}
-                    </>
-                  )}
-                </>
-              )}
+                        ) : null}
+
+                        {rowsForUi.map((row) => (
+                          <s-stack key={row.locationId} gap="small">
+                            <MetricBlock title={row.locationName ?? row.locationId}>
+                              <DailyMetricRows row={row} o={o} />
+                            </MetricBlock>
+                            {row.footfallReportingEnabled && scope === "all" ? (
+                              <s-box padding="none" paddingBlockStart="none">
+                                <s-stack direction="inline" gap="small" blockAlignment="end">
+                                  <s-text-field
+                                    label={`入店数（${row.locationName ?? ""}）`}
+                                    value={footfallInputs[row.locationId] ?? ""}
+                                    onChange={(e) =>
+                                      setFootfallInputs((s) => ({
+                                        ...s,
+                                        [row.locationId]:
+                                          e.detail?.value ?? e.target?.value ?? footfallInputs[row.locationId],
+                                      }))
+                                    }
+                                  />
+                                  <s-button onClick={() => handleSaveRowFootfall(row.locationId)}>保存</s-button>
+                                </s-stack>
+                              </s-box>
+                            ) : null}
+                          </s-stack>
+                        ))}
+                      </>
+                    )}
+                  </>
+                )}
+              </s-stack>
+            </s-box>
+          </s-scroll-box>
+
+          <s-divider />
+
+          <s-box
+            padding="base"
+            border="base"
+            style={{
+              position: "sticky",
+              bottom: 0,
+              background: "var(--s-color-bg)",
+              zIndex: 10,
+            }}
+          >
+            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+                {scope === "all" ? (
+                  <s-button kind="secondary" disabled>
+                    入店数を報告
+                  </s-button>
+                ) : sessionRow?.footfallReportingEnabled ? (
+                  <s-stack gap="extraSmall">
+                    <s-button
+                      kind="secondary"
+                      onClick={() => {
+                        setFootfallErr("");
+                        setFootfallModalOpen(true);
+                      }}
+                    >
+                      {footerFootfallInput
+                        ? `入店数を報告（${footerFootfallInput}人）`
+                        : "入店数を報告"}
+                    </s-button>
+                    {footfallErr ? (
+                      <s-text tone="critical" size="small">
+                        {footfallErr}
+                      </s-text>
+                    ) : null}
+                  </s-stack>
+                ) : (
+                  <s-text tone="subdued" size="small">
+                    入店数報告なし
+                  </s-text>
+                )}
+              </s-box>
+              <s-box style={{ flex: "0 0 auto" }}>
+                <s-button kind="secondary" onClick={onNavigateToDailyList}>
+                  日別一覧
+                </s-button>
+              </s-box>
             </s-stack>
           </s-box>
-        </s-scroll-box>
-
-        <s-divider />
-
-        <s-box
-          padding="base"
-          border="base"
-          style={{
-            position: "sticky",
-            bottom: 0,
-            background: "var(--s-color-bg)",
-            zIndex: 10,
-          }}
-        >
-          <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
-            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-              {scope === "all" ? (
-                <s-text tone="subdued" size="small">
-                  全店 入店数: {totals.visitors != null ? `${fmtNum(totals.visitors)}人` : "—"}
-                </s-text>
-              ) : sessionRow?.footfallReportingEnabled ? (
-                <s-stack direction="inline" gap="small" blockAlignment="end">
-                  <s-text-field
-                    label="入店数"
-                    value={footerFootfallInput}
-                    onChange={(e) =>
-                      setFooterFootfallInput(e.detail?.value ?? e.target?.value ?? footerFootfallInput)
-                    }
-                  />
-                  <s-button onClick={handleSaveFooterFootfall} loading={savingFootfall}>
-                    保存
-                  </s-button>
-                </s-stack>
-              ) : (
-                <s-text tone="subdued" size="small">
-                  入店数報告なし
-                </s-text>
-              )}
-              {footfallErr ? (
-                <s-box paddingBlockStart="tight">
-                  <s-text tone="critical" size="small">
-                    {footfallErr}
-                  </s-text>
-                </s-box>
-              ) : null}
-            </s-box>
-            <s-box style={{ flex: "0 0 auto" }}>
-              <s-button kind="secondary" onClick={onNavigateToDailyList}>
-                日別一覧
-              </s-button>
-            </s-box>
-          </s-stack>
-        </s-box>
-      </s-stack>
-    </s-page>
+        </s-stack>
+      </s-page>
+      <FootfallReportModalHost
+        modalRef={historyFootfallModalRef}
+        open={footfallModalOpen}
+        onRequestClose={() => setFootfallModalOpen(false)}
+        heading="入店数の報告"
+        dateLine={`対象日: ${viewDate}`}
+        value={footerFootfallInput}
+        onChange={(v) => setFooterFootfallInput(v)}
+        onSave={handleSaveFooterFootfall}
+        saving={savingFootfall}
+        footfallErr={footfallErr}
+      />
+    </>
   );
 }
 
@@ -910,6 +1037,8 @@ function SalesSummaryModal() {
   const [footerFootfallInput, setFooterFootfallInput] = useState("");
   const [savingFootfall, setSavingFootfall] = useState(false);
   const [footfallErr, setFootfallErr] = useState("");
+  const [footfallModalOpen, setFootfallModalOpen] = useState(false);
+  const mainFootfallModalRef = useRef(null);
 
   const { locationGid: sessionGid, isReady: sessionReady } = useSessionLocation();
 
@@ -1038,11 +1167,38 @@ function SalesSummaryModal() {
     }
   }, [sessionReady, loadData]);
 
+  useEffect(() => {
+    setFootfallModalOpen(false);
+  }, [grain, scope]);
+
   const o = useMemo(() => ({ ...defaultDisplayOptions(), ...(data?.displayOptions ?? {}) }), [data]);
 
   const rows = data?.rows ?? [];
   const totals = data?.totals ?? {};
-  const showAllTotals = scope === "all" && rows.length > 1 && o.showStoreTotals !== false;
+  const showLocationRows = o.showLocationRows !== false;
+  const showStoreTotalsFlag = o.showStoreTotals !== false;
+  const showAllTotals = scope === "all" && rows.length >= 1 && showStoreTotalsFlag;
+  const totalsDaily = totalsDailyRows(totals, o);
+  const totalsPeriod = totalsPeriodRows(totals, o);
+  const showTotalsSectionDaily = showAllTotals && grain === "daily" && totalsDaily.length > 0;
+  const showTotalsSectionMonthly = showAllTotals && grain === "monthly" && totalsPeriod.length > 0;
+
+  let rowsForUi = [];
+  if (showLocationRows) rowsForUi = rows;
+  else if (scope === "single") rowsForUi = sessionGid ? rows.filter((r) => r.locationId === sessionGid) : rows;
+  else rowsForUi = [];
+
+  const kpiHidden =
+    !loading &&
+    data &&
+    rows.length > 0 &&
+    (grain === "daily" ? !hasAnyDailyKpi(o) : !hasAnyPeriodKpi(o));
+  const layoutEmpty =
+    !loading &&
+    data &&
+    rows.length > 0 &&
+    !(showTotalsSectionDaily || showTotalsSectionMonthly) &&
+    rowsForUi.length === 0;
 
   const sessionRow = useMemo(() => {
     if (!sessionGid || !rows.length) return null;
@@ -1058,6 +1214,7 @@ function SalesSummaryModal() {
     try {
       await reportFootfall({ locationId: sessionGid, targetDate, visitors });
       await loadData();
+      setFootfallModalOpen(false);
     } catch (err) {
       setFootfallErr(toUserMessage(err?.message) || "保存に失敗しました");
     } finally {
@@ -1137,316 +1294,347 @@ function SalesSummaryModal() {
   const canPrevDay = targetDate > "2020-01-01";
   const canNextDay = targetDate < todayStr();
 
+  const footfallReportDisabled = grain === "monthly" || scope === "all";
+
   return (
-    <s-page heading="売上サマリー">
-      <s-stack
-        gap="none"
-        blockSize="100%"
-        inlineSize="100%"
-        minBlockSize="0"
-        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
-      >
-        <s-box
-          padding="base"
-          border="base"
-          style={{
-            position: "sticky",
-            top: 0,
-            background: "var(--s-color-bg)",
-            zIndex: 10,
-          }}
-        >
-          <s-stack gap="small">
-            {locLoadErr ? (
-              <s-text tone="critical" size="small">
-                {locLoadErr}
-              </s-text>
-            ) : null}
-            <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {sessionLocationName || "店舗名を取得中…"}
-            </s-text>
-            {scope === "all" ? (
-              <s-text tone="subdued" size="small">
-                表示: 全店舗
-              </s-text>
-            ) : null}
-
-            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
-              <s-stack direction="inline" gap="extraSmall" alignItems="center">
-                <s-button
-                  kind={scope === "single" ? "primary" : "secondary"}
-                  onClick={() => setScope("single")}
-                >
-                  この店舗
-                </s-button>
-                <s-button kind={scope === "all" ? "primary" : "secondary"} onClick={() => setScope("all")}>
-                  全店舗
-                </s-button>
-              </s-stack>
-              <s-stack direction="inline" gap="extraSmall" alignItems="center">
-                <s-button
-                  kind={grain === "monthly" ? "primary" : "secondary"}
-                  onClick={() => setGrain("monthly")}
-                >
-                  月次
-                </s-button>
-                <s-button kind={grain === "daily" ? "primary" : "secondary"} onClick={() => setGrain("daily")}>
-                  日次
-                </s-button>
-              </s-stack>
-            </s-stack>
-
-            {grain === "daily" ? (
-              <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
-                <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setTargetDate(addDays(targetDate, -1))}>
-                  前日
-                </s-button>
-                <s-text emphasis="bold" size="small">
-                  {targetDate}
-                </s-text>
-                <s-button kind="secondary" disabled={!canNextDay} onClick={() => setTargetDate(addDays(targetDate, 1))}>
-                  翌日
-                </s-button>
-              </s-stack>
-            ) : (
-              <s-stack gap="small">
-                <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
-                  <s-box style={{ flex: "0 0 auto" }}>
-                    <s-text tone="subdued" size="small">
-                      対象月
-                    </s-text>
-                  </s-box>
-                  <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
-                    <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
-                      <s-button
-                        kind="secondary"
-                        style={{ width: "100%", maxInlineSize: "100%" }}
-                        onClick={() => {
-                          setMonthMenuOpen(false);
-                          setYearMenuOpen((v) => !v);
-                        }}
-                      >
-                        {selectedYear}年
-                      </s-button>
-                    </s-box>
-                    <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
-                      <s-button
-                        kind="secondary"
-                        style={{ width: "100%", maxInlineSize: "100%" }}
-                        onClick={() => {
-                          setYearMenuOpen(false);
-                          setMonthMenuOpen((v) => !v);
-                        }}
-                      >
-                        {selectedMonth}月
-                      </s-button>
-                    </s-box>
-                  </s-stack>
-                </s-stack>
-                {yearMenuOpen ? (
-                  <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                    <s-stack
-                      direction="inline"
-                      gap="small"
-                      style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
-                    >
-                      {availableYears.map((y) => (
-                        <s-button
-                          key={`y-${y}`}
-                          kind={y === selectedYear ? "primary" : "secondary"}
-                          style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
-                          onClick={() => {
-                            setSelectedYear(y);
-                            setYearMenuOpen(false);
-                          }}
-                        >
-                          {y}年
-                        </s-button>
-                      ))}
-                    </s-stack>
-                  </s-box>
-                ) : null}
-                {monthMenuOpen ? (
-                  <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                    <s-stack
-                      direction="inline"
-                      gap="small"
-                      style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
-                    >
-                      {monthsLoading ? (
-                        <s-text tone="subdued" size="small">
-                          月一覧を読み込み中…
-                        </s-text>
-                      ) : (
-                        availableMonthsForYear.map((m) => (
-                          <s-button
-                            key={`m-${m}`}
-                            kind={m === selectedMonth ? "primary" : "secondary"}
-                            style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
-                            onClick={() => {
-                              setSelectedMonth(m);
-                              setMonthMenuOpen(false);
-                            }}
-                          >
-                            {m}月
-                          </s-button>
-                        ))
-                      )}
-                    </s-stack>
-                  </s-box>
-                ) : null}
-              </s-stack>
-            )}
-          </s-stack>
-        </s-box>
-
-        <s-divider />
-
-        <s-scroll-box
-          blockSize="auto"
-          maxBlockSize="100%"
+    <>
+      <s-page heading="売上サマリー">
+        <s-stack
+          gap="none"
+          blockSize="100%"
+          inlineSize="100%"
           minBlockSize="0"
-          style={{ flex: "1 1 0", minHeight: 0 }}
+          style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
         >
-          <s-box padding="base">
-            <s-stack gap="base">
-              {loading ? (
-                <s-text tone="subdued" size="small">
-                  読み込み中…
+          <s-box
+            padding="base"
+            border="base"
+            style={{
+              position: "sticky",
+              top: 0,
+              background: "var(--s-color-bg)",
+              zIndex: 10,
+            }}
+          >
+            <s-stack gap="small">
+              {locLoadErr ? (
+                <s-text tone="critical" size="small">
+                  {locLoadErr}
                 </s-text>
               ) : null}
-              {error ? (
-                <s-banner status="critical">{error}</s-banner>
-              ) : null}
-
-              {!loading && data && (
-                <>
-                  {rows.length === 0 ? (
-                    <s-text tone="subdued" size="small">
-                      売上サマリーが有効な店舗がありません。管理画面でロケーション設定を確認してください。
+              <s-stack direction="inline" justifyContent="space-between" alignItems="start" gap="small" style={{ width: "100%" }}>
+                <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+                  <s-stack gap="extraSmall">
+                    <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {sessionLocationName || "店舗名を取得中…"}
                     </s-text>
-                  ) : (
-                    <>
-                      {showAllTotals && grain === "daily" && (
-                        <MetricBlock title="全店合計">
-                          {totalsDailyRows(totals, o).map((r, i, arr) => (
-                            <SummaryRow
-                              key={r.label}
-                              label={r.label}
-                              value={r.value}
-                              valueBold={r.valueBold}
-                              divider={i < arr.length - 1}
-                            />
-                          ))}
-                        </MetricBlock>
-                      )}
-                      {showAllTotals && grain === "monthly" && (
-                        <MetricBlock title="全店合計">
-                          {totalsPeriodRows(totals, o).map((r, i, arr) => (
-                            <SummaryRow
-                              key={r.label}
-                              label={r.label}
-                              value={r.value}
-                              valueBold={r.valueBold}
-                              divider={i < arr.length - 1}
-                            />
-                          ))}
-                        </MetricBlock>
-                      )}
+                    {scope === "all" ? (
+                      <s-text tone="subdued" size="small">
+                        表示: 全店舗
+                      </s-text>
+                    ) : null}
+                  </s-stack>
+                </s-box>
+                <s-box style={{ flex: "0 0 auto", alignSelf: "start" }}>
+                  <s-button
+                    kind={scope === "all" ? "primary" : "secondary"}
+                    onClick={() => setScope(scope === "all" ? "single" : "all")}
+                  >
+                    全店舗表示
+                  </s-button>
+                </s-box>
+              </s-stack>
 
-                      {rows.map((row) => (
-                        <s-stack key={row.locationId} gap="small">
-                          <MetricBlock title={row.locationName ?? row.locationId}>
-                            {grain === "daily" ? (
-                              <DailyMetricRows row={row} o={o} />
-                            ) : (
-                              <PeriodMetricRows row={row} o={o} />
-                            )}
-                          </MetricBlock>
-                          {grain === "daily" && row.footfallReportingEnabled && scope === "all" ? (
-                            <s-box padding="none" paddingBlockStart="none">
-                              <s-stack direction="inline" gap="small" blockAlignment="end">
-                                <s-text-field
-                                  label={`入店数（${row.locationName ?? ""}）`}
-                                  value={footfallInputs[row.locationId] ?? ""}
-                                  onChange={(e) =>
-                                    setFootfallInputs((s) => ({
-                                      ...s,
-                                      [row.locationId]:
-                                        e.detail?.value ?? e.target?.value ?? footfallInputs[row.locationId],
-                                    }))
-                                  }
-                                />
-                                <s-button onClick={() => handleSaveRowFootfall(row.locationId)}>保存</s-button>
-                              </s-stack>
-                            </s-box>
-                          ) : null}
-                        </s-stack>
-                      ))}
-                    </>
-                  )}
-                </>
-              )}
-            </s-stack>
-          </s-box>
-        </s-scroll-box>
+              <s-stack direction="inline" gap="small" alignItems="stretch" style={{ width: "100%" }}>
+                <s-box style={{ flex: "1 1 50%", minInlineSize: 0 }}>
+                  <s-button
+                    kind={grain === "monthly" ? "primary" : "secondary"}
+                    style={{ width: "100%" }}
+                    onClick={() => setGrain("monthly")}
+                  >
+                    月次
+                  </s-button>
+                </s-box>
+                <s-box style={{ flex: "1 1 50%", minInlineSize: 0 }}>
+                  <s-button
+                    kind={grain === "daily" ? "primary" : "secondary"}
+                    style={{ width: "100%" }}
+                    onClick={() => setGrain("daily")}
+                  >
+                    日次
+                  </s-button>
+                </s-box>
+              </s-stack>
 
-        <s-divider />
-
-        <s-box
-          padding="base"
-          border="base"
-          style={{
-            position: "sticky",
-            bottom: 0,
-            background: "var(--s-color-bg)",
-            zIndex: 10,
-          }}
-        >
-          <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
-            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-              {grain === "monthly" ? (
-                <s-text tone="subdued" size="small">
-                  入店数は日次で入力
-                </s-text>
-              ) : scope === "all" ? (
-                <s-text tone="subdued" size="small">
-                  全店 入店数: {totals.visitors != null ? `${fmtNum(totals.visitors)}人` : "—"}
-                </s-text>
-              ) : sessionRow?.footfallReportingEnabled ? (
-                <s-stack direction="inline" gap="small" blockAlignment="end">
-                  <s-text-field
-                    label="入店数"
-                    value={footerFootfallInput}
-                    onChange={(e) =>
-                      setFooterFootfallInput(e.detail?.value ?? e.target?.value ?? footerFootfallInput)
-                    }
-                  />
-                  <s-button onClick={handleSaveFooterFootfall} loading={savingFootfall}>
-                    保存
+              {grain === "daily" ? (
+                <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
+                  <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setTargetDate(addDays(targetDate, -1))}>
+                    前日
+                  </s-button>
+                  <s-text emphasis="bold" size="small">
+                    {targetDate}
+                  </s-text>
+                  <s-button kind="secondary" disabled={!canNextDay} onClick={() => setTargetDate(addDays(targetDate, 1))}>
+                    翌日
                   </s-button>
                 </s-stack>
               ) : (
-                <s-text tone="subdued" size="small">
-                  入店数報告なし
-                </s-text>
+                <s-stack gap="small">
+                  <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+                    <s-box style={{ flex: "0 0 auto" }}>
+                      <s-text tone="subdued" size="small">
+                        対象月
+                      </s-text>
+                    </s-box>
+                    <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
+                      <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
+                        <s-button
+                          kind="secondary"
+                          style={{ width: "100%", maxInlineSize: "100%" }}
+                          onClick={() => {
+                            setMonthMenuOpen(false);
+                            setYearMenuOpen((v) => !v);
+                          }}
+                        >
+                          {selectedYear}年
+                        </s-button>
+                      </s-box>
+                      <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
+                        <s-button
+                          kind="secondary"
+                          style={{ width: "100%", maxInlineSize: "100%" }}
+                          onClick={() => {
+                            setYearMenuOpen(false);
+                            setMonthMenuOpen((v) => !v);
+                          }}
+                        >
+                          {selectedMonth}月
+                        </s-button>
+                      </s-box>
+                    </s-stack>
+                  </s-stack>
+                  {yearMenuOpen ? (
+                    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                      <s-stack
+                        direction="inline"
+                        gap="small"
+                        style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
+                      >
+                        {availableYears.map((y) => (
+                          <s-button
+                            key={`y-${y}`}
+                            kind={y === selectedYear ? "primary" : "secondary"}
+                            style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
+                            onClick={() => {
+                              setSelectedYear(y);
+                              setYearMenuOpen(false);
+                            }}
+                          >
+                            {y}年
+                          </s-button>
+                        ))}
+                      </s-stack>
+                    </s-box>
+                  ) : null}
+                  {monthMenuOpen ? (
+                    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                      <s-stack
+                        direction="inline"
+                        gap="small"
+                        style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
+                      >
+                        {monthsLoading ? (
+                          <s-text tone="subdued" size="small">
+                            月一覧を読み込み中…
+                          </s-text>
+                        ) : (
+                          availableMonthsForYear.map((m) => (
+                            <s-button
+                              key={`m-${m}`}
+                              kind={m === selectedMonth ? "primary" : "secondary"}
+                              style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
+                              onClick={() => {
+                                setSelectedMonth(m);
+                                setMonthMenuOpen(false);
+                              }}
+                            >
+                              {m}月
+                            </s-button>
+                          ))
+                        )}
+                      </s-stack>
+                    </s-box>
+                  ) : null}
+                </s-stack>
               )}
-              {footfallErr ? (
-                <s-box paddingBlockStart="tight">
-                  <s-text tone="critical" size="small">
-                    {footfallErr}
+            </s-stack>
+          </s-box>
+
+          <s-divider />
+
+          <s-scroll-box
+            blockSize="auto"
+            maxBlockSize="100%"
+            minBlockSize="0"
+            style={{ flex: "1 1 0", minHeight: 0 }}
+          >
+            <s-box padding="base">
+              <s-stack gap="base">
+                {loading ? (
+                  <s-text tone="subdued" size="small">
+                    読み込み中…
                   </s-text>
-                </s-box>
-              ) : null}
+                ) : null}
+                {error ? (
+                  <s-banner status="critical">{error}</s-banner>
+                ) : null}
+
+                {kpiHidden ? (
+                  <s-banner status="info">
+                    表示する数字の項目がすべてOFFです。管理画面の売上サマリー設定で、実績や件数などをONにしてください。
+                  </s-banner>
+                ) : null}
+
+                {layoutEmpty ? (
+                  <s-banner status="info">
+                    店舗ごとの一覧と店舗合計の両方が非表示です。管理画面で「ロケーション行を表示」または「店舗合計を表示」をONにしてください。
+                  </s-banner>
+                ) : null}
+
+                {!loading && data && (
+                  <>
+                    {rows.length === 0 ? (
+                      <s-text tone="subdued" size="small">
+                        売上サマリーが有効な店舗がありません。管理画面でロケーション設定を確認してください。
+                      </s-text>
+                    ) : (
+                      <>
+                        {showTotalsSectionDaily ? (
+                          <MetricBlock title="全店合計">
+                            {totalsDaily.map((r, i, arr) => (
+                              <SummaryRow
+                                key={r.label}
+                                label={r.label}
+                                value={r.value}
+                                valueBold={r.valueBold}
+                                divider={i < arr.length - 1}
+                              />
+                            ))}
+                          </MetricBlock>
+                        ) : null}
+                        {showTotalsSectionMonthly ? (
+                          <MetricBlock title="全店合計">
+                            {totalsPeriod.map((r, i, arr) => (
+                              <SummaryRow
+                                key={r.label}
+                                label={r.label}
+                                value={r.value}
+                                valueBold={r.valueBold}
+                                divider={i < arr.length - 1}
+                              />
+                            ))}
+                          </MetricBlock>
+                        ) : null}
+
+                        {rowsForUi.map((row) => (
+                          <s-stack key={row.locationId} gap="small">
+                            <MetricBlock title={row.locationName ?? row.locationId}>
+                              {grain === "daily" ? (
+                                <DailyMetricRows row={row} o={o} />
+                              ) : (
+                                <PeriodMetricRows row={row} o={o} />
+                              )}
+                            </MetricBlock>
+                            {grain === "daily" && row.footfallReportingEnabled && scope === "all" ? (
+                              <s-box padding="none" paddingBlockStart="none">
+                                <s-stack direction="inline" gap="small" blockAlignment="end">
+                                  <s-text-field
+                                    label={`入店数（${row.locationName ?? ""}）`}
+                                    value={footfallInputs[row.locationId] ?? ""}
+                                    onChange={(e) =>
+                                      setFootfallInputs((s) => ({
+                                        ...s,
+                                        [row.locationId]:
+                                          e.detail?.value ?? e.target?.value ?? footfallInputs[row.locationId],
+                                      }))
+                                    }
+                                  />
+                                  <s-button onClick={() => handleSaveRowFootfall(row.locationId)}>保存</s-button>
+                                </s-stack>
+                              </s-box>
+                            ) : null}
+                          </s-stack>
+                        ))}
+                      </>
+                    )}
+                  </>
+                )}
+              </s-stack>
             </s-box>
-            <s-box style={{ flex: "0 0 auto" }}>
-              <s-button kind="secondary" disabled={!sessionGid} onClick={openDailyList}>
-                日別一覧
-              </s-button>
-            </s-box>
-          </s-stack>
-        </s-box>
-      </s-stack>
-    </s-page>
+          </s-scroll-box>
+
+          <s-divider />
+
+          <s-box
+            padding="base"
+            border="base"
+            style={{
+              position: "sticky",
+              bottom: 0,
+              background: "var(--s-color-bg)",
+              zIndex: 10,
+            }}
+          >
+            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+                {sessionRow?.footfallReportingEnabled ? (
+                  <s-stack gap="extraSmall">
+                    <s-button
+                      kind="secondary"
+                      disabled={footfallReportDisabled}
+                      onClick={() => {
+                        if (footfallReportDisabled) return;
+                        setFootfallErr("");
+                        setFootfallModalOpen(true);
+                      }}
+                    >
+                      {footerFootfallInput && !footfallReportDisabled
+                        ? `入店数を報告（${footerFootfallInput}人）`
+                        : "入店数を報告"}
+                    </s-button>
+                    {footfallErr && !footfallReportDisabled ? (
+                      <s-text tone="critical" size="small">
+                        {footfallErr}
+                      </s-text>
+                    ) : null}
+                  </s-stack>
+                ) : (
+                  <s-text tone="subdued" size="small">
+                    入店数報告なし
+                  </s-text>
+                )}
+              </s-box>
+              <s-box style={{ flex: "0 0 auto" }}>
+                <s-button kind="secondary" disabled={!sessionGid} onClick={openDailyList}>
+                  日別一覧
+                </s-button>
+              </s-box>
+            </s-stack>
+          </s-box>
+        </s-stack>
+      </s-page>
+      <FootfallReportModalHost
+        modalRef={mainFootfallModalRef}
+        open={footfallModalOpen}
+        onRequestClose={() => setFootfallModalOpen(false)}
+        heading="入店数の報告"
+        dateLine={`対象日: ${targetDate}`}
+        value={footerFootfallInput}
+        onChange={(v) => setFooterFootfallInput(v)}
+        onSave={handleSaveFooterFootfall}
+        saving={savingFootfall}
+        footfallErr={footfallErr}
+      />
+    </>
   );
 }
