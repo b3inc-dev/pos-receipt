@@ -21,6 +21,11 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
+import {
+  autoDiscoverChannels,
+  computeAndCacheChannelDailySummary,
+  getEnabledSalesChannels,
+} from "../services/salesChannelEngine.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
@@ -383,6 +388,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         selectedLocationId,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows: [] as Array<Record<string, string | number | null>>,
+        channelRows: [] as Array<Record<string, string | number | null>>,
         loadError: null as string | null,
       };
     }
@@ -400,6 +406,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         selectedLocationId,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows: [] as Array<Record<string, string | number | null>>,
+        channelRows: [] as Array<Record<string, string | number | null>>,
         loadError: null as string | null,
       };
     }
@@ -437,6 +444,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
         }
       }
       const rows = rowsRaw.filter((r): r is NonNullable<typeof r> => r !== null);
+
+      // ── チャネル行集計（daily） ──────────────────────────────────────────────
+      await autoDiscoverChannels(admin, shop.id);
+      const enabledChannels = await getEnabledSalesChannels(shop.id);
+      const isPastDate = targetDate < today;
+      const channelRows: Array<{
+        channelId: string; channelName: string;
+        actual: number; orders: number; items: number;
+        budget: number | null; budgetRatio: number | null;
+        atv: number | null; setRate: number | null; unit: number | null;
+      }> = [];
+      for (const ch of enabledChannels) {
+        try {
+          if (isPastDate) {
+            const cached = await prisma.salesChannelCacheDaily.findFirst({
+              where: { shopId: shop.id, channelId: ch.id, targetDate },
+            });
+            if (cached && ch.sourceNamesJson === ch.sourceNamesSnapshot) {
+              channelRows.push({
+                channelId: ch.id, channelName: ch.displayName,
+                actual: Number(cached.actual), orders: cached.orders, items: cached.items,
+                budget: cached.budget !== null ? Number(cached.budget) : null,
+                budgetRatio: cached.budgetRatio !== null ? Number(cached.budgetRatio) : null,
+                atv: cached.atv !== null ? Number(cached.atv) : null,
+                setRate: cached.setRate !== null ? Number(cached.setRate) : null,
+                unit: cached.unit !== null ? Number(cached.unit) : null,
+              });
+              continue;
+            }
+          }
+          const row = await computeAndCacheChannelDailySummary(
+            admin, shop.id, ch.id, ch.displayName, ch.sourceNames, targetDate
+          );
+          channelRows.push({ channelId: ch.id, channelName: ch.displayName, ...row });
+        } catch { /* チャネル1件の失敗で全体を落とさない */ }
+      }
+
       const failedDetails = Array.from(failedLocationErrors.entries()).map(
         ([name, reason]) => `${name}: ${reason}`
       );
@@ -455,6 +499,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         selectedLocationId,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows,
+        channelRows,
         loadError: loadErrorParts.length > 0 ? loadErrorParts.join(" ") : null,
       };
     }
@@ -564,6 +609,76 @@ export async function loader({ request }: LoaderFunctionArgs) {
       setRate: entry.orders > 0 ? entry.items / entry.orders : null,
       unit: entry.items > 0 ? entry.actualTotal / entry.items : null,
     }));
+
+    // ── チャネル行集計（period） ─────────────────────────────────────────────
+    await autoDiscoverChannels(admin, shop.id);
+    const enabledChannelsPeriod = await getEnabledSalesChannels(shop.id);
+    // 月内各日のチャネルキャッシュを補完
+    for (const day of eachDay(dateFrom, dateTo)) {
+      const shouldRecompute = day >= todayStrForPeriod;
+      for (const ch of enabledChannelsPeriod) {
+        try {
+          const cached = await prisma.salesChannelCacheDaily.findFirst({
+            where: { shopId: shop.id, channelId: ch.id, targetDate: day },
+            select: { id: true },
+          });
+          if (!cached || shouldRecompute) {
+            await computeAndCacheChannelDailySummary(
+              admin, shop.id, ch.id, ch.displayName, ch.sourceNames, day
+            );
+          }
+        } catch { /* 1日1チャネルの失敗で全体を落とさない */ }
+      }
+    }
+    const channelCacheRows = await prisma.salesChannelCacheDaily.findMany({
+      where: {
+        shopId: shop.id,
+        channelId: { in: enabledChannelsPeriod.map((c) => c.id) },
+        targetDate: { gte: dateFrom, lte: dateTo },
+      },
+    });
+    const channelMap = new Map<string, {
+      channelId: string; channelName: string;
+      actualTotal: number; budgetTotal: number | null;
+      orders: number; items: number;
+      progressBudgetToday: number; progressBudgetPrev: number;
+    }>();
+    for (const ch of enabledChannelsPeriod) {
+      channelMap.set(ch.id, {
+        channelId: ch.id, channelName: ch.displayName,
+        actualTotal: 0, budgetTotal: null, orders: 0, items: 0,
+        progressBudgetToday: 0, progressBudgetPrev: 0,
+      });
+    }
+    for (const row of channelCacheRows) {
+      const entry = channelMap.get(row.channelId);
+      if (!entry) continue;
+      entry.actualTotal += Number(row.actual);
+      entry.orders += row.orders;
+      entry.items += row.items;
+      if (row.budget !== null) {
+        entry.budgetTotal = (entry.budgetTotal ?? 0) + Number(row.budget);
+        if (row.targetDate <= todayStrForPeriod) entry.progressBudgetToday += Number(row.budget);
+        if (row.targetDate <= yesterdayStrForPeriod) entry.progressBudgetPrev += Number(row.budget);
+      }
+    }
+    const channelRows = Array.from(channelMap.values()).map((entry) => ({
+      channelId: entry.channelId,
+      channelName: entry.channelName,
+      actualTotal: entry.actualTotal,
+      budgetTotal: entry.budgetTotal,
+      achievementRate: entry.budgetTotal && entry.budgetTotal > 0 ? entry.actualTotal / entry.budgetTotal : null,
+      progressBudgetToday: entry.progressBudgetToday,
+      progressRateToday: entry.progressBudgetToday > 0 ? entry.actualTotal / entry.progressBudgetToday : null,
+      progressBudgetPrev: entry.progressBudgetPrev,
+      progressRatePrev: entry.progressBudgetPrev > 0 ? entry.actualTotal / entry.progressBudgetPrev : null,
+      orders: entry.orders,
+      items: entry.items,
+      atv: entry.orders > 0 ? entry.actualTotal / entry.orders : null,
+      setRate: entry.orders > 0 ? entry.items / entry.orders : null,
+      unit: entry.items > 0 ? entry.actualTotal / entry.items : null,
+    }));
+
     const failedDetails = Array.from(failedLocationErrors.entries()).map(
       ([name, reason]) => `${name}: ${reason}`
     );
@@ -583,6 +698,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       selectedLocationId,
       locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
       rows,
+      channelRows,
       loadError: loadErrorParts.length > 0 ? loadErrorParts.join(" ") : null,
     };
   } catch (err) {
@@ -597,6 +713,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       selectedLocationId: "",
       locations: [] as Array<{ id: string; name: string }>,
       rows: [] as Array<Record<string, string | number | null>>,
+      channelRows: [] as Array<Record<string, string | number | null>>,
       loadError: message,
     };
   }
@@ -615,7 +732,7 @@ export default function SalesSummaryAdminPage() {
 
   const tableRows = useMemo(() => {
     if (!data.hasAccess) return [];
-    const body =
+    const locationBody =
       data.view === "daily"
         ? data.rows.map((r) => [
             String(r.locationName ?? ""),
@@ -647,13 +764,49 @@ export default function SalesSummaryAdminPage() {
             `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
             fmtYen((r.unit as number | null) ?? null),
           ]);
+
+    // チャネル行（POS以外のチャネル集計）
+    const channelBody =
+      data.view === "daily"
+        ? (data.channelRows ?? []).map((r) => [
+            `[${String(r.channelName ?? "")}]`,
+            fmtYen((r.actual as number) ?? 0),
+            fmtYen((r.budget as number | null) ?? null),
+            fmtPct((r.budgetRatio as number | null) ?? null),
+            `${Number(r.orders ?? 0).toLocaleString("ja-JP")}件`,
+            "-", // 入店数なし
+            "-", // 購買率なし
+            fmtYen((r.atv as number | null) ?? null),
+            fmtDecimal((r.setRate as number | null) ?? null, 2),
+            `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
+            fmtYen((r.unit as number | null) ?? null),
+          ])
+        : (data.channelRows ?? []).map((r) => [
+            `[${String(r.channelName ?? "")}]`,
+            fmtYen((r.actualTotal as number) ?? 0),
+            r.budgetTotal != null ? fmtYen(Number(r.budgetTotal)) : "-",
+            fmtPct((r.achievementRate as number | null) ?? null),
+            (r.progressBudgetToday as number) > 0 ? fmtYen(Number(r.progressBudgetToday)) : "-",
+            fmtPct((r.progressRateToday as number | null) ?? null),
+            (r.progressBudgetPrev as number) > 0 ? fmtYen(Number(r.progressBudgetPrev)) : "-",
+            fmtPct((r.progressRatePrev as number | null) ?? null),
+            `${Number(r.orders ?? 0).toLocaleString("ja-JP")}件`,
+            "-", // 入店数なし
+            "-", // 購買率なし
+            fmtYen((r.atv as number | null) ?? null),
+            fmtDecimal((r.setRate as number | null) ?? null, 2),
+            `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
+            fmtYen((r.unit as number | null) ?? null),
+          ]);
+
+    const body = [...locationBody, ...channelBody];
     const totalRow =
       data.view === "daily"
         ? buildDailyTotalRowCells(data.rows as Array<Record<string, unknown>>)
         : buildPeriodTotalRowCells(data.rows as Array<Record<string, unknown>>);
     if (!totalRow || body.length === 0) return body;
     return [totalRow, ...body];
-  }, [data.hasAccess, data.view, data.rows]);
+  }, [data.hasAccess, data.view, data.rows, data.channelRows]);
 
   const dailyHeadings = [
     "ロケーション",
