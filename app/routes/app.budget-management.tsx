@@ -197,7 +197,19 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === "download_template") {
     const month = String(formData.get("month") ?? "");
     const locationIdsRaw = String(formData.get("locationIds") ?? "[]");
-    const requestedLocationIds = JSON.parse(locationIdsRaw) as string[];
+    const legacyLocationId = String(formData.get("locationId") ?? "");
+    let requestedLocationIds: string[] = [];
+    try {
+      const parsed = JSON.parse(locationIdsRaw) as unknown;
+      if (Array.isArray(parsed)) {
+        requestedLocationIds = parsed.map((v) => String(v));
+      }
+    } catch {
+      requestedLocationIds = [];
+    }
+    if (requestedLocationIds.length === 0 && legacyLocationId) {
+      requestedLocationIds = [legacyLocationId];
+    }
     if (!month) {
       return Response.json(
         { ok: false, error: "month が必要です" },
@@ -324,28 +336,36 @@ export default function BudgetManagementPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const savedMonth = localStorage.getItem("budgetTemplateMonth");
-    const savedLocationIds = localStorage.getItem("budgetTemplateLocationIds");
-    if (savedMonth) setTemplateMonth(savedMonth);
-    if (savedLocationIds) {
-      try {
+    try {
+      const savedMonth = localStorage.getItem("budgetTemplateMonth");
+      const savedLocationIds = localStorage.getItem("budgetTemplateLocationIds");
+      if (savedMonth) setTemplateMonth(savedMonth);
+      if (savedLocationIds) {
         const parsed = JSON.parse(savedLocationIds) as string[];
         const valid = parsed.filter((id) => allTemplateLocationIds.includes(id));
         if (valid.length > 0) setTemplateLocationIds(valid);
-      } catch {
-        // ignore broken localStorage
       }
+    } catch {
+      // In embedded iframe environments, storage access may be blocked.
     }
   }, [allTemplateLocationIds.join(",")]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    localStorage.setItem("budgetTemplateMonth", templateMonth);
+    try {
+      localStorage.setItem("budgetTemplateMonth", templateMonth);
+    } catch {
+      // ignore storage errors in restricted browser contexts
+    }
   }, [templateMonth]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    localStorage.setItem("budgetTemplateLocationIds", JSON.stringify(templateLocationIds));
+    try {
+      localStorage.setItem("budgetTemplateLocationIds", JSON.stringify(templateLocationIds));
+    } catch {
+      // ignore storage errors in restricted browser contexts
+    }
   }, [templateLocationIds]);
 
   const handleFilter = (key: string, value: string) => {
