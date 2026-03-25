@@ -63,6 +63,11 @@ function formatUpdatedTimeLabel(dateObj) {
   return `${hh}:${mm}更新`;
 }
 
+function UpdatedAtBadge({ dateObj }) {
+  if (!dateObj) return null;
+  return <s-badge tone="info">{formatUpdatedTimeLabel(dateObj)}</s-badge>;
+}
+
 function fmtNum(n, dec = 0) {
   if (n === null || n === undefined) return "—";
   return Number(n).toLocaleString("ja-JP", {
@@ -236,9 +241,13 @@ function MetricBlock({ title, children }) {
   return (
     <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
       <s-box padding="small" paddingBlockEnd="none">
-        <s-text emphasis="bold" size="small">
-          {title}
-        </s-text>
+        {typeof title === "string" ? (
+          <s-text emphasis="bold" size="small">
+            {title}
+          </s-text>
+        ) : (
+          title
+        )}
       </s-box>
       <s-stack gap="none">{children}</s-stack>
     </s-box>
@@ -852,27 +861,12 @@ function HistoryDailyDetailView({
                   </s-stack>
                 </s-box>
                 <s-box style={{ flex: "0 0 auto" }}>
-                  <s-stack gap="extraSmall" alignItems="end">
-                    {showUpdatedBadge ? (
-                      <s-box
-                        paddingInline="small"
-                        style={{
-                          border: "1px solid var(--s-color-border-subdued)",
-                          borderRadius: "9999px",
-                        }}
-                      >
-                        <s-text size="small" tone="subdued">
-                          {formatUpdatedTimeLabel(lastLoadedAt)}
-                        </s-text>
-                      </s-box>
-                    ) : null}
-                    <s-button
-                      variant={scope === "all" ? "primary" : "secondary"}
-                      onClick={() => setScope(scope === "all" ? "single" : "all")}
-                    >
-                      全店舗表示
-                    </s-button>
-                  </s-stack>
+                  <s-button
+                    variant={scope === "all" ? "primary" : "secondary"}
+                    onClick={() => setScope(scope === "all" ? "single" : "all")}
+                  >
+                    全店舗表示
+                  </s-button>
                 </s-box>
               </s-stack>
 
@@ -945,7 +939,22 @@ function HistoryDailyDetailView({
 
                         {rowsForUi.map((row) => (
                           <s-stack key={row.locationId} gap="small">
-                            <MetricBlock title={row.locationName ?? row.locationId}>
+                            <MetricBlock
+                              title={
+                                <s-stack
+                                  direction="inline"
+                                  justifyContent="space-between"
+                                  alignItems="center"
+                                  gap="small"
+                                  style={{ width: "100%" }}
+                                >
+                                  <s-text emphasis="bold" size="small">
+                                    {row.locationName ?? row.locationId}
+                                  </s-text>
+                                  {showUpdatedBadge ? <UpdatedAtBadge dateObj={lastLoadedAt} /> : null}
+                                </s-stack>
+                              }
+                            >
                               <DailyMetricRows row={row} o={o} />
                             </MetricBlock>
                           </s-stack>
@@ -1336,27 +1345,12 @@ function SalesSummaryModal() {
                   </s-stack>
                 </s-box>
                 <s-box style={{ flex: "0 0 auto" }}>
-                  <s-stack gap="extraSmall" alignItems="end">
-                    {showUpdatedBadge ? (
-                      <s-box
-                        paddingInline="small"
-                        style={{
-                          border: "1px solid var(--s-color-border-subdued)",
-                          borderRadius: "9999px",
-                        }}
-                      >
-                        <s-text size="small" tone="subdued">
-                          {formatUpdatedTimeLabel(lastLoadedAt)}
-                        </s-text>
-                      </s-box>
-                    ) : null}
-                    <s-button
-                      variant={scope === "all" ? "primary" : "secondary"}
-                      onClick={() => setScope(scope === "all" ? "single" : "all")}
-                    >
-                      全店舗表示
-                    </s-button>
-                  </s-stack>
+                  <s-button
+                    variant={scope === "all" ? "primary" : "secondary"}
+                    onClick={() => setScope(scope === "all" ? "single" : "all")}
+                  >
+                    全店舗表示
+                  </s-button>
                 </s-box>
               </s-stack>
 
@@ -1552,7 +1546,22 @@ function SalesSummaryModal() {
 
                         {rowsForUi.map((row) => (
                           <s-stack key={row.locationId} gap="small">
-                            <MetricBlock title={row.locationName ?? row.locationId}>
+                            <MetricBlock
+                              title={
+                                <s-stack
+                                  direction="inline"
+                                  justifyContent="space-between"
+                                  alignItems="center"
+                                  gap="small"
+                                  style={{ width: "100%" }}
+                                >
+                                  <s-text emphasis="bold" size="small">
+                                    {row.locationName ?? row.locationId}
+                                  </s-text>
+                                  {showUpdatedBadge ? <UpdatedAtBadge dateObj={lastLoadedAt} /> : null}
+                                </s-stack>
+                              }
+                            >
                               {grain === "daily" ? (
                                 <DailyMetricRows row={row} o={o} />
                               ) : (
