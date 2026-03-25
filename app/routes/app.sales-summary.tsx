@@ -28,6 +28,11 @@ import {
 } from "../services/salesChannelEngine.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
+import {
+  buildLocationDayCacheSet,
+  getSalesSummaryPeriodMaxComputes,
+  needsLocationDayCompute,
+} from "../utils/salesSummaryPeriodCache.server";
 
 type AdminClient = {
   graphql: (query: string, opts?: { variables?: Record<string, unknown> }) => Promise<{ json: () => Promise<unknown> }>;
@@ -122,26 +127,6 @@ function parseEnvInt(name: string, fallback: number, min = 1, max = 10000): numb
   if (i > max) return max;
   return i;
 }
-
-/** 環境変数が 0 のときは「無制限」（月次の計算件数バッチ用） */
-function parseEnvIntWithZeroUnlimited(name: string, fallback: number, min: number, max: number): number {
-  const raw = process.env[name];
-  const n = raw ? Number(raw) : NaN;
-  if (!Number.isFinite(n)) return fallback;
-  const i = Math.trunc(n);
-  if (i === 0) return 0;
-  if (i < min) return min;
-  if (i > max) return max;
-  return i;
-}
-
-/** 月次1リクエストあたりの Shopify 集計（compute）の最大回数。ロケーション日次＋チャネル日次で共通の残り枠を使う。0=無制限 */
-const SALES_SUMMARY_PERIOD_MAX_COMPUTES = parseEnvIntWithZeroUnlimited(
-  "SALES_SUMMARY_PERIOD_MAX_COMPUTES",
-  48,
-  1,
-  500,
-);
 
 const SALES_SUMMARY_RETRY_MAX_ATTEMPTS = parseEnvInt(
   "SALES_SUMMARY_RETRY_MAX_ATTEMPTS",
@@ -345,33 +330,6 @@ function eachDay(dateFrom: string, dateTo: string) {
   return days;
 }
 
-/** 月次用: 既存キャッシュの (正規ロケーションGID, 日付) を Set で保持 */
-function buildLocationDayCacheSet(
-  rows: Array<{ locationId: string; targetDate: string }>,
-  validTargetLocations: LocationRow[],
-): Set<string> {
-  const set = new Set<string>();
-  for (const r of rows) {
-    const canon = resolveCanonicalLocationGid(validTargetLocations, r.locationId);
-    if (!canon) continue;
-    set.add(`${canon}|${r.targetDate}`);
-  }
-  return set;
-}
-
-/** 月次ローダーと同じ条件で、その日×店の再計算が必要か */
-function needsLocationDayCompute(
-  day: string,
-  locGid: string,
-  today: string,
-  cacheSet: Set<string>,
-): boolean {
-  const hasCache = cacheSet.has(`${locGid}|${day}`);
-  const shouldRecompute = day >= today;
-  if (!shouldRecompute && hasCache) return false;
-  return true;
-}
-
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -566,7 +524,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
       select: { locationId: true, targetDate: true },
     });
-    const locationCacheSet = buildLocationDayCacheSet(prefetchLocationCaches, validTargetLocations);
+    const locationCacheSet = buildLocationDayCacheSet(
+      prefetchLocationCaches,
+      validTargetLocations,
+      resolveCanonicalLocationGid,
+    );
 
     const locationWork: Array<{ day: string; loc: LocationRow }> = [];
     for (const day of daysInMonth) {
@@ -579,7 +541,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       (a, b) => a.day.localeCompare(b.day) || a.loc.name.localeCompare(b.loc.name),
     );
 
-    const maxPeriod = SALES_SUMMARY_PERIOD_MAX_COMPUTES;
+    const maxPeriod = getSalesSummaryPeriodMaxComputes();
     let budget = maxPeriod === 0 ? Number.MAX_SAFE_INTEGER : maxPeriod;
     let locationAttempts = 0;
     for (const { day, loc } of locationWork) {

@@ -16,6 +16,11 @@ import {
   mergeAndNormalizeSalesSummarySettings,
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
+import {
+  buildLocationDayCacheSet,
+  getSalesSummaryPeriodMaxComputes,
+  needsLocationDayCompute,
+} from "../utils/salesSummaryPeriodCache.server";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
 
@@ -118,13 +123,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const locationIdsForQuery = expandLocationIdsForCacheQuery(targetLocations);
 
     if (locationGids.length === 0) {
-      return corsJson({ rows: [], totals: {}, dateFrom, dateTo, displayOptions: merged });
+      return corsJson({
+        rows: [],
+        totals: {},
+        dateFrom,
+        dateTo,
+        displayOptions: merged,
+        periodCachePartial: false,
+        pendingComputeEstimate: 0,
+      });
     }
 
-    // 期間表示時は先に日次キャッシュを再計算する。
-    // 日ごとに全ロケーションを並列にし、日×店の同時 GraphQL を抑えてレート制限を避ける。
     await autoDiscoverChannels(admin, shop.id);
     const enabledChannels = await getEnabledSalesChannels(shop.id);
+
+    let periodCachePartial = false;
+    let pendingComputeEstimate = 0;
+
     if (dateFrom && dateTo) {
       const start = new Date(dateFrom + "T00:00:00Z").getTime();
       const end = new Date(dateTo + "T23:59:59Z").getTime();
@@ -132,18 +147,96 @@ export async function loader({ request }: LoaderFunctionArgs) {
       for (let t = start; t <= end; t += 86400000) {
         days.push(new Date(t).toISOString().slice(0, 10));
       }
-      for (const targetDate of days) {
-        // POS ロケーション（並列）
-        await Promise.all(
-          targetLocations.map((loc) =>
-            computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, targetDate)
-          )
-        );
-        // チャネル（逐次: レート制限対策）
-        for (const ch of enabledChannels) {
-          await computeAndCacheChannelDailySummary(admin, shop.id, ch.id, ch.displayName, ch.sourceNames, targetDate);
+      const today = new Date().toISOString().slice(0, 10);
+
+      const prefetchLocationCaches = await prisma.salesSummaryCacheDaily.findMany({
+        where: {
+          shopId: shop.id,
+          locationId: { in: locationIdsForQuery },
+          targetDate: { gte: dateFrom, lte: dateTo },
+        },
+        select: { locationId: true, targetDate: true },
+      });
+      const locationCacheSet = buildLocationDayCacheSet(
+        prefetchLocationCaches,
+        targetLocations,
+        resolveCanonicalLocationGid,
+      );
+
+      const locationWork: Array<{ day: string; loc: SalesSummaryLocationRow }> = [];
+      for (const day of days) {
+        for (const loc of targetLocations) {
+          if (!needsLocationDayCompute(day, loc.shopifyLocationGid, today, locationCacheSet)) continue;
+          locationWork.push({ day, loc });
         }
       }
+      locationWork.sort(
+        (a, b) => a.day.localeCompare(b.day) || a.loc.name.localeCompare(b.loc.name),
+      );
+
+      const prefetchChannelCaches =
+        enabledChannels.length === 0
+          ? []
+          : await prisma.salesChannelCacheDaily.findMany({
+              where: {
+                shopId: shop.id,
+                channelId: { in: enabledChannels.map((c) => c.id) },
+                targetDate: { gte: dateFrom, lte: dateTo },
+              },
+              select: { channelId: true, targetDate: true },
+            });
+      const channelCachePresence = new Set(
+        prefetchChannelCaches.map((r) => `${r.channelId}|${r.targetDate}`),
+      );
+
+      type EnabledCh = (typeof enabledChannels)[number];
+      const channelWork: Array<{ day: string; ch: EnabledCh }> = [];
+      for (const day of days) {
+        const shouldRecompute = day >= today;
+        for (const ch of enabledChannels) {
+          const hasCache = channelCachePresence.has(`${ch.id}|${day}`);
+          if (!shouldRecompute && hasCache) continue;
+          channelWork.push({ day, ch });
+        }
+      }
+      channelWork.sort(
+        (a, b) =>
+          a.day.localeCompare(b.day) || a.ch.displayName.localeCompare(b.ch.displayName),
+      );
+
+      const maxPeriod = getSalesSummaryPeriodMaxComputes();
+      let budget = maxPeriod === 0 ? Number.MAX_SAFE_INTEGER : maxPeriod;
+
+      let locAttempts = 0;
+      for (const { day, loc } of locationWork) {
+        if (budget <= 0) break;
+        locAttempts += 1;
+        try {
+          await computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, day);
+        } catch {
+          /* 1店舗日の失敗で全体を落とさない */
+        }
+        budget -= 1;
+      }
+      const skippedLoc = Math.max(0, locationWork.length - locAttempts);
+
+      let chAttempts = 0;
+      for (const { day, ch } of channelWork) {
+        if (budget <= 0) break;
+        chAttempts += 1;
+        try {
+          await computeAndCacheChannelDailySummary(
+            admin, shop.id, ch.id, ch.displayName, ch.sourceNames, day,
+          );
+        } catch {
+          /* 同上 */
+        }
+        budget -= 1;
+      }
+      const skippedCh = Math.max(0, channelWork.length - chAttempts);
+
+      pendingComputeEstimate = skippedLoc + skippedCh;
+      periodCachePartial = maxPeriod !== 0 && pendingComputeEstimate > 0;
     }
 
     // 日次キャッシュから集計
@@ -294,7 +387,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       unit: totalItems > 0 ? totalActual / totalItems : null,
     };
 
-    return corsJson({ rows, channelRows, totals, dateFrom, dateTo, displayOptions: merged });
+    return corsJson({
+      rows,
+      channelRows,
+      totals,
+      dateFrom,
+      dateTo,
+      displayOptions: merged,
+      periodCachePartial,
+      pendingComputeEstimate,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
