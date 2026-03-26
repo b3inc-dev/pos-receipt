@@ -163,3 +163,84 @@ export async function getBudgetAmountsByDateForLocation(
   }
   return byDate;
 }
+
+/**
+ * 複数チャネル・同一日の予算を1クエリで取得（日次API用）
+ */
+export async function getChannelBudgetAmountsForDayBatch(
+  shopId: string,
+  channelIds: string[],
+  targetDate: string,
+): Promise<Map<string, number | null>> {
+  const result = new Map<string, number | null>();
+  if (channelIds.length === 0) return result;
+
+  const rows = await prisma.salesChannelBudget.findMany({
+    where: {
+      shopId,
+      channelId: { in: channelIds },
+      targetDate,
+    },
+    select: { channelId: true, amount: true },
+  });
+  const byCh = new Map(rows.map((r) => [r.channelId, Number(r.amount)]));
+  for (const id of channelIds) {
+    result.set(id, byCh.has(id) ? byCh.get(id)! : null);
+  }
+  return result;
+}
+
+/**
+ * チャネルごとの期間合計予算・遂行予算（ロケーションの sumLocationBudgetsForPeriodBatch と同型）
+ */
+export async function sumChannelBudgetsForPeriodBatch(
+  shopId: string,
+  channelIds: string[],
+  dateFrom: string,
+  dateTo: string,
+  todayCutoff: string,
+  yesterdayCutoff: string,
+): Promise<Map<string, LocationPeriodBudgetFromDb>> {
+  const result = new Map<string, LocationPeriodBudgetFromDb>();
+  if (channelIds.length === 0) return result;
+
+  const rows = await prisma.salesChannelBudget.findMany({
+    where: {
+      shopId,
+      channelId: { in: channelIds },
+      targetDate: { gte: dateFrom, lte: dateTo },
+    },
+    select: { channelId: true, targetDate: true, amount: true },
+  });
+
+  const byChannelDates = new Map<string, Map<string, number>>();
+  for (const id of channelIds) {
+    byChannelDates.set(id, new Map());
+  }
+  for (const r of rows) {
+    const dm = byChannelDates.get(r.channelId);
+    if (!dm) continue;
+    if (!dm.has(r.targetDate)) {
+      dm.set(r.targetDate, Number(r.amount));
+    }
+  }
+
+  for (const id of channelIds) {
+    const dm = byChannelDates.get(id)!;
+    if (dm.size === 0) {
+      result.set(id, { budgetTotal: null, progressBudgetToday: 0, progressBudgetPrev: 0 });
+      continue;
+    }
+    let budgetTotal = 0;
+    let progressBudgetToday = 0;
+    let progressBudgetPrev = 0;
+    for (const [targetDate, amt] of dm) {
+      budgetTotal += amt;
+      if (targetDate <= todayCutoff) progressBudgetToday += amt;
+      if (targetDate <= yesterdayCutoff) progressBudgetPrev += amt;
+    }
+    result.set(id, { budgetTotal, progressBudgetToday, progressBudgetPrev });
+  }
+
+  return result;
+}

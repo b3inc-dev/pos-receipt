@@ -53,6 +53,7 @@ model Shop {
   salesSummaryCachePeriod  SalesSummaryCachePeriod[]
   salesChannels            SalesChannel[]
   salesChannelCacheDaily   SalesChannelCacheDaily[]
+  salesChannelBudgets      SalesChannelBudget[]
 }
 
 // ========== 20.2 ロケーション（印字方式・サマリー設定）要件 §4 ==========
@@ -326,8 +327,25 @@ model SalesChannel {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
-  cacheDaily SalesChannelCacheDaily[]
+  cacheDaily       SalesChannelCacheDaily[]
+  channelBudgets   SalesChannelBudget[]
 
+  @@index([shopId])
+}
+
+// ========== 20.12b チャネル別日次予算（ロケーション予算と独立）==========
+model SalesChannelBudget {
+  id         String       @id @default(cuid())
+  shopId     String
+  shop       Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  channelId  String
+  channel    SalesChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  targetDate String       // YYYY-MM-DD
+  amount     Decimal      @db.Decimal(18, 2)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([shopId, channelId, targetDate])
   @@index([shopId])
 }
 

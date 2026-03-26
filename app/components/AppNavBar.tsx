@@ -25,6 +25,7 @@ const GROUP_PATHS: Record<string, string[]> = {
     "/app/special-refund-history",
     "/app/receipt-history",
     "/app/budget-management",
+    "/app/channel-budget-management",
   ],
   "/app/plan": ["/app/plan", "/app/diagnostics", "/app/backfill", "/app/member-card-admin"],
 };

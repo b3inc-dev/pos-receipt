@@ -21,7 +21,10 @@ import {
   getSalesSummaryPeriodMaxComputes,
   needsLocationDayCompute,
 } from "../utils/salesSummaryPeriodCache.server";
-import { sumLocationBudgetsForPeriodBatch } from "../utils/salesSummaryBudgetFromDb.server";
+import {
+  sumChannelBudgetsForPeriodBatch,
+  sumLocationBudgetsForPeriodBatch,
+} from "../utils/salesSummaryBudgetFromDb.server";
 import { sumOptionalBudgetColumn } from "../utils/salesSummaryTotals";
 import {
   getShopTimezoneForDaily,
@@ -402,10 +405,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
         entry.actualTotal += Number(c.actual);
         entry.orders += c.orders;
         entry.items += c.items;
-        if (c.budget !== null) {
+        if (!useDbBudgetForPeriod && c.budget !== null) {
           entry.budgetTotal = (entry.budgetTotal ?? 0) + Number(c.budget);
           if (c.targetDate <= today) entry.progressBudgetToday += Number(c.budget);
           if (c.targetDate <= yesterday) entry.progressBudgetPrev += Number(c.budget);
+        }
+      }
+
+      if (useDbBudgetForPeriod && enabledChannels.length > 0) {
+        const periodBudgetByChannel = await sumChannelBudgetsForPeriodBatch(
+          shop.id,
+          enabledChannels.map((c) => c.id),
+          dateFrom!,
+          dateTo!,
+          today,
+          yesterday,
+        );
+        for (const ch of enabledChannels) {
+          const entry = channelMap.get(ch.id);
+          if (!entry) continue;
+          const pb = periodBudgetByChannel.get(ch.id);
+          if (!pb) continue;
+          entry.budgetTotal = pb.budgetTotal;
+          entry.progressBudgetToday = pb.progressBudgetToday;
+          entry.progressBudgetPrev = pb.progressBudgetPrev;
         }
       }
 

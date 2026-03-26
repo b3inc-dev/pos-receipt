@@ -60,6 +60,7 @@ export const REPORTS_TABS: TabItem[] = [
   { path: "/app/special-refund-history", label: "特殊返金履歴" },
   { path: "/app/receipt-history", label: "領収書履歴" },
   { path: "/app/budget-management", label: "予算管理" },
+  { path: "/app/channel-budget-management", label: "チャネル予算" },
 ];
 
 export function buildSystemTabs(memberCardEnabled: boolean): TabItem[] {

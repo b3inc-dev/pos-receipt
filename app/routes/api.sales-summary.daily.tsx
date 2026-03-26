@@ -22,7 +22,10 @@ import {
   isFootfallReportingAllowedForLocation,
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
-import { getLocationBudgetAmountsForDayBatch } from "../utils/salesSummaryBudgetFromDb.server";
+import {
+  getChannelBudgetAmountsForDayBatch,
+  getLocationBudgetAmountsForDayBatch,
+} from "../utils/salesSummaryBudgetFromDb.server";
 import { sumOptionalBudgetColumn } from "../utils/salesSummaryTotals";
 import { getShopTimezoneForDaily, getCalendarDateStringInTimeZone } from "../utils/shopTimezone.server";
 
@@ -233,6 +236,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
         channelRows = await Promise.all(enabledChannels.map(buildChannelRow));
       }
     }
+
+    const budgetByChannelDay = await getChannelBudgetAmountsForDayBatch(
+      shop.id,
+      channelRows.map((r) => r.channelId),
+      targetDate,
+    );
+    channelRows = channelRows.map((r) => {
+      const budget = budgetByChannelDay.get(r.channelId) ?? null;
+      const budgetRatio = budget != null && budget > 0 ? r.actual / budget : null;
+      return { ...r, budget, budgetRatio };
+    });
 
     // ── 合計（全チャネルを含む・管理画面「総合計」と同じ予算ルール） ─────────────
     const grandForBudget = [...rows, ...channelRows];

@@ -161,6 +161,8 @@ function hideFootfallModal(modalRef) {
 function defaultDisplayOptions() {
   return {
     showLocationRows: true,
+    showChannelRows: true,
+    showChannelOnTile: true,
     showStoreTotals: true,
     showBudget: true,
     showActual: true,
@@ -887,10 +889,14 @@ function HistoryDailyDetailView({
 
   const o = useMemo(() => ({ ...defaultDisplayOptions(), ...(data?.displayOptions ?? {}) }), [data]);
   const rows = data?.rows ?? [];
+  const channelRows = data?.channelRows ?? [];
+  const showChannelRowsFlag = o.showChannelRows !== false;
+  const channelRowsForUi = showChannelRowsFlag ? channelRows : [];
   const totals = data?.totals ?? {};
   const showLocationRows = o.showLocationRows !== false;
   const showStoreTotalsFlag = o.showStoreTotals !== false;
-  const showAllTotals = scope === "all" && rows.length >= 1 && showStoreTotalsFlag;
+  const showAllTotals =
+    scope === "all" && (rows.length >= 1 || channelRowsForUi.length >= 1) && showStoreTotalsFlag;
   const totalsDaily = totalsDailyRows(totals, o);
   const showTotalsSection = showAllTotals && totalsDaily.length > 0;
 
@@ -937,14 +943,19 @@ function HistoryDailyDetailView({
   const historyShowLoading = loading || (!historyDataFresh && !error);
 
   const kpiHidden =
-    !loading && historyDataFresh && data && rows.length > 0 && !hasAnyDailyKpi(o);
+    !loading &&
+    historyDataFresh &&
+    data &&
+    (rows.length > 0 || channelRowsForUi.length > 0) &&
+    !hasAnyDailyKpi(o);
   const layoutEmpty =
     !loading &&
     historyDataFresh &&
     data &&
-    rows.length > 0 &&
+    (rows.length > 0 || channelRowsForUi.length > 0) &&
     !showTotalsSection &&
     rowsForUi.length === 0 &&
+    channelRowsForUi.length === 0 &&
     !kpiHidden;
   const showUpdatedBadge = isTodayDate(viewDate, data?.calendarToday) && !!lastLoadedAt;
 
@@ -1047,7 +1058,7 @@ function HistoryDailyDetailView({
 
                 {!loading && data && historyDataFresh && (
                   <>
-                    {rows.length === 0 ? (
+                    {rows.length === 0 && channelRowsForUi.length === 0 ? (
                       <s-text tone="subdued" size="small">
                         売上サマリーが有効な店舗がありません。管理画面でロケーション設定を確認してください。
                       </s-text>
@@ -1083,6 +1094,19 @@ function HistoryDailyDetailView({
                                   </s-text>
                                   {showUpdatedBadge ? <UpdatedAtBadge dateObj={lastLoadedAt} /> : null}
                                 </s-stack>
+                              }
+                            >
+                              <DailyMetricRows row={row} o={o} />
+                            </MetricBlock>
+                          </s-stack>
+                        ))}
+                        {channelRowsForUi.map((row) => (
+                          <s-stack key={row.channelId} gap="small">
+                            <MetricBlock
+                              title={
+                                <s-text emphasis="bold" size="small">
+                                  [{row.channelName ?? row.channelId}]
+                                </s-text>
                               }
                             >
                               <DailyMetricRows row={row} o={o} />
@@ -1394,10 +1418,14 @@ function SalesSummaryModal() {
   const o = useMemo(() => ({ ...defaultDisplayOptions(), ...(data?.displayOptions ?? {}) }), [data]);
 
   const rows = data?.rows ?? [];
+  const channelRows = data?.channelRows ?? [];
+  const showChannelRowsFlag = o.showChannelRows !== false;
+  const channelRowsForUi = showChannelRowsFlag ? channelRows : [];
   const totals = data?.totals ?? {};
   const showLocationRows = o.showLocationRows !== false;
   const showStoreTotalsFlag = o.showStoreTotals !== false;
-  const showAllTotals = scope === "all" && rows.length >= 1 && showStoreTotalsFlag;
+  const showAllTotals =
+    scope === "all" && (rows.length >= 1 || channelRowsForUi.length >= 1) && showStoreTotalsFlag;
   const totalsDaily = totalsDailyRows(totals, o);
   const totalsPeriod = totalsPeriodRows(totals, o, rows);
   const showTotalsSectionDaily = showAllTotals && grain === "daily" && totalsDaily.length > 0;
@@ -1417,7 +1445,7 @@ function SalesSummaryModal() {
     !loading &&
     summaryDataFresh &&
     data &&
-    rows.length > 0 &&
+    (rows.length > 0 || channelRowsForUi.length > 0) &&
     (grain === "daily" ? !hasAnyDailyKpi(o) : !hasAnyPeriodKpi(o));
   const showUpdatedBadge =
     grain === "daily" && isTodayDate(targetDate, shopCalendarDay) && !!lastLoadedAt;
@@ -1425,9 +1453,10 @@ function SalesSummaryModal() {
     !loading &&
     summaryDataFresh &&
     data &&
-    rows.length > 0 &&
+    (rows.length > 0 || channelRowsForUi.length > 0) &&
     !(showTotalsSectionDaily || showTotalsSectionMonthly) &&
     rowsForUi.length === 0 &&
+    channelRowsForUi.length === 0 &&
     !kpiHidden;
 
   const sessionRow = useMemo(() => {
@@ -2080,7 +2109,7 @@ function SalesSummaryModal() {
 
                 {!loading && data && summaryDataFresh && (
                   <>
-                    {rows.length === 0 ? (
+                    {rows.length === 0 && channelRowsForUi.length === 0 ? (
                       <s-text tone="subdued" size="small">
                         売上サマリーが有効な店舗がありません。管理画面でロケーション設定を確認してください。
                       </s-text>
@@ -2129,6 +2158,23 @@ function SalesSummaryModal() {
                                   </s-text>
                                   {showUpdatedBadge ? <UpdatedAtBadge dateObj={lastLoadedAt} /> : null}
                                 </s-stack>
+                              }
+                            >
+                              {grain === "daily" ? (
+                                <DailyMetricRows row={row} o={o} />
+                              ) : (
+                                <PeriodMetricRows row={row} o={o} />
+                              )}
+                            </MetricBlock>
+                          </s-stack>
+                        ))}
+                        {channelRowsForUi.map((row) => (
+                          <s-stack key={row.channelId} gap="small">
+                            <MetricBlock
+                              title={
+                                <s-text emphasis="bold" size="small">
+                                  [{row.channelName ?? row.channelId}]
+                                </s-text>
                               }
                             >
                               {grain === "daily" ? (

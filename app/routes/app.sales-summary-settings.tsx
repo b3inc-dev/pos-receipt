@@ -71,6 +71,8 @@ function formDataToSettings(formData: FormData, locations: { id: string }[]): Sa
     allowSingleDateSummary: bool("allowSingleDateSummary", true),
     allowDateRangeSummary: bool("allowDateRangeSummary", true),
     showLocationRows: bool("showLocationRows", true),
+    showChannelRows: bool("showChannelRows", true),
+    showChannelOnTile: bool("showChannelOnTile", true),
     showStoreTotals: bool("showStoreTotals", true),
     showOverallTotals: bool("showOverallTotals", true),
     visibleLocationIds: visibleIds ? (JSON.parse(visibleIds as string) as string[]) : [],
@@ -244,6 +246,16 @@ export default function SalesSummarySettingsPage() {
                   label="ロケーション行を表示"
                   checked={form.showLocationRows}
                   onChange={(v) => set("showLocationRows", v)}
+                />
+                <Checkbox
+                  label="チャネル行を表示（EC・マーケットプレイス等）"
+                  checked={form.showChannelRows}
+                  onChange={(v) => set("showChannelRows", v)}
+                />
+                <Checkbox
+                  label="POSタイルにチャネル別実績を表示"
+                  checked={form.showChannelOnTile}
+                  onChange={(v) => set("showChannelOnTile", v)}
                 />
                 <Checkbox
                   label="店舗合計を表示"

@@ -34,6 +34,19 @@ function SalesSummaryTile() {
         const parts = [];
         if (o.showActual !== false) parts.push(`実績 ${fmtYen(t.actual)}`);
         if (o.showBudget && t.budget != null) parts.push(`予算 ${fmtYen(t.budget)}`);
+
+        if (o.showChannelOnTile !== false && channelRows.length > 0) {
+          const maxCh = 4;
+          const slice = channelRows.slice(0, maxCh);
+          const chParts = slice.map((r) => {
+            const label = String(r.channelName ?? "").trim().slice(0, 8) || "CH";
+            return `${label} ${fmtYen(r.actual)}`;
+          });
+          const more =
+            channelRows.length > maxCh ? ` · +${channelRows.length - maxCh}` : "";
+          parts.push(`${chParts.join(" · ")}${more}`);
+        }
+
         if (parts.length > 0) setSubheading(parts.join(" · "));
       } catch {
         /* 取得失敗時は初期文言のまま */

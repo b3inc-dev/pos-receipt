@@ -41,6 +41,10 @@ export interface SalesSummarySettings {
   allowSingleDateSummary: boolean;
   allowDateRangeSummary: boolean;
   showLocationRows: boolean;
+  /** POS 売上サマリーにチャネル行（EC 等）を表示 */
+  showChannelRows: boolean;
+  /** POS ホームの売上サマリータイルにチャネル別実績の抜粋を表示 */
+  showChannelOnTile: boolean;
   showStoreTotals: boolean;
   showOverallTotals: boolean;
   visibleLocationIds: string[];
@@ -73,6 +77,8 @@ export const DEFAULT_SALES_SUMMARY_SETTINGS: SalesSummarySettings = {
   allowSingleDateSummary: true,
   allowDateRangeSummary: true,
   showLocationRows: true,
+  showChannelRows: true,
+  showChannelOnTile: true,
   showStoreTotals: true,
   showOverallTotals: true,
   visibleLocationIds: [],

@@ -553,11 +553,11 @@ export async function computeAndCacheChannelDailySummary(
   const { netSales: actual } = splitTaxInclusiveToNetAndTax(inclusiveActual, taxRatePercent);
   const orderCount = orders.length;
 
-  // 予算取得
-  const budget = await prisma.salesChannelBudget?.findFirst?.({
+  // 予算取得（SalesChannelBudget テーブル）
+  const budgetRow = await prisma.salesChannelBudget.findFirst({
     where: { shopId, channelId, targetDate },
-  }).catch(() => null) ?? null;
-  const budgetAmount: number | null = budget ? Number((budget as { amount: unknown }).amount) : null;
+  });
+  const budgetAmount: number | null = budgetRow ? Number(budgetRow.amount) : null;
 
   // KPI 算出
   const budgetRatio = budgetAmount && budgetAmount > 0 ? actual / budgetAmount : null;
