@@ -23,9 +23,7 @@ const ORDERS_SEARCH_QUERY = `#graphql
           name
         }
         transactions(first: 20) {
-          nodes {
-            gateway
-          }
+          gateway
         }
       }
       pageInfo {
@@ -129,9 +127,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         totalPriceSet?: { shopMoney?: { amount?: string } };
         customer?: { displayName?: string } | null;
         retailLocation?: { id: string; name: string } | null;
-        transactions?: { nodes?: Array<{ gateway?: string | null }> };
+        transactions?: Array<{ gateway?: string | null }>;
       };
-      const gateways = (n.transactions?.nodes ?? [])
+      const gateways = (n.transactions ?? [])
         .map((t) => (t.gateway ? String(t.gateway) : ""))
         .filter(Boolean);
       const financialStatus = n.displayFinancialStatus ?? "";
