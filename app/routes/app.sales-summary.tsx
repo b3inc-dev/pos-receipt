@@ -37,6 +37,7 @@ import {
 import {
   getLocationBudgetAmountsForDayBatch,
   sumLocationBudgetsForPeriodBatch,
+  sumOptionalBudgetColumn,
 } from "../utils/salesSummaryBudgetFromDb.server";
 import {
   getShopTimezoneForDaily,
@@ -265,17 +266,15 @@ function fmtDecimal(n: number | null, decimals: number) {
 /** 日次合計セルを生成する（visitorsを持たない行は visitors=null として扱われる） */
 function buildDailyTotalRowCells(rows: Array<Record<string, unknown>>, label = "POS合計"): string[] | null {
   if (rows.length === 0) return null;
-  let actual = 0, orders = 0, items = 0, visitorsAcc = 0, budgetSum = 0;
-  let haveVisitors = false, allBudget = true;
+  let actual = 0, orders = 0, items = 0, visitorsAcc = 0;
+  let haveVisitors = false;
   for (const r of rows) {
     actual += Number(r.actual ?? 0);
     orders += Number(r.orders ?? 0);
     items += Number(r.items ?? 0);
-    if (r.budget === null || r.budget === undefined) allBudget = false;
-    else budgetSum += Number(r.budget);
     if (r.visitors != null) { haveVisitors = true; visitorsAcc += Number(r.visitors); }
   }
-  const budget = allBudget ? budgetSum : null;
+  const budget = sumOptionalBudgetColumn(rows, "budget");
   const budgetRatio = budget != null && budget > 0 ? actual / budget : null;
   const visitors = haveVisitors ? visitorsAcc : null;
   const conv = visitors != null && visitors > 0 ? orders / visitors : null;
@@ -301,19 +300,17 @@ function buildDailyTotalRowCells(rows: Array<Record<string, unknown>>, label = "
 function buildPeriodTotalRowCells(rows: Array<Record<string, unknown>>, label = "POS合計"): string[] | null {
   if (rows.length === 0) return null;
   let actualTotal = 0, orders = 0, items = 0;
-  let progressBudgetToday = 0, progressBudgetPrev = 0, budgetSum = 0;
-  let visitorsAcc = 0, haveVisitors = false, allBudget = true;
+  let progressBudgetToday = 0, progressBudgetPrev = 0;
+  let visitorsAcc = 0, haveVisitors = false;
   for (const r of rows) {
     actualTotal += Number(r.actualTotal ?? 0);
     orders += Number(r.orders ?? 0);
     items += Number(r.items ?? 0);
     progressBudgetToday += Number(r.progressBudgetToday ?? 0);
     progressBudgetPrev += Number(r.progressBudgetPrev ?? 0);
-    if (r.budgetTotal === null || r.budgetTotal === undefined) allBudget = false;
-    else budgetSum += Number(r.budgetTotal);
     if (r.visitors != null) { haveVisitors = true; visitorsAcc += Number(r.visitors); }
   }
-  const budgetTotal = allBudget ? budgetSum : null;
+  const budgetTotal = sumOptionalBudgetColumn(rows, "budgetTotal");
   const achievementRate = budgetTotal != null && budgetTotal > 0 ? actualTotal / budgetTotal : null;
   const progressRateToday = progressBudgetToday > 0 ? actualTotal / progressBudgetToday : null;
   const progressRatePrev = progressBudgetPrev > 0 ? actualTotal / progressBudgetPrev : null;

@@ -22,7 +22,10 @@ import {
   isFootfallReportingAllowedForLocation,
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
-import { getLocationBudgetAmountsForDayBatch } from "../utils/salesSummaryBudgetFromDb.server";
+import {
+  getLocationBudgetAmountsForDayBatch,
+  sumOptionalBudgetColumn,
+} from "../utils/salesSummaryBudgetFromDb.server";
 import { getShopTimezoneForDaily, getCalendarDateStringInTimeZone } from "../utils/shopTimezone.server";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
@@ -235,11 +238,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // ── 合計（全チャネルを含む・管理画面「総合計」と同じ予算ルール） ─────────────
     const grandForBudget = [...rows, ...channelRows];
-    const budget =
-      grandForBudget.length > 0 &&
-      grandForBudget.every((r) => r.budget !== null && r.budget !== undefined)
-        ? grandForBudget.reduce((s, r) => s + Number(r.budget ?? 0), 0)
-        : null;
+    const budget = sumOptionalBudgetColumn(grandForBudget, "budget");
     const totals = {
       actual: rows.reduce((s, r) => s + r.actual, 0) + channelRows.reduce((s, r) => s + r.actual, 0),
       orders: rows.reduce((s, r) => s + r.orders, 0) + channelRows.reduce((s, r) => s + r.orders, 0),

@@ -21,7 +21,10 @@ import {
   getSalesSummaryPeriodMaxComputes,
   needsLocationDayCompute,
 } from "../utils/salesSummaryPeriodCache.server";
-import { sumLocationBudgetsForPeriodBatch } from "../utils/salesSummaryBudgetFromDb.server";
+import {
+  sumLocationBudgetsForPeriodBatch,
+  sumOptionalBudgetColumn,
+} from "../utils/salesSummaryBudgetFromDb.server";
 import {
   getShopTimezoneForDaily,
   getCalendarDateStringInTimeZone,
@@ -433,11 +436,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       channelRows.reduce((s, r) => s + r.items, 0);
 
     const grandForBudget = [...rows, ...channelRows];
-    const budgetTotal =
-      grandForBudget.length > 0 &&
-      grandForBudget.every((r) => r.budgetTotal !== null && r.budgetTotal !== undefined)
-        ? grandForBudget.reduce((s, r) => s + Number(r.budgetTotal ?? 0), 0)
-        : null;
+    const budgetTotal = sumOptionalBudgetColumn(grandForBudget, "budgetTotal");
 
     const progressBudgetToday =
       rows.reduce((s, r) => s + Number(r.progressBudgetToday ?? 0), 0) +
