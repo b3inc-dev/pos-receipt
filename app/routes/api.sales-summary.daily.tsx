@@ -22,10 +22,8 @@ import {
   isFootfallReportingAllowedForLocation,
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
-import {
-  getLocationBudgetAmountsForDayBatch,
-  sumOptionalBudgetColumn,
-} from "../utils/salesSummaryBudgetFromDb.server";
+import { getLocationBudgetAmountsForDayBatch } from "../utils/salesSummaryBudgetFromDb.server";
+import { sumOptionalBudgetColumn } from "../utils/salesSummaryTotals";
 import { getShopTimezoneForDaily, getCalendarDateStringInTimeZone } from "../utils/shopTimezone.server";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];

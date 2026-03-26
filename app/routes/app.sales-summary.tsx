@@ -37,8 +37,8 @@ import {
 import {
   getLocationBudgetAmountsForDayBatch,
   sumLocationBudgetsForPeriodBatch,
-  sumOptionalBudgetColumn,
 } from "../utils/salesSummaryBudgetFromDb.server";
+import { sumOptionalBudgetColumn } from "../utils/salesSummaryTotals";
 import {
   getShopTimezoneForDaily,
   getCalendarDateStringInTimeZone,

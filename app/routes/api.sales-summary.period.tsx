@@ -21,10 +21,8 @@ import {
   getSalesSummaryPeriodMaxComputes,
   needsLocationDayCompute,
 } from "../utils/salesSummaryPeriodCache.server";
-import {
-  sumLocationBudgetsForPeriodBatch,
-  sumOptionalBudgetColumn,
-} from "../utils/salesSummaryBudgetFromDb.server";
+import { sumLocationBudgetsForPeriodBatch } from "../utils/salesSummaryBudgetFromDb.server";
+import { sumOptionalBudgetColumn } from "../utils/salesSummaryTotals";
 import {
   getShopTimezoneForDaily,
   getCalendarDateStringInTimeZone,
