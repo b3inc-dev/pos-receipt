@@ -5,11 +5,12 @@
  * - POS ロケーションとは独立して動作する（retailLocation 照合なし）
  * - Shopify の source_name フィールドでチャネルを識別する
  * - 返金は updated_at ベースの 2 パスで集計（POS の settlementEngine と同方式）
+ * - Shopify 検索の日付境界は POS（900a774）と同じく dayRange の UTC ISO（Z）を使用
  * - 実績 actual は税込（注文 totalPriceSet − 当日返金）を精算設定の税率で税抜に換算（buildSettlementPreview の netSales と同一式）
  * - キャッシュは SalesChannelCacheDaily に保存
  */
 import prisma from "../db.server";
-import { getShopTimezoneForDaily, getDayRangeInUtc, getDayRangeShopifySearchIso } from "../utils/shopTimezone.server";
+import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
 import { getAppSetting, setAppSetting, SETTLEMENT_SETTINGS_KEY } from "../utils/appSettings.server";
 import { splitTaxInclusiveToNetAndTax } from "./settlementEngine.server";
 
@@ -519,28 +520,27 @@ export async function computeAndCacheChannelDailySummary(
 
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
-  const searchIso = getDayRangeShopifySearchIso(targetDate, timezone);
 
   // Pass 1: created_at ベース（当日注文）
-  // source_name は Shopify GraphQL の query 引数では信頼性が低いため除外し、
-  // フェッチ後に sourceName フィールドでメモリ内フィルタリングする
-  // 検索境界は GAS と同様 +09:00 壁時計（東京）を優先し、さらに createdAt で再フィルタする
+  // source_name はクエリでは POS 除外のみとし、チャネル判定はフェッチ後の sourceName（filterBySourceNames）
+  // 検索境界は POS 精算と同じ UTC ISO（getDayRangeInUtc）— +09:00 文字列と二重解釈を避ける
   const createdQuery = buildChannelQuery(
     "created_at",
-    searchIso.start,
-    searchIso.end,
+    dayRange.startUtcIso,
+    dayRange.endUtcIso,
     ["tag_not:settlement", "-status:cancelled"]
   );
   const allCreatedOrders = await fetchChannelOrders(admin, createdQuery, dayRange);
   const orders = filterBySourceNames(allCreatedOrders, sourceNames);
-  const orderIdsCreatedInDay = new Set(allCreatedOrders.map((o) => o.id)); // overlay 重複除外用は全件で持つ
+  // POS と同様「このチャネルで Pass1 に載せた注文」だけオーバーレイでスキップ（他チャネル同日作成 ID で返金を落とさない）
+  const orderIdsCreatedInDay = new Set(orders.map((o) => o.id));
   const { gross, refund: refundInDay, refundCountInDay, items, currency } = computeChannelTotalsFromOrders(orders, dayRange);
 
   // Pass 2: updated_at ベース返金 overlay（当日以外の注文から当日処理された返金）
   const updatedQuery = buildChannelQuery(
     "updated_at",
-    searchIso.start,
-    searchIso.end,
+    dayRange.startUtcIso,
+    dayRange.endUtcIso,
     ["tag_not:settlement"]
   );
   const allUpdatedOrders = await fetchChannelOrdersForRefundOverlay(admin, updatedQuery);
