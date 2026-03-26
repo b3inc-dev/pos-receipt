@@ -196,23 +196,6 @@ function filterOrdersByRetailLocation(
   });
 }
 
-/**
- * Shopify の注文は店舗・API 世代で sourceName が異なる（pos / point_of_sale / shopify_pos 等）。
- * 検索を source_name:pos のみにすると取りこぼすため、広く取得したあとここで POS のみ残す。
- */
-function isPosOrderSourceName(raw: string | null | undefined): boolean {
-  const s = (raw ?? "").trim().toLowerCase();
-  if (!s) return false;
-  if (s === "pos" || s === "shopify_pos" || s === "point_of_sale") return true;
-  if (s.includes("point_of_sale") || s.includes("point of sale")) return true;
-  if (s.includes("shopify_pos") || s === "shopifypossdk") return true;
-  return false;
-}
-
-function filterOrdersToPosSalesBySourceName(orders: ShopifyOrder[]): ShopifyOrder[] {
-  return orders.filter((o) => isPosOrderSourceName(o.sourceName));
-}
-
 /** 返金再集計用: updated_at でその日に更新された注文を取得（refunds.createdAt でフィルタするため） */
 const REFUNDS_ORDERS_QUERY = `#graphql
   query RefundsOrders($first: Int!, $after: String, $query: String) {
@@ -419,11 +402,10 @@ export async function getRefundOverlayForDay(
   const startIso = dayRange.startUtc.toISOString().replace(/\.000Z$/, "Z");
   const endIso = dayRange.endUtc.toISOString();
   const locationGid = `gid://shopify/Location/${locIdRaw}`;
-  // GAS と同様に updated_at ベースの返金補足では cancelled も含める（POS は sourceName で事後フィルタ）
+  // GAS fetchAllOrdersSmart と同様、source_name では絞らない（location_id + タグのみ）。retailLocation で店舗一致を確認するのは呼び出し側。
   const updatedQuery = `location_id:${locIdRaw} updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement`;
   const ordersUpdatedRaw = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
-  const ordersUpdated = ordersUpdatedRaw.filter((o) => isPosOrderSourceName(o.sourceName));
-  const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationGid, locIdRaw);
+  const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdatedRaw, locationGid, locIdRaw);
   const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
   return { refundTotal: overlay.refundTotal };
 }
@@ -476,8 +458,7 @@ async function calculatePaymentSections(
 
   for (const order of orders) {
     for (const tx of order.transactions) {
-      // GAS と揃えるため tx.status を見ない
-      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && inDay(tx.createdAt)) {
+      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS" && inDay(tx.createdAt)) {
         const gw = tx.gateway ?? "";
         ensure(gw);
         sections[gw].net += Number(tx.amountSet.shopMoney.amount);
@@ -600,13 +581,13 @@ export async function buildSettlementPreview(
   const dayRange = getDayRangeInUtc(targetDate, timezone);
   const searchIso = getDayRangeShopifySearchIso(targetDate, timezone);
 
-  // 精算注文・キャンセル除外。source_name は店舗で表記が異なるため検索に含めず、取得後に sourceName で POS のみ残す
+  // GAS baseNoCancelled と同様: location_id + 精算タグ除外 + キャンセル除外。source_name / sourceName では絞らない（空や表記差で POS が全落ちするのを防ぐ）
   const shopifyQuery = `location_id:${locIdRaw} created_at:>=${searchIso.start} created_at:<=${searchIso.end} tag_not:settlement -status:cancelled`;
   const ordersRaw = await fetchAllOrders(admin, shopifyQuery);
-  const orders = filterOrdersToPosSalesBySourceName(ordersRaw);
-  const ordersAtLocation = filterOrdersByRetailLocation(orders, locationId, locIdRaw);
+  const ordersAtLocation = filterOrdersByRetailLocation(ordersRaw, locationId, locIdRaw);
   const ordersRawCount = ordersRaw.length;
-  const ordersPosSourceMatchedCount = orders.length;
+  /** sourceName による除外は行わないため、常に ordersRaw と同じ件数 */
+  const ordersPosSourceMatchedCount = ordersRaw.length;
   const ordersAtLocationCount = ordersAtLocation.length;
 
   const orderIdsCreatedInDay = new Set(ordersAtLocation.map((o) => o.id));
@@ -632,9 +613,7 @@ export async function buildSettlementPreview(
     let orderRefundToday = 0;
     for (const tx of order.transactions) {
       if (!inDay(tx.createdAt)) continue;
-      // GAS_精算レシート.md は transactions.kind だけで集計しており、tx.status === "SUCCESS" の条件がない。
-      // その差で App 側だけ売上・件数が少なくなる可能性があるため、status 条件を外して GAS と揃える。
-      if (tx.kind === "SALE" || tx.kind === "CAPTURE") {
+      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS") {
         orderSaleToday += Number(tx.amountSet.shopMoney.amount);
       }
       if (tx.kind === "REFUND") {
@@ -671,11 +650,10 @@ export async function buildSettlementPreview(
   // GAS と同様に updated_at ベースの返金補足では cancelled も含める
   const updatedQuery = `location_id:${locIdRaw} updated_at:>=${searchIso.start} updated_at:<=${searchIso.end} tag_not:settlement`;
   const ordersUpdatedRaw = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
-  const ordersUpdated = ordersUpdatedRaw.filter((o) => isPosOrderSourceName(o.sourceName));
-  const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationId, locIdRaw);
+  const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdatedRaw, locationId, locIdRaw);
   const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
   const ordersUpdatedRawCount = ordersUpdatedRaw.length;
-  const ordersUpdatedPosSourceMatchedCount = ordersUpdated.length;
+  const ordersUpdatedPosSourceMatchedCount = ordersUpdatedRaw.length;
   const ordersUpdatedAtLocationCount = ordersUpdatedAtLocation.length;
   const overlayRefundCount = overlay.refundCount;
 
