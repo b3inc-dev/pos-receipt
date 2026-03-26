@@ -1,7 +1,8 @@
 /**
  * GET /api/sales-summary/period
  * 要件書 §21.6: 期間売上サマリー
- * Query: dateFrom, dateTo, locationIds[]
+ * Query: dateFrom, dateTo, budgetDateTo?（月予算だけ dateFrom〜budgetDateTo で集計）,
+ * progressAsOfDate?（遂行予算の締め日。未指定時は店舗タイムゾーンの当日）, locationIds[]
  * 設定 §10: 売上サマリー設定で表示対象を制御
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
@@ -31,6 +32,10 @@ import {
   getCalendarDateStringInTimeZone,
   addCalendarDaysToIsoDate,
 } from "../utils/shopTimezone.server";
+import {
+  tryLoadPeriodAggregatesFromRollup,
+  syncRollupsMatchingPeriodRequest,
+} from "../services/salesSummaryPeriodRollup.server";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
 
@@ -80,6 +85,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const url = new URL(request.url);
     const dateFrom = url.searchParams.get("dateFrom");
     const dateTo = url.searchParams.get("dateTo");
+    /** 実績・日次キャッシュは dateTo まで。月予算だけ月末まで積みたいときに指定（月次UI向け） */
+    const budgetDateToParam = url.searchParams.get("budgetDateTo");
+    const progressAsOfParam = url.searchParams.get("progressAsOfDate");
     const locationIdsParam = url.searchParams.getAll("locationIds[]");
 
     let allLocations: SalesSummaryLocationRow[] = await prisma.location.findMany({
@@ -149,6 +157,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const shopIanaTz = await getShopTimezoneForDaily(admin, shop.id);
     const shopCalendarToday = getCalendarDateStringInTimeZone(new Date(), shopIanaTz);
 
+    const useDbBudgetForPeriod = Boolean(dateFrom && dateTo);
+    const budgetRangeTo =
+      useDbBudgetForPeriod && budgetDateToParam && budgetDateToParam >= dateFrom!
+        ? budgetDateToParam
+        : dateTo ?? "";
+    let progressCutoff = shopCalendarToday;
+    let progressPrevCutoff = addCalendarDaysToIsoDate(shopCalendarToday, -1);
+    if (progressAsOfParam && /^\d{4}-\d{2}-\d{2}$/.test(progressAsOfParam)) {
+      const capped =
+        progressAsOfParam > shopCalendarToday ? shopCalendarToday : progressAsOfParam;
+      progressCutoff = capped;
+      progressPrevCutoff = addCalendarDaysToIsoDate(capped, -1);
+    }
+
     let periodCachePartial = false;
     let pendingComputeEstimate = 0;
 
@@ -216,6 +238,37 @@ export async function loader({ request }: LoaderFunctionArgs) {
           a.day.localeCompare(b.day) || a.ch.displayName.localeCompare(b.ch.displayName),
       );
 
+      if (
+        locationWork.length === 0 &&
+        channelWork.length === 0 &&
+        useDbBudgetForPeriod &&
+        budgetRangeTo
+      ) {
+        const fromRollup = await tryLoadPeriodAggregatesFromRollup({
+          shopId: shop.id,
+          dateFrom: dateFrom!,
+          dateTo: dateTo!,
+          budgetRangeTo,
+          progressCutoff,
+          progressPrevCutoff,
+          locationGids: targetLocations.map((l) => l.shopifyLocationGid),
+          locationNames: new Map(targetLocations.map((l) => [l.shopifyLocationGid, l.name])),
+          channels: enabledChannels.map((c) => ({ id: c.id, displayName: c.displayName })),
+        });
+        if (fromRollup) {
+          return corsJson({
+            rows: fromRollup.rows,
+            channelRows: fromRollup.channelRows,
+            totals: fromRollup.totals,
+            dateFrom,
+            dateTo,
+            displayOptions: merged,
+            periodCachePartial: false,
+            pendingComputeEstimate: 0,
+          });
+        }
+      }
+
       const maxPeriod = getSalesSummaryPeriodMaxComputes();
       let budget = maxPeriod === 0 ? Number.MAX_SAFE_INTEGER : maxPeriod;
 
@@ -268,7 +321,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const yesterday = addCalendarDaysToIsoDate(shopCalendarToday, -1);
 
     const locNameMap = new Map(targetLocations.map((l) => [l.shopifyLocationGid, l.name]));
-    const useDbBudgetForPeriod = Boolean(dateFrom && dateTo);
 
     // ロケーション別集計
     const locationMap = new Map<
@@ -321,9 +373,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         shop.id,
         targetLocations.map((l) => l.shopifyLocationGid),
         dateFrom!,
-        dateTo!,
-        today,
-        yesterday,
+        budgetRangeTo,
+        progressCutoff,
+        progressPrevCutoff,
       );
       for (const loc of targetLocations) {
         const entry = locationMap.get(loc.shopifyLocationGid);
@@ -417,9 +469,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
           shop.id,
           enabledChannels.map((c) => c.id),
           dateFrom!,
-          dateTo!,
-          today,
-          yesterday,
+          budgetRangeTo,
+          progressCutoff,
+          progressPrevCutoff,
         );
         for (const ch of enabledChannels) {
           const entry = channelMap.get(ch.id);
@@ -479,6 +531,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       setRate: totalOrders > 0 ? totalItems / totalOrders : null,
       unit: totalItems > 0 ? totalActual / totalItems : null,
     };
+
+    if (useDbBudgetForPeriod && dateFrom && dateTo && budgetRangeTo && !periodCachePartial) {
+      void syncRollupsMatchingPeriodRequest(
+        shop.id,
+        dateFrom,
+        dateTo,
+        budgetRangeTo,
+        progressCutoff,
+        progressPrevCutoff,
+        targetLocations.map((l) => ({ shopifyLocationGid: l.shopifyLocationGid, name: l.name })),
+        enabledChannels.map((c) => ({ id: c.id, displayName: c.displayName })),
+      ).catch((e) => console.warn("[sales-summary] rollup after period:", e));
+    }
 
     return corsJson({
       rows,

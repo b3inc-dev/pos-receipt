@@ -56,10 +56,14 @@ export async function getDailySummary(options) {
 export async function getPeriodSummary(options) {
   const dateFrom = options?.dateFrom;
   const dateTo = options?.dateTo;
+  const budgetDateTo = options?.budgetDateTo;
+  const progressAsOfDate = options?.progressAsOfDate;
   const locationIds = options?.locationIds ?? [];
   const params = new URLSearchParams();
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
+  if (budgetDateTo) params.set("budgetDateTo", budgetDateTo);
+  if (progressAsOfDate) params.set("progressAsOfDate", progressAsOfDate);
   for (const id of locationIds) params.append("locationIds[]", id);
   return apiFetch(`/api/sales-summary/period?${params.toString()}`);
 }

@@ -4,6 +4,7 @@
  *
  * - スコープ: この店舗（セッションロケーション） / 全店舗（locationIds 省略＝API が有効店すべて）
  * - 粒度: 日次 / 月次（期間はその月の1日〜当日または月末）
+ * - 日次: 一品単価の下に当月MTDの月予算・遂行など（期間APIを並列取得）
  * - スクロール: 全店舗時は先頭に全店合計、その下に店舗別のリスト行（精算プレビュー型）
  * - フッター左: 入店数報告ボタン（日次・この店のみ・対象店で表示／command で s-modal を開く）
  * - フッター右: 日別一覧（/api/sales-summary/month-daily・比較用KPI付きリスト）
@@ -45,7 +46,23 @@ function monthRange(year, month) {
   const lastStr = `${year}-${pad2(month)}-${pad2(lastDay)}`;
   const today = todayStr();
   const dateTo = lastStr > today ? today : lastStr;
-  return { dateFrom, dateTo };
+  /** 実績は dateTo まで。月予算は API で budgetDateTo（月末）まで積む */
+  return { dateFrom, dateTo, budgetDateTo: lastStr };
+}
+
+/** 日次で選択中の日を含む月の 1日〜その日（実績）・月末まで（月予算） */
+function monthRangeForTargetDate(ymdStr) {
+  const parts = String(ymdStr || "").split("-");
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (!y || !m || m < 1 || m > 12) return null;
+  const dateFrom = `${y}-${pad2(m)}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const lastStr = `${y}-${pad2(m)}-${pad2(lastDay)}`;
+  let cap = ymdStr;
+  if (cap > lastStr) cap = lastStr;
+  if (cap < dateFrom) cap = dateFrom;
+  return { dateFrom, dateTo: cap, budgetDateTo: lastStr };
 }
 
 function daysInMonth(year, month) {
@@ -193,7 +210,12 @@ function hasAnyDailyKpi(o) {
     o.showAtv ||
     o.showSetRate ||
     o.showItems ||
-    o.showUnitPrice
+    o.showUnitPrice ||
+    o.showMonthBudget ||
+    o.showMonthActual ||
+    o.showMonthAchvRatio ||
+    o.showProgressToday ||
+    o.showProgressPrev
   );
 }
 
@@ -338,11 +360,12 @@ function dailyKpiRows(row, o) {
 }
 
 /** tone は SummaryRow が未対応のため value に含めずそのまま表示 */
-function DailyMetricRows({ row, o }) {
-  const items = dailyKpiRows(row, o);
+function DailyMetricRows({ row, o, periodRow }) {
+  const base = dailyKpiRows(row, o);
+  const items = mergeDailyRowsWithMonthKpi(base, periodRow, o);
   return items.map((r, i) => (
     <SummaryRow
-      key={r.label}
+      key={`${r.label}-${i}`}
       label={r.label}
       value={r.value}
       valueBold={r.valueBold}
@@ -418,6 +441,79 @@ function totalsDailyRows(totals, o) {
   const unit = totals.items > 0 ? totals.actual / totals.items : null;
   if (o.showUnitPrice && unit !== null) rows.push({ label: "一品単価", value: fmtAmount(unit) });
   return rows;
+}
+
+/** 全店合計用: 期間 API の totals を月次KPI行向けに整形 */
+function totalsToPseudoPeriodRow(totals, locationRows = []) {
+  const actualTotal = Number(totals.actualTotal ?? 0);
+  const budgetTotal = totals.budgetTotal != null ? totals.budgetTotal : null;
+  const progressBudgetToday =
+    totals.progressBudgetToday != null && totals.progressBudgetToday !== undefined
+      ? Number(totals.progressBudgetToday)
+      : locationRows.reduce((s, r) => s + Number(r.progressBudgetToday ?? 0), 0);
+  const progressBudgetPrev =
+    totals.progressBudgetPrev != null && totals.progressBudgetPrev !== undefined
+      ? Number(totals.progressBudgetPrev)
+      : locationRows.reduce((s, r) => s + Number(r.progressBudgetPrev ?? 0), 0);
+  return {
+    budgetTotal,
+    actualTotal,
+    achievementRate: budgetTotal != null && budgetTotal > 0 ? actualTotal / budgetTotal : null,
+    progressBudgetToday,
+    progressBudgetPrev,
+    progressRateToday: progressBudgetToday > 0 ? actualTotal / progressBudgetToday : null,
+    progressRatePrev: progressBudgetPrev > 0 ? actualTotal / progressBudgetPrev : null,
+  };
+}
+
+/** 月予算→月実績→達成率→遂行…（日次で一品単価の直後に挿入） */
+function monthKpiRowsOrderedFromPeriodRow(row, o) {
+  const items = [];
+  if (!row) return items;
+  if (o.showMonthBudget && row.budgetTotal !== null)
+    items.push({ label: "月予算", value: fmtAmount(row.budgetTotal) });
+  if (o.showMonthActual)
+    items.push({ label: "月実績", value: fmtAmount(row.actualTotal), valueBold: true });
+  if (o.showMonthAchvRatio && row.achievementRate !== null) {
+    items.push({
+      label: "達成率",
+      value: fmtPct(row.achievementRate),
+    });
+  }
+  if (row.progressBudgetToday > 0 && o.showProgressToday) {
+    items.push({ label: "遂行予算(当日)", value: fmtAmount(row.progressBudgetToday) });
+    items.push({ label: "遂行率(当日)", value: fmtPct(row.progressRateToday) });
+  }
+  if (row.progressBudgetPrev > 0 && o.showProgressPrev) {
+    items.push({ label: "遂行予算(前日)", value: fmtAmount(row.progressBudgetPrev) });
+    items.push({ label: "遂行率(前日)", value: fmtPct(row.progressRatePrev) });
+  }
+  return items;
+}
+
+function mergeDailyRowsWithMonthKpi(baseItems, periodRow, o) {
+  if (!periodRow) return baseItems;
+  const wantMonth =
+    o.showMonthBudget ||
+    o.showMonthActual ||
+    o.showMonthAchvRatio ||
+    o.showProgressToday ||
+    o.showProgressPrev;
+  if (!wantMonth) return baseItems;
+  const extra = monthKpiRowsOrderedFromPeriodRow(periodRow, o);
+  if (extra.length === 0) return baseItems;
+  const idx = baseItems.findIndex((r) => r.label === "一品単価");
+  if (idx === -1) return [...baseItems, ...extra];
+  return [...baseItems.slice(0, idx + 1), ...extra, ...baseItems.slice(idx + 1)];
+}
+
+/** 日次の1行（店舗 or チャネル）に対応する期間API行 */
+function pickPeriodRowForDailyLine(dailyMonthPeriod, row) {
+  if (!dailyMonthPeriod) return null;
+  if (row.channelId != null) {
+    return dailyMonthPeriod.channelRows?.find((pr) => pr.channelId === row.channelId) ?? null;
+  }
+  return dailyMonthPeriod.rows?.find((pr) => locationIdsMatch(pr.locationId, row.locationId)) ?? null;
 }
 
 /**
@@ -1225,6 +1321,8 @@ function SalesSummaryModal() {
   const [monthsLoading, setMonthsLoading] = useState(false);
 
   const [data, setData] = useState(null);
+  /** 日次タブ: 当月MTDの期間API結果（一品単価の下の月次KPI用） */
+  const [dailyMonthPeriod, setDailyMonthPeriod] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState(null);
@@ -1357,21 +1455,52 @@ function SalesSummaryModal() {
     try {
       if (scope === "single" && !sessionGid) {
         setData(null);
+        setDailyMonthPeriod(null);
         setLoadedSummaryParamsKey(null);
         setError("ロケーションを取得できませんでした。POSで店舗を選択してから開き直してください。");
         return;
       }
       let result;
       if (grain === "daily") {
-        result = await getDailySummary({ targetDate, locationIds: locationIdsForApi });
+        const mr = monthRangeForTargetDate(targetDate);
+        const [dailySettled, monthSettled] = await Promise.allSettled([
+          getDailySummary({ targetDate, locationIds: locationIdsForApi }),
+          mr
+            ? getPeriodSummary({
+                dateFrom: mr.dateFrom,
+                dateTo: mr.dateTo,
+                budgetDateTo: mr.budgetDateTo,
+                progressAsOfDate: targetDate,
+                locationIds: locationIdsForApi,
+              })
+            : Promise.resolve(null),
+        ]);
+        if (dailySettled.status === "rejected") {
+          const reason = dailySettled.reason;
+          throw reason instanceof Error ? reason : new Error(String(reason));
+        }
+        result = dailySettled.value;
+        if (monthSettled.status === "fulfilled" && monthSettled.value?.rows) {
+          setDailyMonthPeriod(monthSettled.value);
+        } else {
+          setDailyMonthPeriod(null);
+        }
       } else if (grain === "monthly") {
-        const { dateFrom, dateTo } = monthRange(selectedYear, selectedMonth);
-        result = await getPeriodSummary({ dateFrom, dateTo, locationIds: locationIdsForApi });
+        setDailyMonthPeriod(null);
+        const { dateFrom, dateTo, budgetDateTo } = monthRange(selectedYear, selectedMonth);
+        result = await getPeriodSummary({
+          dateFrom,
+          dateTo,
+          budgetDateTo,
+          locationIds: locationIdsForApi,
+        });
       } else {
+        setDailyMonthPeriod(null);
         const dateFrom = periodAppliedFrom;
         const dateTo = periodAppliedTo;
         if (dateFrom > dateTo) {
           setData(null);
+          setDailyMonthPeriod(null);
           setLoadedSummaryParamsKey(null);
           setError("開始日は終了日以前にしてください");
           return;
@@ -1397,6 +1526,7 @@ function SalesSummaryModal() {
     } catch (err) {
       setError(toUserMessage(err?.message));
       setData(null);
+      setDailyMonthPeriod(null);
       setLoadedSummaryParamsKey(null);
     } finally {
       setLoading(false);
@@ -1429,7 +1559,12 @@ function SalesSummaryModal() {
   const showStoreTotalsFlag = o.showStoreTotals !== false;
   const showAllTotals =
     scope === "all" && (rows.length >= 1 || channelRowsForUi.length >= 1) && showStoreTotalsFlag;
-  const totalsDaily = totalsDailyRows(totals, o);
+  const totalsDaily = useMemo(() => {
+    const base = totalsDailyRows(totals, o);
+    if (grain !== "daily" || !dailyMonthPeriod?.totals) return base;
+    const pseudo = totalsToPseudoPeriodRow(dailyMonthPeriod.totals, dailyMonthPeriod.rows ?? []);
+    return mergeDailyRowsWithMonthKpi(base, pseudo, o);
+  }, [totals, o, grain, dailyMonthPeriod]);
   const totalsPeriod = totalsPeriodRows(totals, o, rows);
   const showTotalsSectionDaily = showAllTotals && grain === "daily" && totalsDaily.length > 0;
   const showTotalsSectionMonthly = showAllTotals && grain !== "daily" && totalsPeriod.length > 0;
@@ -2164,7 +2299,11 @@ function SalesSummaryModal() {
                               }
                             >
                               {grain === "daily" ? (
-                                <DailyMetricRows row={row} o={o} />
+                                <DailyMetricRows
+                                  row={row}
+                                  o={o}
+                                  periodRow={pickPeriodRowForDailyLine(dailyMonthPeriod, row)}
+                                />
                               ) : (
                                 <PeriodMetricRows row={row} o={o} />
                               )}
@@ -2181,7 +2320,11 @@ function SalesSummaryModal() {
                               }
                             >
                               {grain === "daily" ? (
-                                <DailyMetricRows row={row} o={o} />
+                                <DailyMetricRows
+                                  row={row}
+                                  o={o}
+                                  periodRow={pickPeriodRowForDailyLine(dailyMonthPeriod, row)}
+                                />
                               ) : (
                                 <PeriodMetricRows row={row} o={o} />
                               )}

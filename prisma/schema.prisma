@@ -54,6 +54,7 @@ model Shop {
   salesChannels            SalesChannel[]
   salesChannelCacheDaily   SalesChannelCacheDaily[]
   salesChannelBudgets      SalesChannelBudget[]
+  salesChannelCachePeriod  SalesChannelCachePeriod[]
 }
 
 // ========== 20.2 ロケーション（印字方式・サマリー設定）要件 §4 ==========
@@ -299,12 +300,45 @@ model SalesSummaryCachePeriod {
   endDate               String?
   budgetTotal           Decimal? @db.Decimal(18, 2)
   actualTotal           Decimal? @db.Decimal(18, 2)
+  ordersTotal           Int      @default(0)
+  itemsTotal            Int      @default(0)
+  visitorsTotal         Int?
   progressBudgetToday   Decimal? @db.Decimal(18, 2)
   progressBudgetPrev    Decimal? @db.Decimal(18, 2)
+  /** 遂行予算計算に使った暦日（期間APIの progressAsOf と一致するときだけロールアップ高速パス） */
+  progressCutoffUsed    String?
+  /** 予算集計の終端日（通常は月末 YYYY-MM-DD） */
+  budgetRangeEnd        String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
   @@unique([shopId, locationId, periodType, periodKey])
+  @@index([shopId])
+}
+
+// ========== 20.11b チャネル別・月次ロールアップ（期間API高速パス用） ==========
+model SalesChannelCachePeriod {
+  id                    String   @id @default(cuid())
+  shopId                String
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  channelId             String
+  channel               SalesChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  periodType            String   @default("month")
+  periodKey             String
+  startDate             String?
+  endDate               String?
+  budgetTotal           Decimal? @db.Decimal(18, 2)
+  actualTotal           Decimal? @db.Decimal(18, 2)
+  ordersTotal           Int      @default(0)
+  itemsTotal            Int      @default(0)
+  progressBudgetToday   Decimal? @db.Decimal(18, 2)
+  progressBudgetPrev    Decimal? @db.Decimal(18, 2)
+  progressCutoffUsed    String?
+  budgetRangeEnd        String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([shopId, channelId, periodKey])
   @@index([shopId])
 }
 
@@ -328,6 +362,7 @@ model SalesChannel {
   updatedAt              DateTime @updatedAt
 
   cacheDaily       SalesChannelCacheDaily[]
+  cachePeriod      SalesChannelCachePeriod[]
   channelBudgets   SalesChannelBudget[]
 
   @@index([shopId])

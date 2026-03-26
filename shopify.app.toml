@@ -22,6 +22,11 @@ uri = "/webhooks/app/uninstalled"
 compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
 uri = "/webhooks/compliance"
 
+# 注文更新時に売上サマリー日次キャッシュを裏で更新（POS Stock の orders/updated と同型）
+[[webhooks.subscriptions]]
+topics = ["orders/updated"]
+uri = "/webhooks/orders/updated"
+
 [access.admin]
 direct_api_mode = "offline"
 embedded_app_direct_api_access = true

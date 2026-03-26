@@ -26,3 +26,12 @@ export const authenticate = shopify.authenticate;
 export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
 export const registerWebhooks = shopify.registerWebhooks;
+
+/** pg-boss ワーカーをプロセス起動直後に温める（初回 Webhook まで待たない） */
+if (typeof queueMicrotask !== "undefined") {
+  queueMicrotask(() => {
+    import("./services/salesSummaryWebhookQueue.server")
+      .then((m) => m.ensureSalesSummaryWebhookWorker())
+      .catch(() => {});
+  });
+}
