@@ -63,7 +63,7 @@ export interface SettlementPreviewDTO {
 export interface SettlementPreviewDebugDTO {
   // Shopify 検索結果（売上集計用）の件数
   ordersRawCount: number;
-  // sourceName で POS 相当だけ残した件数
+  // 互換のため残す（sourceName フィルタ廃止後は ordersRawCount と同じ）
   ordersPosSourceMatchedCount: number;
   // retailLocation（または null の許容）で対象ロケーションとして残った件数
   ordersAtLocationCount: number;
@@ -73,6 +73,14 @@ export interface SettlementPreviewDebugDTO {
   ordersUpdatedPosSourceMatchedCount: number;
   ordersUpdatedAtLocationCount: number;
   overlayRefundCount: number;
+  /** created_at 検索の生件数（GAS fetchAllOrdersSmart ① の手前） */
+  ordersCreatedSearchCount: number;
+  /** ① のうち createdAt が暦日内に厳密に入る件数（GAS と同様の事後フィルタ） */
+  ordersCreatedStrictDayCount: number;
+  /** 当日 updated のキャンセル済み注文の取得件数（GAS ⑤） */
+  ordersUpdatedCancelledSearchCount: number;
+  /** 注文ユニオンに updated 系を含めたため返金オーバーレイは使わず二重計上を防ぐ */
+  refundOverlayMergedIntoUnion: boolean;
 }
 
 // ── Gateway Labels（支払方法マスタ未設定時はフォールバックを paymentMethod.server で使用） ───
@@ -106,6 +114,8 @@ interface ShopifyRefund {
 interface ShopifyOrder {
   id: string;
   name: string;
+  /** 暦日厳密フィルタ・割引帰属に使用（GAS fetchAllOrdersSmart ①） */
+  createdAt?: string;
   sourceName?: string | null;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   totalTaxSet: { shopMoney: { amount: string } };
@@ -129,6 +139,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
       nodes {
         id
         name
+        createdAt
         sourceName
         totalPriceSet { shopMoney { amount currencyCode } }
         totalTaxSet { shopMoney { amount } }
@@ -194,6 +205,17 @@ function filterOrdersByRetailLocation(
     const ridRaw = extractLocationNumericId(rid);
     return rid === locationGid || ridRaw === locIdRaw;
   });
+}
+
+/** GAS fetchAllOrdersSmart のユニオン（注文 id 重複除去・先勝ち） */
+function unionOrdersById(batches: ShopifyOrder[][]): ShopifyOrder[] {
+  const byId = new Map<string, ShopifyOrder>();
+  for (const batch of batches) {
+    for (const o of batch) {
+      if (o?.id && !byId.has(o.id)) byId.set(o.id, o);
+    }
+  }
+  return [...byId.values()];
 }
 
 /** 返金再集計用: updated_at でその日に更新された注文を取得（refunds.createdAt でフィルタするため） */
@@ -392,18 +414,20 @@ function computeRefundsOnlyForDay(
 /**
  * その日の返金オーバーレイ（注文が「その日作成」でない分）の refundTotal を返す。
  * 売上サマリーの actual（純売上）算出で利用（GAS_vs_APP_IMPLEMENTATION_GAP §7.3）。
+ * buildSettlementPreview は注文ユニオンに updated を含めるため本関数は基本未使用。
  */
 export async function getRefundOverlayForDay(
   admin: AdminClient,
+  shopId: string,
   locIdRaw: string,
+  targetDate: string,
   orderIdsCreatedInDay: Set<string>,
   dayRange: { startUtc: Date; endUtc: Date }
 ): Promise<{ refundTotal: number }> {
-  const startIso = dayRange.startUtc.toISOString().replace(/\.000Z$/, "Z");
-  const endIso = dayRange.endUtc.toISOString();
+  const timezone = await getShopTimezoneForDaily(admin, shopId);
+  const searchIso = getDayRangeShopifySearchIso(targetDate, timezone);
   const locationGid = `gid://shopify/Location/${locIdRaw}`;
-  // GAS fetchAllOrdersSmart と同様、source_name では絞らない（location_id + タグのみ）。retailLocation で店舗一致を確認するのは呼び出し側。
-  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement`;
+  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${searchIso.start} updated_at:<=${searchIso.end} tag_not:settlement`;
   const ordersUpdatedRaw = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
   const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdatedRaw, locationGid, locIdRaw);
   const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
@@ -458,7 +482,8 @@ async function calculatePaymentSections(
 
   for (const order of orders) {
     for (const tx of order.transactions) {
-      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS" && inDay(tx.createdAt)) {
+      // GAS_精算レシート.md は kind のみで集計（SUCCESS に依存しない）
+      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && inDay(tx.createdAt)) {
         const gw = tx.gateway ?? "";
         ensure(gw);
         sections[gw].net += Number(tx.amountSet.shopMoney.amount);
@@ -581,25 +606,31 @@ export async function buildSettlementPreview(
   const dayRange = getDayRangeInUtc(targetDate, timezone);
   const searchIso = getDayRangeShopifySearchIso(targetDate, timezone);
 
-  // GAS baseNoCancelled と同様: location_id + 精算タグ除外 + キャンセル除外。source_name / sourceName では絞らない（空や表記差で POS が全落ちするのを防ぐ）
-  const shopifyQuery = `location_id:${locIdRaw} created_at:>=${searchIso.start} created_at:<=${searchIso.end} tag_not:settlement -status:cancelled`;
-  const ordersRaw = await fetchAllOrders(admin, shopifyQuery);
-  const ordersAtLocation = filterOrdersByRetailLocation(ordersRaw, locationId, locIdRaw);
-  const ordersRawCount = ordersRaw.length;
-  /** sourceName による除外は行わないため、常に ordersRaw と同じ件数 */
-  const ordersPosSourceMatchedCount = ordersRaw.length;
-  const ordersAtLocationCount = ordersAtLocation.length;
-
-  const orderIdsCreatedInDay = new Set(ordersAtLocation.map((o) => o.id));
-
   const inDay = (iso?: string) => {
     if (!iso) return false;
     const t = new Date(iso).getTime();
     return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
   };
 
+  // GAS fetchAllOrdersSmart: ① created ＋ ③ updated（非キャンセル）＋ ⑤ 当日 updated のキャンセル済み を id ユニオン
+  const qLoc = `location_id:${locIdRaw} tag_not:settlement`;
+  const shopifyQueryCreated = `${qLoc} created_at:>=${searchIso.start} created_at:<=${searchIso.end} -status:cancelled`;
+  const shopifyQueryUpdated = `${qLoc} updated_at:>=${searchIso.start} updated_at:<=${searchIso.end} -status:cancelled`;
+  const shopifyQueryUpdatedCancelled = `location_id:${locIdRaw} updated_at:>=${searchIso.start} updated_at:<=${searchIso.end} tag_not:settlement status:cancelled`;
+
+  const ordersCreatedFetched = await fetchAllOrders(admin, shopifyQueryCreated);
+  const ordersUpdatedFetched = await fetchAllOrders(admin, shopifyQueryUpdated);
+  const ordersUpdatedCancelledFetched = await fetchAllOrders(admin, shopifyQueryUpdatedCancelled);
+
+  const ordersCreatedStrict = ordersCreatedFetched.filter((o) => inDay(o.createdAt));
+  const ordersRaw = unionOrdersById([ordersCreatedStrict, ordersUpdatedFetched, ordersUpdatedCancelledFetched]);
+  const ordersAtLocation = filterOrdersByRetailLocation(ordersRaw, locationId, locIdRaw);
+  const ordersRawCount = ordersRaw.length;
+  const ordersPosSourceMatchedCount = ordersRaw.length;
+  const ordersAtLocationCount = ordersAtLocation.length;
+  const ordersUpdatedAtLocationForDebug = filterOrdersByRetailLocation(ordersUpdatedFetched, locationId, locIdRaw);
+
   let total = 0;
-  let tax = 0;
   let discounts = 0;
   let refundTotal = 0;
   let itemCount = 0;
@@ -613,7 +644,8 @@ export async function buildSettlementPreview(
     let orderRefundToday = 0;
     for (const tx of order.transactions) {
       if (!inDay(tx.createdAt)) continue;
-      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS") {
+      // GAS と揃え tx.status は見ない（PENDING 等でも取引は集計対象）
+      if (tx.kind === "SALE" || tx.kind === "CAPTURE") {
         orderSaleToday += Number(tx.amountSet.shopMoney.amount);
       }
       if (tx.kind === "REFUND") {
@@ -622,8 +654,10 @@ export async function buildSettlementPreview(
     }
 
     total += orderSaleToday;
-    tax += Number(order.totalTaxSet.shopMoney.amount);
-    discounts += Number(order.totalDiscountsSet.shopMoney.amount);
+    // 税は後段で payment sections 合計から再計算。割引は「その日に作成された注文」に限定（前日分の updated ユニオンで全額を足さない）
+    if (inDay(order.createdAt)) {
+      discounts += Number(order.totalDiscountsSet.shopMoney.amount);
+    }
 
     if ((orderSaleToday - orderRefundToday) > 0) {
       saleOrderSet.add(order.id);
@@ -646,16 +680,16 @@ export async function buildSettlementPreview(
     }
   }
 
-  // 返金再集計（別パス）: その日に処理された返金のうち、注文が「その日作成」でない分を追加（GAS overlayRefundsAndRecalc 相当）
-  // GAS と同様に updated_at ベースの返金補足では cancelled も含める
-  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${searchIso.start} updated_at:<=${searchIso.end} tag_not:settlement`;
-  const ordersUpdatedRaw = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
-  const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdatedRaw, locationId, locIdRaw);
-  const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
-  const ordersUpdatedRawCount = ordersUpdatedRaw.length;
-  const ordersUpdatedPosSourceMatchedCount = ordersUpdatedRaw.length;
-  const ordersUpdatedAtLocationCount = ordersUpdatedAtLocation.length;
-  const overlayRefundCount = overlay.refundCount;
+  // 注文集合に updated / cancelled-updated をユニオン済みのため、返金はメインループで計上。オーバーレイを掛けると二重になる
+  const emptyRefundOverlay: {
+    refundTotal: number;
+    refundCount: number;
+    byGateway: Record<string, { refund: number; refundCount: number }>;
+  } = { refundTotal: 0, refundCount: 0, byGateway: {} };
+  const ordersUpdatedRawCount = ordersUpdatedFetched.length;
+  const ordersUpdatedPosSourceMatchedCount = ordersUpdatedFetched.length;
+  const ordersUpdatedAtLocationCount = ordersUpdatedAtLocationForDebug.length;
+  const overlayRefundCount = 0;
 
   let netSales = total - discounts;
 
@@ -692,7 +726,7 @@ export async function buildSettlementPreview(
     loyaltySettings?.loyaltyUsageDisplayLabel ?? DEFAULT_LOYALTY_SETTINGS.loyaltyUsageDisplayLabel;
 
   let paymentSections = await calculatePaymentSections(ordersAtLocation, shopId, dayRange);
-  mergeRefundOverlay(paymentSections, overlay, { refundTotal, refundCount });
+  mergeRefundOverlay(paymentSections, emptyRefundOverlay, { refundTotal, refundCount });
   // 特殊返金イベントを totals オブジェクト経由で受け取り、ローカル変数に反映する
   const eventTotals = { total, refundTotal };
   applySpecialRefundEventsToTotals(paymentSections, otherEvents, eventTotals);
@@ -708,7 +742,7 @@ export async function buildSettlementPreview(
   const settlementSettings = await getAppSetting<{ taxRatePercent?: number }>(shopId, SETTLEMENT_SETTINGS_KEY);
   const taxRatePercent = Number(settlementSettings?.taxRatePercent) || 10;
   const split = splitTaxInclusiveToNetAndTax(total, taxRatePercent);
-  tax = split.tax;
+  const tax = split.tax;
   netSales = split.netSales;
 
   for (const sec of paymentSections) {
@@ -748,6 +782,10 @@ export async function buildSettlementPreview(
           ordersUpdatedPosSourceMatchedCount,
           ordersUpdatedAtLocationCount,
           overlayRefundCount,
+          ordersCreatedSearchCount: ordersCreatedFetched.length,
+          ordersCreatedStrictDayCount: ordersCreatedStrict.length,
+          ordersUpdatedCancelledSearchCount: ordersUpdatedCancelledFetched.length,
+          refundOverlayMergedIntoUnion: true,
         }
       : undefined,
     appliedSpecialRefundEvents: otherEvents.map((e) => ({
