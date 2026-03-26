@@ -1100,7 +1100,7 @@ export default function SalesSummaryAdminPage() {
                   </Text>
                   {recomputeDebugLocations.slice(0, 5).map((d: any) => (
                     <Text key={d.locationId ?? d.locationName} as="p">
-                      {d.locationName}：Shopify取得 {d.debug?.ordersRawCount ?? "-"} → ロケーション一致 {d.debug?.ordersAtLocationCount ?? "-"}（sourceName では絞りません）/ 件数 {d.orders}件 / 売上 {fmtYen(Number(d.actual ?? 0))}
+                      {d.locationName}：POS検索取得 {d.debug?.ordersRawCount ?? "-"} → retailLocation一致 {d.debug?.ordersAtLocationCount ?? "-"}（fa78e63 方針: source_name:pos・SUCCESS）/ 件数 {d.orders}件 / 売上 {fmtYen(Number(d.actual ?? 0))}
                     </Text>
                   ))}
                   {recomputeDebugLocations.length > 5 && (
