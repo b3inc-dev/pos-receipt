@@ -368,8 +368,13 @@ export function OrderDayListScreen({
                 <s-stack gap="none">
                   {items.map((order) => {
                     const badges = formatPosBadgeLabels(order, badgeMode);
+                    const handleSelect = () => onSelectOrderId(order.orderId);
                     return (
-                      <s-pressable key={order.orderId} onPress={() => onSelectOrderId(order.orderId)}>
+                      <s-pressable
+                        key={order.orderId}
+                        onPress={handleSelect}
+                        onClick={handleSelect}
+                      >
                         <s-box padding="small">
                           <s-stack gap="extraSmall">
                             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>

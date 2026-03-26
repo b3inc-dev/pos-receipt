@@ -9,6 +9,8 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import prisma from "../db.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { SPECIAL_REFUND_SETTINGS_KEY, DEFAULT_SPECIAL_REFUND_SETTINGS } from "../utils/appSettings.server";
+import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
+import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
 
@@ -20,6 +22,15 @@ function getAllowedEventTypes(settings: typeof DEFAULT_SPECIAL_REFUND_SETTINGS |
   if (s.enableVoucherChangeAdjustment) out.push("voucher_change_adjustment");
   if (s.enableReceiptCashAdjustment) out.push("receipt_cash_adjustment");
   return out.length > 0 ? out : [...EVENT_TYPES];
+}
+
+function normalizeLocationIdToGid(locationId: string): string | null {
+  const s = String(locationId || "").trim();
+  if (!s) return null;
+  if (s.startsWith("gid://shopify/Location/")) return s;
+  if (/^\d+$/.test(s)) return `gid://shopify/Location/${s}`;
+  const m = s.match(/\/(\d+)$/);
+  return m?.[1] ? `gid://shopify/Location/${m[1]}` : null;
 }
 
 // GET /api/special-refunds?sourceOrderId=...
@@ -125,6 +136,28 @@ export async function action({ request }: ActionFunctionArgs) {
         status: "active",
       },
     });
+
+    // 売上サマリー（過去実績含む）の整合を保つため、登録日の日次キャッシュを再計算
+    const locationGid = normalizeLocationIdToGid(event.locationId);
+    if (locationGid) {
+      try {
+        const timezone = await getShopTimezoneForDaily(admin, shop.id);
+        const targetDate = getCalendarDateStringInTimeZone(event.createdAt, timezone);
+        const loc = await prisma.location.findFirst({
+          where: { shopId: shop.id, shopifyLocationGid: locationGid },
+          select: { name: true },
+        });
+        await computeAndCacheDailySummary(
+          admin,
+          shop.id,
+          locationGid,
+          loc?.name ?? "",
+          targetDate,
+        );
+      } catch {
+        // キャッシュ更新失敗でイベント登録自体は失敗させない
+      }
+    }
 
     return corsJson({ ok: true, event: serializeEvent(event) }, { status: 201 });
   } catch (err) {
