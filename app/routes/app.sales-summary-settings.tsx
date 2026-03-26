@@ -249,6 +249,7 @@ export default function SalesSummarySettingsPage() {
                 />
                 <Checkbox
                   label="チャネル行を表示（EC・マーケットプレイス等）"
+                  helpText="POS の売上サマリーで「全店舗表示」のときのみ一覧に出ます。単一店舗表示では店舗の売上だけです。"
                   checked={form.showChannelRows}
                   onChange={(v) => set("showChannelRows", v)}
                 />

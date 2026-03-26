@@ -891,7 +891,9 @@ function HistoryDailyDetailView({
   const rows = data?.rows ?? [];
   const channelRows = data?.channelRows ?? [];
   const showChannelRowsFlag = o.showChannelRows !== false;
-  const channelRowsForUi = showChannelRowsFlag ? channelRows : [];
+  // チャネル（EC 等）は「全店舗表示」時のみ一覧に出す。単一ロケーション時は店舗行のみ。
+  const channelRowsForUi =
+    scope === "all" && showChannelRowsFlag ? channelRows : [];
   const totals = data?.totals ?? {};
   const showLocationRows = o.showLocationRows !== false;
   const showStoreTotalsFlag = o.showStoreTotals !== false;
@@ -1420,7 +1422,8 @@ function SalesSummaryModal() {
   const rows = data?.rows ?? [];
   const channelRows = data?.channelRows ?? [];
   const showChannelRowsFlag = o.showChannelRows !== false;
-  const channelRowsForUi = showChannelRowsFlag ? channelRows : [];
+  const channelRowsForUi =
+    scope === "all" && showChannelRowsFlag ? channelRows : [];
   const totals = data?.totals ?? {};
   const showLocationRows = o.showLocationRows !== false;
   const showStoreTotalsFlag = o.showStoreTotals !== false;
