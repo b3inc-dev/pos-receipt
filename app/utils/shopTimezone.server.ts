@@ -1,9 +1,9 @@
 /**
  * ショップタイムゾーンと日次集計用 UTC 範囲
- * GAS_vs_APP_IMPLEMENTATION_GAP.md §5: Shopify の shop.ianaTimezone で「その日」の境界を算出
+ * 日次の「その日」は管理画面の一般設定（デフォルトタイムゾーン）を正とし、
+ * 未保存時のみ Shopify の shop.ianaTimezone を使う（要件 §3 一般設定との整合）。
  */
-import { getAppSetting } from "./appSettings.server";
-import { GENERAL_SETTINGS_KEY } from "./appSettings.server";
+import { getAppSetting, GENERAL_SETTINGS_KEY, type GeneralSettings } from "./appSettings.server";
 
 type AdminClient = {
   graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }>;
@@ -17,21 +17,27 @@ const FALLBACK_TIMEZONE = "Asia/Tokyo";
 
 /**
  * 日次集計に使うタイムゾーンを取得する。
- * 1) Shopify の shop.ianaTimezone、2) 一般設定の defaultTimezone、3) Asia/Tokyo の順でフォールバック。
+ * 1) 一般設定（general_settings）の defaultTimezone（保存済みなら必ずこれを優先）
+ * 2) Shopify の shop.ianaTimezone（一般設定が未作成のとき）
+ * 3) Asia/Tokyo
  */
 export async function getShopTimezoneForDaily(
   admin: AdminClient,
   shopId: string
 ): Promise<string> {
+  const general = await getAppSetting<Partial<GeneralSettings>>(shopId, GENERAL_SETTINGS_KEY);
+  const appTz = general?.defaultTimezone?.trim();
+  if (appTz) return appTz;
+
   const fromShop = await getShopIanaTimezone(admin);
   if (fromShop) return fromShop;
-  const general = await getAppSetting<{ defaultTimezone?: string }>(shopId, GENERAL_SETTINGS_KEY);
-  return general?.defaultTimezone?.trim() || FALLBACK_TIMEZONE;
+
+  return FALLBACK_TIMEZONE;
 }
 
 /**
  * Shopify のショップ設定から IANA タイムゾーンを取得する。
- * 取得できない場合は null を返す（呼び出し側で defaultTimezone にフォールバックすること）
+ * 取得できない場合は null を返す（呼び出し側で getShopTimezoneForDaily のフォールバックチェーンを使うこと）
  */
 export async function getShopIanaTimezone(
   admin: AdminClient
