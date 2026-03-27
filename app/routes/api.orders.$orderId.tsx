@@ -13,36 +13,9 @@ const ORDER_DETAIL_QUERY = `#graphql
       createdAt
       displayFinancialStatus
       totalPriceSet { shopMoney { amount currencyCode } }
-      customer {
-        id
-        displayName
-        email
-      }
       retailLocation {
         id
         name
-      }
-      lineItems(first: 100) {
-        nodes {
-          id
-          title
-          quantity
-          originalUnitPriceSet { shopMoney { amount } }
-          discountedUnitPriceSet { shopMoney { amount } }
-        }
-      }
-      transactions(first: 50) {
-        id
-        kind
-        status
-        gateway
-        amountSet { shopMoney { amount currencyCode } }
-        createdAt
-      }
-      refunds {
-        id
-        createdAt
-        totalRefundedSet { shopMoney { amount } }
       }
     }
   }
@@ -89,36 +62,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       createdAt: order.createdAt,
       financialStatus: order.displayFinancialStatus,
       totalPrice: order.totalPriceSet?.shopMoney ?? {},
-      customer: order.customer
-        ? {
-            id: order.customer.id,
-            displayName: order.customer.displayName,
-            email: order.customer.email,
-          }
-        : null,
+      customer: null,
       location: order.retailLocation
         ? { id: order.retailLocation.id, name: order.retailLocation.name }
         : null,
-      lineItems: (order.lineItems?.nodes ?? []).map((li: Record<string, unknown>) => ({
-        id: li.id,
-        title: li.title,
-        quantity: li.quantity,
-        originalUnitPrice: (li.originalUnitPriceSet as { shopMoney?: { amount?: string } })?.shopMoney?.amount,
-        discountedUnitPrice: (li.discountedUnitPriceSet as { shopMoney?: { amount?: string } })?.shopMoney?.amount,
-      })),
-      transactions: ((order.transactions as Record<string, unknown>[]) ?? []).map((tx: Record<string, unknown>) => ({
-        id: tx.id,
-        kind: tx.kind,
-        status: tx.status,
-        gateway: tx.gateway,
-        amount: (tx.amountSet as { shopMoney?: { amount?: string; currencyCode?: string } })?.shopMoney,
-        createdAt: tx.createdAt,
-      })),
-      refunds: ((order.refunds as Record<string, unknown>[]) ?? []).map((r: Record<string, unknown>) => ({
-        id: r.id,
-        createdAt: r.createdAt,
-        totalRefunded: (r.totalRefundedSet as { shopMoney?: { amount?: string } })?.shopMoney?.amount,
-      })),
+      lineItems: [],
+      transactions: [],
+      refunds: [],
     };
 
     return corsJson(result, {
