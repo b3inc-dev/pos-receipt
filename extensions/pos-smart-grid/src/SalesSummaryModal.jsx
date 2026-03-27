@@ -1232,14 +1232,26 @@ function HistoryDailyDetailView({
             }}
           >
             <s-stack direction="inline" alignItems="center" gap="base" style={{ width: "100%" }}>
-              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                <s-stack alignItems="start">
-                  <s-button kind="secondary" onClick={loadData} loading={loading}>
-                    更新
-                  </s-button>
-                </s-stack>
+              <s-box
+                style={{
+                  flex: "1 1 0",
+                  minInlineSize: 0,
+                  display: "flex",
+                  justifyContent: "flex-start",
+                }}
+              >
+                <s-button kind="secondary" onClick={loadData} disabled={loading}>
+                  {loading ? "更新中.." : "更新"}
+                </s-button>
               </s-box>
-              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+              <s-box
+                style={{
+                  flex: "1 1 0",
+                  minInlineSize: 0,
+                  display: "flex",
+                  justifyContent: "center",
+                }}
+              >
                 <s-stack alignItems="center">
                   {scope === "single" && sessionRow?.footfallReportingEnabled ? (
                     <s-stack gap="extraSmall" alignItems="center">
@@ -1262,12 +1274,17 @@ function HistoryDailyDetailView({
                   ) : null}
                 </s-stack>
               </s-box>
-              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                <s-stack alignItems="end">
-                  <s-button kind="secondary" onClick={onNavigateToDailyList}>
-                    日別一覧
-                  </s-button>
-                </s-stack>
+              <s-box
+                style={{
+                  flex: "1 1 0",
+                  minInlineSize: 0,
+                  display: "flex",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <s-button kind="secondary" onClick={onNavigateToDailyList}>
+                  日別一覧
+                </s-button>
               </s-box>
             </s-stack>
           </s-box>
@@ -2363,14 +2380,26 @@ function SalesSummaryModal() {
             }}
           >
             <s-stack direction="inline" alignItems="center" gap="base" style={{ width: "100%" }}>
-              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                <s-stack alignItems="start">
-                  <s-button kind="secondary" onClick={loadData} loading={loading}>
-                    更新
-                  </s-button>
-                </s-stack>
+              <s-box
+                style={{
+                  flex: "1 1 0",
+                  minInlineSize: 0,
+                  display: "flex",
+                  justifyContent: "flex-start",
+                }}
+              >
+                <s-button kind="secondary" onClick={loadData} disabled={loading}>
+                  {loading ? "更新中.." : "更新"}
+                </s-button>
               </s-box>
-              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+              <s-box
+                style={{
+                  flex: "1 1 0",
+                  minInlineSize: 0,
+                  display: "flex",
+                  justifyContent: "center",
+                }}
+              >
                 <s-stack alignItems="center">
                   {showFooterFootfallButton ? (
                     <s-stack gap="extraSmall" alignItems="center">
@@ -2393,12 +2422,17 @@ function SalesSummaryModal() {
                   ) : null}
                 </s-stack>
               </s-box>
-              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                <s-stack alignItems="end">
-                  <s-button kind="secondary" disabled={!sessionGid} onClick={openDailyList}>
-                    日別一覧
-                  </s-button>
-                </s-stack>
+              <s-box
+                style={{
+                  flex: "1 1 0",
+                  minInlineSize: 0,
+                  display: "flex",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <s-button kind="secondary" disabled={!sessionGid} onClick={openDailyList}>
+                  日別一覧
+                </s-button>
               </s-box>
             </s-stack>
           </s-box>
