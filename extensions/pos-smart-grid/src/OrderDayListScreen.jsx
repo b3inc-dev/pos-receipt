@@ -365,15 +365,14 @@ export function OrderDayListScreen({
               ) : items.length === 0 ? (
                 <s-text tone="subdued" size="small">この日の取引はありません。</s-text>
               ) : (
-                <s-stack gap="none">
+                {/* 売上サマリー日別一覧・精算モーダル日別行と同型: s-clickable + onClick（POS でタップが確実に届く） */}
+                <s-stack gap="base">
                   {items.map((order) => {
                     const badges = formatPosBadgeLabels(order, badgeMode);
-                    const handleSelect = () => onSelectOrderId(order.orderId);
                     return (
-                      <s-pressable
+                      <s-clickable
                         key={order.orderId}
-                        onPress={handleSelect}
-                        onClick={handleSelect}
+                        onClick={() => onSelectOrderId(order.orderId)}
                       >
                         <s-box padding="small">
                           <s-stack gap="extraSmall">
@@ -396,7 +395,7 @@ export function OrderDayListScreen({
                           </s-stack>
                         </s-box>
                         <s-divider />
-                      </s-pressable>
+                      </s-clickable>
                     );
                   })}
                   {nextCursor ? (
