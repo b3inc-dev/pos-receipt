@@ -1231,32 +1231,43 @@ function HistoryDailyDetailView({
               zIndex: 10,
             }}
           >
-            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+            <s-stack direction="inline" alignItems="center" gap="base" style={{ width: "100%" }}>
               <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                {scope === "single" && sessionRow?.footfallReportingEnabled ? (
-                  <s-stack gap="extraSmall">
-                    <s-button
-                      kind="secondary"
-                      command="--show"
-                      commandFor={FOOTFALL_MODAL_ID_HISTORY}
-                      onClick={() => setFootfallErr("")}
-                    >
-                      {footerFootfallInput
-                        ? `入店数報告（${footerFootfallInput}人）`
-                        : "入店数報告"}
-                    </s-button>
-                    {footfallErr ? (
-                      <s-text tone="critical" size="small">
-                        {footfallErr}
-                      </s-text>
-                    ) : null}
-                  </s-stack>
-                ) : null}
+                <s-stack alignItems="start">
+                  <s-button kind="secondary" onClick={loadData} loading={loading}>
+                    更新
+                  </s-button>
+                </s-stack>
               </s-box>
-              <s-box style={{ flex: "0 0 auto" }}>
-                <s-button kind="secondary" onClick={onNavigateToDailyList}>
-                  日別一覧
-                </s-button>
+              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+                <s-stack alignItems="center">
+                  {scope === "single" && sessionRow?.footfallReportingEnabled ? (
+                    <s-stack gap="extraSmall" alignItems="center">
+                      <s-button
+                        kind="secondary"
+                        command="--show"
+                        commandFor={FOOTFALL_MODAL_ID_HISTORY}
+                        onClick={() => setFootfallErr("")}
+                      >
+                        {footerFootfallInput
+                          ? `入店数報告（${footerFootfallInput}人）`
+                          : "入店数報告"}
+                      </s-button>
+                      {footfallErr ? (
+                        <s-text tone="critical" size="small">
+                          {footfallErr}
+                        </s-text>
+                      ) : null}
+                    </s-stack>
+                  ) : null}
+                </s-stack>
+              </s-box>
+              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+                <s-stack alignItems="end">
+                  <s-button kind="secondary" onClick={onNavigateToDailyList}>
+                    日別一覧
+                  </s-button>
+                </s-stack>
               </s-box>
             </s-stack>
           </s-box>
@@ -2351,32 +2362,43 @@ function SalesSummaryModal() {
               zIndex: 10,
             }}
           >
-            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+            <s-stack direction="inline" alignItems="center" gap="base" style={{ width: "100%" }}>
               <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                {showFooterFootfallButton ? (
-                  <s-stack gap="extraSmall">
-                    <s-button
-                      kind="secondary"
-                      command="--show"
-                      commandFor={FOOTFALL_MODAL_ID_MAIN}
-                      onClick={() => setFootfallErr("")}
-                    >
-                      {footerFootfallInput
-                        ? `入店数報告（${footerFootfallInput}人）`
-                        : "入店数報告"}
-                    </s-button>
-                    {footfallErr ? (
-                      <s-text tone="critical" size="small">
-                        {footfallErr}
-                      </s-text>
-                    ) : null}
-                  </s-stack>
-                ) : null}
+                <s-stack alignItems="start">
+                  <s-button kind="secondary" onClick={loadData} loading={loading}>
+                    更新
+                  </s-button>
+                </s-stack>
               </s-box>
-              <s-box style={{ flex: "0 0 auto" }}>
-                <s-button kind="secondary" disabled={!sessionGid} onClick={openDailyList}>
-                  日別一覧
-                </s-button>
+              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+                <s-stack alignItems="center">
+                  {showFooterFootfallButton ? (
+                    <s-stack gap="extraSmall" alignItems="center">
+                      <s-button
+                        kind="secondary"
+                        command="--show"
+                        commandFor={FOOTFALL_MODAL_ID_MAIN}
+                        onClick={() => setFootfallErr("")}
+                      >
+                        {footerFootfallInput
+                          ? `入店数報告（${footerFootfallInput}人）`
+                          : "入店数報告"}
+                      </s-button>
+                      {footfallErr ? (
+                        <s-text tone="critical" size="small">
+                          {footfallErr}
+                        </s-text>
+                      ) : null}
+                    </s-stack>
+                  ) : null}
+                </s-stack>
+              </s-box>
+              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+                <s-stack alignItems="end">
+                  <s-button kind="secondary" disabled={!sessionGid} onClick={openDailyList}>
+                    日別一覧
+                  </s-button>
+                </s-stack>
               </s-box>
             </s-stack>
           </s-box>
