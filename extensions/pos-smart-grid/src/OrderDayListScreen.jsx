@@ -365,7 +365,6 @@ export function OrderDayListScreen({
               ) : items.length === 0 ? (
                 <s-text tone="subdued" size="small">この日の取引はありません。</s-text>
               ) : (
-                {/* 売上サマリー日別一覧・精算モーダル日別行と同型: s-clickable + onClick（POS でタップが確実に届く） */}
                 <s-stack gap="base">
                   {items.map((order) => {
                     const badges = formatPosBadgeLabels(order, badgeMode);
