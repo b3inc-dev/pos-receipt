@@ -51,7 +51,7 @@ export default async () => {
 
 // ── Root ──────────────────────────────────────────────────────────────────────
 function SettlementModal() {
-  const [step, setStep] = useState("main");
+  const [step, setStep] = useState("preview");
   const [locations, setLocations] = useState([]);
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [targetDate, setTargetDate] = useState(todayStr());
@@ -675,16 +675,13 @@ function MainView({
             onOpenDailyRow({ targetDate: t });
           }}
           leftDisabled={!selectedLocation}
-          leftLoading={loading}
           middleLabel="点検"
           onMiddle={onInspection}
           middleDisabled={!selectedLocation}
-          middleLoading={loading}
           rightLabel="精算"
           onRight={onSettle}
           rightTone="success"
           rightDisabled={!selectedLocation}
-          rightLoading={loading}
         />
       </s-stack>
     </s-page>
@@ -706,7 +703,71 @@ function PreviewView({
   onConfirm,
   onBackToHistory,
 }) {
-  if (!preview) return null;
+  if (!preview) {
+    return (
+      <s-page heading={isInspection ? "点検レシート プレビュー" : "精算プレビュー"}>
+        <s-stack
+          gap="none"
+          blockSize="100%"
+          inlineSize="100%"
+          minBlockSize="0"
+          style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+        >
+          <s-box
+            padding="base"
+            border="base"
+            style={{
+              position: "sticky",
+              top: 0,
+              background: "var(--s-color-bg)",
+              zIndex: 10,
+            }}
+          >
+            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
+              <s-button kind="secondary" disabled={!canPrevDay || loading} onClick={() => onPickDate(addDays(targetDate, -1))}>
+                前日
+              </s-button>
+              <s-text emphasis="bold" size="small">
+                {targetDate}
+              </s-text>
+              <s-button kind="secondary" disabled={!canNextDay || loading} onClick={() => onPickDate(addDays(targetDate, 1))}>
+                翌日
+              </s-button>
+            </s-stack>
+          </s-box>
+          <s-divider />
+          <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
+            <s-box padding="base">
+              <s-stack gap="base">
+                <s-text tone="subdued" size="small">当日の精算プレビューを読み込み中…</s-text>
+                {error ? <s-text tone="critical">{error}</s-text> : null}
+                {!loading ? (
+                  <s-button kind="secondary" onClick={() => onPickDate(targetDate)}>
+                    再読み込み
+                  </s-button>
+                ) : null}
+              </s-stack>
+            </s-box>
+          </s-scroll-box>
+          <s-divider />
+          <FixedFooterNavBar
+            centerAlignWithButtons
+            leftLabel="履歴一覧"
+            onLeft={onBackToHistory}
+            leftDisabled={loading}
+            middleLabel="点検"
+            onMiddle={() => onConfirm(true)}
+            middleDisabled
+            rightLabel="精算"
+            onRight={() => onConfirm(false)}
+            rightTone="success"
+            rightDisabled
+          />
+        </s-stack>
+      </s-page>
+    );
+  }
+
   const printModeLabel = printMode === "cloudprnt_direct" ? "CloudPRNT直印字" : "注文経由印字";
 
   const headerRows = [
