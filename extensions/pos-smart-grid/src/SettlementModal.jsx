@@ -39,6 +39,12 @@ function todayYearMonth() {
   return { year: d.getFullYear(), month: d.getMonth() + 1 };
 }
 
+function addDays(ymd, delta) {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
 export default async () => {
   render(<SettlementModal />, document.body);
 };
@@ -68,6 +74,7 @@ function SettlementModal() {
   const initialYm = useMemo(() => todayYearMonth(), []);
   const [selectedYear, setSelectedYear] = useState(initialYm.year);
   const [selectedMonth, setSelectedMonth] = useState(initialYm.month);
+  const [initialPreviewLoaded, setInitialPreviewLoaded] = useState(false);
 
   // POS Stock と同様: ポーリングでセッションのロケーションが確定するまで待つ
   const { locationGid: sessionLocationGid, isReady: sessionReady } = useSessionLocation();
@@ -187,9 +194,9 @@ function SettlementModal() {
     }
   }, []);
 
-  const handlePreview = useCallback(
-    async (inspection = false) => {
-      if (!selectedLocation) return;
+  const fetchPreviewForDate = useCallback(
+    async ({ date, inspection = false, openStep = "preview" }) => {
+      if (!selectedLocation) return false;
       setLoading(true);
       setError("");
       setIsInspection(inspection);
@@ -197,17 +204,27 @@ function SettlementModal() {
         const res = await previewSettlement({
           locationId: selectedLocation.locationId,
           locationName: selectedLocation.locationName,
-          targetDate,
+          targetDate: date,
         });
+        setTargetDate(date);
         setPreview(res.preview);
-        setStep("preview");
+        setStep(openStep);
+        return true;
       } catch (e) {
         setError(toUserMessage(e?.message) || "プレビューの取得に失敗しました");
+        return false;
       } finally {
         setLoading(false);
       }
     },
-    [selectedLocation, targetDate]
+    [selectedLocation]
+  );
+
+  const handlePreview = useCallback(
+    async (inspection = false) => {
+      await fetchPreviewForDate({ date: targetDate, inspection, openStep: "preview" });
+    },
+    [fetchPreviewForDate, targetDate]
   );
 
   const handleCreate = useCallback(async () => {
@@ -300,6 +317,15 @@ function SettlementModal() {
     loadMonthRows(selectedLocation?.locationId, selectedYear, selectedMonth);
   }, [selectedLocation?.locationId, selectedYear, selectedMonth, loadMonthRows]);
 
+  // 初回は当日プレビューを自動表示（精算運用の主導線）
+  useEffect(() => {
+    if (!selectedLocation || initialPreviewLoaded) return;
+    const t = todayStr();
+    fetchPreviewForDate({ date: t, inspection: false, openStep: "preview" }).finally(() =>
+      setInitialPreviewLoaded(true)
+    );
+  }, [selectedLocation, initialPreviewLoaded, fetchPreviewForDate]);
+
   if (step === "main") {
     return (
       <MainView
@@ -352,16 +378,20 @@ function SettlementModal() {
     return (
       <PreviewView
         preview={preview}
+        targetDate={targetDate}
+        canPrevDay={targetDate > "2020-01-01"}
+        canNextDay={targetDate < todayStr()}
         isInspection={isInspection}
         printMode={selectedLocation?.printMode}
         loading={loading}
         error={error}
+        onPickDate={(d) => fetchPreviewForDate({ date: d, inspection: isInspection, openStep: "preview" })}
         onRecalculate={handleRecalculate}
         onConfirm={(inspection) => {
           setIsInspection(!!inspection);
           setStep("confirm");
         }}
-        onBack={() => setStep("main")}
+        onBackToHistory={() => setStep("main")}
       />
     );
   }
@@ -638,8 +668,12 @@ function MainView({
 
         <FixedFooterNavBar
           centerAlignWithButtons
-          leftLabel="精算プレビュー"
-          onLeft={onPreview}
+          leftLabel="当日プレビュー"
+          onLeft={() => {
+            const t = todayStr();
+            setError("");
+            onOpenDailyRow({ targetDate: t });
+          }}
           leftDisabled={!selectedLocation}
           leftLoading={loading}
           middleLabel="点検"
@@ -660,13 +694,17 @@ function MainView({
 // ── プレビュー画面 ─────────────────────────────────────────────────────────────
 function PreviewView({
   preview,
+  targetDate,
+  canPrevDay,
+  canNextDay,
   isInspection,
   printMode,
   loading,
   error,
+  onPickDate,
   onRecalculate,
   onConfirm,
-  onBack,
+  onBackToHistory,
 }) {
   if (!preview) return null;
   const printModeLabel = printMode === "cloudprnt_direct" ? "CloudPRNT直印字" : "注文経由印字";
@@ -758,17 +796,30 @@ function PreviewView({
             zIndex: 10,
           }}
         >
-          <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
-            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-              <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {preview.locationName ?? "-"}
-              </s-text>
-            </s-box>
-            <s-box style={{ flex: "0 0 auto" }}>
-              <s-button kind="secondary" onClick={onRecalculate} loading={loading}>
-                更新
+          <s-stack gap="small">
+            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+              <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
+                <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {preview.locationName ?? "-"}
+                </s-text>
+              </s-box>
+              <s-box style={{ flex: "0 0 auto" }}>
+                <s-button kind="secondary" onClick={onRecalculate} loading={loading}>
+                  更新
+                </s-button>
+              </s-box>
+            </s-stack>
+            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
+              <s-button kind="secondary" disabled={!canPrevDay || loading} onClick={() => onPickDate(addDays(targetDate, -1))}>
+                前日
               </s-button>
-            </s-box>
+              <s-text emphasis="bold" size="small">
+                {targetDate}
+              </s-text>
+              <s-button kind="secondary" disabled={!canNextDay || loading} onClick={() => onPickDate(addDays(targetDate, 1))}>
+                翌日
+              </s-button>
+            </s-stack>
           </s-stack>
         </s-box>
 
@@ -871,8 +922,8 @@ function PreviewView({
 
         <FixedFooterNavBar
           centerAlignWithButtons
-          leftLabel="戻る"
-          onLeft={onBack}
+          leftLabel="履歴一覧"
+          onLeft={onBackToHistory}
           leftDisabled={loading}
           middleLabel="点検"
           onMiddle={() => onConfirm(true)}
