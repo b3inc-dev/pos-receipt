@@ -6,8 +6,8 @@
  * - 粒度: 日次 / 月次（期間はその月の1日〜当日または月末）
  * - 日次: 一品単価の下に当月MTDの月予算・遂行など（期間APIを並列取得）
  * - スクロール: 全店舗時は先頭に全店合計、その下に店舗別のリスト行（精算プレビュー型）
- * - フッター左: 入店数報告ボタン（日次・この店のみ・対象店で表示／command で s-modal を開く）
- * - フッター右: 日別一覧（/api/sales-summary/month-daily・比較用KPI付きリスト）
+ * - 固定フッター: POS Stock の FixedFooterNavBar（centerAlignWithButtons）と同型
+ *   space-between + 左ボタン / 中央（入店数報告 or 空 s-box）/ 右「日別一覧」
  * - 日別一覧で日付タップ: メインの日付は据え置きで historyDaily へ（入店数報告は単一店・日次のみ）
  * - 日別一覧の「戻る」は常に売上サマリーTOPへ
  */
@@ -1231,61 +1231,37 @@ function HistoryDailyDetailView({
               zIndex: 10,
             }}
           >
-            <s-stack direction="inline" alignItems="center" gap="base" style={{ width: "100%" }}>
-              <s-box
-                style={{
-                  flex: "1 1 0",
-                  minInlineSize: 0,
-                  display: "flex",
-                  justifyContent: "flex-start",
-                }}
-              >
-                <s-button kind="secondary" onClick={loadData} disabled={loading}>
-                  {loading ? "更新中.." : "更新"}
-                </s-button>
-              </s-box>
-              <s-box
-                style={{
-                  flex: "1 1 0",
-                  minInlineSize: 0,
-                  display: "flex",
-                  justifyContent: "center",
-                }}
-              >
-                <s-stack alignItems="center">
-                  {scope === "single" && sessionRow?.footfallReportingEnabled ? (
-                    <s-stack gap="extraSmall" alignItems="center">
-                      <s-button
-                        kind="secondary"
-                        command="--show"
-                        commandFor={FOOTFALL_MODAL_ID_HISTORY}
-                        onClick={() => setFootfallErr("")}
-                      >
-                        {footerFootfallInput
-                          ? `入店数報告（${footerFootfallInput}人）`
-                          : "入店数報告"}
-                      </s-button>
-                      {footfallErr ? (
-                        <s-text tone="critical" size="small">
-                          {footfallErr}
-                        </s-text>
-                      ) : null}
-                    </s-stack>
-                  ) : null}
-                </s-stack>
-              </s-box>
-              <s-box
-                style={{
-                  flex: "1 1 0",
-                  minInlineSize: 0,
-                  display: "flex",
-                  justifyContent: "flex-end",
-                }}
-              >
-                <s-button kind="secondary" onClick={onNavigateToDailyList}>
-                  日別一覧
-                </s-button>
-              </s-box>
+            {/* POS Stock: FixedFooterNavBar centerAlignWithButtons と同型（space-between 3 子） */}
+            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+              <s-button kind="secondary" onClick={loadData} disabled={loading}>
+                {loading ? "更新中.." : "更新"}
+              </s-button>
+              {scope === "single" && sessionRow?.footfallReportingEnabled ? (
+                <s-box style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+                  <s-stack gap="extraSmall" alignItems="center">
+                    <s-button
+                      kind="secondary"
+                      command="--show"
+                      commandFor={FOOTFALL_MODAL_ID_HISTORY}
+                      onClick={() => setFootfallErr("")}
+                    >
+                      {footerFootfallInput
+                        ? `入店数報告（${footerFootfallInput}人）`
+                        : "入店数報告"}
+                    </s-button>
+                    {footfallErr ? (
+                      <s-text tone="critical" size="small">
+                        {footfallErr}
+                      </s-text>
+                    ) : null}
+                  </s-stack>
+                </s-box>
+              ) : (
+                <s-box />
+              )}
+              <s-button kind="secondary" onClick={onNavigateToDailyList}>
+                日別一覧
+              </s-button>
             </s-stack>
           </s-box>
         </s-stack>
@@ -2379,61 +2355,37 @@ function SalesSummaryModal() {
               zIndex: 10,
             }}
           >
-            <s-stack direction="inline" alignItems="center" gap="base" style={{ width: "100%" }}>
-              <s-box
-                style={{
-                  flex: "1 1 0",
-                  minInlineSize: 0,
-                  display: "flex",
-                  justifyContent: "flex-start",
-                }}
-              >
-                <s-button kind="secondary" onClick={loadData} disabled={loading}>
-                  {loading ? "更新中.." : "更新"}
-                </s-button>
-              </s-box>
-              <s-box
-                style={{
-                  flex: "1 1 0",
-                  minInlineSize: 0,
-                  display: "flex",
-                  justifyContent: "center",
-                }}
-              >
-                <s-stack alignItems="center">
-                  {showFooterFootfallButton ? (
-                    <s-stack gap="extraSmall" alignItems="center">
-                      <s-button
-                        kind="secondary"
-                        command="--show"
-                        commandFor={FOOTFALL_MODAL_ID_MAIN}
-                        onClick={() => setFootfallErr("")}
-                      >
-                        {footerFootfallInput
-                          ? `入店数報告（${footerFootfallInput}人）`
-                          : "入店数報告"}
-                      </s-button>
-                      {footfallErr ? (
-                        <s-text tone="critical" size="small">
-                          {footfallErr}
-                        </s-text>
-                      ) : null}
-                    </s-stack>
-                  ) : null}
-                </s-stack>
-              </s-box>
-              <s-box
-                style={{
-                  flex: "1 1 0",
-                  minInlineSize: 0,
-                  display: "flex",
-                  justifyContent: "flex-end",
-                }}
-              >
-                <s-button kind="secondary" disabled={!sessionGid} onClick={openDailyList}>
-                  日別一覧
-                </s-button>
-              </s-box>
+            {/* POS Stock: FixedFooterNavBar centerAlignWithButtons と同型（space-between 3 子） */}
+            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
+              <s-button kind="secondary" onClick={loadData} disabled={loading}>
+                {loading ? "更新中.." : "更新"}
+              </s-button>
+              {showFooterFootfallButton ? (
+                <s-box style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+                  <s-stack gap="extraSmall" alignItems="center">
+                    <s-button
+                      kind="secondary"
+                      command="--show"
+                      commandFor={FOOTFALL_MODAL_ID_MAIN}
+                      onClick={() => setFootfallErr("")}
+                    >
+                      {footerFootfallInput
+                        ? `入店数報告（${footerFootfallInput}人）`
+                        : "入店数報告"}
+                    </s-button>
+                    {footfallErr ? (
+                      <s-text tone="critical" size="small">
+                        {footfallErr}
+                      </s-text>
+                    ) : null}
+                  </s-stack>
+                </s-box>
+              ) : (
+                <s-box />
+              )}
+              <s-button kind="secondary" disabled={!sessionGid} onClick={openDailyList}>
+                日別一覧
+              </s-button>
             </s-stack>
           </s-box>
         </s-stack>
