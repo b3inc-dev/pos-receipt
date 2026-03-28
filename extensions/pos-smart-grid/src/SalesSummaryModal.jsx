@@ -23,6 +23,7 @@ import { getAvailableMonths } from "../../common/settlementApi.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
+import { formatYmdSlash } from "../../common/dateDisplay.js";
 
 export default async () => {
   render(<SalesSummaryModal />, document.body);
@@ -561,23 +562,30 @@ function totalsPeriodRows(totals, o, locationRows = []) {
 }
 
 /**
- * 日別一覧の1日分：3行で列位置を揃える。
- * POS UI では `s-box` に grid 用 style が効かないことがあるため、
- * 精算の支払内訳と同様に `s-stack direction="inline"` + 子 `s-box` の `inlineSize`（%）で揃える。
+ * 日別一覧の1日分：狭い画面向けに4行レイアウト。列は `inlineSize`（%）で揃える。
  *
- * 行1: 日付 | (空) | 純売上 値 | 客数 値 | 客単価 値
- * 行2: (空) | (空) | 予算 値 | 入店数 値 | セット率 値
- * 行3: 点数 値 | (空) | 予算比 値 | 購買率 値 | 一品単価 値
+ * 行1: 日付 | (空)×3 | 予算比 値
+ * 行2: 予算 値 | 純売上 値 | 点数 値
+ * 行3: 客数 値 | 入店数 値 | 購買率 値
+ * 行4: 客単価 値 | セット率 値 | 一品単価 値
  */
-const DAILY_LIST_COL = {
-  lead: "18%",
-  leadVal: "12%",
-  m1Lab: "11%",
-  m1Val: "15%",
-  m2Lab: "11%",
-  m2Val: "14%",
-  m3Lab: "9%",
-  m3Val: "10%",
+const DAILY_LIST_ROW1 = {
+  date: "20%",
+  s1: "6%",
+  s2: "6%",
+  s3: "6%",
+  brLab: "10%",
+  brVal: "52%",
+};
+
+/** 行2〜4共通：ラベル＋値を3組（計100%） */
+const DAILY_LIST_TRIPLE = {
+  l1: "10%",
+  v1: "22%",
+  l2: "10%",
+  v2: "22%",
+  l3: "10%",
+  v3: "26%",
 };
 
 function DailyListDayRowGrid({ row, o }) {
@@ -625,144 +633,148 @@ function DailyListDayRowGrid({ row, o }) {
     );
   }
 
+  const T = DAILY_LIST_TRIPLE;
+
   return (
     <s-stack gap="extraSmall">
       <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
         {gridCell(
-          DAILY_LIST_COL.lead,
+          DAILY_LIST_ROW1.date,
           false,
           <s-text emphasis="bold" size="small">
-            {row.targetDate}
+            {formatYmdSlash(row.targetDate)}
           </s-text>,
         )}
-        {gridCell(DAILY_LIST_COL.leadVal, false, <s-text size="small">{blank}</s-text>)}
+        {gridCell(DAILY_LIST_ROW1.s1, false, <s-text size="small">{blank}</s-text>)}
+        {gridCell(DAILY_LIST_ROW1.s2, false, <s-text size="small">{blank}</s-text>)}
+        {gridCell(DAILY_LIST_ROW1.s3, false, <s-text size="small">{blank}</s-text>)}
         {gridCell(
-          DAILY_LIST_COL.m1Lab,
-          false,
-          <s-text tone="subdued" size="small">
-            純売上
-          </s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.m1Val,
-          true,
-          <s-text size="small" fontWeight="bold">
-            {net}
-          </s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.m2Lab,
-          false,
-          <s-text tone="subdued" size="small">
-            客数
-          </s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.m2Val,
-          true,
-          <s-text size="small">{orders}</s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.m3Lab,
-          false,
-          <s-text tone="subdued" size="small">
-            客単価
-          </s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.m3Val,
-          true,
-          <s-text size="small">{atv}</s-text>,
-        )}
-      </s-stack>
-      <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
-        {gridCell(DAILY_LIST_COL.lead, false, <s-text size="small">{blank}</s-text>)}
-        {gridCell(DAILY_LIST_COL.leadVal, false, <s-text size="small">{blank}</s-text>)}
-        {gridCell(
-          DAILY_LIST_COL.m1Lab,
-          false,
-          <s-text tone="subdued" size="small">
-            予算
-          </s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.m1Val,
-          true,
-          <s-text size="small">{budget}</s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.m2Lab,
-          false,
-          <s-text tone="subdued" size="small">
-            入店数
-          </s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.m2Val,
-          true,
-          <s-text size="small">{visitors}</s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.m3Lab,
-          false,
-          <s-text tone="subdued" size="small">
-            セット率
-          </s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.m3Val,
-          true,
-          <s-text size="small">{setRate}</s-text>,
-        )}
-      </s-stack>
-      <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
-        {gridCell(
-          DAILY_LIST_COL.lead,
-          false,
-          <s-text tone="subdued" size="small">
-            点数
-          </s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.leadVal,
-          true,
-          <s-text size="small">{itemsVal}</s-text>,
-        )}
-        {gridCell(
-          DAILY_LIST_COL.m1Lab,
+          DAILY_LIST_ROW1.brLab,
           false,
           <s-text tone="subdued" size="small">
             予算比
           </s-text>,
         )}
         {gridCell(
-          DAILY_LIST_COL.m1Val,
+          DAILY_LIST_ROW1.brVal,
           true,
           <s-text size="small" tone={budgetRatioTone}>
             {budgetRatioText}
           </s-text>,
         )}
+      </s-stack>
+      <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
         {gridCell(
-          DAILY_LIST_COL.m2Lab,
+          T.l1,
+          false,
+          <s-text tone="subdued" size="small">
+            予算
+          </s-text>,
+        )}
+        {gridCell(
+          T.v1,
+          true,
+          <s-text size="small">{budget}</s-text>,
+        )}
+        {gridCell(
+          T.l2,
+          false,
+          <s-text tone="subdued" size="small">
+            純売上
+          </s-text>,
+        )}
+        {gridCell(
+          T.v2,
+          true,
+          <s-text size="small" fontWeight="bold">
+            {net}
+          </s-text>,
+        )}
+        {gridCell(
+          T.l3,
+          false,
+          <s-text tone="subdued" size="small">
+            点数
+          </s-text>,
+        )}
+        {gridCell(
+          T.v3,
+          true,
+          <s-text size="small">{itemsVal}</s-text>,
+        )}
+      </s-stack>
+      <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
+        {gridCell(
+          T.l1,
+          false,
+          <s-text tone="subdued" size="small">
+            客数
+          </s-text>,
+        )}
+        {gridCell(
+          T.v1,
+          true,
+          <s-text size="small">{orders}</s-text>,
+        )}
+        {gridCell(
+          T.l2,
+          false,
+          <s-text tone="subdued" size="small">
+            入店数
+          </s-text>,
+        )}
+        {gridCell(
+          T.v2,
+          true,
+          <s-text size="small">{visitors}</s-text>,
+        )}
+        {gridCell(
+          T.l3,
           false,
           <s-text tone="subdued" size="small">
             購買率
           </s-text>,
         )}
         {gridCell(
-          DAILY_LIST_COL.m2Val,
+          T.v3,
           true,
           <s-text size="small">{conv}</s-text>,
         )}
+      </s-stack>
+      <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
         {gridCell(
-          DAILY_LIST_COL.m3Lab,
+          T.l1,
+          false,
+          <s-text tone="subdued" size="small">
+            客単価
+          </s-text>,
+        )}
+        {gridCell(
+          T.v1,
+          true,
+          <s-text size="small">{atv}</s-text>,
+        )}
+        {gridCell(
+          T.l2,
+          false,
+          <s-text tone="subdued" size="small">
+            セット率
+          </s-text>,
+        )}
+        {gridCell(
+          T.v2,
+          true,
+          <s-text size="small">{setRate}</s-text>,
+        )}
+        {gridCell(
+          T.l3,
           false,
           <s-text tone="subdued" size="small">
             一品単価
           </s-text>,
         )}
         {gridCell(
-          DAILY_LIST_COL.m3Val,
+          T.v3,
           true,
           <s-text size="small">{unit}</s-text>,
         )}
@@ -1226,7 +1238,7 @@ function HistoryDailyDetailView({
                       {sessionLocationName || "店舗名を取得中…"}
                     </s-text>
                     <s-text tone="subdued" size="small">
-                      日次（履歴） {viewDate}
+                      日次（履歴） {formatYmdSlash(viewDate)}
                     </s-text>
                     {scope === "all" ? (
                       <s-text tone="subdued" size="small">
@@ -1250,7 +1262,7 @@ function HistoryDailyDetailView({
                   前日
                 </s-button>
                 <s-text emphasis="bold" size="small">
-                  {viewDate}
+                  {formatYmdSlash(viewDate)}
                 </s-text>
                 <s-button kind="secondary" disabled={!canNextDay} onClick={() => setViewDate(addDays(viewDate, 1))}>
                   翌日
@@ -1407,7 +1419,7 @@ function HistoryDailyDetailView({
         modalRef={historyFootfallModalRef}
         onRequestClose={() => setFootfallErr("")}
         heading="入店数報告"
-        dateLine={`対象日: ${viewDate}`}
+        dateLine={`対象日: ${formatYmdSlash(viewDate)}`}
         value={footerFootfallInput}
         onChange={(v) => setFooterFootfallInput(v)}
         onSave={handleSaveFooterFootfall}
@@ -1983,7 +1995,7 @@ function SalesSummaryModal() {
                     前日
                   </s-button>
                   <s-text emphasis="bold" size="small">
-                    {targetDate}
+                    {formatYmdSlash(targetDate)}
                   </s-text>
                   <s-button kind="secondary" disabled={!canNextDay} onClick={() => setTargetDate(addDays(targetDate, 1))}>
                     翌日
@@ -2531,7 +2543,7 @@ function SalesSummaryModal() {
         modalRef={mainFootfallModalRef}
         onRequestClose={() => setFootfallErr("")}
         heading="入店数報告"
-        dateLine={`対象日: ${targetDate}`}
+        dateLine={`対象日: ${formatYmdSlash(targetDate)}`}
         value={footerFootfallInput}
         onChange={(v) => setFooterFootfallInput(v)}
         onSave={handleSaveFooterFootfall}

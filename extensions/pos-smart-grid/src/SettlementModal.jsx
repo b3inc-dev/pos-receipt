@@ -22,6 +22,7 @@ import { getAppUrl } from "../../common/appUrl.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
+import { formatYmdSlash } from "../../common/dateDisplay.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 
 /**
@@ -648,7 +649,7 @@ function MainView({
                             size="small"
                             style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                           >
-                            {row.targetDate}
+                            {formatYmdSlash(row.targetDate)}
                           </s-text>
                           <s-text fontWeight="bold" size="small" style={{ whiteSpace: "nowrap" }}>
                             ¥{Number(row.netSales).toLocaleString()}
@@ -729,7 +730,7 @@ function PreviewView({
                 前日
               </s-button>
               <s-text emphasis="bold" size="small">
-                {targetDate}
+                {formatYmdSlash(targetDate)}
               </s-text>
               <s-button kind="secondary" disabled={!canNextDay || loading} onClick={() => onPickDate(addDays(targetDate, 1))}>
                 翌日
@@ -775,7 +776,7 @@ function PreviewView({
 
   const headerRows = [
     { label: "ロケーション", value: preview.locationName ?? "-", valueBold: true },
-    { label: "対象日", value: preview.targetDate ?? "-" },
+    { label: "対象日", value: formatYmdSlash(preview.targetDate ?? "-") },
   ];
 
   const summaryRows = [
@@ -885,7 +886,7 @@ function PreviewView({
                 前日
               </s-button>
               <s-text emphasis="bold" size="small">
-                {targetDate}
+                {formatYmdSlash(targetDate)}
               </s-text>
               <s-button kind="secondary" disabled={!canNextDay || loading} onClick={() => onPickDate(addDays(targetDate, 1))}>
                 翌日
@@ -1044,7 +1045,7 @@ function SettlementIssueConfirmModals({ preview, printMode, loading, error, onEx
 
   const rows = [
     { label: "ロケーション", value: preview?.locationName ?? "-" },
-    { label: "対象日", value: preview?.targetDate ?? "-" },
+    { label: "対象日", value: formatYmdSlash(preview?.targetDate ?? "-") },
     { label: "総売上", value: `¥${Number(preview?.total ?? 0).toLocaleString()}`, valueBold: true },
     { label: "件数", value: `${preview?.orderCount ?? 0}件` },
     { label: "印字方式", value: printModeLabel },
@@ -1163,7 +1164,7 @@ function DoneView({ result, isInspection, onBack }) {
                     label: "精算ID",
                     value: result?.settlementId ? `…${result.settlementId.slice(-8)}` : "-",
                   },
-                  { label: "対象日", value: result?.preview?.targetDate ?? "-" },
+                  { label: "対象日", value: formatYmdSlash(result?.preview?.targetDate ?? "-") },
                   {
                     label: "総売上",
                     value: `¥${Number(result?.preview?.total ?? 0).toLocaleString()}`,
@@ -1204,7 +1205,7 @@ function HistoryDetailView({ item, onBack }) {
               <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="none">
                   {[
-                    { label: "対象日", value: item.targetDate ?? "-" },
+                    { label: "対象日", value: formatYmdSlash(item.targetDate ?? "-") },
                     { label: "総売上", value: `¥${Number(item.total ?? 0).toLocaleString()}`, valueBold: true },
                     { label: "件数", value: `${Number(item.orderCount ?? 0)}件` },
                     { label: "点数", value: `${Number(item.itemCount ?? 0)}点` },
