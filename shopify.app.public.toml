@@ -27,7 +27,7 @@ topics = ["orders/updated"]
 uri = "/webhooks/orders/updated"
 
 [access_scopes]
-scopes = "read_orders,read_locations,write_draft_orders,write_orders"
+scopes = "read_orders,read_locations,read_gift_cards,write_draft_orders,write_orders"
 
 [auth]
 redirect_urls = [ "https://pos-receipt.onrender.com" ]

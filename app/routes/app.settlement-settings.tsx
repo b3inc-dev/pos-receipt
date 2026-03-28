@@ -102,6 +102,7 @@ export async function action({ request }: ActionFunctionArgs) {
     orderBasedCreateSettlementOrderEnabled: bool("orderBasedCreateSettlementOrderEnabled", true),
     orderBasedAttachMetafieldsEnabled: bool("orderBasedAttachMetafieldsEnabled", true),
     orderBasedAttachNoteEnabled: bool("orderBasedAttachNoteEnabled", true),
+    legacyGiftCardAggregationEnabled: bool("legacyGiftCardAggregationEnabled", true),
   };
   await setAppSetting(shop.id, SETTLEMENT_SETTINGS_KEY, settings);
   return Response.json({ ok: true });
@@ -216,6 +217,12 @@ export default function SettlementSettingsPage() {
                 <Checkbox label="order_based: 精算注文を作成" checked={form.orderBasedCreateSettlementOrderEnabled} onChange={(v) => set("orderBasedCreateSettlementOrderEnabled", v)} />
                 <Checkbox label="order_based: メタフィールドを付与" checked={form.orderBasedAttachMetafieldsEnabled} onChange={(v) => set("orderBasedAttachMetafieldsEnabled", v)} />
                 <Checkbox label="order_based: 注文にメモを付与" checked={form.orderBasedAttachNoteEnabled} onChange={(v) => set("orderBasedAttachNoteEnabled", v)} />
+                <Checkbox
+                  label="旧ギフトカード API 集計（検証用・ON で有効）"
+                  checked={form.legacyGiftCardAggregationEnabled !== false}
+                  onChange={(v) => set("legacyGiftCardAggregationEnabled", v)}
+                  helpText="ON のとき、精算対象日ごとに Shopify ギフトカード API でその日に作られたカードのうち、当日 POS 注文にまだ載っていない分を「商品券」に加算します（read_gift_cards が必要）。検証が終わったら OFF にしてください。注文に紐づかないカードはギフトカードの note に「LOC:店名」が必要です。"
+                />
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>

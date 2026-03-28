@@ -346,6 +346,11 @@ export interface SettlementSettings {
   orderBasedCreateSettlementOrderEnabled: boolean;
   orderBasedAttachMetafieldsEnabled: boolean;
   orderBasedAttachNoteEnabled: boolean;
+  /**
+   * 検証用: ON のとき、精算日ごとに Shopify ギフトカード API で
+   * その日 created のカードのうち POS 集計に未包含の分を「商品券」バケットに加算する。
+   */
+  legacyGiftCardAggregationEnabled: boolean;
 }
 
 export const DEFAULT_SETTLEMENT_SETTINGS: SettlementSettings = {
@@ -386,6 +391,8 @@ export const DEFAULT_SETTLEMENT_SETTINGS: SettlementSettings = {
   orderBasedCreateSettlementOrderEnabled: true,
   orderBasedAttachMetafieldsEnabled: true,
   orderBasedAttachNoteEnabled: true,
+  /** 検証用のためデフォルト ON（本番では管理画面で OFF にできる） */
+  legacyGiftCardAggregationEnabled: true,
 };
 
 // ── 印字設定（要件 §12） ──────────────────────────────────────────────────────

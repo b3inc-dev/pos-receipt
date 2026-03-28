@@ -10,7 +10,14 @@
 import prisma from "../db.server";
 import { getPaymentMethodDisplayLabel } from "../utils/paymentMethod.server";
 import { getAppSetting } from "../utils/appSettings.server";
-import { LOYALTY_SETTINGS_KEY, DEFAULT_LOYALTY_SETTINGS, SETTLEMENT_SETTINGS_KEY } from "../utils/appSettings.server";
+import {
+  LOYALTY_SETTINGS_KEY,
+  DEFAULT_LOYALTY_SETTINGS,
+  SETTLEMENT_SETTINGS_KEY,
+  DEFAULT_SETTLEMENT_SETTINGS,
+  type SettlementSettings,
+} from "../utils/appSettings.server";
+import { fetchLegacyGiftCardIssuanceForDay } from "./settlementLegacyGiftCards.server";
 import { getShopTimezoneForDaily, getDayRangeInUtc, formatTimeHmInTimeZone } from "../utils/shopTimezone.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -66,6 +73,12 @@ export interface SettlementPreviewDTO {
   settlementTxLastHm: string | null;
   /** GAS _tax_shopify: currentTotalTax × keepRatioToday を注文ごとに合算 */
   taxShopify: number;
+  /**
+   * 旧運用: Shopify ギフトカード API で加算した発行額（POS 注文に既にある分は除外）。
+   * 精算設定で「旧ギフトカード API 集計」が OFF のときは undefined。
+   */
+  legacyGiftCardsAddedAmount?: number;
+  legacyGiftCardsAddedCount?: number;
 }
 
 export interface SettlementPreviewDebugDTO {
@@ -116,6 +129,9 @@ interface ShopifyRefund {
 interface ShopifyOrder {
   id: string;
   name: string;
+  /** GAS observeVoucherChangeFromFace / observeGenericCashChange 用 */
+  note?: string | null;
+  cancelledAt?: string | null;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   /** GAS currentTotalTaxSet 相当（注文の現在の税合計） */
   currentTotalTaxSet?: { shopMoney: { amount: string } } | null;
@@ -152,6 +168,8 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
       nodes {
         id
         name
+        note
+        cancelledAt
         totalPriceSet { shopMoney { amount currencyCode } }
         currentTotalTaxSet { shopMoney { amount } }
         totalTaxSet { shopMoney { amount } }
@@ -549,9 +567,39 @@ function gasTxLabel(tx: ShopifyTransaction | ShopifyRefundTransaction): string {
   return gasNormalizeGatewayLabel(tx.gateway ?? "", tx.formattedGateway);
 }
 
+/** GAS z2hDigits: 全角数字・読点を除いて半角化（商品券額面パース用） */
+function z2hDigitsForVoucherNote(input: string): string {
+  const digitMap: Record<string, string> = {
+    "０": "0",
+    "１": "1",
+    "２": "2",
+    "３": "3",
+    "４": "4",
+    "５": "5",
+    "６": "6",
+    "７": "7",
+    "８": "8",
+    "９": "9",
+  };
+  let s = "";
+  for (const ch of String(input ?? "")) {
+    s += digitMap[ch] ?? ch;
+  }
+  return s.replace(/[，、,]/g, "");
+}
+
+/** GAS parseVoucherFaceFromNote: 注文ノートの「商品券 2000円」等から額面を抽出 */
+function parseVoucherFaceFromNote(note: string | null | undefined): number {
+  const s = z2hDigitsForVoucherNote(note ?? "");
+  const m = s.match(/商品券\s*([0-9]+)\s*(?:円|えん)?/);
+  return m ? Number(m[1]) : 0;
+}
+
+const GAS_GATEWAY_CASH = "現金";
+
 /**
  * GAS aggregate の注文ループ（todaysTx・pay・refundsGross・割引/VIP 按分・税 Shopify 相当）。
- * ノート由来のお釣り観測（observeVoucherChangeFromFace 等）は未移植。
+ * ノート観測: observeVoucherChangeFromFace（キャンセル除外）・observeGenericCashChange。
  */
 function aggregateGasStyleForOrders(
   orders: ShopifyOrder[],
@@ -565,6 +613,8 @@ function aggregateGasStyleForOrders(
   refundOrderSet: Set<string>;
   itemCount: number;
   taxTotalShopify: number;
+  /** GAS _voucher_change_total 相当（ノート・現金お釣りヒューリスティックの観測値のみ） */
+  voucherChangeObserved: number;
 } {
   const pay: Record<string, { sale: number; refund: number; saleTx: number; refundTx: number }> = {};
   let refundsGross = 0;
@@ -574,6 +624,7 @@ function aggregateGasStyleForOrders(
   const refundOrderSet = new Set<string>();
   let itemCount = 0;
   let taxTotalShopify = 0;
+  let voucherChangeObserved = 0;
 
   for (const o of orders) {
     const refundTxIdsInDay = new Set<string>();
@@ -593,6 +644,7 @@ function aggregateGasStyleForOrders(
 
     let orderSaleToday = 0;
     let orderRefundToday = 0;
+    const gwSaleMapToday: Record<string, number> = {};
 
     for (const tx of todaysTx) {
       const amt = Number(tx.amountSet?.shopMoney?.amount ?? 0);
@@ -602,6 +654,7 @@ function aggregateGasStyleForOrders(
 
       if (kind === "SALE" || kind === "CAPTURE") {
         orderSaleToday += amt;
+        gwSaleMapToday[gw] = (gwSaleMapToday[gw] || 0) + amt;
         pay[gw].sale += amt;
         pay[gw].saleTx += 1;
       } else if (kind === "REFUND") {
@@ -635,6 +688,45 @@ function aggregateGasStyleForOrders(
         pay[k].refundTx += Math.max(1, cnt);
         orderRefundToday += amt;
         refundOrderSet.add(o.id);
+      }
+    }
+
+    const isCancelled = Boolean(o.cancelledAt);
+
+    // GAS observeVoucherChangeFromFace（キャンセル済み注文はノート観測しない）
+    if (!isCancelled) {
+      const face = parseVoucherFaceFromNote(o.note);
+      if (face > 0) {
+        const giftAppliedToday =
+          Number(gwSaleMapToday["商品券釣有り"] || 0) +
+          Number(gwSaleMapToday["商品券釣無し"] || 0) +
+          Number(gwSaleMapToday["商品券"] || 0);
+        const netToday = orderSaleToday - orderRefundToday;
+        if (netToday > 0) {
+          const change = Math.max(0, face - giftAppliedToday);
+          if (change > 0) voucherChangeObserved += change;
+        }
+      }
+    }
+
+    // GAS observeGenericCashChange（合計・現金バケットを調整し、商品券文脈なら観測額に加算）
+    {
+      const saleSumToday = Object.values(gwSaleMapToday).reduce((acc, v) => acc + Number(v || 0), 0);
+      const orderFinal = Number(o.totalPriceSet?.shopMoney?.amount ?? 0);
+      if (orderRefundToday <= 0 && saleSumToday > orderFinal) {
+        const change = saleSumToday - orderFinal;
+        const cashSaleToday = Number(gwSaleMapToday[GAS_GATEWAY_CASH] || 0);
+        const dec = Math.min(change, cashSaleToday);
+        if (dec > 0) {
+          ensurePayBucket(pay, GAS_GATEWAY_CASH);
+          pay[GAS_GATEWAY_CASH].sale -= dec;
+          const noteStr = o.note ?? "";
+          const hasVoucherInNote = /商品券/.test(noteStr);
+          const hasVoucherInGateway = Object.keys(gwSaleMapToday).some((gw) => /商品券/.test(gw));
+          if (hasVoucherInNote || hasVoucherInGateway) {
+            voucherChangeObserved += dec;
+          }
+        }
       }
     }
 
@@ -693,6 +785,7 @@ function aggregateGasStyleForOrders(
     refundOrderSet,
     itemCount,
     taxTotalShopify: Math.round(taxTotalShopify),
+    voucherChangeObserved: Math.round(voucherChangeObserved),
   };
 }
 
@@ -874,6 +967,35 @@ export async function buildSettlementPreview(
 
   const gas = aggregateGasStyleForOrders(ordersUnion, inDay);
 
+  const settlementSettings = await getAppSetting<Partial<SettlementSettings>>(shopId, SETTLEMENT_SETTINGS_KEY);
+  const settlementMerged: SettlementSettings = { ...DEFAULT_SETTLEMENT_SETTINGS, ...settlementSettings };
+
+  const legacyGiftOn = settlementMerged.legacyGiftCardAggregationEnabled === true;
+  let legacyGiftCardsAddedAmount = 0;
+  let legacyGiftCardsAddedCount = 0;
+  if (legacyGiftOn) {
+    const posOrderIds = new Set(ordersUnion.map((o) => o.id));
+    try {
+      const leg = await fetchLegacyGiftCardIssuanceForDay(
+        admin,
+        dayRange,
+        locationId,
+        locationName,
+        posOrderIds,
+      );
+      legacyGiftCardsAddedAmount = leg.amount;
+      legacyGiftCardsAddedCount = leg.count;
+      if (leg.amount > 0) {
+        const bucket = gasNormalizeGatewayLabel("gift_card", null);
+        ensurePayBucket(gas.pay, bucket);
+        gas.pay[bucket].sale += leg.amount;
+        gas.pay[bucket].saleTx += leg.count;
+      }
+    } catch {
+      // read_gift_cards 未付与・API 差異時は加算せず続行
+    }
+  }
+
   const { firstHm: settlementTxFirstHm, lastHm: settlementTxLastHm } = computeGasSettlementTxTimeBounds(
     ordersUnion,
     inDay,
@@ -908,10 +1030,10 @@ export async function buildSettlementPreview(
     (e) => e.eventType !== "voucher_change_adjustment"
   );
 
-  const voucherChangeAmount = voucherAdjustments.reduce(
-    (sum, e) => sum + Number(e.voucherChangeAmount ?? 0),
-    0
-  );
+  /** DB の手入力調整 + ノート観測（GAS _voucher_change_total と同系） */
+  const voucherChangeAmount =
+    Math.round(gas.voucherChangeObserved) +
+    voucherAdjustments.reduce((sum, e) => sum + Number(e.voucherChangeAmount ?? 0), 0);
   /** GAS: lineItems の VIP- 割引按分のみ（特殊返金の points は後続フェーズで合成可） */
   const vipPointsUsed = gas.vipPointsUsed;
 
@@ -931,8 +1053,7 @@ export async function buildSettlementPreview(
     paymentSections.reduce((sum, sec) => sum + Number(sec.net || 0) - Number(sec.refund || 0), 0)
   );
   total = Math.max(0, sectionsTotal);
-  const settlementSettings = await getAppSetting<{ taxRatePercent?: number }>(shopId, SETTLEMENT_SETTINGS_KEY);
-  const taxRatePercent = Number(settlementSettings?.taxRatePercent) || 10;
+  const taxRatePercent = Number(settlementMerged.taxRatePercent) || 10;
   const split = splitTaxInclusiveToNetAndTax(total, taxRatePercent);
   const tax = split.tax;
   const netSales = split.netSales;
@@ -991,6 +1112,7 @@ export async function buildSettlementPreview(
     settlementTxFirstHm,
     settlementTxLastHm,
     taxShopify,
+    ...(legacyGiftOn ? { legacyGiftCardsAddedAmount, legacyGiftCardsAddedCount } : {}),
   };
 }
 
