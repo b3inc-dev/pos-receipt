@@ -12,7 +12,8 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { buildSettlementPreview, buildSettlementReceiptText, type SettlementPreviewDTO } from "../services/settlementEngine.server";
+import { buildSettlementPreview, buildSettlementReceiptText } from "../services/settlementEngine.server";
+import { syncSettlementOrderLikeGas } from "../services/settlementOrderGas.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 
 /** locationId + targetDate + printMode から冪等キーを生成 */
@@ -96,7 +97,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // ガイド 8.1: order_based のときのみ精算注文を生成。cloudprnt_direct のときは生成しない。点検レシートは作成しない。
     if (String(printMode) === "order_based" && !isInspection) {
-      const result = await createSettlementOrder(admin, preview);
+      const result = await syncSettlementOrderLikeGas(admin, shop.id, preview);
       sourceOrderId = result.orderId;
       sourceOrderName = result.orderName;
     }
@@ -153,82 +154,4 @@ export async function action({ request }: ActionFunctionArgs) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
   }
-}
-
-// ── Shopify精算注文作成（order_based印字用） ──────────────────────────────────
-
-const DRAFT_ORDER_CREATE = `#graphql
-  mutation DraftOrderCreate($input: DraftOrderInput!) {
-    draftOrderCreate(input: $input) {
-      draftOrder { id name }
-      userErrors { field message }
-    }
-  }
-`;
-
-const DRAFT_ORDER_COMPLETE = `#graphql
-  mutation DraftOrderComplete($id: ID!) {
-    draftOrderComplete(id: $id) {
-      draftOrder { order { id name } }
-      userErrors { field message }
-    }
-  }
-`;
-
-async function createSettlementOrder(
-  admin: { graphql: (q: string, opts?: object) => Promise<{ json: () => Promise<unknown> }> },
-  preview: SettlementPreviewDTO,
-): Promise<{ orderId: string; orderName: string }> {
-  const noteLines = buildSettlementReceiptText(preview);
-
-  const createRes = await admin.graphql(DRAFT_ORDER_CREATE, {
-    variables: {
-      input: {
-        lineItems: [{ title: "精算", quantity: 1, originalUnitPrice: "0" }],
-        note: noteLines,
-        tags: ["settlement", `settlement-${preview.targetDate}`],
-        customAttributes: [
-          { key: "settlement_date", value: preview.targetDate },
-          { key: "settlement_location", value: preview.locationName },
-          { key: "settlement_total", value: String(preview.total) },
-        ],
-      },
-    },
-  });
-
-  const createJson = await createRes.json() as {
-    data?: {
-      draftOrderCreate?: {
-        draftOrder?: { id: string; name: string };
-        userErrors: { message: string }[];
-      };
-    };
-  };
-
-  const draftOrder = createJson.data?.draftOrderCreate?.draftOrder;
-  if (!draftOrder) {
-    const errors = createJson.data?.draftOrderCreate?.userErrors ?? [];
-    throw new Error(`精算注文の作成に失敗しました: ${errors.map((e) => e.message).join(", ")}`);
-  }
-
-  const completeRes = await admin.graphql(DRAFT_ORDER_COMPLETE, {
-    variables: { id: draftOrder.id },
-  });
-
-  const completeJson = await completeRes.json() as {
-    data?: {
-      draftOrderComplete?: {
-        draftOrder?: { order?: { id: string; name: string } };
-        userErrors: { message: string }[];
-      };
-    };
-  };
-
-  const completedOrder = completeJson.data?.draftOrderComplete?.draftOrder?.order;
-  if (completedOrder) {
-    return { orderId: completedOrder.id, orderName: completedOrder.name };
-  }
-
-  // フォールバック: ドラフト注文 ID を返す
-  return { orderId: draftOrder.id, orderName: draftOrder.name };
 }

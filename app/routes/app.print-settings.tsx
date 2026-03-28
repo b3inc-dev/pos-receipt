@@ -2,7 +2,7 @@
  * /app/print-settings — 印字設定（要件 §12）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useLoaderData, useSubmit, useLocation, useNavigate, useFetcher } from "react-router";
 import {
   Page,
   Layout,
@@ -70,9 +70,19 @@ export async function action({ request }: ActionFunctionArgs) {
   return Response.json({ ok: true });
 }
 
+type MetafieldEnsureResponse = {
+  ok?: boolean;
+  created?: string[];
+  skipped?: string[];
+  errors?: { key: string; message: string }[];
+  message?: string;
+  error?: string;
+};
+
 export default function PrintSettingsPage() {
   const { settings: initial } = useLoaderData<typeof loader>();
   const submit = useSubmit();
+  const metafieldFetcher = useFetcher<MetafieldEnsureResponse>();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
@@ -134,6 +144,46 @@ export default function PrintSettingsPage() {
                 <Checkbox label="印字時に精算注文を作成" checked={form.createSettlementOrderWhenPrinting} onChange={(v) => set("createSettlementOrderWhenPrinting", v)} />
                 <Checkbox label="精算メモを注文に付与" checked={form.attachSettlementNoteToOrder} onChange={(v) => set("attachSettlementNoteToOrder", v)} />
                 <Checkbox label="精算メタフィールドを注文に付与" checked={form.attachSettlementMetafieldsToOrder} onChange={(v) => set("attachSettlementMetafieldsToOrder", v)} />
+                <Text as="p" tone="subdued">
+                  注文経由印字では Shopify 上に「注文」のメタフィールド定義（namespace: settlement）が必要なことがあります。アプリインストール時に自動作成を試みますが、失敗した場合や別ストアにコピーした場合は下のボタンで再実行できます。
+                </Text>
+                <InlineStack gap="200" blockAlign="center">
+                  <Button
+                    loading={metafieldFetcher.state === "submitting"}
+                    onClick={() =>
+                      metafieldFetcher.submit(null, {
+                        method: "POST",
+                        action: "/api/admin/settlement-metafields/ensure",
+                      })
+                    }
+                  >
+                    注文の精算メタフィールド定義を作成・確認
+                  </Button>
+                </InlineStack>
+                {metafieldFetcher.data ? (
+                  metafieldFetcher.data.error ? (
+                    <Banner tone="critical">エラー: {metafieldFetcher.data.error}</Banner>
+                  ) : (
+                    <Banner tone={metafieldFetcher.data.ok ? "success" : "warning"}>
+                      {metafieldFetcher.data.message}
+                      {metafieldFetcher.data.created && metafieldFetcher.data.created.length > 0 ? (
+                        <Text as="p" variant="bodySm">新規作成キー: {metafieldFetcher.data.created.join(", ")}</Text>
+                      ) : null}
+                      {metafieldFetcher.data.skipped && metafieldFetcher.data.skipped.length > 0 ? (
+                        <Text as="p" variant="bodySm">既存のためスキップ: {metafieldFetcher.data.skipped.join(", ")}</Text>
+                      ) : null}
+                      {metafieldFetcher.data.errors && metafieldFetcher.data.errors.length > 0 ? (
+                        <BlockStack gap="100">
+                          {metafieldFetcher.data.errors.map((err) => (
+                            <Text key={err.key} as="p" variant="bodySm">
+                              {err.key}: {err.message}
+                            </Text>
+                          ))}
+                        </BlockStack>
+                      ) : null}
+                    </Banner>
+                  )
+                ) : null}
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
