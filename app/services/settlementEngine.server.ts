@@ -11,7 +11,7 @@ import prisma from "../db.server";
 import { getPaymentMethodDisplayLabel } from "../utils/paymentMethod.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { LOYALTY_SETTINGS_KEY, DEFAULT_LOYALTY_SETTINGS, SETTLEMENT_SETTINGS_KEY } from "../utils/appSettings.server";
-import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
+import { getShopTimezoneForDaily, getDayRangeInUtc, formatTimeHmInTimeZone } from "../utils/shopTimezone.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -58,6 +58,14 @@ export interface SettlementPreviewDTO {
   }[];
   /** ポイント利用額の表示ラベル（設定から取得） */
   loyaltyUsageDisplayLabel: string;
+  /**
+   * GAS aggregate: 当日かつ対象注文の transactions の createdAt の最小・最大を店舗TZの HH:mm で表したもの。
+   * 無い場合は null（period_label は 00:00–23:59 フォールバック）。
+   */
+  settlementTxFirstHm: string | null;
+  settlementTxLastHm: string | null;
+  /** GAS _tax_shopify: currentTotalTax × keepRatioToday を注文ごとに合算 */
+  taxShopify: number;
 }
 
 export interface SettlementPreviewDebugDTO {
@@ -65,11 +73,12 @@ export interface SettlementPreviewDebugDTO {
   ordersRawCount: number;
   /** 互換用（現状は ordersRawCount と同じ） */
   ordersPosSourceMatchedCount: number;
-  /** retailLocation が一致する注文のみ残した件数（fa78e63 方針: null は除外） */
+  /** retailLocation フィルタ後の created∪updated ユニオン件数（GAS 型集計の入力） */
   ordersAtLocationCount: number;
   ordersUpdatedRawCount: number;
   ordersUpdatedPosSourceMatchedCount: number;
   ordersUpdatedAtLocationCount: number;
+  /** 精算プレビューはユニオン集計のため常に 0（売上サマリー等の別パスでは従来どおり） */
   overlayRefundCount: number;
 }
 
@@ -84,12 +93,15 @@ interface ShopifyTransaction {
   status: string;
   amountSet: { shopMoney: { amount: string; currencyCode: string } };
   gateway: string;
+  /** GAS normalizeGatewayLabel の formatted 側 */
+  formattedGateway?: string | null;
 }
 
 interface ShopifyRefundTransaction {
   id: string;
   kind: string;
   gateway: string;
+  formattedGateway?: string | null;
   amountSet: { shopMoney: { amount: string; currencyCode: string } };
 }
 
@@ -105,9 +117,23 @@ interface ShopifyOrder {
   id: string;
   name: string;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+  /** GAS currentTotalTaxSet 相当（注文の現在の税合計） */
+  currentTotalTaxSet?: { shopMoney: { amount: string } } | null;
   totalTaxSet: { shopMoney: { amount: string } };
   totalDiscountsSet: { shopMoney: { amount: string } };
-  lineItems: { nodes: { quantity: number }[] };
+  lineItems: {
+    nodes: {
+      quantity: number;
+      discountAllocations?: {
+        allocatedAmountSet: { shopMoney: { amount: string } };
+        discountApplication?: {
+          __typename: string;
+          code?: string | null;
+          title?: string | null;
+        } | null;
+      }[];
+    }[];
+  };
   transactions: ShopifyTransaction[];
   refunds: ShopifyRefund[];
   tags: string[];
@@ -121,16 +147,29 @@ type AdminClient = {
 // ── GraphQL Query ─────────────────────────────────────────────────────────────
 
 const SETTLEMENT_ORDERS_QUERY = `#graphql
-  query SettlementOrders($first: Int!, $after: String, $query: String) {
-    orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT) {
+  query SettlementOrders($first: Int!, $after: String, $query: String, $sortKey: OrderSortKeys!) {
+    orders(first: $first, after: $after, query: $query, sortKey: $sortKey) {
       nodes {
         id
         name
         totalPriceSet { shopMoney { amount currencyCode } }
+        currentTotalTaxSet { shopMoney { amount } }
         totalTaxSet { shopMoney { amount } }
         totalDiscountsSet { shopMoney { amount } }
         lineItems(first: 250) {
-          nodes { quantity }
+          nodes {
+            quantity
+            discountAllocations {
+              allocatedAmountSet { shopMoney { amount } }
+              discountApplication {
+                __typename
+                ... on DiscountCodeApplication { code }
+                ... on ManualDiscountApplication { title }
+                ... on AutomaticDiscountApplication { title }
+                ... on ScriptDiscountApplication { title }
+              }
+            }
+          }
         }
         transactions(first: 50) {
           id
@@ -139,6 +178,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
           status
           amountSet { shopMoney { amount currencyCode } }
           gateway
+          formattedGateway
         }
         refunds {
           id
@@ -152,6 +192,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
               id
               kind
               gateway
+              formattedGateway
               amountSet { shopMoney { amount currencyCode } }
             }
           }
@@ -220,14 +261,18 @@ const REFUNDS_ORDERS_QUERY = `#graphql
 
 // ── Fetch All Orders（精算注文を除外しながら全ページ取得） ────────────────────
 
-async function fetchAllOrders(admin: AdminClient, query: string): Promise<ShopifyOrder[]> {
+async function fetchAllOrders(
+  admin: AdminClient,
+  query: string,
+  sortKey: "CREATED_AT" | "UPDATED_AT" = "CREATED_AT",
+): Promise<ShopifyOrder[]> {
   const orders: ShopifyOrder[] = [];
   let cursor: string | null = null;
   let hasNextPage = true;
 
   while (hasNextPage) {
     const response = await admin.graphql(SETTLEMENT_ORDERS_QUERY, {
-      variables: { first: 100, after: cursor, query },
+      variables: { first: 100, after: cursor, query, sortKey },
     });
     const json = await response.json() as {
       data?: {
@@ -401,80 +446,289 @@ export async function getRefundOverlayForDay(
   return { refundTotal: overlay.refundTotal };
 }
 
-/** 返金オーバーレイを payment sections と合計にマージ */
-function mergeRefundOverlay(
-  sections: PaymentSectionDTO[],
-  overlay: { refundTotal: number; refundCount: number; byGateway: Record<string, { refund: number; refundCount: number }> },
-  totals: { refundTotal: number; refundCount: number }
-): void {
-  totals.refundTotal += overlay.refundTotal;
-  totals.refundCount += overlay.refundCount;
-  for (const [gateway, data] of Object.entries(overlay.byGateway)) {
-    const idx = sections.findIndex((s) => s.gateway === gateway);
-    if (idx >= 0) {
-      sections[idx].refund += data.refund;
-      sections[idx].refundCount += data.refundCount;
-    } else {
-      sections.push({
-        gateway,
-        label: gateway,
-        net: 0,
-        refund: data.refund,
-        txCount: 0,
-        refundCount: data.refundCount,
-      });
-    }
-  }
+/** GAS: その日 created の注文に、その日 updated のスナップショットを上書きマージ */
+function unionSettlementOrdersById(created: ShopifyOrder[], updated: ShopifyOrder[]): ShopifyOrder[] {
+  const m = new Map<string, ShopifyOrder>();
+  for (const o of created) m.set(o.id, o);
+  for (const o of updated) m.set(o.id, o);
+  return [...m.values()];
 }
 
-// ── Payment Sections 算出（支払方法マスタで表示名を解決） ────────────────────────
+const GAS_UNKNOWN_GATEWAY = "未分類";
 
-async function calculatePaymentSections(
+function ensurePayBucket(
+  pay: Record<string, { sale: number; refund: number; saleTx: number; refundTx: number }>,
+  key: string,
+): void {
+  if (!pay[key]) pay[key] = { sale: 0, refund: 0, saleTx: 0, refundTx: 0 };
+}
+
+/** docs/GAS_精算レシート.md の normalizeGatewayLabel に合わせる */
+function gasNormalizeGatewayLabel(gateway: string, formattedGateway?: string | null): string {
+  const raw = String(gateway ?? "").trim().toLowerCase();
+  const fmt = String(formattedGateway ?? "").trim().toLowerCase();
+  const s = `${raw} ${fmt}`.trim();
+  if (!s) return GAS_UNKNOWN_GATEWAY;
+
+  const isGift =
+    raw === "gift_card" ||
+    s.includes("giftcard") ||
+    s.includes("gift_card") ||
+    s.includes("gift ") ||
+    s.includes("voucher") ||
+    s.includes("gc") ||
+    s.includes("商品券") ||
+    s.includes("ギフトカード");
+
+  const hasNoChangeHint =
+    s.includes("釣無") ||
+    s.includes("釣なし") ||
+    s.includes("釣り無し") ||
+    s.includes("つりなし") ||
+    s.includes("nochange") ||
+    s.includes("no change");
+
+  const hasChangeHint =
+    s.includes("釣有") ||
+    s.includes("釣あり") ||
+    s.includes("釣り有り") ||
+    s.includes("つりあり") ||
+    s.includes("change") ||
+    s.includes("with_change") ||
+    s.includes("chg") ||
+    s.includes("釣銭") ||
+    s.includes("おつり");
+
+  if (isGift) {
+    if (hasNoChangeHint && !hasChangeHint) return "商品券釣無し";
+    if (hasChangeHint) return "商品券釣有り";
+    return "商品券";
+  }
+
+  if (
+    raw === "cash" ||
+    raw === "cash_payment" ||
+    raw === "manual" ||
+    fmt === "現金" ||
+    s.includes("現金決済")
+  ) {
+    return "現金";
+  }
+
+  if (raw === "credit_card" || raw === "card" || raw === "creditcard") return "クレジットカード";
+  if (s.includes("credit") || s.includes("クレジット")) return "クレジットカード";
+
+  if (s.includes("qr")) return "電子マネー (QR)";
+  if (s.includes("edy") || s.includes("waon") || s.includes("nanaco")) return "電子マネー";
+
+  if (
+    s.includes("交通系") ||
+    s.includes("suica") ||
+    s.includes("pasmo") ||
+    s.includes("toica") ||
+    s.includes("icoca") ||
+    s.includes("nimoca") ||
+    s.includes("はやかけん") ||
+    s.includes("kitaca") ||
+    s.includes("icカード") ||
+    s.includes("icｶｰﾄﾞ")
+  ) {
+    return "交通系 ICカード決済";
+  }
+
+  if (s.includes("id") || s.includes("felica")) return "電子マネー";
+
+  if (raw === "paypal" || s.includes("paypal")) return "PayPal";
+
+  const rawFmt = String(formattedGateway ?? "").trim();
+  const rawGw = String(gateway ?? "").trim();
+  return rawFmt || rawGw || GAS_UNKNOWN_GATEWAY;
+}
+
+function gasTxLabel(tx: ShopifyTransaction | ShopifyRefundTransaction): string {
+  return gasNormalizeGatewayLabel(tx.gateway ?? "", tx.formattedGateway);
+}
+
+/**
+ * GAS aggregate の注文ループ（todaysTx・pay・refundsGross・割引/VIP 按分・税 Shopify 相当）。
+ * ノート由来のお釣り観測（observeVoucherChangeFromFace 等）は未移植。
+ */
+function aggregateGasStyleForOrders(
   orders: ShopifyOrder[],
-  shopId: string,
-  dayRange: { startUtc: Date; endUtc: Date }
-): Promise<PaymentSectionDTO[]> {
-  const sections: Record<string, { net: number; refund: number; txCount: number; refundCount: number }> = {};
-  const inDay = (iso?: string) => {
-    if (!iso) return false;
-    const t = new Date(iso).getTime();
-    return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
-  };
+  inRange: (iso?: string) => boolean,
+): {
+  pay: Record<string, { sale: number; refund: number; saleTx: number; refundTx: number }>;
+  refundsGross: number;
+  discountsTotal: number;
+  vipPointsUsed: number;
+  saleOrderSet: Set<string>;
+  refundOrderSet: Set<string>;
+  itemCount: number;
+  taxTotalShopify: number;
+} {
+  const pay: Record<string, { sale: number; refund: number; saleTx: number; refundTx: number }> = {};
+  let refundsGross = 0;
+  let discountsTotal = 0;
+  let vipPointsUsed = 0;
+  const saleOrderSet = new Set<string>();
+  const refundOrderSet = new Set<string>();
+  let itemCount = 0;
+  let taxTotalShopify = 0;
 
-  const ensure = (gateway: string) => {
-    if (!sections[gateway]) {
-      sections[gateway] = { net: 0, refund: 0, txCount: 0, refundCount: 0 };
-    }
-  };
-
-  for (const order of orders) {
-    for (const tx of order.transactions) {
-      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS" && inDay(tx.createdAt)) {
-        const gw = tx.gateway ?? "";
-        ensure(gw);
-        sections[gw].net += Number(tx.amountSet.shopMoney.amount);
-        sections[gw].txCount += 1;
+  for (const o of orders) {
+    const refundTxIdsInDay = new Set<string>();
+    for (const r of o.refunds ?? []) {
+      if (!inRange(r.createdAt)) continue;
+      for (const e of r.transactions ?? []) {
+        if (e?.id) refundTxIdsInDay.add(e.id);
       }
     }
-    for (const refund of order.refunds) {
-      if (!inDay(refund.createdAt)) continue;
-      for (const tx of refund.transactions) {
-        if (tx.kind === "REFUND") {
-          const gw = tx.gateway ?? "";
-          ensure(gw);
-          sections[gw].refund += Number(tx.amountSet.shopMoney.amount);
-          sections[gw].refundCount += 1;
+
+    const txs = o.transactions ?? [];
+    const todaysTx = txs.filter((tx) => {
+      const byTime = inRange(tx.createdAt);
+      const byRefundLink = refundTxIdsInDay.has(tx.id);
+      return byTime || (String(tx.kind) === "REFUND" && byRefundLink);
+    });
+
+    let orderSaleToday = 0;
+    let orderRefundToday = 0;
+
+    for (const tx of todaysTx) {
+      const amt = Number(tx.amountSet?.shopMoney?.amount ?? 0);
+      const kind = String(tx.kind ?? "");
+      const gw = gasTxLabel(tx);
+      ensurePayBucket(pay, gw);
+
+      if (kind === "SALE" || kind === "CAPTURE") {
+        orderSaleToday += amt;
+        pay[gw].sale += amt;
+        pay[gw].saleTx += 1;
+      } else if (kind === "REFUND") {
+        const r = Math.abs(amt);
+        orderRefundToday += r;
+        pay[gw].refund += r;
+        pay[gw].refundTx += 1;
+        refundOrderSet.add(o.id);
+      }
+    }
+
+    const hasRefundObjToday = refundTxIdsInDay.size > 0;
+    const hasRefundTxToday = todaysTx.some((tx) => String(tx.kind) === "REFUND");
+    if (hasRefundObjToday && !hasRefundTxToday) {
+      let amt = 0;
+      let cnt = 0;
+      for (const r of o.refunds ?? []) {
+        if (!inRange(r.createdAt)) continue;
+        for (const e of r.transactions ?? []) {
+          const v = Math.abs(Number(e?.amountSet?.shopMoney?.amount ?? 0));
+          if (v > 0) {
+            amt += v;
+            cnt += 1;
+          }
+        }
+      }
+      if (amt > 0) {
+        const k = GAS_UNKNOWN_GATEWAY;
+        ensurePayBucket(pay, k);
+        pay[k].refund += amt;
+        pay[k].refundTx += Math.max(1, cnt);
+        orderRefundToday += amt;
+        refundOrderSet.add(o.id);
+      }
+    }
+
+    refundsGross += orderRefundToday;
+
+    if (orderSaleToday - orderRefundToday > 0) saleOrderSet.add(o.id);
+
+    if (orderSaleToday > 0) {
+      const nodes = o.lineItems?.nodes ?? [];
+      itemCount += nodes.reduce((s, n) => s + Number(n.quantity ?? 0), 0);
+    }
+    if (orderRefundToday > 0) {
+      for (const r of o.refunds ?? []) {
+        if (!inRange(r.createdAt)) continue;
+        for (const ri of r.refundLineItems ?? []) {
+          itemCount -= Number(ri.quantity ?? 0);
         }
       }
     }
+
+    let orderDiscount = 0;
+    let orderVip = 0;
+    for (const li of o.lineItems?.nodes ?? []) {
+      for (const da of li.discountAllocations ?? []) {
+        const alloc = Number(da.allocatedAmountSet?.shopMoney?.amount ?? 0);
+        const typ = da.discountApplication?.__typename ?? "";
+        const code =
+          typ === "DiscountCodeApplication" ? String(da.discountApplication?.code ?? "") : "";
+        if (code && code.toUpperCase().startsWith("VIP-")) {
+          orderVip += alloc;
+        } else {
+          orderDiscount += alloc;
+        }
+      }
+    }
+
+    let keepRatioToday = 0;
+    if (orderSaleToday > 0) {
+      keepRatioToday = Math.max(0, orderSaleToday - orderRefundToday) / orderSaleToday;
+    }
+    discountsTotal += orderDiscount * keepRatioToday;
+    vipPointsUsed += orderVip * keepRatioToday;
+
+    const oTax = Number(
+      o.currentTotalTaxSet?.shopMoney?.amount ?? o.totalTaxSet?.shopMoney?.amount ?? 0,
+    );
+    taxTotalShopify += oTax * keepRatioToday;
   }
 
-  const result: PaymentSectionDTO[] = [];
-  for (const [gateway, data] of Object.entries(sections)) {
-    const label = await getPaymentMethodDisplayLabel(shopId, gateway);
-    result.push({ gateway, label, ...data });
+  return {
+    pay,
+    refundsGross,
+    discountsTotal: Math.round(discountsTotal),
+    vipPointsUsed: Math.round(vipPointsUsed),
+    saleOrderSet,
+    refundOrderSet,
+    itemCount,
+    taxTotalShopify: Math.round(taxTotalShopify),
+  };
+}
+
+function totalFromPayBuckets(
+  pay: Record<string, { sale: number; refund: number; saleTx: number; refundTx: number }>,
+): number {
+  let sum = 0;
+  for (const p of Object.values(pay)) {
+    sum += Math.round((p.sale || 0) - (p.refund || 0));
   }
-  return result;
+  return Math.max(0, Math.round(sum));
+}
+
+async function payBucketsToPaymentSections(
+  pay: Record<string, { sale: number; refund: number; saleTx: number; refundTx: number }>,
+  shopId: string,
+): Promise<PaymentSectionDTO[]> {
+  const entries = Object.entries(pay);
+  entries.sort((a, b) => a[0].localeCompare(b[0], "ja"));
+  const out: PaymentSectionDTO[] = [];
+  for (const [key, p] of entries) {
+    out.push({
+      gateway: key,
+      label: key,
+      net: p.sale,
+      refund: p.refund,
+      txCount: p.saleTx,
+      refundCount: p.refundTx,
+    });
+  }
+  for (const sec of out) {
+    if (/^[a-z0-9_.]+$/i.test(sec.gateway)) {
+      sec.label = await getPaymentMethodDisplayLabel(shopId, sec.gateway);
+    }
+  }
+  return out;
 }
 
 /** payment sections から gateway または label で該当セクションのインデックスを返す */
@@ -551,6 +805,27 @@ export function splitTaxInclusiveToNetAndTax(
   return { netSales, tax };
 }
 
+/** GAS aggregate: 当日 inRange の全 transaction.createdAt から first/last の HH:mm（店舗TZ） */
+function computeGasSettlementTxTimeBounds(
+  orders: ShopifyOrder[],
+  inDay: (iso?: string) => boolean,
+  ianaTimezone: string,
+): { firstHm: string | null; lastHm: string | null } {
+  const isoList: string[] = [];
+  for (const o of orders) {
+    for (const tx of o.transactions) {
+      const iso = tx.createdAt;
+      if (iso && inDay(iso)) isoList.push(iso);
+    }
+  }
+  if (isoList.length === 0) return { firstHm: null, lastHm: null };
+  isoList.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+  return {
+    firstHm: formatTimeHmInTimeZone(isoList[0], ianaTimezone),
+    lastHm: formatTimeHmInTimeZone(isoList[isoList.length - 1], ianaTimezone),
+  };
+}
+
 // ── メインエントリ ─────────────────────────────────────────────────────────────
 
 export async function buildSettlementPreview(
@@ -571,15 +846,25 @@ export async function buildSettlementPreview(
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
 
-  // fa78e63 当時と同じ POS 集計（現場で一致していた条件に戻す）
-  const shopifyQuery = `location_id:${locIdRaw} source_name:pos created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
-  const ordersRaw = await fetchAllOrders(admin, shopifyQuery);
-  const ordersAtLocation = filterOrdersByRetailLocation(ordersRaw, locationId, locIdRaw);
-  const orderIdsCreatedInDay = new Set(ordersAtLocation.map((o) => o.id));
+  // GAS と同型: created 当日 ∪ updated 当日を ID ユニオンし、todaysTx / pay で total・返金・割引/VIP を集計
+  const shopifyQueryCreated = `location_id:${locIdRaw} source_name:pos created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
+  const shopifyQueryUpdated = `location_id:${locIdRaw} source_name:pos updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
 
-  const ordersRawCount = ordersRaw.length;
-  const ordersPosSourceMatchedCount = ordersRaw.length;
-  const ordersAtLocationCount = ordersAtLocation.length;
+  const createdRaw = await fetchAllOrders(admin, shopifyQueryCreated, "CREATED_AT");
+  const updatedRaw = await fetchAllOrders(admin, shopifyQueryUpdated, "UPDATED_AT");
+
+  const createdAtLoc = filterOrdersByRetailLocation(createdRaw, locationId, locIdRaw);
+  const updatedAtLoc = filterOrdersByRetailLocation(updatedRaw, locationId, locIdRaw);
+  const ordersUnion = unionSettlementOrdersById(createdAtLoc, updatedAtLoc);
+
+  const ordersRawCount = createdRaw.length;
+  const ordersPosSourceMatchedCount = createdRaw.length;
+  const ordersAtLocationCount = ordersUnion.length;
+  const ordersUpdatedRawCount = updatedRaw.length;
+  const ordersUpdatedPosSourceMatchedCount = updatedRaw.length;
+  const ordersUpdatedAtLocationCount = updatedAtLoc.length;
+  /** ユニオン集計後は返金オーバーレイをマージしない（二重計上防止） */
+  const overlayRefundCount = 0;
 
   const inDay = (iso?: string) => {
     if (!iso) return false;
@@ -587,62 +872,21 @@ export async function buildSettlementPreview(
     return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
   };
 
-  let total = 0;
-  let discounts = 0;
-  let refundTotal = 0;
-  let itemCount = 0;
-  let refundCount = 0;
-  const saleOrderSet = new Set<string>();
-  const refundOrderSet = new Set<string>();
-  const currency = ordersAtLocation[0]?.totalPriceSet?.shopMoney?.currencyCode ?? "JPY";
+  const gas = aggregateGasStyleForOrders(ordersUnion, inDay);
 
-  for (const order of ordersAtLocation) {
-    let orderSaleToday = 0;
-    let orderRefundToday = 0;
-    for (const tx of order.transactions) {
-      if (!inDay(tx.createdAt)) continue;
-      if ((tx.kind === "SALE" || tx.kind === "CAPTURE") && tx.status === "SUCCESS") {
-        orderSaleToday += Number(tx.amountSet.shopMoney.amount);
-      }
-      if (tx.kind === "REFUND") {
-        orderRefundToday += Number(tx.amountSet.shopMoney.amount);
-      }
-    }
+  const { firstHm: settlementTxFirstHm, lastHm: settlementTxLastHm } = computeGasSettlementTxTimeBounds(
+    ordersUnion,
+    inDay,
+    timezone,
+  );
+  const taxShopify = gas.taxTotalShopify;
 
-    total += orderSaleToday;
-    discounts += Number(order.totalDiscountsSet.shopMoney.amount);
+  const currency = ordersUnion[0]?.totalPriceSet?.shopMoney?.currencyCode ?? "JPY";
 
-    if ((orderSaleToday - orderRefundToday) > 0) {
-      saleOrderSet.add(order.id);
-    }
-    if (orderRefundToday > 0) {
-      refundOrderSet.add(order.id);
-    }
-
-    if (orderSaleToday > 0) {
-      itemCount += order.lineItems.nodes.reduce((sum, n) => sum + n.quantity, 0);
-    }
-
-    for (const refund of order.refunds) {
-      if (!inDay(refund.createdAt)) continue;
-      refundTotal += Number(refund.totalRefundedSet.shopMoney.amount);
-      refundCount += 1;
-      for (const ri of refund.refundLineItems ?? []) {
-        itemCount -= Number(ri.quantity ?? 0);
-      }
-    }
-  }
-
-  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement`;
-  const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
-  const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationId, locIdRaw);
-  const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
-  const ordersUpdatedRawCount = ordersUpdated.length;
-  const ordersUpdatedPosSourceMatchedCount = ordersUpdated.length;
-  const ordersUpdatedAtLocationCount = ordersUpdatedAtLocation.length;
-  const overlayRefundCount = overlay.refundCount;
-
-  let netSales = total - discounts;
+  let total = totalFromPayBuckets(gas.pay);
+  let refundTotal = Math.round(gas.refundsGross);
+  let discounts = gas.discountsTotal;
+  const itemCount = gas.itemCount;
 
   const locationGid = locationId.startsWith("gid://") ? locationId : `gid://shopify/Location/${locationId}`;
   const specialRefundEvents = await prisma.specialRefundEvent.findMany({
@@ -668,17 +912,14 @@ export async function buildSettlementPreview(
     (sum, e) => sum + Number(e.voucherChangeAmount ?? 0),
     0
   );
-  const vipPointsUsed = otherEvents
-    .filter((e) => e.originalPaymentMethod === "points")
-    .reduce((sum, e) => sum + Number(e.amount), 0);
+  /** GAS: lineItems の VIP- 割引按分のみ（特殊返金の points は後続フェーズで合成可） */
+  const vipPointsUsed = gas.vipPointsUsed;
 
   const loyaltySettings = await getAppSetting<{ loyaltyUsageDisplayLabel?: string }>(shopId, LOYALTY_SETTINGS_KEY);
   const loyaltyUsageDisplayLabel =
     loyaltySettings?.loyaltyUsageDisplayLabel ?? DEFAULT_LOYALTY_SETTINGS.loyaltyUsageDisplayLabel;
 
-  let paymentSections = await calculatePaymentSections(ordersAtLocation, shopId, dayRange);
-  mergeRefundOverlay(paymentSections, overlay, { refundTotal, refundCount });
-  // 特殊返金イベントを totals オブジェクト経由で受け取り、ローカル変数に反映する
+  let paymentSections = await payBucketsToPaymentSections(gas.pay, shopId);
   const eventTotals = { total, refundTotal };
   applySpecialRefundEventsToTotals(paymentSections, otherEvents, eventTotals);
   total = eventTotals.total;
@@ -694,10 +935,10 @@ export async function buildSettlementPreview(
   const taxRatePercent = Number(settlementSettings?.taxRatePercent) || 10;
   const split = splitTaxInclusiveToNetAndTax(total, taxRatePercent);
   const tax = split.tax;
-  netSales = split.netSales;
+  const netSales = split.netSales;
 
   for (const sec of paymentSections) {
-    if (sec.label === sec.gateway) {
+    if (/^[a-z0-9_.]+$/i.test(sec.gateway) && sec.label === sec.gateway) {
       sec.label = await getPaymentMethodDisplayLabel(shopId, sec.gateway);
     }
   }
@@ -719,8 +960,8 @@ export async function buildSettlementPreview(
     discounts: roundInt(discounts),
     vipPointsUsed: roundInt(vipPointsUsed),
     refundTotal: roundInt(refundTotal),
-    orderCount: saleOrderSet.size,
-    refundCount: Math.max(refundCount, refundOrderSet.size),
+    orderCount: gas.saleOrderSet.size,
+    refundCount: gas.refundOrderSet.size,
     itemCount,
     voucherChangeAmount: roundInt(voucherChangeAmount),
     paymentSections,
@@ -747,6 +988,9 @@ export async function buildSettlementPreview(
       sourceOrderName: e.sourceOrderName,
     })),
     loyaltyUsageDisplayLabel,
+    settlementTxFirstHm,
+    settlementTxLastHm,
+    taxShopify,
   };
 }
 

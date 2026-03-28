@@ -55,6 +55,50 @@ export async function action({ request }: ActionFunctionArgs) {
         where: { idempotencyKey: idemKey },
       });
       if (existingSettlement) {
+        // GAS upsert は都度 Shopify 注文を更新する。order_based のときは再集計してメタ・ノートを同期する。
+        if (String(printMode) === "order_based") {
+          const preview = await buildSettlementPreview(
+            admin,
+            shop.id,
+            String(locationId),
+            String(locationName ?? ""),
+            String(targetDate),
+          );
+          let sourceOrderId = existingSettlement.sourceOrderId;
+          let sourceOrderName = existingSettlement.sourceOrderName;
+          try {
+            const sync = await syncSettlementOrderLikeGas(admin, shop.id, preview);
+            sourceOrderId = sync.orderId;
+            sourceOrderName = sync.orderName;
+          } catch (syncErr) {
+            const msg = syncErr instanceof Error ? syncErr.message : String(syncErr);
+            return corsJson({ ok: false, error: msg }, { status: 500 });
+          }
+          try {
+            await computeAndCacheDailySummary(
+              admin,
+              shop.id,
+              String(locationId),
+              String(locationName ?? ""),
+              String(targetDate),
+            );
+          } catch {
+            /* 同上 */
+          }
+          return corsJson(
+            {
+              ok: true,
+              idempotent: true,
+              settlementId: existingSettlement.id,
+              preview,
+              sourceOrderId,
+              sourceOrderName,
+              printMode: existingSettlement.printMode,
+              isInspection: false,
+            },
+            { status: 200 }
+          );
+        }
         return corsJson(
           {
             ok: true,

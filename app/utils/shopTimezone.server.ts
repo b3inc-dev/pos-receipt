@@ -159,6 +159,26 @@ export function getCalendarDateStringInTimeZone(date: Date, ianaTimezone: string
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * ISO 時刻を指定タイムゾーンの「時:分」（24h, HH:mm）に変換する。
+ * GAS aggregate の firstTime / lastTime（Utilities.formatDate(..., 'HH:mm')）相当。
+ */
+export function formatTimeHmInTimeZone(isoUtc: string, ianaTimezone: string): string {
+  const d = new Date(isoUtc);
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: ianaTimezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(d);
+  let hh = parts.find((p) => p.type === "hour")?.value ?? "00";
+  let mm = parts.find((p) => p.type === "minute")?.value ?? "00";
+  if (hh.length === 1) hh = `0${hh}`;
+  if (mm.length === 1) mm = `0${mm}`;
+  return `${hh}:${mm}`;
+}
+
 /** YYYY-MM-DD の暦日に整数日を加算（日次キーの前後関係・前日比用） */
 export function addCalendarDaysToIsoDate(isoDate: string, deltaDays: number): string {
   const [y, m, d] = isoDate.split("-").map(Number);

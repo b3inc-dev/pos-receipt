@@ -269,7 +269,13 @@ async function metafieldsSetGas(
     { ownerId: orderId, namespace: "settlement", key: "vip_points_used", type: "number_decimal", value: String(roundYen(preview.vipPointsUsed)) },
     { ownerId: orderId, namespace: "settlement", key: "tax", type: "number_decimal", value: String(roundYen(preview.tax)) },
     { ownerId: orderId, namespace: "settlement", key: "net_sales", type: "number_decimal", value: String(roundYen(preview.netSales)) },
-    { ownerId: orderId, namespace: "settlement", key: "tax_shopify", type: "number_decimal", value: "0" },
+    {
+      ownerId: orderId,
+      namespace: "settlement",
+      key: "tax_shopify",
+      type: "number_decimal",
+      value: String(roundYen(preview.taxShopify)),
+    },
     { ownerId: orderId, namespace: "settlement", key: "voucher_change", type: "number_integer", value: String(roundYen(preview.voucherChangeAmount)) },
     { ownerId: orderId, namespace: "settlement", key: "order_count", type: "number_integer", value: String(roundYen(preview.orderCount)) },
     { ownerId: orderId, namespace: "settlement", key: "refund_count", type: "number_integer", value: String(roundYen(preview.refundCount)) },
@@ -406,7 +412,9 @@ export async function syncSettlementOrderLikeGas(
   const prevVersion = await readSettlementVersion(admin, order.id);
   const version = prevVersion + 1;
 
-  const periodLabel = `${labelDate} 00:00–23:59`;
+  const ft = preview.settlementTxFirstHm ?? "00:00";
+  const lt = preview.settlementTxLastHm ?? "23:59";
+  const periodLabel = `${labelDate} ${ft}–${lt}`;
   const asOf = formatNowYmdHm(iana);
   const paymentSectionRows = buildGasPaymentSectionRows(preview);
 

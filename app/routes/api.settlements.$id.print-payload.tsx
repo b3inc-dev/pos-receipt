@@ -54,6 +54,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       appliedSpecialRefundEvents: [],
       appliedVoucherAdjustments: [],
       loyaltyUsageDisplayLabel: "ポイント利用",
+      settlementTxFirstHm: null,
+      settlementTxLastHm: null,
+      taxShopify: 0,
     };
 
     const printPayload = buildSettlementReceiptText(preview);
