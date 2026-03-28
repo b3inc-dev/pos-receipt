@@ -9,7 +9,7 @@
  *   historyDetail → 精算履歴明細
  */
 import { render } from "preact";
-import { useState, useEffect, useCallback, useMemo, useRef } from "preact/hooks";
+import { useState, useEffect, useCallback, useMemo } from "preact/hooks";
 import {
   getLocations,
   previewSettlement,
@@ -24,8 +24,22 @@ import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 
-/** 発行確認モーダル（売上サマリーの入店数報告と同型: showOverlay で開閉） */
-const SETTLEMENT_ISSUE_CONFIRM_MODAL_ID = "pos-receipt-settlement-issue-confirm";
+/**
+ * 発行確認モーダル（POS Stock / 入庫確定と同型）
+ * s-modal は常時マウントし、フッターの s-button に command="--show" commandFor={id} で開く。
+ */
+const SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID = "pos-receipt-settlement-issue-inspection";
+const SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID = "pos-receipt-settlement-issue-settle";
+
+function hideSettlementIssueConfirmModals() {
+  for (const id of [SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID, SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID]) {
+    try {
+      const el = document.getElementById(id);
+      el?.hide?.();
+      el?.hideOverlay?.();
+    } catch (_) {}
+  }
+}
 
 // ── 今日の日付（YYYY-MM-DD） ────────────────────────────────────────────────
 function todayStr() {
@@ -77,8 +91,6 @@ function SettlementModal() {
   const [selectedYear, setSelectedYear] = useState(initialYm.year);
   const [selectedMonth, setSelectedMonth] = useState(initialYm.month);
   const [initialPreviewLoaded, setInitialPreviewLoaded] = useState(false);
-  const [issueConfirmOpen, setIssueConfirmOpen] = useState(false);
-
   // POS Stock と同様: ポーリングでセッションのロケーションが確定するまで待つ
   const { locationGid: sessionLocationGid, isReady: sessionReady } = useSessionLocation();
 
@@ -200,7 +212,7 @@ function SettlementModal() {
   const fetchPreviewForDate = useCallback(
     async ({ date, inspection = false, openStep = "preview" }) => {
       if (!selectedLocation) return false;
-      setIssueConfirmOpen(false);
+      hideSettlementIssueConfirmModals();
       setLoading(true);
       setError("");
       setIsInspection(inspection);
@@ -237,7 +249,7 @@ function SettlementModal() {
         isInspection,
       });
       setSettlementResult(res);
-      setIssueConfirmOpen(false);
+      hideSettlementIssueConfirmModals();
       setStep("done");
     } catch (e) {
       setError(toUserMessage(e?.message) || "精算の実行に失敗しました");
@@ -249,7 +261,7 @@ function SettlementModal() {
   const handleOpenDailyRow = useCallback(async (row) => {
     const d = String(row?.targetDate || "").trim();
     if (!d || !selectedLocation) return;
-    setIssueConfirmOpen(false);
+    hideSettlementIssueConfirmModals();
     if (row?.settlement) {
       setSelectedHistoryItem(row.settlement);
       setStep("historyDetail");
@@ -345,6 +357,11 @@ function SettlementModal() {
           loadAvailableMonths(selectedLocation?.locationId);
           loadMonthRows(selectedLocation?.locationId, selectedYear, selectedMonth);
         }}
+        onBackFromHistory={() => {
+          hideSettlementIssueConfirmModals();
+          setError("");
+          setStep("preview");
+        }}
         setError={setError}
       />
     );
@@ -363,30 +380,28 @@ function SettlementModal() {
           error={error}
           onPickDate={(d) => fetchPreviewForDate({ date: d, inspection: isInspection, openStep: "preview" })}
           onRecalculate={handleRecalculate}
-          onOpenIssueConfirm={(inspection) => {
-            setIsInspection(!!inspection);
+          onPrepareInspectionIssue={() => {
+            setIsInspection(true);
             setError("");
-            setIssueConfirmOpen(true);
+          }}
+          onPrepareSettleIssue={() => {
+            setIsInspection(false);
+            setError("");
           }}
           onBackToHistory={() => {
-            setIssueConfirmOpen(false);
+            hideSettlementIssueConfirmModals();
             setStep("main");
           }}
         />
-        <IssueConfirmModal
-          open={issueConfirmOpen}
-          onRequestClose={() => {
-            if (!loading) {
-              setIssueConfirmOpen(false);
-              setError("");
-            }
-          }}
+        <SettlementIssueConfirmModals
           preview={preview}
-          isInspection={isInspection}
           printMode={selectedLocation?.printMode}
           loading={loading}
           error={error}
           onExecute={handleCreate}
+          onRequestClose={() => {
+            if (!loading) setError("");
+          }}
         />
       </>
     );
@@ -398,7 +413,7 @@ function SettlementModal() {
         result={settlementResult}
         isInspection={isInspection}
         onBack={() => {
-          setIssueConfirmOpen(false);
+          hideSettlementIssueConfirmModals();
           setStep("main");
           setPreview(null);
           setSettlementResult(null);
@@ -439,6 +454,7 @@ function MainView({
   onOpenDailyRow,
   onRetryLocations,
   onRetryDaily,
+  onBackFromHistory,
   setError,
 }) {
   const [yearMenuOpen, setYearMenuOpen] = useState(false);
@@ -660,9 +676,8 @@ function MainView({
           centerAlignWithButtons
           leftLabel="戻る"
           onLeft={() => {
-            const t = todayStr();
             setError("");
-            onOpenDailyRow({ targetDate: t });
+            onBackFromHistory();
           }}
           leftDisabled={!selectedLocation || loading || dailyLoading}
           rightLabel={loading ? "読込中.." : dailyLoading ? "更新中.." : "更新"}
@@ -685,7 +700,8 @@ function PreviewView({
   error,
   onPickDate,
   onRecalculate,
-  onOpenIssueConfirm,
+  onPrepareInspectionIssue,
+  onPrepareSettleIssue,
   onBackToHistory,
 }) {
   if (!preview) {
@@ -741,10 +757,14 @@ function PreviewView({
             onLeft={onBackToHistory}
             leftDisabled={loading}
             middleLabel="点検"
-            onMiddle={() => onOpenIssueConfirm(true)}
+            onMiddle={onPrepareInspectionIssue}
+            middleCommand="--show"
+            middleCommandFor={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID}
             middleDisabled
             rightLabel="精算"
-            onRight={() => onOpenIssueConfirm(false)}
+            onRight={onPrepareSettleIssue}
+            rightCommand="--show"
+            rightCommandFor={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID}
             rightTone="success"
             rightDisabled
           />
@@ -969,10 +989,14 @@ function PreviewView({
           onLeft={onBackToHistory}
           leftDisabled={loading}
           middleLabel="点検"
-          onMiddle={() => onOpenIssueConfirm(true)}
+          onMiddle={onPrepareInspectionIssue}
+          middleCommand="--show"
+          middleCommandFor={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID}
           middleDisabled={loading}
           rightLabel="精算"
-          onRight={() => onOpenIssueConfirm(false)}
+          onRight={onPrepareSettleIssue}
+          rightCommand="--show"
+          rightCommandFor={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID}
           rightTone="success"
           rightDisabled={loading}
         />
@@ -981,79 +1005,80 @@ function PreviewView({
   );
 }
 
-/** 精算・点検の発行直前確認（ページ遷移せず s-modal で表示） */
-function IssueConfirmModal({
-  open,
-  onRequestClose,
-  preview,
-  isInspection,
-  printMode,
-  loading,
-  error,
-  onExecute,
-}) {
-  const modalRef = useRef(null);
-  useEffect(() => {
-    const el = modalRef.current;
-    if (!el) return;
-    try {
-      if (open) el.showOverlay?.();
-      else el.hideOverlay?.();
-    } catch (_) {}
-  }, [open]);
-
+/** 精算・点検それぞれ専用の s-modal（POS Stock: ボタン command + commandFor で開閉） */
+function SettlementIssueConfirmModals({ preview, printMode, loading, error, onExecute, onRequestClose }) {
   const printModeLabel =
     printMode === "cloudprnt_direct"
       ? "CloudPRNT直印字"
       : "注文経由印字（精算注文を作成します）";
 
+  const rows = [
+    { label: "ロケーション", value: preview?.locationName ?? "-" },
+    { label: "対象日", value: preview?.targetDate ?? "-" },
+    { label: "総売上", value: `¥${Number(preview?.total ?? 0).toLocaleString()}`, valueBold: true },
+    { label: "件数", value: `${preview?.orderCount ?? 0}件` },
+    { label: "印字方式", value: printModeLabel },
+  ];
+
+  const body = (headingLine) => (
+    <s-scroll-box>
+      <s-box padding="base">
+        <s-stack gap="base">
+          <s-text fontWeight="bold">{headingLine}</s-text>
+          <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
+            <s-stack gap="none">
+              {rows.map((row, i, arr) => (
+                <SummaryRow
+                  key={row.label}
+                  label={row.label}
+                  value={row.value}
+                  valueBold={row.valueBold}
+                  divider={i < arr.length - 1}
+                />
+              ))}
+            </s-stack>
+          </s-box>
+          {error ? <s-text tone="critical">{error}</s-text> : null}
+        </s-stack>
+      </s-box>
+    </s-scroll-box>
+  );
+
   return (
-    <s-modal id={SETTLEMENT_ISSUE_CONFIRM_MODAL_ID} ref={modalRef} heading="発行確認">
-      <s-scroll-box>
-        <s-box padding="base">
-          <s-stack gap="base">
-            <s-text fontWeight="bold">
-              {isInspection ? "点検レシートを発行します" : "精算レシートを発行します"}
-            </s-text>
-
-            <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="none">
-                {[
-                  { label: "ロケーション", value: preview?.locationName ?? "-" },
-                  { label: "対象日", value: preview?.targetDate ?? "-" },
-                  { label: "総売上", value: `¥${Number(preview?.total ?? 0).toLocaleString()}`, valueBold: true },
-                  { label: "件数", value: `${preview?.orderCount ?? 0}件` },
-                  { label: "印字方式", value: printModeLabel },
-                ].map((row, i, arr) => (
-                  <SummaryRow
-                    key={row.label}
-                    label={row.label}
-                    value={row.value}
-                    valueBold={row.valueBold}
-                    divider={i < arr.length - 1}
-                  />
-                ))}
-              </s-stack>
-            </s-box>
-
-            {error ? <s-text tone="critical">{error}</s-text> : null}
-          </s-stack>
-        </s-box>
-      </s-scroll-box>
-      <s-button
-        slot="secondary-actions"
-        kind="secondary"
-        command="--hide"
-        commandFor={SETTLEMENT_ISSUE_CONFIRM_MODAL_ID}
-        onClick={onRequestClose}
-        disabled={loading}
-      >
-        戻る
-      </s-button>
-      <s-button slot="primary-action" onClick={onExecute} loading={loading}>
-        発行する
-      </s-button>
-    </s-modal>
+    <>
+      <s-modal id={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID} heading="発行確認">
+        {body("点検レシートを発行します")}
+        <s-button
+          slot="secondary-actions"
+          kind="secondary"
+          command="--hide"
+          commandFor={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID}
+          onClick={onRequestClose}
+          disabled={loading}
+        >
+          戻る
+        </s-button>
+        <s-button slot="primary-action" onClick={onExecute} disabled={loading}>
+          {loading ? "発行中.." : "発行する"}
+        </s-button>
+      </s-modal>
+      <s-modal id={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID} heading="発行確認">
+        {body("精算レシートを発行します")}
+        <s-button
+          slot="secondary-actions"
+          kind="secondary"
+          command="--hide"
+          commandFor={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID}
+          onClick={onRequestClose}
+          disabled={loading}
+        >
+          戻る
+        </s-button>
+        <s-button slot="primary-action" onClick={onExecute} disabled={loading}>
+          {loading ? "発行中.." : "発行する"}
+        </s-button>
+      </s-modal>
+    </>
   );
 }
 

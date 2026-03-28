@@ -43,7 +43,7 @@ export function FixedFooterNavBar({
       {centerAlignWithButtons ? (
         <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
           <s-button tone={leftTone} disabled={leftDisabled} loading={leftLoading} onClick={onLeft}>{leftLabel}</s-button>
-          {hasCenter ? (typeof summaryCenter === "string" ? <s-text size="small" tone="subdued">{summaryCenter}</s-text> : summaryCenter) : hasMiddle ? <s-button tone={middleTone} disabled={middleDisabled} loading={middleLoading} onClick={onMiddle}>{middleLabel}</s-button> : <s-box />}
+          {hasCenter ? (typeof summaryCenter === "string" ? <s-text size="small" tone="subdued">{summaryCenter}</s-text> : summaryCenter) : hasMiddle ? <s-button tone={middleTone} disabled={middleDisabled} loading={middleLoading} onClick={onMiddle} command={middleCommand} commandFor={middleCommandFor}>{middleLabel}</s-button> : <s-box />}
           {rightLabel && typeof onRight === "function" ? <s-button tone={rightTone} disabled={rightDisabled} loading={rightLoading} onClick={onRight} command={rightCommand} commandFor={rightCommandFor}>{rightLabel}</s-button> : <s-box />}
         </s-stack>
       ) : (
