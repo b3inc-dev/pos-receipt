@@ -560,6 +560,217 @@ function totalsPeriodRows(totals, o, locationRows = []) {
   return rows;
 }
 
+/**
+ * 日別一覧の1日分：3行で列位置を揃える。
+ * POS UI では `s-box` に grid 用 style が効かないことがあるため、
+ * 精算の支払内訳と同様に `s-stack direction="inline"` + 子 `s-box` の `inlineSize`（%）で揃える。
+ *
+ * 行1: 日付 | (空) | 純売上 値 | 客数 値 | 客単価 値
+ * 行2: (空) | (空) | 予算 値 | 入店数 値 | セット率 値
+ * 行3: 点数 値 | (空) | 予算比 値 | 購買率 値 | 一品単価 値
+ */
+const DAILY_LIST_COL = {
+  lead: "18%",
+  leadVal: "12%",
+  m1Lab: "11%",
+  m1Val: "15%",
+  m2Lab: "11%",
+  m2Val: "14%",
+  m3Lab: "9%",
+  m3Val: "10%",
+};
+
+function DailyListDayRowGrid({ row, o }) {
+  const blank = "\u00a0";
+  const net =
+    o.showActual !== false && row.netSales != null ? fmtAmount(row.netSales) : "—";
+  const orders =
+    o.showOrders !== false && row.orders != null ? `${fmtNum(row.orders)}件` : "—";
+  const atv = o.showAtv !== false ? fmtAmount(row.atv) : "—";
+  const budget =
+    o.showBudget !== false && row.budget != null ? fmtAmount(row.budget) : "—";
+  const visitors =
+    o.showVisitors !== false && row.visitors != null ? `${fmtNum(row.visitors)}人` : "—";
+  const setRate = o.showSetRate !== false ? fmtNum(row.setRate, 2) : "—";
+  const itemsVal =
+    o.showItems !== false && row.items != null ? `${fmtNum(row.items)}点` : "—";
+
+  let budgetRatioText = "—";
+  let budgetRatioTone;
+  if (
+    o.showBudgetRatio !== false &&
+    row.budget != null &&
+    Number(row.budget) > 0 &&
+    row.netSales != null
+  ) {
+    const r = Number(row.netSales) / Number(row.budget);
+    budgetRatioText = fmtPct(r);
+    budgetRatioTone = r >= 1 ? "success" : "critical";
+  }
+
+  const conv = o.showConv !== false ? fmtPct(row.conv) : "—";
+  const unit = o.showUnitPrice !== false ? fmtAmount(row.unit) : "—";
+
+  function gridCell(pct, alignEnd, children) {
+    return (
+      <s-box padding="none" inlineSize={pct} minInlineSize="0" maxInlineSize={pct}>
+        {alignEnd ? (
+          <s-stack direction="block" alignItems="end">
+            {children}
+          </s-stack>
+        ) : (
+          children
+        )}
+      </s-box>
+    );
+  }
+
+  return (
+    <s-stack gap="extraSmall">
+      <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
+        {gridCell(
+          DAILY_LIST_COL.lead,
+          false,
+          <s-text emphasis="bold" size="small">
+            {row.targetDate}
+          </s-text>,
+        )}
+        {gridCell(DAILY_LIST_COL.leadVal, false, <s-text size="small">{blank}</s-text>)}
+        {gridCell(
+          DAILY_LIST_COL.m1Lab,
+          false,
+          <s-text tone="subdued" size="small">
+            純売上
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m1Val,
+          true,
+          <s-text size="small" fontWeight="bold">
+            {net}
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m2Lab,
+          false,
+          <s-text tone="subdued" size="small">
+            客数
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m2Val,
+          true,
+          <s-text size="small">{orders}</s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m3Lab,
+          false,
+          <s-text tone="subdued" size="small">
+            客単価
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m3Val,
+          true,
+          <s-text size="small">{atv}</s-text>,
+        )}
+      </s-stack>
+      <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
+        {gridCell(DAILY_LIST_COL.lead, false, <s-text size="small">{blank}</s-text>)}
+        {gridCell(DAILY_LIST_COL.leadVal, false, <s-text size="small">{blank}</s-text>)}
+        {gridCell(
+          DAILY_LIST_COL.m1Lab,
+          false,
+          <s-text tone="subdued" size="small">
+            予算
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m1Val,
+          true,
+          <s-text size="small">{budget}</s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m2Lab,
+          false,
+          <s-text tone="subdued" size="small">
+            入店数
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m2Val,
+          true,
+          <s-text size="small">{visitors}</s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m3Lab,
+          false,
+          <s-text tone="subdued" size="small">
+            セット率
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m3Val,
+          true,
+          <s-text size="small">{setRate}</s-text>,
+        )}
+      </s-stack>
+      <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
+        {gridCell(
+          DAILY_LIST_COL.lead,
+          false,
+          <s-text tone="subdued" size="small">
+            点数
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.leadVal,
+          true,
+          <s-text size="small">{itemsVal}</s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m1Lab,
+          false,
+          <s-text tone="subdued" size="small">
+            予算比
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m1Val,
+          true,
+          <s-text size="small" tone={budgetRatioTone}>
+            {budgetRatioText}
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m2Lab,
+          false,
+          <s-text tone="subdued" size="small">
+            購買率
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m2Val,
+          true,
+          <s-text size="small">{conv}</s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m3Lab,
+          false,
+          <s-text tone="subdued" size="small">
+            一品単価
+          </s-text>,
+        )}
+        {gridCell(
+          DAILY_LIST_COL.m3Val,
+          true,
+          <s-text size="small">{unit}</s-text>,
+        )}
+      </s-stack>
+    </s-stack>
+  );
+}
+
 // ── 日別一覧サブ画面（精算メインと同型：固定ヘッダー＋スクロール＋固定フッター）────────
 
 function DailyListView({
@@ -793,82 +1004,7 @@ function DailyListView({
                   {rows.map((row) => (
                     <s-clickable key={row.targetDate} onClick={() => onPickDate(row.targetDate)}>
                       <s-box padding="small">
-                        <s-stack
-                          direction="inline"
-                          alignItems="start"
-                          gap="small"
-                          style={{ width: "100%" }}
-                        >
-                          <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                            <s-stack gap="extraSmall">
-                              <s-text emphasis="bold" size="small">
-                                {row.targetDate}
-                              </s-text>
-                              <s-text tone="subdued" size="small">
-                                純売上
-                              </s-text>
-                              <s-text size="small">
-                                {listO.showActual !== false ? fmtAmount(row.netSales) : "—"}
-                              </s-text>
-                              <s-text tone="subdued" size="small">
-                                点数
-                              </s-text>
-                              <s-text size="small">
-                                {listO.showItems !== false && row.items != null
-                                  ? `${fmtNum(row.items)}点`
-                                  : "—"}
-                              </s-text>
-                            </s-stack>
-                          </s-box>
-                          <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                            <s-stack gap="extraSmall">
-                              <s-text tone="subdued" size="small">
-                                客数
-                              </s-text>
-                              <s-text size="small">
-                                {listO.showOrders !== false && row.orders != null
-                                  ? `${fmtNum(row.orders)}件`
-                                  : "—"}
-                              </s-text>
-                              <s-text tone="subdued" size="small">
-                                入店数
-                              </s-text>
-                              <s-text size="small">
-                                {listO.showVisitors !== false && row.visitors != null
-                                  ? `${fmtNum(row.visitors)}人`
-                                  : "—"}
-                              </s-text>
-                              <s-text tone="subdued" size="small">
-                                購買率
-                              </s-text>
-                              <s-text size="small">
-                                {listO.showConv !== false ? fmtPct(row.conv) : "—"}
-                              </s-text>
-                            </s-stack>
-                          </s-box>
-                          <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                            <s-stack gap="extraSmall">
-                              <s-text tone="subdued" size="small">
-                                客単価
-                              </s-text>
-                              <s-text size="small">
-                                {listO.showAtv !== false ? fmtAmount(row.atv) : "—"}
-                              </s-text>
-                              <s-text tone="subdued" size="small">
-                                セット率
-                              </s-text>
-                              <s-text size="small">
-                                {listO.showSetRate !== false ? fmtNum(row.setRate, 2) : "—"}
-                              </s-text>
-                              <s-text tone="subdued" size="small">
-                                一品単価
-                              </s-text>
-                              <s-text size="small">
-                                {listO.showUnitPrice !== false ? fmtAmount(row.unit) : "—"}
-                              </s-text>
-                            </s-stack>
-                          </s-box>
-                        </s-stack>
+                        <DailyListDayRowGrid row={row} o={listO} />
                       </s-box>
                       <s-divider />
                     </s-clickable>
