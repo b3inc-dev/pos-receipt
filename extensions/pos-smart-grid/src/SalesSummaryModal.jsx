@@ -562,39 +562,35 @@ function totalsPeriodRows(totals, o, locationRows = []) {
 }
 
 /**
- * 日別一覧の1日分：狭い画面向けに4行レイアウト。列は `inlineSize`（%）で揃える。
- *
- * 行1: 日付のみ
- * 行2: 予算 値 | 純売上 値 | 右列に 予算比（上）→ 点数（下）を縦積み
- * 行3: 客数 値 | 入店数 値 | 購買率 値
- * 行4: 客単価 値 | セット率 値 | 一品単価 値
- *
- * 値と次のラベルが詰まらないよう値セルに paddingInlineEnd。
- * 4文字ラベルが折り返さないよう whiteSpace: nowrap（POS では style が効く場合に限定）。
+ * 日別一覧の1日分：スマホ・タブレット共通「3列 × 上ラベル・下値」。
+ * - 各セルはラベル行＋値行で、横に詰めない（折り返し崩れを防ぐ）。
+ * - 行1右列は右寄せで [予算比グレーバッジ neutral] を％の直前に並べる。点数は行2の3列目。
  */
-const DAILY_LIST_ROW2 = {
-  l1: "8%",
-  v1: "19%",
-  l2: "8%",
-  v2: "19%",
-  tail: "46%",
-};
+const DAILY_LIST_COL_W = { c1: "34%", c2: "33%", c3: "33%" };
 
-/** 行3〜4共通：ラベル列をやや広げて「一品単価」等が1行に収まりやすくする */
-const DAILY_LIST_TRIPLE = {
-  l1: "9%",
-  v1: "19%",
-  l2: "9%",
-  v2: "19%",
-  l3: "13%",
-  v3: "31%",
-};
-
-function dailyListMetricLabel(text) {
+function DailyListThreeColCell({ widthPct, label, valueAlignEnd = false, padInlineEnd = false, children }) {
+  const nbsp = "\u00a0";
   return (
-    <s-text tone="subdued" size="small" style={{ whiteSpace: "nowrap" }}>
-      {text}
-    </s-text>
+    <s-box
+      padding="none"
+      paddingInlineEnd={padInlineEnd ? "small" : "none"}
+      inlineSize={widthPct}
+      minInlineSize="0"
+      maxInlineSize={widthPct}
+    >
+      <s-stack gap="extraSmall" inlineSize="100%">
+        {label != null && label !== "" ? (
+          <s-text tone="subdued" size="small">
+            {label}
+          </s-text>
+        ) : (
+          <s-text size="small">{nbsp}</s-text>
+        )}
+        <s-stack direction="block" alignItems={valueAlignEnd ? "end" : "start"} inlineSize="100%">
+          {children}
+        </s-stack>
+      </s-stack>
+    </s-box>
   );
 }
 
@@ -628,81 +624,71 @@ function DailyListDayRowGrid({ row, o }) {
   const conv = o.showConv !== false ? fmtPct(row.conv) : "—";
   const unit = o.showUnitPrice !== false ? fmtAmount(row.unit) : "—";
 
-  /** padInlineEnd: 数字の直後と次の項目名の間に余白 */
-  function gridCell(pct, alignEnd, children, padInlineEnd = false) {
-    return (
-      <s-box
-        padding="none"
-        paddingInlineEnd={padInlineEnd ? "small" : "none"}
-        inlineSize={pct}
-        minInlineSize="0"
-        maxInlineSize={pct}
-      >
-        {alignEnd ? (
-          <s-stack direction="block" alignItems="end">
-            {children}
-          </s-stack>
-        ) : (
-          children
-        )}
-      </s-box>
-    );
-  }
-
-  const R2 = DAILY_LIST_ROW2;
-  const T = DAILY_LIST_TRIPLE;
+  const W = DAILY_LIST_COL_W;
 
   return (
     <s-stack gap="extraSmall">
-      <s-box padding="none" inlineSize="100%">
-        <s-text emphasis="bold" size="small">
-          {formatYmdSlash(row.targetDate)}
-        </s-text>
-      </s-box>
+      <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
+        <DailyListThreeColCell widthPct={W.c1} label="日付" valueAlignEnd={false} padInlineEnd>
+          <s-text emphasis="bold" size="small">
+            {formatYmdSlash(row.targetDate)}
+          </s-text>
+        </DailyListThreeColCell>
+        <DailyListThreeColCell widthPct={W.c2} label="" padInlineEnd>
+          <s-text size="small" tone="subdued">
+            {"\u00a0"}
+          </s-text>
+        </DailyListThreeColCell>
+        <DailyListThreeColCell widthPct={W.c3} label="" valueAlignEnd padInlineEnd={false}>
+          <s-stack direction="inline" gap="small" justifyContent="end" alignItems="center" inlineSize="100%">
+            <s-badge tone="neutral">予算比</s-badge>
+            <s-text
+              size="small"
+              fontWeight="bold"
+              tone={o.showBudgetRatio !== false ? budgetRatioTone : undefined}
+            >
+              {o.showBudgetRatio !== false ? budgetRatioText : "—"}
+            </s-text>
+          </s-stack>
+        </DailyListThreeColCell>
+      </s-stack>
 
       <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
-        {gridCell(R2.l1, false, dailyListMetricLabel("予算"), false)}
-        {gridCell(R2.v1, true, <s-text size="small">{budget}</s-text>, true)}
-        {gridCell(R2.l2, false, dailyListMetricLabel("純売上"), false)}
-        {gridCell(
-          R2.v2,
-          true,
+        <DailyListThreeColCell widthPct={W.c1} label="予算" valueAlignEnd padInlineEnd>
+          <s-text size="small">{budget}</s-text>
+        </DailyListThreeColCell>
+        <DailyListThreeColCell widthPct={W.c2} label="純売上" valueAlignEnd padInlineEnd>
           <s-text size="small" fontWeight="bold">
             {net}
-          </s-text>,
-          true,
-        )}
-        <s-box padding="none" inlineSize={R2.tail} minInlineSize="0" maxInlineSize={R2.tail}>
-          <s-stack gap="extraSmall" inlineSize="100%">
-            <s-stack direction="inline" gap="small" justifyContent="space-between" alignItems="center" inlineSize="100%">
-              {dailyListMetricLabel("予算比")}
-              <s-text size="small" tone={budgetRatioTone}>
-                {budgetRatioText}
-              </s-text>
-            </s-stack>
-            <s-stack direction="inline" gap="small" justifyContent="space-between" alignItems="center" inlineSize="100%">
-              {dailyListMetricLabel("点数")}
-              <s-text size="small">{itemsVal}</s-text>
-            </s-stack>
-          </s-stack>
-        </s-box>
+          </s-text>
+        </DailyListThreeColCell>
+        <DailyListThreeColCell widthPct={W.c3} label="点数" valueAlignEnd padInlineEnd={false}>
+          <s-text size="small">{itemsVal}</s-text>
+        </DailyListThreeColCell>
       </s-stack>
 
-      <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
-        {gridCell(T.l1, false, dailyListMetricLabel("客数"), false)}
-        {gridCell(T.v1, true, <s-text size="small">{orders}</s-text>, true)}
-        {gridCell(T.l2, false, dailyListMetricLabel("入店数"), false)}
-        {gridCell(T.v2, true, <s-text size="small">{visitors}</s-text>, true)}
-        {gridCell(T.l3, false, dailyListMetricLabel("購買率"), false)}
-        {gridCell(T.v3, true, <s-text size="small">{conv}</s-text>, false)}
+      <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
+        <DailyListThreeColCell widthPct={W.c1} label="客数" valueAlignEnd padInlineEnd>
+          <s-text size="small">{orders}</s-text>
+        </DailyListThreeColCell>
+        <DailyListThreeColCell widthPct={W.c2} label="入店数" valueAlignEnd padInlineEnd>
+          <s-text size="small">{visitors}</s-text>
+        </DailyListThreeColCell>
+        <DailyListThreeColCell widthPct={W.c3} label="購買率" valueAlignEnd padInlineEnd={false}>
+          <s-text size="small">{conv}</s-text>
+        </DailyListThreeColCell>
       </s-stack>
-      <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
-        {gridCell(T.l1, false, dailyListMetricLabel("客単価"), false)}
-        {gridCell(T.v1, true, <s-text size="small">{atv}</s-text>, true)}
-        {gridCell(T.l2, false, dailyListMetricLabel("セット率"), false)}
-        {gridCell(T.v2, true, <s-text size="small">{setRate}</s-text>, true)}
-        {gridCell(T.l3, false, dailyListMetricLabel("一品単価"), false)}
-        {gridCell(T.v3, true, <s-text size="small">{unit}</s-text>, false)}
+
+      <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
+        <DailyListThreeColCell widthPct={W.c1} label="客単価" valueAlignEnd padInlineEnd>
+          <s-text size="small">{atv}</s-text>
+        </DailyListThreeColCell>
+        <DailyListThreeColCell widthPct={W.c2} label="セット率" valueAlignEnd padInlineEnd>
+          <s-text size="small">{setRate}</s-text>
+        </DailyListThreeColCell>
+        <DailyListThreeColCell widthPct={W.c3} label="一品単価" valueAlignEnd padInlineEnd={false}>
+          <s-text size="small">{unit}</s-text>
+        </DailyListThreeColCell>
       </s-stack>
     </s-stack>
   );
