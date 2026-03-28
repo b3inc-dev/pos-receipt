@@ -798,27 +798,35 @@ function PreviewView({
     { label: "点数", value: `${preview.itemCount}点` },
   ];
 
-  const paymentDetailRows = [];
+  /** 納金金額ブロック用（現金セクションの net − refund） */
+  const cashDepositRows = [];
+  /** 支払方法 | 件数 | 金額（返金行は ラベル[返金]） */
+  const paymentTripleRows = [];
   if (preview.paymentSections?.length > 0) {
     for (const section of preview.paymentSections) {
-      paymentDetailRows.push({
-        key: `${section.gateway}-net`,
-        label: section.label,
-        value: `¥${Number(section.net).toLocaleString()}`,
-        labelBold: true,
-      });
-      paymentDetailRows.push({
-        key: `${section.gateway}-tx`,
-        label: "件数",
-        value: `${Number(section.txCount ?? 0)}件${
-          Number(section.refundCount ?? 0) > 0 ? `（返金${section.refundCount}件）` : ""
-        }`,
+      const methodLabel = section.label ?? section.gateway ?? "-";
+      if (isCashPaymentSection(section)) {
+        const deposit = Math.round(Number(section.net ?? 0) - Number(section.refund ?? 0));
+        cashDepositRows.push({
+          key: `deposit-${section.gateway}-${cashDepositRows.length}`,
+          label: methodLabel,
+          value: `¥${deposit.toLocaleString()}`,
+        });
+      }
+      paymentTripleRows.push({
+        key: `${section.gateway}-sale`,
+        left: methodLabel,
+        middle: `${Number(section.txCount ?? 0)}件`,
+        right: `¥${Number(section.net ?? 0).toLocaleString()}`,
+        leftBold: true,
       });
       if (Number(section.refund) > 0) {
-        paymentDetailRows.push({
+        paymentTripleRows.push({
           key: `${section.gateway}-refund`,
-          label: "返金",
-          value: `▲¥${Number(section.refund).toLocaleString()}`,
+          left: `${methodLabel}[返金]`,
+          middle: `${Number(section.refundCount ?? 0)}件`,
+          right: `¥${Number(section.refund).toLocaleString()}`,
+          leftBold: false,
         });
       }
     }
@@ -935,21 +943,43 @@ function PreviewView({
                 </s-stack>
               </s-box>
 
-              {/* 支払方法別内訳（売上額・返金額・件数） */}
-              {paymentDetailRows.length > 0 ? (
+              {/* 納金金額（現金の差引額のみ・件数なし） */}
+              {cashDepositRows.length > 0 ? (
+                <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
+                  <s-stack gap="none">
+                    <s-box padding="small">
+                      <s-text fontWeight="bold" fontSize="small">納金金額</s-text>
+                    </s-box>
+                    <s-divider />
+                    {cashDepositRows.map((row, i) => (
+                      <SummaryRow
+                        key={row.key}
+                        label={row.label}
+                        value={row.value}
+                        valueBold
+                        divider={i < cashDepositRows.length - 1}
+                      />
+                    ))}
+                  </s-stack>
+                </s-box>
+              ) : null}
+
+              {/* 支払方法別内訳：支払方法 / 件数 / 金額（返金は 方法[返金]） */}
+              {paymentTripleRows.length > 0 ? (
                 <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
                   <s-stack gap="none">
                     <s-box padding="small">
                       <s-text fontWeight="bold" fontSize="small">支払方法別内訳</s-text>
                     </s-box>
                     <s-divider />
-                    {paymentDetailRows.map((row, i) => (
-                      <SummaryRow
+                    {paymentTripleRows.map((row, i) => (
+                      <PaymentMethodTripleRow
                         key={row.key}
-                        label={row.label}
-                        value={row.value}
-                        labelBold={row.labelBold}
-                        divider={i < paymentDetailRows.length - 1}
+                        left={row.left}
+                        middle={row.middle}
+                        right={row.right}
+                        leftBold={row.leftBold}
+                        divider={i < paymentTripleRows.length - 1}
                       />
                     ))}
                   </s-stack>
@@ -1213,6 +1243,64 @@ function HistoryDetailView({ item, onBack }) {
 }
 
 // ── ヘルパー ──────────────────────────────────────────────────────────────────
+
+/** 精算プレビューの支払セクションが現金か（納金金額の対象） */
+function isCashPaymentSection(section) {
+  const g = String(section?.gateway ?? "").trim().toLowerCase();
+  const l = String(section?.label ?? "").trim();
+  if (g === "現金" || l === "現金") return true;
+  if (g === "cash" || l.toLowerCase() === "cash") return true;
+  return /^現金/.test(l);
+}
+
+/**
+ * 支払内訳1行：支払方法・件数・金額の3列。
+ * flex だと方法名の長さで件数列が横に流れるため、Grid で 2・3 列目の幅を固定して縦揃えする。
+ * （POS WebView で style が無効な場合は横スクロールや折り返しに落ちるが、通常は有効。）
+ */
+function PaymentMethodTripleRow({ left, middle, right, leftBold = false, divider = true }) {
+  const gridStyle = {
+    display: "grid",
+    // 1: 残り幅（長いラベルは省略） / 2: 件数固定 / 3: 金額固定（¥7,777,777 程度まで想定）
+    gridTemplateColumns: "minmax(0, 1fr) 4.25rem 6.75rem",
+    columnGap: "10px",
+    alignItems: "center",
+    width: "100%",
+    boxSizing: "border-box",
+  };
+  return (
+    <s-stack gap="none">
+      <s-box padding="small">
+        <s-box style={gridStyle}>
+          <s-box
+            style={{
+              minInlineSize: 0,
+              overflow: "hidden",
+              whiteSpace: "nowrap",
+              textOverflow: "ellipsis",
+            }}
+          >
+            <s-text size="small" fontWeight={leftBold ? "bold" : undefined}>
+              {left}
+            </s-text>
+          </s-box>
+          <s-box style={{ textAlign: "end", whiteSpace: "nowrap" }}>
+            <s-text size="small" tone="subdued">
+              {middle}
+            </s-text>
+          </s-box>
+          <s-box style={{ textAlign: "end", whiteSpace: "nowrap" }}>
+            <s-text size="small" fontWeight="bold">
+              {right}
+            </s-text>
+          </s-box>
+        </s-box>
+      </s-box>
+      {divider ? <s-divider /> : null}
+    </s-stack>
+  );
+}
+
 /** 明細1行：左に項目名、右寄せに値。下に区切り線（最下行は divider=false） */
 function SummaryRow({
   label,
