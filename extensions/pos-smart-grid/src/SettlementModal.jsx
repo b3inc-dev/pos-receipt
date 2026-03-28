@@ -1244,57 +1244,53 @@ function HistoryDetailView({ item, onBack }) {
 
 // ── ヘルパー ──────────────────────────────────────────────────────────────────
 
-/** 精算プレビューの支払セクションが現金か（納金金額の対象） */
+/**
+ * 精算プレビューの支払セクションが現金か（納金金額の対象）
+ * 全角／半角の表記ゆれを少し吸収
+ */
 function isCashPaymentSection(section) {
   const g = String(section?.gateway ?? "").trim().toLowerCase();
   const l = String(section?.label ?? "").trim();
-  if (g === "現金" || l === "現金") return true;
+  const lNorm = typeof l.normalize === "function" ? l.normalize("NFKC") : l;
+  if (g === "現金" || l === "現金" || lNorm === "現金") return true;
   if (g === "cash" || l.toLowerCase() === "cash") return true;
-  return /^現金/.test(l);
+  return /^現金/.test(lNorm);
 }
 
 /**
- * 支払内訳1行：支払方法・件数・金額の3列。
- * flex だと方法名の長さで件数列が横に流れるため、Grid で 2・3 列目の幅を固定して縦揃えする。
- * （POS WebView で style が無効な場合は横スクロールや折り返しに落ちるが、通常は有効。）
+ * 支払内訳1行：支払方法・件数・金額を1行に並べる。
+ *
+ * POS UI 制約（@shopify/ui-extensions の point-of-sale `Box.d.ts`）:
+ * - `s-box` の公開 props に **`style` はない**。`style={{ display: "grid" }}` は無視され、
+ *   子 `s-box` が縦に積まれる（スクリーンショットの「方法→件数→金額」の3行になる）。
+ * - レイアウトは **`s-stack` の `direction="inline"`** と、子 **`s-box` の `inlineSize`（`%` または `px`）**
+ *   など、型定義にあるプロパティに寄せる。
  */
 function PaymentMethodTripleRow({ left, middle, right, leftBold = false, divider = true }) {
-  const gridStyle = {
-    display: "grid",
-    // 1: 残り幅（長いラベルは省略） / 2: 件数固定 / 3: 金額固定（¥7,777,777 程度まで想定）
-    gridTemplateColumns: "minmax(0, 1fr) 4.25rem 6.75rem",
-    columnGap: "10px",
-    alignItems: "center",
-    width: "100%",
-    boxSizing: "border-box",
-  };
   return (
     <s-stack gap="none">
       <s-box padding="small">
-        <s-box style={gridStyle}>
-          <s-box
-            style={{
-              minInlineSize: 0,
-              overflow: "hidden",
-              whiteSpace: "nowrap",
-              textOverflow: "ellipsis",
-            }}
-          >
+        <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
+          <s-box padding="none" inlineSize="56%" minInlineSize="0" maxInlineSize="56%">
             <s-text size="small" fontWeight={leftBold ? "bold" : undefined}>
               {left}
             </s-text>
           </s-box>
-          <s-box style={{ textAlign: "end", whiteSpace: "nowrap" }}>
-            <s-text size="small" tone="subdued">
-              {middle}
-            </s-text>
+          <s-box padding="none" inlineSize="18%" minInlineSize="44px" maxInlineSize="18%">
+            <s-stack direction="block" alignItems="end">
+              <s-text size="small" tone="subdued">
+                {middle}
+              </s-text>
+            </s-stack>
           </s-box>
-          <s-box style={{ textAlign: "end", whiteSpace: "nowrap" }}>
-            <s-text size="small" fontWeight="bold">
-              {right}
-            </s-text>
+          <s-box padding="none" inlineSize="26%" minInlineSize="70px" maxInlineSize="26%">
+            <s-stack direction="block" alignItems="end">
+              <s-text size="small" fontWeight="bold">
+                {right}
+              </s-text>
+            </s-stack>
           </s-box>
-        </s-box>
+        </s-stack>
       </s-box>
       {divider ? <s-divider /> : null}
     </s-stack>
