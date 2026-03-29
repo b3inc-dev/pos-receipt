@@ -246,7 +246,8 @@ function SettlementModal() {
         locationId: selectedLocation.locationId,
         locationName: selectedLocation.locationName,
         targetDate,
-        printMode: selectedLocation.printMode,
+        // サーバーは DB の Location.printMode を正とする。欠落時は order_based で送る（互換用）。
+        printMode: selectedLocation.printMode ?? "order_based",
         isInspection,
       });
       setSettlementResult(res);
@@ -396,7 +397,7 @@ function SettlementModal() {
         />
         <SettlementIssueConfirmModals
           preview={preview}
-          printMode={selectedLocation?.printMode}
+          printMode={selectedLocation?.printMode ?? "order_based"}
           loading={loading}
           error={error}
           onExecute={handleCreate}
@@ -413,6 +414,7 @@ function SettlementModal() {
       <DoneView
         result={settlementResult}
         isInspection={isInspection}
+        targetDateYmd={targetDate}
         onBack={() => {
           hideSettlementIssueConfirmModals();
           setStep("main");
@@ -1114,8 +1116,10 @@ function SettlementIssueConfirmModals({ preview, printMode, loading, error, onEx
 }
 
 // ── 完了画面 ──────────────────────────────────────────────────────────────────
-function DoneView({ result, isInspection, onBack }) {
+function DoneView({ result, isInspection, targetDateYmd, onBack }) {
   const isOrderBased = result?.printMode === "order_based";
+  const doneTargetDate = result?.preview?.targetDate ?? result?.targetDate ?? targetDateYmd ?? "-";
+  const doneTotal = result?.preview?.total;
 
   return (
     <s-page heading="発行完了">
@@ -1126,7 +1130,16 @@ function DoneView({ result, isInspection, onBack }) {
               {isInspection ? "点検レシートを保存しました" : "精算レシートを保存しました"}
             </s-text>
 
-            {isOrderBased && result?.sourceOrderName ? (
+            {isInspection ? (
+              <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+                <s-stack gap="small">
+                  <s-text fontWeight="bold">点検レシート</s-text>
+                  <s-text tone="subdued">
+                    点検では Shopify 上に精算用の注文は作りません。保存した内容をレシートテンプレートで印刷してください。
+                  </s-text>
+                </s-stack>
+              </s-box>
+            ) : isOrderBased && result?.sourceOrderName ? (
               <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <s-text fontWeight="bold">注文経由印字</s-text>
@@ -1135,6 +1148,18 @@ function DoneView({ result, isInspection, onBack }) {
                   </s-text>
                   <s-text tone="subdued" fontSize="small">
                     POS の注文一覧からこの注文を開き、レシートを印刷してください。
+                  </s-text>
+                </s-stack>
+              </s-box>
+            ) : isOrderBased && !result?.sourceOrderName ? (
+              <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+                <s-stack gap="small">
+                  <s-text fontWeight="bold" tone="critical">
+                    注文番号を取得できませんでした
+                  </s-text>
+                  <s-text tone="subdued" fontSize="small">
+                    印字方式は注文経由（order_based）ですが、精算注文の名前が返っていません。管理画面の Shopify 注文一覧で tag SETTLEMENT
+                    を確認するか、アプリを再インストールして権限を更新してください。
                   </s-text>
                 </s-stack>
               </s-box>
@@ -1164,10 +1189,13 @@ function DoneView({ result, isInspection, onBack }) {
                     label: "精算ID",
                     value: result?.settlementId ? `…${result.settlementId.slice(-8)}` : "-",
                   },
-                  { label: "対象日", value: formatYmdSlash(result?.preview?.targetDate ?? "-") },
+                  { label: "対象日", value: formatYmdSlash(doneTargetDate) },
                   {
                     label: "総売上",
-                    value: `¥${Number(result?.preview?.total ?? 0).toLocaleString()}`,
+                    value:
+                      doneTotal != null
+                        ? `¥${Number(doneTotal).toLocaleString()}`
+                        : "（再表示時は履歴から確認）",
                     valueBold: true,
                   },
                 ].map((row, i, arr) => (
