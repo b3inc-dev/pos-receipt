@@ -356,6 +356,16 @@ export default function SalesSummarySettingsPage() {
                 <Text as="p" variant="bodySm" tone="subdued">
                   状態: {publicLinkActive ? "有効（トークンが設定されています）" : "未設定"}
                 </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  発行されるURLのドメインは、環境変数 SHOPIFY_APP_URL（アプリの公開URL）に合わせます。Render 以外のホストや独自ドメインでも、この変数を正しく設定すればそのURLで発行されます。
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  公開ページでは「日次」「月次」「期間」を切り替えられます。ブックマーク例: 月次は URL の末尾に{" "}
+                  <code style={{ fontSize: "12px" }}>{`?mode=month&y=2026&m=3`}</code>
+                  、期間は{" "}
+                  <code style={{ fontSize: "12px" }}>{`?mode=period&from=2026-03-01&to=2026-03-31`}</code>
+                  を付けます（トークン部分はそのまま）。
+                </Text>
                 <InlineStack gap="200" wrap>
                   <Button
                     onClick={issuePublicLink}

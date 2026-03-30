@@ -1,39 +1,109 @@
 /**
- * ブラウザ直アクセス用 日次売上サマリー（トークンURL）
- * - 1 ショップ 1 トークン（DB はハッシュのみ）
- * - ロケーション未指定 = POS と同様「全店」＋表示対象フィルタは設定に従う
+ * ブラウザ直アクセス用 売上サマリー（トークンURL）
+ * - 日次 / 月次 / 期間（POS の API と同じデータ）
+ * - KPI 行は POS タイルと同じ並び（publicSalesSummaryKpi）
  */
+import type { ReactNode } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { Link, useLoaderData } from "react-router";
+import { Form, Link, useLoaderData, useNavigation } from "react-router";
 import { unauthenticated } from "../shopify.server";
 import prisma from "../db.server";
 import { hashSalesSummaryPublicToken } from "../utils/salesSummaryPublicToken.server";
 import { buildDailySalesSummaryPayload } from "../services/salesSummaryDailyPayload.server";
+import { buildPeriodSalesSummaryPayload } from "../services/salesSummaryPeriodPayload.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import type { DailySalesSummaryPayload } from "../services/salesSummaryDailyPayload.server";
+import { getShopTimezoneForDaily, getCalendarDateStringInTimeZone } from "../utils/shopTimezone.server";
+import {
+  buildDailyKpiLinesWithMonth,
+  buildDailyTotalsLines,
+  buildPeriodKpiLines,
+  buildPeriodTotalsLines,
+  mergeDailyTotalsWithMonth,
+  pickPeriodRowForDailyLine,
+  type KpiLine,
+  type PeriodRowLike,
+  type SalesSummaryDisplayOpts,
+} from "../utils/publicSalesSummaryKpi";
 
 export const meta: MetaFunction = () => [
   { title: "売上サマリー" },
   { name: "robots", content: "noindex, nofollow" },
 ];
 
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
 function addDaysIso(ymd: string, delta: number): string {
   const d = new Date(ymd + "T12:00:00");
   d.setDate(d.getDate() + delta);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-const yen = new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" });
-const num = new Intl.NumberFormat("ja-JP");
+function addMonthsYm(y: number, m: number, delta: number): { y: number; m: number } {
+  const d = new Date(y, m - 1 + delta, 1);
+  return { y: d.getFullYear(), m: d.getMonth() + 1 };
+}
 
-function cell(v: string | number | null | undefined, suffix = ""): string {
-  if (v === null || v === undefined) return "—";
-  if (typeof v === "number" && !Number.isFinite(v)) return "—";
-  if (typeof v === "number") return num.format(v) + suffix;
-  return String(v);
+/** 日次画面用：その日を含む月の MTD 範囲（POS の monthRangeForTargetDate に合わせる） */
+function monthPeriodRangeForDailyContext(viewDateYmd: string, calendarToday: string) {
+  const parts = viewDateYmd.split("-").map(Number);
+  const y = parts[0];
+  const m = parts[1];
+  if (!y || !m || m < 1 || m > 12) return null;
+  const dateFrom = `${y}-${pad2(m)}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const lastStr = `${y}-${pad2(m)}-${pad2(lastDay)}`;
+  let dateTo = viewDateYmd;
+  if (dateTo > lastStr) dateTo = lastStr;
+  if (dateTo > calendarToday) dateTo = calendarToday;
+  return { dateFrom, dateTo, budgetDateTo: lastStr };
+}
+
+function monthRangeCalendarMonth(year: number, month: number, calendarToday: string) {
+  const dateFrom = `${year}-${pad2(month)}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const lastStr = `${year}-${pad2(month)}-${pad2(lastDay)}`;
+  const dateTo = lastStr > calendarToday ? calendarToday : lastStr;
+  return { dateFrom, dateTo, budgetDateTo: lastStr };
+}
+
+function KpiBlock({ title, lines }: { title: ReactNode; lines: KpiLine[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <div
+      style={{
+        border: "1px solid #e1e3e5",
+        borderRadius: "8px",
+        overflow: "hidden",
+        marginBottom: "12px",
+        background: "#fff",
+      }}
+    >
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid #e1e3e5", background: "#fafbfb" }}>
+        <div style={{ fontSize: "14px", fontWeight: 700, color: "#202223" }}>{title}</div>
+      </div>
+      <div>
+        {lines.map((r, i) => (
+          <div
+            key={`${r.label}-${i}`}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "12px",
+              padding: "10px 12px",
+              borderBottom: i < lines.length - 1 ? "1px solid #e1e3e5" : undefined,
+              fontSize: "14px",
+            }}
+          >
+            <span style={{ color: "#6d7175" }}>{r.label}</span>
+            <span style={{ fontWeight: r.valueBold ? 700 : 500, textAlign: "right" }}>{r.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -59,17 +129,100 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return { kind: "forbidden" as const, message: access.message };
     }
 
+    const shopIanaTz = await getShopTimezoneForDaily(admin, shop.id);
+    const calendarToday = getCalendarDateStringInTimeZone(new Date(), shopIanaTz);
+
     const url = new URL(request.url);
+    const mode = (url.searchParams.get("mode") || "daily").toLowerCase();
+    const token = raw;
+
+    if (mode === "month") {
+      let y = parseInt(url.searchParams.get("y") || "", 10);
+      let m = parseInt(url.searchParams.get("m") || "", 10);
+      const monthStr = url.searchParams.get("month");
+      if (monthStr && /^\d{4}-\d{2}$/.test(monthStr)) {
+        const [yy, mm] = monthStr.split("-").map(Number);
+        y = yy;
+        m = mm;
+      }
+      if (!y || !m || m < 1 || m > 12) {
+        const [cy, cm] = calendarToday.split("-").map(Number);
+        y = cy;
+        m = cm;
+      }
+      const { dateFrom, dateTo, budgetDateTo } = monthRangeCalendarMonth(y, m, calendarToday);
+      const period = await buildPeriodSalesSummaryPayload(admin, shop, {
+        dateFrom,
+        dateTo,
+        budgetDateTo,
+        locationIdsParam: [],
+      });
+      return {
+        kind: "ok" as const,
+        view: "month" as const,
+        period,
+        token,
+        calendarToday,
+        year: y,
+        month: m,
+      };
+    }
+
+    if (mode === "period") {
+      let from = url.searchParams.get("from");
+      let to = url.searchParams.get("to");
+      if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        const [cy, cm] = calendarToday.split("-").map(Number);
+        const mr = monthRangeCalendarMonth(cy, cm, calendarToday);
+        from = mr.dateFrom;
+        to = mr.dateTo;
+      }
+      if (from > to) {
+        const t = from;
+        from = to;
+        to = t;
+      }
+      const period = await buildPeriodSalesSummaryPayload(admin, shop, {
+        dateFrom: from,
+        dateTo: to,
+        budgetDateTo: to,
+        locationIdsParam: [],
+      });
+      return {
+        kind: "ok" as const,
+        view: "period" as const,
+        period,
+        token,
+        calendarToday,
+        dateFrom: from!,
+        dateTo: to!,
+      };
+    }
+
+    // daily（既定）
     const dateParam = url.searchParams.get("date");
-    const payload = await buildDailySalesSummaryPayload(admin, shop, {
+    const daily = await buildDailySalesSummaryPayload(admin, shop, {
       targetDate: dateParam,
       locationIdsParam: [],
     });
 
+    const mr = monthPeriodRangeForDailyContext(daily.targetDate, daily.calendarToday);
+    let monthPeriod: PeriodSalesSummaryPayload | null = null;
+    if (mr) {
+      monthPeriod = await buildPeriodSalesSummaryPayload(admin, shop, {
+        dateFrom: mr.dateFrom,
+        dateTo: mr.dateTo,
+        budgetDateTo: mr.budgetDateTo,
+        locationIdsParam: [],
+      });
+    }
+
     return {
       kind: "ok" as const,
-      payload,
-      tokenForLinks: raw,
+      view: "daily" as const,
+      daily,
+      monthPeriod,
+      token,
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : "読み込みに失敗しました";
@@ -77,212 +230,347 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 }
 
-type LoaderOk = {
-  kind: "ok";
-  payload: DailySalesSummaryPayload;
-  tokenForLinks: string;
-};
+function ModeTabs(props: {
+  token: string;
+  active: "daily" | "month" | "period";
+  dailyQuery?: string;
+  monthQuery?: string;
+  periodQuery?: string;
+}) {
+  const { token, active } = props;
+  const enc = encodeURIComponent(token);
+  const base = `/p/sales-summary/${enc}`;
+  const tab = (mode: string, label: string, q: string) => {
+    const isOn = active === mode;
+    return (
+      <Link
+        to={`${base}?${q}`}
+        style={{
+          padding: "8px 14px",
+          borderRadius: "6px",
+          textDecoration: "none",
+          fontSize: "14px",
+          fontWeight: isOn ? 700 : 500,
+          color: isOn ? "#fff" : "#2c6ecb",
+          background: isOn ? "#2c6ecb" : "#e3e5e8",
+        }}
+      >
+        {label}
+      </Link>
+    );
+  };
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "20px" }}>
+      {tab("daily", "日次", props.dailyQuery || "mode=daily")}
+      {tab("month", "月次", props.monthQuery || "mode=month")}
+      {tab("period", "期間", props.periodQuery || "mode=period")}
+    </div>
+  );
+}
 
-function SummaryTable({ data }: { data: LoaderOk }) {
-  const { payload, tokenForLinks } = data;
-  const o = payload.displayOptions;
-  const { targetDate, calendarToday, rows, channelRows, totals } = payload;
+function DailyView(props: {
+  data: Extract<Awaited<ReturnType<typeof loader>>, { kind: "ok"; view: "daily" }>;
+}) {
+  const { daily, monthPeriod, token } = props.data;
+  const o = daily.displayOptions as SalesSummaryDisplayOpts;
+  const { targetDate, calendarToday, rows, channelRows, totals } = daily;
 
   const prev = addDaysIso(targetDate, -1);
   const next = addDaysIso(targetDate, 1);
   const nextDisabled = targetDate >= calendarToday;
-  const base = `/p/sales-summary/${encodeURIComponent(tokenForLinks)}`;
+  const enc = encodeURIComponent(token);
+  const base = `/p/sales-summary/${enc}`;
+  const qDaily = `mode=daily&date=${targetDate}`;
 
+  const showAllTotals = o.showOverallTotals !== false;
   const showLoc = o.showLocationRows !== false && rows.length > 0;
   const showCh = o.showChannelRows !== false && channelRows.length > 0;
 
+  let totalsLines = buildDailyTotalsLines(
+    {
+      actual: totals.actual,
+      budget: totals.budget,
+      orders: totals.orders,
+      items: totals.items,
+      visitors: totals.visitors,
+    },
+    o,
+  );
+  if (monthPeriod && monthPeriod.totals && Object.keys(monthPeriod.totals).length > 0) {
+    totalsLines = mergeDailyTotalsWithMonth(totalsLines, monthPeriod.totals as Parameters<typeof mergeDailyTotalsWithMonth>[1], o);
+  }
+
   return (
-    <div style={{ marginTop: "20px" }}>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: "12px",
-          marginBottom: "16px",
-        }}
-      >
-        <Link
-          to={`${base}?date=${prev}`}
-          style={{ color: "#2c6ecb", textDecoration: "none", fontSize: "15px" }}
-        >
+    <div>
+      <ModeTabs
+        token={token}
+        active="daily"
+        dailyQuery={qDaily}
+        monthQuery={`mode=month&month=${targetDate.slice(0, 7)}`}
+        periodQuery={`mode=period&from=${targetDate.slice(0, 7)}-01&to=${targetDate}`}
+      />
+
+      <p style={{ margin: "0 0 12px", fontSize: "14px", color: "#6d7175" }}>
+        日次（全店） {targetDate.replace(/-/g, "/")}
+        {targetDate === calendarToday ? "（今日）" : ""}
+      </p>
+
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
+        <Link to={`${base}?mode=daily&date=${prev}`} style={{ color: "#2c6ecb", textDecoration: "none" }}>
           ← 前日
         </Link>
-        <span style={{ fontSize: "16px", fontWeight: 600 }}>
-          {targetDate.replace(/-/g, "/")}
-          {targetDate === calendarToday ? "（今日）" : ""}
-        </span>
         {!nextDisabled ? (
-          <Link
-            to={`${base}?date=${next}`}
-            style={{ color: "#2c6ecb", textDecoration: "none", fontSize: "15px" }}
-          >
+          <Link to={`${base}?mode=daily&date=${next}`} style={{ color: "#2c6ecb", textDecoration: "none" }}>
             翌日 →
           </Link>
         ) : (
-          <span style={{ color: "#8c9196", fontSize: "15px" }}>翌日 →</span>
+          <span style={{ color: "#8c9196" }}>翌日 →</span>
         )}
       </div>
 
-      {showLoc ? (
-        <div style={{ overflowX: "auto", marginBottom: "20px" }}>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: "14px",
-              background: "#fff",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-            }}
-          >
-            <thead>
-              <tr style={{ background: "#f6f6f7", borderBottom: "1px solid #e1e3e5" }}>
-                <th style={{ textAlign: "left", padding: "10px 12px" }}>店舗</th>
-                {o.showActual !== false ? (
-                  <th style={{ textAlign: "right", padding: "10px 12px" }}>実績</th>
-                ) : null}
-                {o.showBudget ? <th style={{ textAlign: "right", padding: "10px 12px" }}>予算</th> : null}
-                {o.showBudgetRatio ? <th style={{ textAlign: "right", padding: "10px 12px" }}>予算比</th> : null}
-                {o.showOrders ? <th style={{ textAlign: "right", padding: "10px 12px" }}>注文</th> : null}
-                {o.showItems ? <th style={{ textAlign: "right", padding: "10px 12px" }}>商品数</th> : null}
-                {o.showVisitors ? <th style={{ textAlign: "right", padding: "10px 12px" }}>入店</th> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.locationId} style={{ borderBottom: "1px solid #e1e3e5" }}>
-                  <td style={{ padding: "10px 12px" }}>{r.locationName}</td>
-                  {o.showActual !== false ? (
-                    <td style={{ textAlign: "right", padding: "10px 12px" }}>{yen.format(r.actual)}</td>
-                  ) : null}
-                  {o.showBudget ? (
-                    <td style={{ textAlign: "right", padding: "10px 12px" }}>
-                      {r.budget != null ? yen.format(r.budget) : "—"}
-                    </td>
-                  ) : null}
-                  {o.showBudgetRatio ? (
-                    <td style={{ textAlign: "right", padding: "10px 12px" }}>
-                      {r.budgetRatio != null ? `${(r.budgetRatio * 100).toFixed(1)}%` : "—"}
-                    </td>
-                  ) : null}
-                  {o.showOrders ? (
-                    <td style={{ textAlign: "right", padding: "10px 12px" }}>{cell(r.orders)}</td>
-                  ) : null}
-                  {o.showItems ? (
-                    <td style={{ textAlign: "right", padding: "10px 12px" }}>{cell(r.items)}</td>
-                  ) : null}
-                  {o.showVisitors ? (
-                    <td style={{ textAlign: "right", padding: "10px 12px" }}>
-                      {r.visitors != null ? cell(r.visitors) : "—"}
-                    </td>
-                  ) : null}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {showAllTotals && totalsLines.length > 0 ? (
+        <KpiBlock title="全店合計" lines={totalsLines} />
       ) : null}
 
-      {showCh ? (
-        <div style={{ overflowX: "auto", marginBottom: "20px" }}>
-          <h2 style={{ fontSize: "16px", margin: "0 0 8px", color: "#202223" }}>チャネル</h2>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: "14px",
-              background: "#fff",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-            }}
-          >
-            <thead>
-              <tr style={{ background: "#f6f6f7", borderBottom: "1px solid #e1e3e5" }}>
-                <th style={{ textAlign: "left", padding: "10px 12px" }}>チャネル</th>
-                {o.showActual !== false ? (
-                  <th style={{ textAlign: "right", padding: "10px 12px" }}>実績</th>
-                ) : null}
-                {o.showBudget ? <th style={{ textAlign: "right", padding: "10px 12px" }}>予算</th> : null}
-                {o.showOrders ? <th style={{ textAlign: "right", padding: "10px 12px" }}>注文</th> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {channelRows.map((r) => (
-                <tr key={r.channelId} style={{ borderBottom: "1px solid #e1e3e5" }}>
-                  <td style={{ padding: "10px 12px" }}>{r.channelName}</td>
-                  {o.showActual !== false ? (
-                    <td style={{ textAlign: "right", padding: "10px 12px" }}>{yen.format(r.actual)}</td>
-                  ) : null}
-                  {o.showBudget ? (
-                    <td style={{ textAlign: "right", padding: "10px 12px" }}>
-                      {r.budget != null ? yen.format(r.budget) : "—"}
-                    </td>
-                  ) : null}
-                  {o.showOrders ? (
-                    <td style={{ textAlign: "right", padding: "10px 12px" }}>{cell(r.orders)}</td>
-                  ) : null}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
+      {showLoc
+        ? rows.map((row) => {
+            const pr = monthPeriod
+              ? pickPeriodRowForDailyLine(
+                  {
+                    rows: monthPeriod.rows as PeriodRowLike[],
+                    channelRows: monthPeriod.channelRows as PeriodRowLike[],
+                  },
+                  { locationId: row.locationId },
+                )
+              : null;
+            const lines = buildDailyKpiLinesWithMonth(
+              {
+                actual: row.actual,
+                budget: row.budget,
+                budgetRatio: row.budgetRatio,
+                orders: row.orders,
+                visitors: row.visitors,
+                conv: row.conv,
+                atv: row.atv,
+                setRate: row.setRate,
+                items: row.items,
+                unit: row.unit,
+              },
+              pr,
+              o,
+            );
+            return <KpiBlock key={row.locationId} title={row.locationName ?? row.locationId} lines={lines} />;
+          })
+        : null}
 
-      {o.showOverallTotals !== false ? (
-        <div
-          style={{
-            padding: "16px",
-            background: "#f1f2f4",
-            borderRadius: "8px",
-            fontSize: "15px",
-          }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: "8px", color: "#202223" }}>全体合計</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "16px 24px" }}>
-            {o.showActual !== false ? (
-              <span>
-                実績 <strong>{yen.format(totals.actual)}</strong>
-              </span>
-            ) : null}
-            {o.showBudget && totals.budget != null ? (
-              <span>
-                予算 <strong>{yen.format(totals.budget)}</strong>
-              </span>
-            ) : null}
-            {o.showOrders ? (
-              <span>
-                注文 <strong>{cell(totals.orders)}</strong>
-              </span>
-            ) : null}
-            {o.showItems ? (
-              <span>
-                商品数 <strong>{cell(totals.items)}</strong>
-              </span>
-            ) : null}
-            {o.showVisitors && totals.visitors != null ? (
-              <span>
-                入店 <strong>{cell(totals.visitors)}</strong>
-              </span>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      {showCh
+        ? channelRows.map((row) => {
+            const pr = monthPeriod
+              ? pickPeriodRowForDailyLine(
+                  {
+                    rows: monthPeriod.rows as PeriodRowLike[],
+                    channelRows: monthPeriod.channelRows as PeriodRowLike[],
+                  },
+                  { channelId: row.channelId },
+                )
+              : null;
+            const lines = buildDailyKpiLinesWithMonth(
+              {
+                actual: row.actual,
+                budget: row.budget,
+                budgetRatio: row.budgetRatio,
+                orders: row.orders,
+                visitors: null,
+                conv: null,
+                atv: row.atv,
+                setRate: row.setRate,
+                items: row.items,
+                unit: row.unit,
+              },
+              pr,
+              o,
+            );
+            return (
+              <KpiBlock key={row.channelId} title={`[${row.channelName ?? row.channelId}]`} lines={lines} />
+            );
+          })
+        : null}
 
       {!showLoc && !showCh ? (
-        <p style={{ color: "#6d7175" }}>
-          表示できるデータがありません。売上サマリー設定で対象店舗や表示項目を確認してください。
+        <p style={{ color: "#6d7175" }}>表示できるデータがありません。売上サマリー設定を確認してください。</p>
+      ) : null}
+    </div>
+  );
+}
+
+function MonthView(props: {
+  data: Extract<Awaited<ReturnType<typeof loader>>, { kind: "ok"; view: "month" }>;
+}) {
+  const { period, token, calendarToday, year, month } = props.data;
+  const o = period.displayOptions as SalesSummaryDisplayOpts;
+  const { rows, channelRows, totals, dateFrom, dateTo } = period;
+  const enc = encodeURIComponent(token);
+  const base = `/p/sales-summary/${enc}`;
+  const prev = addMonthsYm(year, month, -1);
+  const next = addMonthsYm(year, month, 1);
+  const cy = parseInt(calendarToday.slice(0, 4), 10);
+  const cm = parseInt(calendarToday.slice(5, 7), 10);
+  const disableNext = next.y > cy || (next.y === cy && next.m > cm);
+
+  const locRows = rows as PeriodRowLike[];
+  const chRows = channelRows as PeriodRowLike[];
+  const showAllTotals = o.showOverallTotals !== false;
+  const showLoc = o.showLocationRows !== false && locRows.length > 0;
+  const showCh = o.showChannelRows !== false && chRows.length > 0;
+
+  const totalsLines = buildPeriodTotalsLines(totals as Parameters<typeof buildPeriodTotalsLines>[0], o, locRows);
+
+  return (
+    <div>
+      <ModeTabs
+        token={token}
+        active="month"
+        dailyQuery={`mode=daily&date=${calendarToday}`}
+        monthQuery={`mode=month&y=${year}&m=${month}`}
+        periodQuery={`mode=period&from=${dateFrom}&to=${dateTo}`}
+      />
+      <p style={{ margin: "0 0 8px", fontSize: "14px", color: "#6d7175" }}>
+        月次（全店） {year}年{month}月
+      </p>
+      <p style={{ margin: "0 0 12px", fontSize: "13px", color: "#6d7175" }}>
+        期間: {String(dateFrom).replace(/-/g, "/")} 〜 {String(dateTo).replace(/-/g, "/")}
+      </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
+        <Link
+          to={`${base}?mode=month&y=${prev.y}&m=${prev.m}`}
+          style={{ color: "#2c6ecb", textDecoration: "none" }}
+        >
+          ← 前月
+        </Link>
+        {!disableNext ? (
+          <Link
+            to={`${base}?mode=month&y=${next.y}&m=${next.m}`}
+            style={{ color: "#2c6ecb", textDecoration: "none" }}
+          >
+            翌月 →
+          </Link>
+        ) : (
+          <span style={{ color: "#8c9196" }}>翌月 →</span>
+        )}
+      </div>
+
+      {period.periodCachePartial ? (
+        <p style={{ color: "#b98900", fontSize: "13px", marginBottom: "12px" }}>
+          一部の日の集計が上限のため省略されています。時間をおいて再読み込みしてください。
         </p>
       ) : null}
+
+      {showAllTotals && totalsLines.length > 0 ? <KpiBlock title="全体合計" lines={totalsLines} /> : null}
+
+      {showLoc
+        ? locRows.map((row) => (
+            <KpiBlock
+              key={String(row.locationId)}
+              title={String(row.locationName ?? row.locationId)}
+              lines={buildPeriodKpiLines(row, o)}
+            />
+          ))
+        : null}
+      {showCh
+        ? chRows.map((row) => (
+            <KpiBlock
+              key={String(row.channelId)}
+              title={`[${String(row.channelName ?? row.channelId)}]`}
+              lines={buildPeriodKpiLines(row, o)}
+            />
+          ))
+        : null}
+    </div>
+  );
+}
+
+function PeriodView(props: {
+  data: Extract<Awaited<ReturnType<typeof loader>>, { kind: "ok"; view: "period" }>;
+}) {
+  const { period, token, calendarToday, dateFrom, dateTo } = props.data;
+  const o = period.displayOptions as SalesSummaryDisplayOpts;
+  const { rows, channelRows, totals } = period;
+  const enc = encodeURIComponent(token);
+
+  const locRows = rows as PeriodRowLike[];
+  const chRows = channelRows as PeriodRowLike[];
+  const showAllTotals = o.showOverallTotals !== false;
+  const showLoc = o.showLocationRows !== false && locRows.length > 0;
+  const showCh = o.showChannelRows !== false && chRows.length > 0;
+  const totalsLines = buildPeriodTotalsLines(totals as Parameters<typeof buildPeriodTotalsLines>[0], o, locRows);
+
+  return (
+    <div>
+      <ModeTabs
+        token={token}
+        active="period"
+        dailyQuery={`mode=daily&date=${calendarToday}`}
+        monthQuery={`mode=month&month=${dateFrom.slice(0, 7)}`}
+        periodQuery={`mode=period&from=${dateFrom}&to=${dateTo}`}
+      />
+      <p style={{ margin: "0 0 8px", fontSize: "14px", color: "#6d7175" }}>期間指定（全店）</p>
+
+      <Form
+        method="get"
+        style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end", marginBottom: "16px" }}
+      >
+        <input type="hidden" name="mode" value="period" />
+        <label style={{ display: "flex", flexDirection: "column", fontSize: "13px", gap: "4px" }}>
+          開始
+          <input type="date" name="from" defaultValue={dateFrom} style={{ padding: "6px 8px" }} />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", fontSize: "13px", gap: "4px" }}>
+          終了
+          <input type="date" name="to" defaultValue={dateTo} style={{ padding: "6px 8px" }} />
+        </label>
+        <button type="submit" style={{ padding: "8px 16px", cursor: "pointer" }}>
+          表示
+        </button>
+      </Form>
+
+      <p style={{ margin: "0 0 12px", fontSize: "13px", color: "#6d7175" }}>
+        {String(dateFrom).replace(/-/g, "/")} 〜 {String(dateTo).replace(/-/g, "/")}
+      </p>
+
+      {period.periodCachePartial ? (
+        <p style={{ color: "#b98900", fontSize: "13px", marginBottom: "12px" }}>
+          一部の日の集計が上限のため省略されています。
+        </p>
+      ) : null}
+
+      {showAllTotals && totalsLines.length > 0 ? <KpiBlock title="全体合計" lines={totalsLines} /> : null}
+
+      {showLoc
+        ? locRows.map((row) => (
+            <KpiBlock
+              key={String(row.locationId)}
+              title={String(row.locationName ?? row.locationId)}
+              lines={buildPeriodKpiLines(row, o)}
+            />
+          ))
+        : null}
+      {showCh
+        ? chRows.map((row) => (
+            <KpiBlock
+              key={String(row.channelId)}
+              title={`[${String(row.channelName ?? row.channelId)}]`}
+              lines={buildPeriodKpiLines(row, o)}
+            />
+          ))
+        : null}
     </div>
   );
 }
 
 export default function PublicSalesSummaryPage() {
   const data = useLoaderData<typeof loader>();
+  const navigation = useNavigation();
+  const busy = navigation.state === "loading";
 
   if (data.kind === "not_found") {
     return (
@@ -316,7 +604,7 @@ export default function PublicSalesSummaryPage() {
       style={{
         padding: "24px 16px 48px",
         fontFamily: "system-ui, -apple-system, sans-serif",
-        maxWidth: "900px",
+        maxWidth: "560px",
         margin: "0 auto",
         color: "#202223",
         background: "#fafbfb",
@@ -324,8 +612,13 @@ export default function PublicSalesSummaryPage() {
       }}
     >
       <h1 style={{ fontSize: "22px", fontWeight: 700, margin: "0 0 4px" }}>売上サマリー</h1>
-      <p style={{ margin: 0, fontSize: "14px", color: "#6d7175" }}>全店合計（日次）</p>
-      <SummaryTable data={data} />
+      <p style={{ margin: "0 0 16px", fontSize: "14px", color: "#6d7175" }}>公開ビュー（読み取り専用）</p>
+      {busy ? (
+        <p style={{ color: "#2c6ecb", marginBottom: "12px" }}>読み込み中…</p>
+      ) : null}
+      {data.view === "daily" ? <DailyView data={data} /> : null}
+      {data.view === "month" ? <MonthView data={data} /> : null}
+      {data.view === "period" ? <PeriodView data={data} /> : null}
     </div>
   );
 }
