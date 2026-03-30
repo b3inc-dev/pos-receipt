@@ -3,7 +3,7 @@
  * 要件 §10: 表示内容・KPI表示制御・入店数報告のON/OFF
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useLoaderData, useSubmit, useLocation, useNavigate, useFetcher, useRevalidator } from "react-router";
 import {
   Page,
   Layout,
@@ -18,9 +18,15 @@ import {
   InlineStack,
   ChoiceList,
 } from "@shopify/polaris";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
+import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
+import {
+  generateSalesSummaryPublicToken,
+  hashSalesSummaryPublicToken,
+} from "../utils/salesSummaryPublicToken.server";
 import {
   getAppSetting,
   setAppSetting,
@@ -57,7 +63,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     footfallTargetLocationIds: Array.isArray(saved?.footfallTargetLocationIds) ? saved.footfallTargetLocationIds : DEFAULT_SALES_SUMMARY_SETTINGS.footfallTargetLocationIds,
   };
 
-  return { settings, locations };
+  const publicLinkActive = Boolean(
+    (
+      await prisma.shop.findUnique({
+        where: { id: shop.id },
+        select: { salesSummaryPublicTokenHash: true },
+      })
+    )?.salesSummaryPublicTokenHash,
+  );
+
+  return { settings, locations, publicLinkActive };
 }
 
 function formDataToSettings(formData: FormData, locations: { id: string }[]): SalesSummarySettings {
@@ -105,26 +120,96 @@ export async function action({ request }: ActionFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
 
+  const formData = await request.formData();
+  const intent = String(formData.get("intent") ?? "");
+
+  if (intent === "issueSalesSummaryPublicLink") {
+    const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
+    const access = checkPlanAccess(shop.planCode, "sales_summary", fullAccess);
+    if (!access.allowed) {
+      return Response.json({ ok: false, error: access.message });
+    }
+    const plain = generateSalesSummaryPublicToken();
+    const hash = hashSalesSummaryPublicToken(plain);
+    await prisma.shop.update({
+      where: { id: shop.id },
+      data: { salesSummaryPublicTokenHash: hash },
+    });
+    const baseUrl = (process.env.SHOPIFY_APP_URL ?? "").replace(/\/$/, "");
+    const fullUrl = `${baseUrl}/p/sales-summary/${encodeURIComponent(plain)}`;
+    return Response.json({
+      ok: true,
+      issued: { plainToken: plain, fullUrl },
+    });
+  }
+
+  if (intent === "revokeSalesSummaryPublicLink") {
+    await prisma.shop.update({
+      where: { id: shop.id },
+      data: { salesSummaryPublicTokenHash: null },
+    });
+    return Response.json({ ok: true, revoked: true });
+  }
+
   const locRes = await admin.graphql(LOCATIONS_QUERY);
   const locJson = (await locRes.json()) as {
     data?: { locations?: { nodes?: { id: string }[] } };
   };
   const locations = locJson.data?.locations?.nodes ?? [];
 
-  const formData = await request.formData();
   const settings = formDataToSettings(formData, locations);
   await setAppSetting(shop.id, SALES_SUMMARY_SETTINGS_KEY, settings);
   return Response.json({ ok: true });
 }
 
+type PublicLinkActionJson =
+  | { ok: true; issued: { plainToken: string; fullUrl: string } }
+  | { ok: true; revoked: true }
+  | { ok: false; error: string };
+
 export default function SalesSummarySettingsPage() {
-  const { settings: initial, locations } = useLoaderData<typeof loader>();
+  const { settings: initial, locations, publicLinkActive } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
+  const linkFetcher = useFetcher<PublicLinkActionJson>();
+  const revalidator = useRevalidator();
   const q = location.search || "";
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<SalesSummarySettings>({ ...initial });
+
+  const issuePublicLink = () => {
+    const fd = new FormData();
+    fd.set("intent", "issueSalesSummaryPublicLink");
+    linkFetcher.submit(fd, { method: "post" });
+  };
+
+  const revokePublicLink = () => {
+    if (!window.confirm("公開用リンクを無効にします。ブラウザに保存したURLは開けなくなります。よろしいですか？")) {
+      return;
+    }
+    const fd = new FormData();
+    fd.set("intent", "revokeSalesSummaryPublicLink");
+    linkFetcher.submit(fd, { method: "post" });
+  };
+
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      window.prompt("コピーしてください:", text);
+    }
+  };
+
+  useEffect(() => {
+    if (linkFetcher.state !== "idle" || !linkFetcher.data?.ok) return;
+    if ("revoked" in linkFetcher.data && linkFetcher.data.revoked) {
+      revalidator.revalidate();
+    }
+    if ("issued" in linkFetcher.data) {
+      revalidator.revalidate();
+    }
+  }, [linkFetcher.state, linkFetcher.data, revalidator]);
 
   const handleSave = () => {
     const fd = new FormData();
@@ -231,6 +316,65 @@ export default function SalesSummarySettingsPage() {
                     set("weekStartsOn", (selected?.[0] === "sunday" ? "sunday" : "monday"))
                   }
                 />
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection
+            title="ブラウザ用公開リンク"
+            description="Shopify にログインしなくても、URL を開くだけで日次の全店売上サマリーを表示できます。トークンは 1 ショップにつき 1 つです。漏れた場合は再発行してください。"
+          >
+            <Card>
+              <BlockStack gap="400">
+                {linkFetcher.data && linkFetcher.data.ok === false && "error" in linkFetcher.data ? (
+                  <Banner tone="critical">{linkFetcher.data.error}</Banner>
+                ) : null}
+                {linkFetcher.data && linkFetcher.data.ok && "issued" in linkFetcher.data ? (
+                  <Banner tone="success" title="公開URLを発行しました">
+                    <BlockStack gap="300">
+                      <Text as="p" variant="bodySm">
+                        以下の URL はこの画面でのみ表示されます。必ずコピーして保管してください。再発行すると古い URL は使えなくなります。
+                      </Text>
+                      <TextField
+                        label="公開URL"
+                        value={linkFetcher.data.issued.fullUrl}
+                        readOnly
+                        autoComplete="off"
+                        multiline={2}
+                      />
+                      <Button
+                        onClick={() => {
+                          const d = linkFetcher.data;
+                          if (d && d.ok && "issued" in d) void copyText(d.issued.fullUrl);
+                        }}
+                      >
+                        URLをコピー
+                      </Button>
+                    </BlockStack>
+                  </Banner>
+                ) : null}
+                <Text as="p" variant="bodySm" tone="subdued">
+                  状態: {publicLinkActive ? "有効（トークンが設定されています）" : "未設定"}
+                </Text>
+                <InlineStack gap="200" wrap>
+                  <Button
+                    onClick={issuePublicLink}
+                    loading={linkFetcher.state === "submitting"}
+                    disabled={linkFetcher.state === "submitting"}
+                  >
+                    {publicLinkActive ? "トークンを再発行" : "公開用リンクを発行"}
+                  </Button>
+                  {publicLinkActive ? (
+                    <Button
+                      tone="critical"
+                      onClick={revokePublicLink}
+                      loading={linkFetcher.state === "submitting"}
+                      disabled={linkFetcher.state === "submitting"}
+                    >
+                      公開リンクを無効化
+                    </Button>
+                  ) : null}
+                </InlineStack>
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
