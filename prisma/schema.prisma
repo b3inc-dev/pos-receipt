@@ -39,6 +39,8 @@ model Shop {
   planCode         String?  // standard | pro、自社用時は無制限
   /** 公開売上サマリーURL用。平文トークンの SHA-256（hex）。1ショップ1トークン */
   salesSummaryPublicTokenHash String? @unique
+  /** 公開ページ閲覧用パスワード（scrypt の salt:hash）。未設定ならパスワード不要 */
+  salesSummaryPublicPasswordScrypt String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

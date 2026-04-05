@@ -4,13 +4,30 @@
  * - KPI 行は POS タイルと同じ並び（publicSalesSummaryKpi）
  */
 import type { ReactNode } from "react";
-import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { Form, Link, useLoaderData, useNavigation } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
+import {
+  Form,
+  Link,
+  redirect,
+  useActionData,
+  useLoaderData,
+  useLocation,
+  useNavigation,
+} from "react-router";
 import { unauthenticated } from "../shopify.server";
 import prisma from "../db.server";
 import { hashSalesSummaryPublicToken } from "../utils/salesSummaryPublicToken.server";
+import {
+  buildPublicSummaryAuthSetCookieHeader,
+  hasPublicSummaryCookieSecret,
+  isPublicSummaryPasswordVerified,
+  verifyPublicSummaryPassword,
+} from "../utils/salesSummaryPublicAuth.server";
 import { buildDailySalesSummaryPayload } from "../services/salesSummaryDailyPayload.server";
-import { buildPeriodSalesSummaryPayload } from "../services/salesSummaryPeriodPayload.server";
+import {
+  buildPeriodSalesSummaryPayload,
+  type PeriodSalesSummaryPayload,
+} from "../services/salesSummaryPeriodPayload.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import type { DailySalesSummaryPayload } from "../services/salesSummaryDailyPayload.server";
 import { getShopTimezoneForDaily, getCalendarDateStringInTimeZone } from "../utils/shopTimezone.server";
@@ -121,6 +138,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return { kind: "not_found" as const };
   }
 
+  if (shop.salesSummaryPublicPasswordScrypt) {
+    if (!hasPublicSummaryCookieSecret()) {
+      return {
+        kind: "error" as const,
+        message:
+          "公開ページ用パスワードが設定されていますが、サーバーに Cookie 署名用の秘密鍵（SHOPIFY_API_SECRET など）が設定されていません。ホスティングの環境変数を確認してください。",
+      };
+    }
+    if (!isPublicSummaryPasswordVerified(request.headers.get("Cookie"), tokenHash)) {
+      return { kind: "password_required" as const };
+    }
+  }
+
   try {
     const { admin } = await unauthenticated.admin(shop.shopDomain);
     const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
@@ -228,6 +258,110 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const message = e instanceof Error ? e.message : "読み込みに失敗しました";
     return { kind: "error" as const, message };
   }
+}
+
+export async function action({ request, params }: ActionFunctionArgs) {
+  if (request.method !== "POST") {
+    return new Response(null, { status: 405 });
+  }
+  const raw = params.token?.trim() ?? "";
+  if (!raw || raw.length < 16) {
+    return Response.json({ ok: false as const, error: "無効なリンクです" }, { status: 404 });
+  }
+  const tokenHash = hashSalesSummaryPublicToken(raw);
+  const shop = await prisma.shop.findFirst({
+    where: { salesSummaryPublicTokenHash: tokenHash },
+    select: { salesSummaryPublicPasswordScrypt: true },
+  });
+  if (!shop) {
+    return Response.json({ ok: false as const, error: "無効なリンクです" }, { status: 404 });
+  }
+  if (!shop.salesSummaryPublicPasswordScrypt) {
+    return redirect(request.url);
+  }
+  const fd = await request.formData();
+  const pwd = String(fd.get("password") ?? "");
+  if (!verifyPublicSummaryPassword(pwd, shop.salesSummaryPublicPasswordScrypt)) {
+    return Response.json({ ok: false as const, error: "パスワードが正しくありません" });
+  }
+  try {
+    const setCookie = buildPublicSummaryAuthSetCookieHeader(tokenHash);
+    return redirect(request.url, { headers: { "Set-Cookie": setCookie } });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "設定エラーです";
+    return Response.json({ ok: false as const, error: msg });
+  }
+}
+
+function PasswordGateScreen() {
+  const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const loc = useLocation();
+  const busy = navigation.state === "submitting";
+
+  return (
+    <div
+      style={{
+        padding: "24px 16px",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        maxWidth: "400px",
+        margin: "0 auto",
+        minHeight: "100vh",
+        background: "#fafbfb",
+      }}
+    >
+      <h1 style={{ fontSize: "20px", fontWeight: 700, margin: "0 0 8px", color: "#202223" }}>
+        売上サマリー
+      </h1>
+      <p style={{ margin: "0 0 20px", fontSize: "14px", color: "#6d7175" }}>
+        このページを表示するにはパスワードを入力してください。
+      </p>
+      <Form method="post" action={`${loc.pathname}${loc.search}`} replace>
+        <label style={{ display: "block", fontSize: "14px", marginBottom: "8px", color: "#202223" }}>
+          パスワード
+          <input
+            type="password"
+            name="password"
+            required
+            autoComplete="current-password"
+            disabled={busy}
+            style={{
+              display: "block",
+              width: "100%",
+              marginTop: "6px",
+              padding: "10px 12px",
+              fontSize: "16px",
+              boxSizing: "border-box",
+              borderRadius: "6px",
+              border: "1px solid #c9cccf",
+            }}
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={busy}
+          style={{
+            marginTop: "16px",
+            padding: "10px 20px",
+            fontSize: "15px",
+            fontWeight: 600,
+            cursor: busy ? "wait" : "pointer",
+            background: "#2c6ecb",
+            color: "#fff",
+            border: "none",
+            borderRadius: "6px",
+          }}
+        >
+          {busy ? "確認中…" : "表示する"}
+        </button>
+      </Form>
+      {actionData && "ok" in actionData && actionData.ok === false ? (
+        <p style={{ marginTop: "16px", fontSize: "14px", color: "#bf0711" }} role="alert">
+          {actionData.error}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function ModeTabs(props: {
@@ -588,6 +722,10 @@ export default function PublicSalesSummaryPage() {
         <p style={{ color: "#6d7175" }}>{data.message}</p>
       </div>
     );
+  }
+
+  if (data.kind === "password_required") {
+    return <PasswordGateScreen />;
   }
 
   if (data.kind === "error") {

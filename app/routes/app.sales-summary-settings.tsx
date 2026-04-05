@@ -27,6 +27,7 @@ import {
   generateSalesSummaryPublicToken,
   hashSalesSummaryPublicToken,
 } from "../utils/salesSummaryPublicToken.server";
+import { hashPublicSummaryPassword } from "../utils/salesSummaryPublicAuth.server";
 import {
   getAppSetting,
   setAppSetting,
@@ -63,16 +64,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     footfallTargetLocationIds: Array.isArray(saved?.footfallTargetLocationIds) ? saved.footfallTargetLocationIds : DEFAULT_SALES_SUMMARY_SETTINGS.footfallTargetLocationIds,
   };
 
-  const publicLinkActive = Boolean(
-    (
-      await prisma.shop.findUnique({
-        where: { id: shop.id },
-        select: { salesSummaryPublicTokenHash: true },
-      })
-    )?.salesSummaryPublicTokenHash,
-  );
+  const shopPublic = await prisma.shop.findUnique({
+    where: { id: shop.id },
+    select: { salesSummaryPublicTokenHash: true, salesSummaryPublicPasswordScrypt: true },
+  });
+  const publicLinkActive = Boolean(shopPublic?.salesSummaryPublicTokenHash);
+  const publicPasswordSet = Boolean(shopPublic?.salesSummaryPublicPasswordScrypt);
 
-  return { settings, locations, publicLinkActive };
+  return { settings, locations, publicLinkActive, publicPasswordSet };
 }
 
 function formDataToSettings(formData: FormData, locations: { id: string }[]): SalesSummarySettings {
@@ -151,6 +150,34 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ ok: true, revoked: true });
   }
 
+  if (intent === "setSalesSummaryPublicPassword") {
+    const newPwd = String(formData.get("publicSummaryNewPassword") ?? "").trim();
+    const confirm = String(formData.get("publicSummaryConfirmPassword") ?? "").trim();
+    if (newPwd.length < 4) {
+      return Response.json({ ok: false, error: "パスワードは 4 文字以上にしてください。" });
+    }
+    if (newPwd.length > 128) {
+      return Response.json({ ok: false, error: "パスワードは 128 文字以内にしてください。" });
+    }
+    if (newPwd !== confirm) {
+      return Response.json({ ok: false, error: "確認用パスワードが一致しません。" });
+    }
+    const hash = hashPublicSummaryPassword(newPwd);
+    await prisma.shop.update({
+      where: { id: shop.id },
+      data: { salesSummaryPublicPasswordScrypt: hash },
+    });
+    return Response.json({ ok: true, passwordSet: true });
+  }
+
+  if (intent === "clearSalesSummaryPublicPassword") {
+    await prisma.shop.update({
+      where: { id: shop.id },
+      data: { salesSummaryPublicPasswordScrypt: null },
+    });
+    return Response.json({ ok: true, passwordCleared: true });
+  }
+
   const locRes = await admin.graphql(LOCATIONS_QUERY);
   const locJson = (await locRes.json()) as {
     data?: { locations?: { nodes?: { id: string }[] } };
@@ -165,10 +192,12 @@ export async function action({ request }: ActionFunctionArgs) {
 type PublicLinkActionJson =
   | { ok: true; issued: { plainToken: string; fullUrl: string } }
   | { ok: true; revoked: true }
+  | { ok: true; passwordSet: true }
+  | { ok: true; passwordCleared: true }
   | { ok: false; error: string };
 
 export default function SalesSummarySettingsPage() {
-  const { settings: initial, locations, publicLinkActive } = useLoaderData<typeof loader>();
+  const { settings: initial, locations, publicLinkActive, publicPasswordSet } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
@@ -177,6 +206,8 @@ export default function SalesSummarySettingsPage() {
   const q = location.search || "";
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<SalesSummarySettings>({ ...initial });
+  const [publicPwd, setPublicPwd] = useState("");
+  const [publicPwdConfirm, setPublicPwdConfirm] = useState("");
 
   const issuePublicLink = () => {
     const fd = new FormData();
@@ -190,6 +221,23 @@ export default function SalesSummarySettingsPage() {
     }
     const fd = new FormData();
     fd.set("intent", "revokeSalesSummaryPublicLink");
+    linkFetcher.submit(fd, { method: "post" });
+  };
+
+  const savePublicPassword = () => {
+    const fd = new FormData();
+    fd.set("intent", "setSalesSummaryPublicPassword");
+    fd.set("publicSummaryNewPassword", publicPwd);
+    fd.set("publicSummaryConfirmPassword", publicPwdConfirm);
+    linkFetcher.submit(fd, { method: "post" });
+  };
+
+  const clearPublicPassword = () => {
+    if (!window.confirm("公開ページのパスワードを削除します。URLを知っている人はそのまま表示できます。よろしいですか？")) {
+      return;
+    }
+    const fd = new FormData();
+    fd.set("intent", "clearSalesSummaryPublicPassword");
     linkFetcher.submit(fd, { method: "post" });
   };
 
@@ -208,6 +256,11 @@ export default function SalesSummarySettingsPage() {
     }
     if ("issued" in linkFetcher.data) {
       revalidator.revalidate();
+    }
+    if ("passwordSet" in linkFetcher.data || "passwordCleared" in linkFetcher.data) {
+      revalidator.revalidate();
+      setPublicPwd("");
+      setPublicPwdConfirm("");
     }
   }, [linkFetcher.state, linkFetcher.data, revalidator]);
 
@@ -353,6 +406,57 @@ export default function SalesSummarySettingsPage() {
                     </BlockStack>
                   </Banner>
                 ) : null}
+
+                <Text as="p" variant="bodySm" fontWeight="semibold">
+                  公開ページのパスワード（任意）
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  公開URLの直下で表示される売上サマリーに、パスワードを必須にできます。正しいパスワードを入れたブラウザでは、しばらく再入力不要です（Cookie）。サーバーには平文では保存しません。
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  現在: {publicPasswordSet ? "設定済み" : "未設定（パスワードなしで表示）"}
+                </Text>
+                {linkFetcher.data && linkFetcher.data.ok && "passwordSet" in linkFetcher.data ? (
+                  <Banner tone="success">パスワードを保存しました。</Banner>
+                ) : null}
+                {linkFetcher.data && linkFetcher.data.ok && "passwordCleared" in linkFetcher.data ? (
+                  <Banner tone="success">パスワードを削除しました。</Banner>
+                ) : null}
+                <TextField
+                  label="新しいパスワード"
+                  type="password"
+                  value={publicPwd}
+                  onChange={setPublicPwd}
+                  autoComplete="new-password"
+                  helpText="4文字以上128文字以内。保存すると既に開いている端末では再入力が必要になることがあります。"
+                />
+                <TextField
+                  label="新しいパスワード（確認）"
+                  type="password"
+                  value={publicPwdConfirm}
+                  onChange={setPublicPwdConfirm}
+                  autoComplete="new-password"
+                />
+                <InlineStack gap="200" wrap>
+                  <Button
+                    onClick={savePublicPassword}
+                    loading={linkFetcher.state === "submitting"}
+                    disabled={linkFetcher.state === "submitting"}
+                  >
+                    パスワードを保存
+                  </Button>
+                  {publicPasswordSet ? (
+                    <Button
+                      tone="critical"
+                      onClick={clearPublicPassword}
+                      loading={linkFetcher.state === "submitting"}
+                      disabled={linkFetcher.state === "submitting"}
+                    >
+                      パスワードを削除
+                    </Button>
+                  ) : null}
+                </InlineStack>
+
                 <Text as="p" variant="bodySm" tone="subdued">
                   状態: {publicLinkActive ? "有効（トークンが設定されています）" : "未設定"}
                 </Text>
