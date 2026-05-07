@@ -244,6 +244,36 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     .points-row { margin-top: 4px; text-align: center; }
     .points-value { font-size: 28px; font-weight: 700; color: #202223; letter-spacing: 0.02em; }
     .points-unit { font-size: 14px; color: #6d7175; margin-left: 4px; }
+    .expiry-row {
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .expiry-text {
+      color: #202223;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .expiry-detail-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 22px;
+      padding: 2px 8px;
+      border: 1px solid #c9cccf;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #202223;
+      text-decoration: none;
+      background: #ffffff;
+      white-space: nowrap;
+    }
+    .expiry-detail-link:active {
+      background: #f6f6f7;
+    }
     @keyframes memberCardShine {
       0% { left: -52%; opacity: 0; }
       12% { opacity: 0.35; }
@@ -368,7 +398,11 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     var expiryBlockHtml = '';
     if (expiringPoints) {
       var expiryText = '直近のポイント失効予定：' + esc(formatPoints(expiringPoints)) + 'ポイント';
-      expiryBlockHtml = '<div class="section-bordered">' + expiryText + '</div>';
+      expiryBlockHtml =
+        '<div class="section-bordered expiry-row">' +
+          '<span class="expiry-text">' + expiryText + '</span>' +
+          '<a class="expiry-detail-link" href="https://ciara-store.com/account" target="_blank" rel="noopener noreferrer">詳細</a>' +
+        '</div>';
     }
     var sectionHtml = '<div class="member-card-section">' +
       '<div class="' + cardClass + '">' +
