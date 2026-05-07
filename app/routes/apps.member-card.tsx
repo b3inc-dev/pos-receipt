@@ -347,7 +347,6 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
     var rankName = data.rankName != null ? data.rankName : '';
     var pointsApproved = data.pointsApproved != null ? data.pointsApproved : '';
     var rankDecisionPurchasePrice = data.rankDecisionPurchasePrice != null ? Number(data.rankDecisionPurchasePrice) : NaN;
-    var expiryDate = data.expiryDate != null && data.expiryDate !== '' ? String(data.expiryDate).trim() : '';
     var expiringPoints = data.expiringPoints != null && data.expiringPoints !== '' ? String(data.expiringPoints).trim() : '';
     var safeId = esc(memberId);
     var safeRank = esc(rankName);
@@ -367,9 +366,8 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
       }
     }
     var expiryBlockHtml = '';
-    if (expiryDate && expiringPoints) {
-      var dateSlash = expiryDate.replace(/-/g, '/');
-      var expiryText = 'ポイント失効予定：' + esc(dateSlash) + ' ' + esc(formatPoints(expiringPoints)) + 'ポイント';
+    if (expiringPoints) {
+      var expiryText = '直近のポイント失効予定：' + esc(formatPoints(expiringPoints)) + 'ポイント';
       expiryBlockHtml = '<div class="section-bordered">' + expiryText + '</div>';
     }
     var sectionHtml = '<div class="member-card-section">' +
@@ -442,7 +440,6 @@ function buildHtml(liffId: string, apiBase: string, shop: string): string {
           rankName: data.rankName,
           pointsApproved: data.pointsApproved,
           rankDecisionPurchasePrice: data.rankDecisionPurchasePrice,
-          expiryDate: data.expiryDate,
           expiringPoints: data.expiringPoints
         });
       } else {
