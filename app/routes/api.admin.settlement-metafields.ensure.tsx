@@ -1,10 +1,12 @@
 /**
  * POST /api/admin/settlement-metafields/ensure
- * 管理画面: 注文の精算メタフィールド定義（namespace settlement）を一括作成（冪等）
+ * 管理画面: 注文メタフィールド定義を一括作成（冪等）
+ * - namespace settlement（精算結果）
+ * - namespace pos（特殊返金・商品券調整・返金集計ロケーション等）
  */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import { ensureSettlementOrderMetafieldDefinitions } from "../services/settlementMetafieldDefinitions.server";
+import { ensureAllOrderMetafieldDefinitions } from "../services/settlementMetafieldDefinitions.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
@@ -12,7 +14,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   try {
     const { admin } = await authenticate.admin(request);
-    const result = await ensureSettlementOrderMetafieldDefinitions(admin);
+    const result = await ensureAllOrderMetafieldDefinitions(admin);
     return Response.json({
       ok: result.ok,
       created: result.created,

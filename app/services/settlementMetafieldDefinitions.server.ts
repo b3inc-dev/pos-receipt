@@ -1,5 +1,7 @@
 /**
- * 精算注文（GAS 同等）用の Order メタフィールド定義を Shopify に作成する。
+ * Order メタフィールド定義を Shopify に作成する。
+ * - namespace `settlement`: 精算結果の書き込み（精算注文）用
+ * - namespace `pos`: 特殊返金・商品券調整・返金集計ロケーション等の業務入力用（集計時参照）
  * metafieldDefinitionCreate — 既に存在するキーは userErrors をスキップ扱いにして冪等にする。
  */
 type AdminClient = {
@@ -149,6 +151,42 @@ export const SETTLEMENT_ORDER_METAFIELD_SPECS: SettlementMetafieldDefSpec[] = [
   },
 ];
 
+/** namespace はすべて `pos`。値の書き込み・集計ロジックは別実装で pos.* と整合させる */
+export const POS_ORDER_BUSINESS_METAFIELD_SPECS: SettlementMetafieldDefSpec[] = [
+  {
+    name: "POS 特殊返金イベント",
+    namespace: "pos",
+    key: "special_refund_events",
+    description:
+      "支払い方法の違う返金などのイベント履歴（JSON 配列）。インストール時に定義のみ作成し、値はアプリが書き込む。",
+    type: "json",
+  },
+  {
+    name: "POS 商品券釣り調整",
+    namespace: "pos",
+    key: "voucher_change_events",
+    description:
+      "商品券の額面・充当・釣り銭などの調整履歴（JSON 配列）。インストール時に定義のみ作成し、値はアプリが書き込む。",
+    type: "json",
+  },
+  {
+    name: "POS 返金集計ロケーション",
+    namespace: "pos",
+    key: "refund_aggregation_location_gid",
+    description:
+      "返金・上記調整を計上するロケーションの GID（gid://shopify/Location/...）。未設定時はアプリ側デフォルト",
+    type: "single_line_text_field",
+  },
+  {
+    name: "POS 業務調整バージョン",
+    namespace: "pos",
+    key: "business_adjustments_version",
+    description:
+      "pos.special_refund_events / pos.voucher_change_events 更新時の楽観ロック用版番号（0 起点でインクリメント）",
+    type: "number_integer",
+  },
+];
+
 function isAlreadyExistsError(message: string, code?: string | null): boolean {
   const m = message.toLowerCase();
   const c = (code ?? "").toUpperCase();
@@ -172,18 +210,15 @@ export type EnsureSettlementMetafieldsResult = {
   errors: { key: string; message: string; code?: string }[];
 };
 
-/**
- * 注文リソース上の settlement.* メタフィールド定義をすべて作成試行する。
- * 既存定義は skipped に入れ、致命的でない重複のみ冪等に扱う。
- */
-export async function ensureSettlementOrderMetafieldDefinitions(
+async function ensureOrderMetafieldDefinitionsForSpecs(
   admin: AdminClient,
+  specs: SettlementMetafieldDefSpec[],
 ): Promise<EnsureSettlementMetafieldsResult> {
   const created: string[] = [];
   const skipped: string[] = [];
   const errors: { key: string; message: string; code?: string }[] = [];
 
-  for (const spec of SETTLEMENT_ORDER_METAFIELD_SPECS) {
+  for (const spec of specs) {
     const res = await admin.graphql(METAFIELD_DEFINITION_CREATE, {
       variables: {
         definition: {
@@ -207,9 +242,11 @@ export async function ensureSettlementOrderMetafieldDefinitions(
       };
     };
 
+    const compoundKey = `${spec.namespace}.${spec.key}`;
+
     if (json.errors?.length) {
       errors.push({
-        key: spec.key,
+        key: compoundKey,
         message: json.errors.map((e) => e.message).join(", "),
       });
       continue;
@@ -218,23 +255,23 @@ export async function ensureSettlementOrderMetafieldDefinitions(
     const payload = json.data?.metafieldDefinitionCreate;
     const uerr = payload?.userErrors ?? [];
     if (payload?.createdDefinition?.id) {
-      created.push(spec.key);
+      created.push(compoundKey);
       continue;
     }
 
     if (uerr.length === 0) {
-      errors.push({ key: spec.key, message: "定義の作成結果が空です" });
+      errors.push({ key: compoundKey, message: "定義の作成結果が空です" });
       continue;
     }
 
     const first = uerr[0];
     if (isAlreadyExistsError(first.message, first.code)) {
-      skipped.push(spec.key);
+      skipped.push(compoundKey);
       continue;
     }
 
     errors.push({
-      key: spec.key,
+      key: compoundKey,
       message: uerr.map((e) => e.message).join("; "),
       code: first.code,
     });
@@ -245,5 +282,40 @@ export async function ensureSettlementOrderMetafieldDefinitions(
     created,
     skipped,
     errors,
+  };
+}
+
+/**
+ * 注文リソース上の settlement.* メタフィールド定義をすべて作成試行する。
+ * 既存定義は skipped に入れ、致命的でない重複のみ冪等に扱う。
+ */
+export async function ensureSettlementOrderMetafieldDefinitions(
+  admin: AdminClient,
+): Promise<EnsureSettlementMetafieldsResult> {
+  return ensureOrderMetafieldDefinitionsForSpecs(admin, SETTLEMENT_ORDER_METAFIELD_SPECS);
+}
+
+/**
+ * 注文リソース上の pos.* 業務用メタフィールド定義をすべて作成試行する。
+ */
+export async function ensurePosOrderBusinessMetafieldDefinitions(
+  admin: AdminClient,
+): Promise<EnsureSettlementMetafieldsResult> {
+  return ensureOrderMetafieldDefinitionsForSpecs(admin, POS_ORDER_BUSINESS_METAFIELD_SPECS);
+}
+
+/**
+ * インストール／OAuth 完了時: settlement.* と pos.* の Order 定義をまとめて作成する。
+ */
+export async function ensureAllOrderMetafieldDefinitions(
+  admin: AdminClient,
+): Promise<EnsureSettlementMetafieldsResult> {
+  const settlement = await ensureOrderMetafieldDefinitionsForSpecs(admin, SETTLEMENT_ORDER_METAFIELD_SPECS);
+  const pos = await ensureOrderMetafieldDefinitionsForSpecs(admin, POS_ORDER_BUSINESS_METAFIELD_SPECS);
+  return {
+    ok: settlement.ok && pos.ok,
+    created: [...settlement.created, ...pos.created],
+    skipped: [...settlement.skipped, ...pos.skipped],
+    errors: [...settlement.errors, ...pos.errors],
   };
 }
