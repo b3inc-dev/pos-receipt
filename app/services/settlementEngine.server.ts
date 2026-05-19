@@ -19,6 +19,13 @@ import {
 } from "../utils/appSettings.server";
 import { fetchLegacyGiftCardIssuanceForDay } from "./settlementLegacyGiftCards.server";
 import { getShopTimezoneForDaily, getDayRangeInUtc, formatTimeHmInTimeZone } from "../utils/shopTimezone.server";
+import {
+  loadRefundAggregationContext,
+  resolveRefundAggregationLocationGid,
+  locationGidMatches,
+  orderHasRefundInDay,
+  type RefundAggregationContext,
+} from "./refundAggregation.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -108,6 +115,7 @@ interface ShopifyTransaction {
   gateway: string;
   /** GAS normalizeGatewayLabel の formatted 側 */
   formattedGateway?: string | null;
+  location?: { id: string } | null;
 }
 
 interface ShopifyRefundTransaction {
@@ -116,6 +124,7 @@ interface ShopifyRefundTransaction {
   gateway: string;
   formattedGateway?: string | null;
   amountSet: { shopMoney: { amount: string; currencyCode: string } };
+  location?: { id: string } | null;
 }
 
 interface ShopifyRefund {
@@ -197,6 +206,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
           amountSet { shopMoney { amount currencyCode } }
           gateway
           formattedGateway
+          location { id }
         }
         refunds {
           id
@@ -212,6 +222,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
               gateway
               formattedGateway
               amountSet { shopMoney { amount currencyCode } }
+              location { id }
             }
           }
         }
@@ -601,9 +612,26 @@ const GAS_GATEWAY_CASH = "現金";
  * GAS aggregate の注文ループ（todaysTx・pay・refundsGross・割引/VIP 按分・税 Shopify 相当）。
  * ノート観測: observeVoucherChangeFromFace（キャンセル除外）・observeGenericCashChange。
  */
+export type GasAggregateAttributionOpts = {
+  attributionCtx: RefundAggregationContext;
+  settlementLocationId: string;
+  locIdRaw: string;
+};
+
+function orderRefundsCountForSettlement(
+  order: ShopifyOrder,
+  inRange: (iso?: string) => boolean,
+  opts?: GasAggregateAttributionOpts,
+): boolean {
+  if (!opts) return true;
+  const attr = resolveRefundAggregationLocationGid(order, opts.attributionCtx, inRange);
+  return locationGidMatches(attr, opts.settlementLocationId, opts.locIdRaw);
+}
+
 function aggregateGasStyleForOrders(
   orders: ShopifyOrder[],
   inRange: (iso?: string) => boolean,
+  attributionOpts?: GasAggregateAttributionOpts,
 ): {
   pay: Record<string, { sale: number; refund: number; saleTx: number; refundTx: number }>;
   refundsGross: number;
@@ -627,6 +655,12 @@ function aggregateGasStyleForOrders(
   let voucherChangeObserved = 0;
 
   for (const o of orders) {
+    const countRefundsForThisLocation = orderRefundsCountForSettlement(
+      o,
+      inRange,
+      attributionOpts,
+    );
+
     const refundTxIdsInDay = new Set<string>();
     for (const r of o.refunds ?? []) {
       if (!inRange(r.createdAt)) continue;
@@ -658,6 +692,7 @@ function aggregateGasStyleForOrders(
         pay[gw].sale += amt;
         pay[gw].saleTx += 1;
       } else if (kind === "REFUND") {
+        if (!countRefundsForThisLocation) continue;
         const r = Math.abs(amt);
         orderRefundToday += r;
         pay[gw].refund += r;
@@ -668,7 +703,7 @@ function aggregateGasStyleForOrders(
 
     const hasRefundObjToday = refundTxIdsInDay.size > 0;
     const hasRefundTxToday = todaysTx.some((tx) => String(tx.kind) === "REFUND");
-    if (hasRefundObjToday && !hasRefundTxToday) {
+    if (countRefundsForThisLocation && hasRefundObjToday && !hasRefundTxToday) {
       let amt = 0;
       let cnt = 0;
       for (const r of o.refunds ?? []) {
@@ -730,21 +765,26 @@ function aggregateGasStyleForOrders(
       }
     }
 
-    refundsGross += orderRefundToday;
+    if (countRefundsForThisLocation) {
+      refundsGross += orderRefundToday;
+    }
 
-    if (orderSaleToday - orderRefundToday > 0) saleOrderSet.add(o.id);
+    if (orderSaleToday - (countRefundsForThisLocation ? orderRefundToday : 0) > 0) {
+      saleOrderSet.add(o.id);
+    }
 
     if (orderSaleToday > 0) {
       const nodes = o.lineItems?.nodes ?? [];
       itemCount += nodes.reduce((s, n) => s + Number(n.quantity ?? 0), 0);
     }
-    if (orderRefundToday > 0) {
+    if (countRefundsForThisLocation && orderRefundToday > 0) {
       for (const r of o.refunds ?? []) {
         if (!inRange(r.createdAt)) continue;
         for (const ri of r.refundLineItems ?? []) {
           itemCount -= Number(ri.quantity ?? 0);
         }
       }
+      refundOrderSet.add(o.id);
     }
 
     let orderDiscount = 0;
@@ -787,6 +827,81 @@ function aggregateGasStyleForOrders(
     taxTotalShopify: Math.round(taxTotalShopify),
     voucherChangeObserved: Math.round(voucherChangeObserved),
   };
+}
+
+type GasAggregateResult = ReturnType<typeof aggregateGasStyleForOrders>;
+
+/**
+ * 売上店舗と異なる帰属先の返金を、対象ロケーションの精算に加算する。
+ */
+function mergeCrossLocationAttributedRefunds(
+  gas: GasAggregateResult,
+  ordersBroad: ShopifyOrder[],
+  orderIdsInUnion: Set<string>,
+  inRange: (iso?: string) => boolean,
+  attributionOpts: GasAggregateAttributionOpts,
+): void {
+  for (const o of ordersBroad) {
+    if (orderIdsInUnion.has(o.id)) continue;
+    if (!orderHasRefundInDay(o, inRange)) continue;
+    if (!orderRefundsCountForSettlement(o, inRange, attributionOpts)) continue;
+
+    const refundTxIdsInDay = new Set<string>();
+    for (const r of o.refunds ?? []) {
+      if (!inRange(r.createdAt)) continue;
+      for (const e of r.transactions ?? []) {
+        if (e?.id) refundTxIdsInDay.add(e.id);
+      }
+    }
+
+    const txs = o.transactions ?? [];
+    const todaysTx = txs.filter((tx) => {
+      const byTime = inRange(tx.createdAt);
+      const byRefundLink = refundTxIdsInDay.has(tx.id);
+      return byTime || (String(tx.kind) === "REFUND" && byRefundLink);
+    });
+
+    let orderRefundToday = 0;
+    for (const tx of todaysTx) {
+      const amt = Number(tx.amountSet?.shopMoney?.amount ?? 0);
+      if (String(tx.kind ?? "") !== "REFUND") continue;
+      const r = Math.abs(amt);
+      const gw = gasTxLabel(tx);
+      ensurePayBucket(gas.pay, gw);
+      orderRefundToday += r;
+      gas.pay[gw].refund += r;
+      gas.pay[gw].refundTx += 1;
+    }
+
+    const hasRefundObjToday = refundTxIdsInDay.size > 0;
+    const hasRefundTxToday = todaysTx.some((tx) => String(tx.kind) === "REFUND");
+    if (hasRefundObjToday && !hasRefundTxToday) {
+      let amt = 0;
+      let cnt = 0;
+      for (const r of o.refunds ?? []) {
+        if (!inRange(r.createdAt)) continue;
+        for (const e of r.transactions ?? []) {
+          const v = Math.abs(Number(e?.amountSet?.shopMoney?.amount ?? 0));
+          if (v > 0) {
+            amt += v;
+            cnt += 1;
+          }
+        }
+      }
+      if (amt > 0) {
+        const k = GAS_UNKNOWN_GATEWAY;
+        ensurePayBucket(gas.pay, k);
+        gas.pay[k].refund += amt;
+        gas.pay[k].refundTx += Math.max(1, cnt);
+        orderRefundToday += amt;
+      }
+    }
+
+    if (orderRefundToday > 0) {
+      gas.refundsGross += orderRefundToday;
+      gas.refundOrderSet.add(o.id);
+    }
+  }
 }
 
 function totalFromPayBuckets(
@@ -946,9 +1061,19 @@ export async function buildSettlementPreview(
   const createdRaw = await fetchAllOrders(admin, shopifyQueryCreated, "CREATED_AT");
   const updatedRaw = await fetchAllOrders(admin, shopifyQueryUpdated, "UPDATED_AT");
 
+  const shopifyQueryUpdatedBroad = `source_name:pos updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
+  const updatedBroadRaw = await fetchAllOrders(admin, shopifyQueryUpdatedBroad, "UPDATED_AT");
+
   const createdAtLoc = filterOrdersByRetailLocation(createdRaw, locationId, locIdRaw);
   const updatedAtLoc = filterOrdersByRetailLocation(updatedRaw, locationId, locIdRaw);
   const ordersUnion = unionSettlementOrdersById(createdAtLoc, updatedAtLoc);
+
+  const attributionCtx = await loadRefundAggregationContext(shopId);
+  const attributionOpts: GasAggregateAttributionOpts = {
+    attributionCtx,
+    settlementLocationId: locationId,
+    locIdRaw,
+  };
 
   const ordersRawCount = createdRaw.length;
   const ordersPosSourceMatchedCount = createdRaw.length;
@@ -965,7 +1090,14 @@ export async function buildSettlementPreview(
     return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
   };
 
-  const gas = aggregateGasStyleForOrders(ordersUnion, inDay);
+  const gas = aggregateGasStyleForOrders(ordersUnion, inDay, attributionOpts);
+  mergeCrossLocationAttributedRefunds(
+    gas,
+    updatedBroadRaw,
+    new Set(ordersUnion.map((o) => o.id)),
+    inDay,
+    attributionOpts,
+  );
 
   const settlementSettings = await getAppSetting<Partial<SettlementSettings>>(shopId, SETTLEMENT_SETTINGS_KEY);
   const settlementMerged: SettlementSettings = { ...DEFAULT_SETTLEMENT_SETTINGS, ...settlementSettings };

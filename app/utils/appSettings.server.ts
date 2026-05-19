@@ -351,6 +351,12 @@ export interface SettlementSettings {
    * その日 created のカードのうち POS 集計に未包含の分を「商品券」バケットに加算する。
    */
   legacyGiftCardAggregationEnabled: boolean;
+  /**
+   * 返金の計上ロケーション: 注文基準（デフォルト）または返金トランザクションの POS ロケーション
+   */
+  refundAggregationLocationMode: "order_transaction" | "refund_transaction_pos_location";
+  /** nonPos 計上先未設定時: 注文 retailLocation にフォールバック / 精算から除外 */
+  nonPosRefundFallbackMode: "order_retail_location" | "exclude";
 }
 
 export const DEFAULT_SETTLEMENT_SETTINGS: SettlementSettings = {
@@ -393,6 +399,8 @@ export const DEFAULT_SETTLEMENT_SETTINGS: SettlementSettings = {
   orderBasedAttachNoteEnabled: true,
   /** 検証用のためデフォルト ON（本番では管理画面で OFF にできる） */
   legacyGiftCardAggregationEnabled: true,
+  refundAggregationLocationMode: "order_transaction",
+  nonPosRefundFallbackMode: "order_retail_location",
 };
 
 // ── 印字設定（要件 §12） ──────────────────────────────────────────────────────

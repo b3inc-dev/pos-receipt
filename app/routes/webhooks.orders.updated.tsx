@@ -9,6 +9,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { runSalesSummaryRefreshFromOrderWebhook } from "../services/salesSummaryWebhookRefresh.server";
 import { enqueueSalesSummaryOrdersUpdatedJob } from "../services/salesSummaryWebhookQueue.server";
+import { syncRefundAggregationFromWebhookPayload } from "../services/refundAggregation.server";
 
 export const loader = async (_: LoaderFunctionArgs) => {
   return new Response("Method Not Allowed", { status: 405 });
@@ -64,6 +65,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       dbShop.id,
       payload,
     );
+
+    try {
+      await syncRefundAggregationFromWebhookPayload(admin, dbShop.id, payload);
+    } catch (e) {
+      console.warn(`[orders/updated][pos-receipt] refund aggregation metafield sync failed shop=${shop}`, e);
+    }
 
     if (errors.length > 0) {
       console.warn(

@@ -28,6 +28,7 @@ import {
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
+import { validateNonPosRefundAttributionLocations } from "../services/refundAggregation.server";
 import { planLabel, getFullAccess, isInhouseMode, PLAN_FEATURES } from "../utils/planFeatures.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
@@ -81,6 +82,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       cloudprntEnabled: (db as { cloudprntEnabled?: boolean } | undefined)?.cloudprntEnabled ?? false,
       summaryTargetGroup: (db as { summaryTargetGroup?: string | null } | undefined)?.summaryTargetGroup ?? null,
       budgetTargetEnabled: (db as { budgetTargetEnabled?: boolean } | undefined)?.budgetTargetEnabled ?? false,
+      nonPosRefundAttributionEnabled:
+        (db as { nonPosRefundAttributionEnabled?: boolean } | undefined)?.nonPosRefundAttributionEnabled ??
+        false,
     };
   });
   // sort_order で並べ替え（要件 §4.2.1）
@@ -123,6 +127,7 @@ type LocationPayload = {
   cloudprntEnabled?: boolean;
   summaryTargetGroup?: string | null;
   budgetTargetEnabled?: boolean;
+  nonPosRefundAttributionEnabled?: boolean;
 };
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -135,6 +140,22 @@ export async function action({ request }: ActionFunctionArgs) {
   if (typeof locationsJson === "string") {
     try {
       const locations = JSON.parse(locationsJson) as LocationPayload[];
+      const validationErr = validateNonPosRefundAttributionLocations(
+        locations.map((l) => ({
+          id: l.id,
+          nonPosRefundAttributionEnabled: l.nonPosRefundAttributionEnabled,
+        })),
+      );
+      if (validationErr) {
+        return Response.json({ ok: false, error: validationErr }, { status: 400 });
+      }
+      const nonPosTarget = locations.find((l) => l.nonPosRefundAttributionEnabled === true);
+      if (nonPosTarget?.id) {
+        await prisma.location.updateMany({
+          where: { shopId: shop.id, shopifyLocationGid: { not: nonPosTarget.id } },
+          data: { nonPosRefundAttributionEnabled: false },
+        });
+      }
       for (const loc of locations) {
         if (!loc?.id) continue;
         await prisma.location.upsert({
@@ -157,6 +178,7 @@ export async function action({ request }: ActionFunctionArgs) {
             cloudprntEnabled: Boolean(loc.cloudprntEnabled),
             summaryTargetGroup: loc.summaryTargetGroup ?? null,
             budgetTargetEnabled: Boolean(loc.budgetTargetEnabled),
+            nonPosRefundAttributionEnabled: Boolean(loc.nonPosRefundAttributionEnabled),
           },
           create: {
             shopId: shop.id,
@@ -179,6 +201,7 @@ export async function action({ request }: ActionFunctionArgs) {
             cloudprntEnabled: Boolean(loc.cloudprntEnabled),
             summaryTargetGroup: loc.summaryTargetGroup ?? null,
             budgetTargetEnabled: Boolean(loc.budgetTargetEnabled),
+            nonPosRefundAttributionEnabled: Boolean(loc.nonPosRefundAttributionEnabled),
           },
         });
       }
@@ -248,9 +271,15 @@ export default function SettingsPage() {
     value: string | number | boolean | null
   ) => {
     setLocations((prev) =>
-      prev.map((loc) =>
-        loc.id !== locationId ? loc : { ...loc, [field]: value }
-      )
+      prev.map((loc) => {
+        if (loc.id !== locationId) {
+          if (field === "nonPosRefundAttributionEnabled" && value === true) {
+            return { ...loc, nonPosRefundAttributionEnabled: false };
+          }
+          return loc;
+        }
+        return { ...loc, [field]: value };
+      })
     );
   };
 
@@ -442,6 +471,16 @@ export default function SettingsPage() {
                           }
                         />
                       </InlineStack>
+
+                      <Text variant="bodySm" as="p" tone="subdued">返金の計上先</Text>
+                      <Checkbox
+                        label="POSロケーション以外の返金の計上先にする"
+                        helpText="管理画面返金など、返金にPOS店舗が付かない場合に、このロケーションの日次精算へ載せます。ショップ全体で1店舗のみ指定できます。"
+                        checked={loc.nonPosRefundAttributionEnabled ?? false}
+                        onChange={(v) =>
+                          handleLocationChange(loc.id, loc.name, "nonPosRefundAttributionEnabled", v)
+                        }
+                      />
 
                       <Text variant="bodySm" as="p" tone="subdued">集計・表示対象（§4.2.3）</Text>
                       <InlineStack gap="400" wrap>

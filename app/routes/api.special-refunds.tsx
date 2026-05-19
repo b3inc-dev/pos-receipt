@@ -10,6 +10,8 @@ import prisma from "../db.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { SPECIAL_REFUND_SETTINGS_KEY, DEFAULT_SPECIAL_REFUND_SETTINGS } from "../utils/appSettings.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
+import { syncRefundAggregationMetafieldForOrder } from "../services/refundAggregation.server";
+import { setOrderRefundAggregationLocationGid } from "../services/posOrderMetafields.server";
 import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
@@ -136,6 +138,20 @@ export async function action({ request }: ActionFunctionArgs) {
         status: "active",
       },
     });
+
+    const orderGid = String(sourceOrderId).startsWith("gid://")
+      ? String(sourceOrderId)
+      : `gid://shopify/Order/${String(sourceOrderId).replace(/\D/g, "")}`;
+    try {
+      const processingGid = normalizeLocationIdToGid(locationId ? String(locationId) : "");
+      if (processingGid) {
+        await setOrderRefundAggregationLocationGid(admin, orderGid, processingGid);
+      } else {
+        await syncRefundAggregationMetafieldForOrder(admin, shop.id, orderGid);
+      }
+    } catch {
+      // メタフィールド同期失敗でもイベント登録は成功させる
+    }
 
     // 売上サマリー（過去実績含む）の整合を保つため、登録日の日次キャッシュを再計算
     const locationGid = normalizeLocationIdToGid(event.locationId);

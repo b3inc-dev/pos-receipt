@@ -92,6 +92,8 @@ model Location {
   summaryTargetGroup      String?
   budgetTargetEnabled     Boolean  @default(false)
   footfallTargetEnabled   Boolean  @default(false)
+  /** POSロケーション以外の返金（管理画面等）の日次精算計上先（ショップ内で最大1件のみ true） */
+  nonPosRefundAttributionEnabled Boolean @default(false)
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 

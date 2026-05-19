@@ -38,6 +38,14 @@ const TAX_ROUNDING_OPTIONS = [
   { label: "切り捨て", value: "floor" },
   { label: "切り上げ", value: "ceil" },
 ];
+const REFUND_AGGREGATION_MODE_OPTIONS = [
+  { label: "注文トランザクション基準（デフォルト）", value: "order_transaction" },
+  { label: "返金トランザクションのPOSロケーション基準", value: "refund_transaction_pos_location" },
+];
+const NON_POS_REFUND_FALLBACK_OPTIONS = [
+  { label: "注文の売上店（retailLocation）にフォールバック", value: "order_retail_location" },
+  { label: "POS精算から除外", value: "exclude" },
+];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
@@ -103,6 +111,12 @@ export async function action({ request }: ActionFunctionArgs) {
     orderBasedAttachMetafieldsEnabled: bool("orderBasedAttachMetafieldsEnabled", true),
     orderBasedAttachNoteEnabled: bool("orderBasedAttachNoteEnabled", true),
     legacyGiftCardAggregationEnabled: bool("legacyGiftCardAggregationEnabled", true),
+    refundAggregationLocationMode:
+      (get("refundAggregationLocationMode") as SettlementSettings["refundAggregationLocationMode"]) ||
+      "order_transaction",
+    nonPosRefundFallbackMode:
+      (get("nonPosRefundFallbackMode") as SettlementSettings["nonPosRefundFallbackMode"]) ||
+      "order_retail_location",
   };
   await setAppSetting(shop.id, SETTLEMENT_SETTINGS_KEY, settings);
   return Response.json({ ok: true });
@@ -194,6 +208,31 @@ export default function SettlementSettingsPage() {
                 <TextField label="商品券おつり" value={form.labelVoucherChange} onChange={(v) => set("labelVoucherChange", v)} autoComplete="off" />
                 <TextField label="項目順 JSON" value={form.settlementFieldOrderJson} onChange={(v) => set("settlementFieldOrderJson", v)} helpText="§5.2.4" autoComplete="off" />
                 <TextField label="支払セクション順 JSON" value={form.paymentSectionOrderJson} onChange={(v) => set("paymentSectionOrderJson", v)} autoComplete="off" />
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection title="返金の計上ロケーション" description="日次精算に載せる返金の帰属先">
+            <Card>
+              <BlockStack gap="400">
+                <Select
+                  label="返金の計上ロケーション"
+                  options={REFUND_AGGREGATION_MODE_OPTIONS}
+                  value={form.refundAggregationLocationMode}
+                  onChange={(v) =>
+                    set("refundAggregationLocationMode", v as SettlementSettings["refundAggregationLocationMode"])
+                  }
+                  helpText="ON のとき、返金トランザクションに付く POS 店舗の精算に返金を載せます（他店で売上・別店で返金した場合など）。"
+                />
+                <Select
+                  label="POSロケーション以外の返金（計上先未設定時）"
+                  options={NON_POS_REFUND_FALLBACK_OPTIONS}
+                  value={form.nonPosRefundFallbackMode}
+                  onChange={(v) =>
+                    set("nonPosRefundFallbackMode", v as SettlementSettings["nonPosRefundFallbackMode"])
+                  }
+                  helpText="管理画面返金などで POS 店舗が付かない場合。計上先ロケーションは「設定」タブのロケーション設定で1店舗指定できます。"
+                />
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
