@@ -47,28 +47,31 @@ npm install && npx prisma generate && npm run build
 
 ---
 
-## 3. Start Command の確認
+## 3. Start Command の確認（重要）
 
-起動コマンドが違うと、サーバーが立ち上がらなかったり、DB 未適用のまま動いて最初のリクエストで落ちたりします。
+起動コマンドが古いままだと、**マイグレーション失敗で毎回 Deploy failed（status 1）** になります。
 
-### 推奨（マイグレーションを起動時に実行）
+### 正しい設定（必ずこれにする）
+
+| 項目 | 値 |
+|------|-----|
+| **Build Command** | `npm install && npx prisma generate && npm run build` |
+| **Pre-Deploy Command**（あれば） | `bash scripts/render-migrate.sh` |
+| **Start Command** | `npm run start` |
+
+- `npm run start` は内部で `bash scripts/render-start.sh` → `node server.js` を実行します。
+- **POS の CORS（OPTIONS）** は `server.js` が処理します。`react-router-serve` だけにすると POS から接続できないことがあります。
+
+### 使ってはいけない例（デプロイが落ちやすい）
 
 ```bash
 npx prisma migrate deploy && npx react-router-serve ./build/server/index.js
 ```
 
-- `prisma migrate deploy` … 本番 DB にマイグレーションを適用（`Session` などのテーブルを作る）
-- これをやっていないと、最初のリクエストで「relation "Session" does not exist」などで落ちることがあります。
+- マイグレーションが 1 回でも失敗すると **サーバーが起動せず status 1** になります。
+- 復旧スクリプト（`scripts/render-migrate.sh`）も **実行されません**（`npm run start` 経由ではないため）。
 
-### 別案（マイグレーションは手動でやる場合）
-
-```bash
-npx react-router-serve ./build/server/index.js
-```
-
-この場合は、**初回だけ** Render の **Shell** やローカルから `npx prisma migrate deploy` を実行してテーブルを作っておく必要があります。
-
-**設定場所**: サービス → **Settings** → **Build & Deploy** → **Start Command**
+**設定場所**: サービス → **Settings** → **Build & Deploy** → **Start Command** / **Pre-Deploy Command**
 
 ---
 

@@ -39,6 +39,9 @@ else
   npx prisma db execute \
     --file scripts/ensure-settlement-operation-lock.sql \
     --schema prisma/schema.prisma
+  npx prisma db execute \
+    --file scripts/repair-settlement-lock-migration-record.sql \
+    --schema prisma/schema.prisma
   npx prisma migrate resolve --applied "$LOCK_MIGRATION"
   npx prisma migrate deploy
 fi
