@@ -5,9 +5,10 @@
  * 集計結果を計算して返す（DB保存なし）
  */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
+import { authenticatePosRequestOrCorsError, corsPreflightResponse } from "../utils/posAuth.server";
 import { buildSettlementPreview } from "../services/settlementEngine.server";
-import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
+import { upsertDailySummaryCacheFromPreview } from "../services/salesSummaryEngine.server";
+import { settlementApiErrorResponse } from "../utils/settlementApiError.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method === "OPTIONS") return corsPreflightResponse(request);
@@ -37,22 +38,20 @@ export async function action({ request }: ActionFunctionArgs) {
       String(targetDate),
     );
 
-    // 精算と同様に、該当日の売上サマリーキャッシュを更新（期間表示と数値の一貫性を保つ）
+    // プレビュー結果で日次キャッシュのみ更新（Shopify の二重呼び出しを避ける）
     try {
-      await computeAndCacheDailySummary(
-        admin,
+      await upsertDailySummaryCacheFromPreview(
         shop.id,
         String(locationId),
-        String(locationName ?? ""),
         String(targetDate),
+        preview,
       );
     } catch {
-      // キャッシュ更新失敗は精算結果に影響させない
+      // キャッシュ更新失敗は精算プレビュー表示には影響させない
     }
 
     return corsJson({ ok: true, preview });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return corsErrorJson(request, { ok: false, error: message }, 500);
+    return settlementApiErrorResponse(request, err);
   }
 }

@@ -4,6 +4,7 @@
  * 未保存時のみ Shopify の shop.ianaTimezone を使う（要件 §3 一般設定との整合）。
  */
 import { getAppSetting, GENERAL_SETTINGS_KEY, type GeneralSettings } from "./appSettings.server";
+import { adminGraphqlWithRetry } from "../lib/shopifyGraphqlThrottle.server";
 
 type AdminClient = {
   graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }>;
@@ -43,8 +44,12 @@ export async function getShopIanaTimezone(
   admin: AdminClient
 ): Promise<string | null> {
   try {
-    const res = await admin.graphql(SHOP_TIMEZONE_QUERY);
-    const json = await res.json() as { data?: { shop?: { ianaTimezone?: string } } };
+    const json = await adminGraphqlWithRetry<{ data?: { shop?: { ianaTimezone?: string } } }>(
+      admin,
+      SHOP_TIMEZONE_QUERY,
+      undefined,
+      "shopTimezone",
+    );
     const tz = json.data?.shop?.ianaTimezone;
     return typeof tz === "string" && tz.trim() ? tz.trim() : null;
   } catch {

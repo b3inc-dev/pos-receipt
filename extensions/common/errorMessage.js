@@ -16,6 +16,9 @@ const MAP = {
   "403": "アクセスが拒否されました。",
   "404": "見つかりません。",
   "500": "サーバーエラーです。しばらくしてから再試行してください。",
+  "503": "混雑しています。しばらくしてからお試しください。",
+  throttled: "混雑しています。しばらくしてからお試しください。",
+  "混雑しています。しばらくしてからお試しください。": "混雑しています。しばらくしてからお試しください。",
 };
 
 /**
@@ -36,5 +39,6 @@ export function toUserMessage(msg) {
   if (t.includes("failed to fetch")) return MAP["failed to fetch"];
   if (t.includes("network")) return MAP["network error"];
   if (t.includes("unauthorized") || t === "401") return MAP["401"];
+  if (t.includes("throttled") || t.includes("混雑しています")) return MAP.throttled;
   return msg;
 }

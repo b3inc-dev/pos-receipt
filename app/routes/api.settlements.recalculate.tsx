@@ -8,7 +8,8 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import { buildSettlementPreview } from "../services/settlementEngine.server";
 import { syncSettlementOrderLikeGas } from "../services/settlementOrderGas.server";
-import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
+import { upsertDailySummaryCacheFromPreview } from "../services/salesSummaryEngine.server";
+import { settlementApiErrorResponse } from "../utils/settlementApiError.server";
 import { resolveSettlementOrderSyncOptions } from "../services/settlementSyncSettings.server";
 import prisma from "../db.server";
 
@@ -61,14 +62,12 @@ export async function action({ request }: ActionFunctionArgs) {
       String(targetDate),
     );
 
-    // 精算と同様に、該当日の売上サマリーキャッシュを更新（期間表示と数値の一貫性を保つ）
     try {
-      await computeAndCacheDailySummary(
-        admin,
+      await upsertDailySummaryCacheFromPreview(
         shop.id,
         String(locationId),
-        String(locationName ?? ""),
         String(targetDate),
+        preview,
       );
     } catch {
       // キャッシュ更新失敗は精算結果に影響させない
@@ -104,7 +103,6 @@ export async function action({ request }: ActionFunctionArgs) {
 
     return corsJson({ ok: true, preview, sourceOrderId, sourceOrderName });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return corsErrorJson(request, { ok: false, error: message }, 500);
+    return settlementApiErrorResponse(request, err);
   }
 }

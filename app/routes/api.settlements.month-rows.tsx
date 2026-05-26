@@ -2,7 +2,7 @@
  * GET /api/settlements/month-rows
  * POS精算モーダル用：月内日別データ一括取得
  * - 過去日：DBのみ参照（Shopify API呼び出しなし）
- * - 当日のみ：キャッシュなければ computeAndCacheDailySummary を1回（失敗時は0にフォールバック）
+ * - 当日の Shopify 再集計は行わない（プレビュー API 側でキャッシュ更新。Throttled 防止）
  * Query: locationId, year, month
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
@@ -12,7 +12,6 @@ import {
   corsPreflightResponse,
 } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
@@ -34,7 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
-    const { admin, shop, corsJson } = authResult;
+    const { shop, corsJson } = authResult;
 
     const url = new URL(request.url);
     const locationId = url.searchParams.get("locationId");
@@ -60,37 +59,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const lastDay = new Date(year, month, 0).getDate();
     const dateTo = `${ym}-${String(lastDay).padStart(2, "0")}`;
     const effectiveDateTo = dateTo > today ? today : dateTo;
-    const isCurrentMonth = today.startsWith(ym);
-
-    // 当月かつ今日のキャッシュがなければ再計算（フリーズ防止: 失敗しても続行）
-    if (isCurrentMonth) {
-      const todayCache = await prisma.salesSummaryCacheDaily.findFirst({
-        where: {
-          shopId: shop.id,
-          locationId: { in: locationIds },
-          targetDate: today,
-        },
-        select: { id: true },
-      });
-      if (!todayCache) {
-        const loc = await prisma.location.findFirst({
-          where: { shopId: shop.id, shopifyLocationGid: locationGid },
-          select: { name: true },
-        });
-        try {
-          await computeAndCacheDailySummary(
-            admin,
-            shop.id,
-            locationGid,
-            loc?.name ?? "",
-            today
-          );
-        } catch {
-          // 当日の再計算失敗はフリーズさせない。0表示にフォールバック
-        }
-      }
-    }
-
     // DB から Settlement・キャッシュを一括取得（Shopify API呼び出しなし）
     const [settlements, cacheRows] = await Promise.all([
       prisma.settlement.findMany({

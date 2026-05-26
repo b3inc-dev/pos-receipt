@@ -31,6 +31,12 @@ import {
   orderHasRefundInDay,
   type RefundAggregationContext,
 } from "./refundAggregation.server";
+import {
+  adminGraphqlWithRetry,
+  GRAPHQL_PAGE_DELAY_MS,
+  runSettlementGraphqlSerial,
+  sleep,
+} from "../lib/shopifyGraphqlThrottle.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -308,10 +314,7 @@ async function fetchAllOrders(
   let hasNextPage = true;
 
   while (hasNextPage) {
-    const response = await admin.graphql(SETTLEMENT_ORDERS_QUERY, {
-      variables: { first: 100, after: cursor, query, sortKey },
-    });
-    const json = await response.json() as {
+    const json = await adminGraphqlWithRetry<{
       data?: {
         orders?: {
           nodes?: (ShopifyOrder & {
@@ -320,7 +323,12 @@ async function fetchAllOrders(
           pageInfo?: { hasNextPage: boolean; endCursor: string };
         };
       };
-    };
+    }>(
+      admin,
+      SETTLEMENT_ORDERS_QUERY,
+      { variables: { first: 100, after: cursor, query, sortKey } },
+      "settlementOrders",
+    );
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
@@ -344,6 +352,7 @@ async function fetchAllOrders(
 
     hasNextPage = pageInfo?.hasNextPage ?? false;
     cursor = pageInfo?.endCursor ?? null;
+    if (hasNextPage) await sleep(GRAPHQL_PAGE_DELAY_MS);
   }
 
   return orders;
@@ -381,10 +390,7 @@ async function fetchOrdersUpdatedInDayRange(
   let hasNextPage = true;
 
   while (hasNextPage) {
-    const response = await admin.graphql(REFUNDS_ORDERS_QUERY, {
-      variables: { first: 100, after: cursor, query },
-    });
-    const json = await response.json() as {
+    const json = await adminGraphqlWithRetry<{
       data?: {
         orders?: {
           nodes?: (OrderWithRefundsCreatedAt & {
@@ -393,7 +399,12 @@ async function fetchOrdersUpdatedInDayRange(
           pageInfo?: { hasNextPage: boolean; endCursor: string };
         };
       };
-    };
+    }>(
+      admin,
+      REFUNDS_ORDERS_QUERY,
+      { variables: { first: 100, after: cursor, query } },
+      "refundsOrders",
+    );
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
@@ -415,6 +426,7 @@ async function fetchOrdersUpdatedInDayRange(
 
     hasNextPage = pageInfo?.hasNextPage ?? false;
     cursor = pageInfo?.endCursor ?? null;
+    if (hasNextPage) await sleep(GRAPHQL_PAGE_DELAY_MS);
   }
 
   return orders;
@@ -1052,6 +1064,19 @@ export async function buildSettlementPreview(
   targetDate: string,
   opts?: { debug?: boolean },
 ): Promise<SettlementPreviewDTO> {
+  return runSettlementGraphqlSerial(shopId, () =>
+    buildSettlementPreviewImpl(admin, shopId, locationId, locationName, targetDate, opts),
+  );
+}
+
+async function buildSettlementPreviewImpl(
+  admin: AdminClient,
+  shopId: string,
+  locationId: string,
+  locationName: string,
+  targetDate: string,
+  opts?: { debug?: boolean },
+): Promise<SettlementPreviewDTO> {
   const debugEnabled = opts?.debug === true;
   const locIdRaw = locationId.replace("gid://shopify/Location/", "");
   if (!locIdRaw || !/^\d+$/.test(locIdRaw)) {
@@ -1067,7 +1092,9 @@ export async function buildSettlementPreview(
   const shopifyQueryUpdated = `location_id:${locIdRaw} source_name:pos updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
 
   const createdRaw = await fetchAllOrders(admin, shopifyQueryCreated, "CREATED_AT");
+  await sleep(GRAPHQL_PAGE_DELAY_MS);
   const updatedRaw = await fetchAllOrders(admin, shopifyQueryUpdated, "UPDATED_AT");
+  await sleep(GRAPHQL_PAGE_DELAY_MS);
 
   const shopifyQueryUpdatedBroad = `source_name:pos updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const updatedBroadRaw = await fetchAllOrders(admin, shopifyQueryUpdatedBroad, "UPDATED_AT");

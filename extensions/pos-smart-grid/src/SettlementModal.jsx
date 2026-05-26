@@ -211,7 +211,7 @@ function SettlementModal() {
   }, []);
 
   const fetchPreviewForDate = useCallback(
-    async ({ date, inspection = false, openStep = "preview" }) => {
+    async ({ date, inspection = false, openStep = "preview", refreshMonthRows = false }) => {
       if (!selectedLocation) return false;
       hideSettlementIssueConfirmModals();
       setLoading(true);
@@ -226,6 +226,9 @@ function SettlementModal() {
         setTargetDate(date);
         setPreview(res.preview);
         setStep(openStep);
+        if (refreshMonthRows) {
+          await loadMonthRows(selectedLocation.locationId, selectedYear, selectedMonth);
+        }
         return true;
       } catch (e) {
         setError(toUserMessage(e?.message) || "精算内容の取得に失敗しました");
@@ -234,7 +237,7 @@ function SettlementModal() {
         setLoading(false);
       }
     },
-    [selectedLocation]
+    [selectedLocation, selectedYear, selectedMonth, loadMonthRows]
   );
 
   const handleCreate = useCallback(async () => {
@@ -310,14 +313,20 @@ function SettlementModal() {
     loadMonthRows(selectedLocation?.locationId, selectedYear, selectedMonth);
   }, [selectedLocation?.locationId, selectedYear, selectedMonth, loadMonthRows]);
 
-  // 初回は当日の精算画面を自動表示（精算運用の主導線）
+  // 初回は当日の精算画面を自動表示（月別一覧の読み込み後にプレビュー＝API競合を避ける）
   useEffect(() => {
-    if (!selectedLocation || initialPreviewLoaded) return;
+    if (!selectedLocation || initialPreviewLoaded || monthRowsLoading) return;
     const t = todayStr();
-    fetchPreviewForDate({ date: t, inspection: false, openStep: "preview" }).finally(() =>
-      setInitialPreviewLoaded(true)
-    );
-  }, [selectedLocation, initialPreviewLoaded, fetchPreviewForDate]);
+    const timer = setTimeout(() => {
+      fetchPreviewForDate({
+        date: t,
+        inspection: false,
+        openStep: "preview",
+        refreshMonthRows: true,
+      }).finally(() => setInitialPreviewLoaded(true));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [selectedLocation, initialPreviewLoaded, monthRowsLoading, fetchPreviewForDate]);
 
   if (step === "main") {
     return (

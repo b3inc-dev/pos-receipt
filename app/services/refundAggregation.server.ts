@@ -9,6 +9,7 @@ import {
   type SettlementSettings,
 } from "../utils/appSettings.server";
 import { setOrderRefundAggregationLocationGid } from "./posOrderMetafields.server";
+import { adminGraphqlWithRetry } from "../lib/shopifyGraphqlThrottle.server";
 
 type AdminClient = {
   graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }>;
@@ -199,10 +200,7 @@ export async function fetchOrderForRefundAggregation(
   admin: AdminClient,
   orderGid: string,
 ): Promise<OrderForRefundAggregation | null> {
-  const res = await admin.graphql(ORDER_FOR_REFUND_AGGREGATION_QUERY, {
-    variables: { id: orderGid },
-  });
-  const json = (await res.json()) as {
+  const json = await adminGraphqlWithRetry<{
     data?: {
       order?: {
         id: string;
@@ -214,7 +212,12 @@ export async function fetchOrderForRefundAggregation(
         }>;
       };
     };
-  };
+  }>(
+    admin,
+    ORDER_FOR_REFUND_AGGREGATION_QUERY,
+    { variables: { id: orderGid } },
+    "refundAggregationOrder",
+  );
 
   const node = json.data?.order;
   if (!node) return null;

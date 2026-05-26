@@ -5,6 +5,7 @@
  * - 注文がある場合は retailLocation でロケーション一致、無い場合は GAS 同型 LOC:店名 をギフトカード note で判定
  */
 import type { DayRangeUtc } from "../utils/shopTimezone.server";
+import { adminGraphqlWithRetry, GRAPHQL_PAGE_DELAY_MS, sleep } from "../lib/shopifyGraphqlThrottle.server";
 
 type AdminLike = {
   graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }>;
@@ -173,10 +174,7 @@ export async function fetchLegacyGiftCardIssuanceForDay(
   let usedFallback = false;
 
   while (hasNext) {
-    const response = await admin.graphql(LEGACY_GIFT_CARDS_QUERY, {
-      variables: { first: 100, after: cursor, query: q },
-    });
-    const json = (await response.json()) as {
+    const json = await adminGraphqlWithRetry<{
       data?: {
         giftCards?: {
           edges?: { node: GiftCardNode }[];
@@ -184,7 +182,9 @@ export async function fetchLegacyGiftCardIssuanceForDay(
         };
       };
       errors?: { message?: string }[];
-    };
+    }>(admin, LEGACY_GIFT_CARDS_QUERY, {
+      variables: { first: 100, after: cursor, query: q },
+    }, "legacyGiftCards");
 
     if (json.errors?.length) {
       usedFallback = true;
@@ -196,6 +196,7 @@ export async function fetchLegacyGiftCardIssuanceForDay(
     const pi = json.data?.giftCards?.pageInfo;
     hasNext = pi?.hasNextPage ?? false;
     cursor = pi?.endCursor ?? null;
+    if (hasNext) await sleep(GRAPHQL_PAGE_DELAY_MS);
   }
 
   if (!usedFallback) {
@@ -208,10 +209,7 @@ export async function fetchLegacyGiftCardIssuanceForDay(
   result.count = 0;
 
   while (hasNext) {
-    const response = await admin.graphql(LEGACY_GIFT_CARDS_FALLBACK_QUERY, {
-      variables: { first: 100, after: cursor },
-    });
-    const json = (await response.json()) as {
+    const json = await adminGraphqlWithRetry<{
       data?: {
         giftCards?: {
           edges?: { node: GiftCardNode }[];
@@ -219,7 +217,9 @@ export async function fetchLegacyGiftCardIssuanceForDay(
         };
       };
       errors?: { message?: string }[];
-    };
+    }>(admin, LEGACY_GIFT_CARDS_FALLBACK_QUERY, {
+      variables: { first: 100, after: cursor },
+    }, "legacyGiftCardsFallback");
 
     if (json.errors?.length) {
       return { amount: 0, count: 0 };
@@ -240,6 +240,7 @@ export async function fetchLegacyGiftCardIssuanceForDay(
     hasNext = (pi?.hasNextPage ?? false) && !stopPaging;
     cursor = pi?.endCursor ?? null;
     if (edges.length === 0) hasNext = false;
+    if (hasNext) await sleep(GRAPHQL_PAGE_DELAY_MS);
   }
 
   return result;
