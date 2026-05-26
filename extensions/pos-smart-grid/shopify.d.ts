@@ -26,7 +26,7 @@ declare module './src/SpecialRefundTile.jsx' {
 
 //@ts-ignore
 declare module './src/SpecialRefundModal.jsx' {
-  const shopify: import('@shopify/ui-extensions/pos.home.modal.render').Api;
+  const shopify: import('@shopify/ui-extensions/pos.order-details.action.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
 
@@ -44,6 +44,12 @@ declare module './src/ReceiptTile.jsx' {
 
 //@ts-ignore
 declare module './src/SalesSummaryModal.jsx' {
+  const shopify: import('@shopify/ui-extensions/pos.home.modal.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/SpecialRefundModal.jsx' {
   const shopify: import('@shopify/ui-extensions/pos.home.modal.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
@@ -68,7 +74,25 @@ declare module './src/ReceiptOrderAction.jsx' {
 
 //@ts-ignore
 declare module './src/FixedFooterNavBar.jsx' {
+  const shopify: import('@shopify/ui-extensions/pos.order-details.action.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/OrderDayListScreen.jsx' {
+  const shopify: import('@shopify/ui-extensions/pos.order-details.action.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/FixedFooterNavBar.jsx' {
   const shopify: import('@shopify/ui-extensions/pos.home.modal.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/OrderDetailSummary.jsx' {
+  const shopify: import('@shopify/ui-extensions/pos.order-details.action.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
 
@@ -87,5 +111,11 @@ declare module './src/OrderDetailSummary.jsx' {
 //@ts-ignore
 declare module './src/orderDisplayUtils.js' {
   const shopify: import('@shopify/ui-extensions/pos.home.modal.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/orderDisplayUtils.js' {
+  const shopify: import('@shopify/ui-extensions/pos.order-details.action.render').Api;
   const globalThis: { shopify: typeof shopify };
 }

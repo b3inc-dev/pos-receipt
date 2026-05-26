@@ -38,9 +38,10 @@ description = "商品券釣銭調整"
 module = "./src/VoucherOrderAction.jsx"
 target = "pos.order-details.action.menu-item.render"
 
+# home.modal は tile 必須のため、取引詳細専用モーダル target を使用
 [[extensions.targeting]]
 module = "./src/SpecialRefundModal.jsx"
-target = "pos.home.modal.render"
+target = "pos.order-details.action.render"
 
 # ============================================================
 # 精算タイル（Phase 5 実装済み）
