@@ -7,7 +7,7 @@ services:
     buildCommand: npm install && npx prisma generate && npm run build
     # 重要: 古い「npx prisma migrate deploy && npx react-router-serve」は使わない
     # POS の CORS は server.js が処理するため npm run start を使う
-    preDeployCommand: bash scripts/render-migrate.sh
+    preDeployCommand: npm run render:migrate
     startCommand: npm run start
     envVars:
       - key: NODE_VERSION

@@ -27,7 +27,29 @@ function corsPreflightMiddleware(req, res, next) {
   res.status(204).end();
 }
 
+function requireEnv(name) {
+  const value = process.env[name]?.trim();
+  if (!value) return name;
+  return null;
+}
+
 async function main() {
+  const missing = [
+    requireEnv("DATABASE_URL"),
+    requireEnv("SHOPIFY_API_KEY"),
+    requireEnv("SHOPIFY_API_SECRET"),
+    requireEnv("SHOPIFY_APP_URL"),
+  ].filter(Boolean);
+
+  if (missing.length > 0) {
+    console.error(
+      "[server] 必須の環境変数が未設定です:",
+      missing.join(", "),
+      "— Render の Environment を確認してください。",
+    );
+    process.exit(1);
+  }
+
   const build = await import(buildPath);
   const mode = process.env.NODE_ENV || "production";
   const port = Number(process.env.PORT) || 3000;

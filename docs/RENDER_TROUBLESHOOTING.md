@@ -56,10 +56,11 @@ npm install && npx prisma generate && npm run build
 | 項目 | 値 |
 |------|-----|
 | **Build Command** | `npm install && npx prisma generate && npm run build` |
-| **Pre-Deploy Command**（あれば） | `bash scripts/render-migrate.sh` |
-| **Start Command** | `npm run start` |
+| **Pre-Deploy Command**（任意） | `npm run render:migrate`（失敗しても exit 0・デプロイは続行） |
+| **Start Command** | `npm run start`（= `node server.js` のみ） |
 
-- `npm run start` は内部で `bash scripts/render-start.sh` → `node server.js` を実行します。
+- **Pre-Deploy に `npx prisma migrate deploy` だけを書かない**（失敗するとデプロイ全体が止まる）。
+- `npm run start` は **マイグレーションを含まない**ので、初回は Pre-Deploy か Shell で `npm run render:migrate` を実行する。
 - **POS の CORS（OPTIONS）** は `server.js` が処理します。`react-router-serve` だけにすると POS から接続できないことがあります。
 
 ### 使ってはいけない例（デプロイが落ちやすい）
@@ -72,6 +73,11 @@ npx prisma migrate deploy && npx react-router-serve ./build/server/index.js
 - 復旧スクリプト（`scripts/render-migrate.sh`）も **実行されません**（`npm run start` 経由ではないため）。
 
 **設定場所**: サービス → **Settings** → **Build & Deploy** → **Start Command** / **Pre-Deploy Command**
+
+### Deploy failed なのに Logs に `Missing values for: apiKey` と出る場合
+
+`SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` / `SHOPIFY_APP_URL` / `DATABASE_URL` のどれかが空です。  
+インハウス（Ciara）と公開（public）で **別の Client ID・Secret・APP_URL** を設定してください（`docs/DEPLOY_PUBLIC_AND_INHOUSE.md` 参照）。
 
 ---
 

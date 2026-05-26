@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# Render 本番起動: マイグレーション（失敗しても続行）→ カスタムサーバー
+# 互換用（推奨は npm run start = node server.js のみ）
 cd "$(dirname "$0")/.."
-
-echo "[render-start] running migrations (non-blocking)"
-bash scripts/render-migrate.sh
-
-echo "[render-start] starting node server.js"
+node scripts/render-migrate.mjs
 exec node server.js
