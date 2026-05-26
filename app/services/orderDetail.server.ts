@@ -44,7 +44,9 @@ export const ORDER_DETAIL_QUERY = `#graphql
           }
           staffMember {
             id
-            displayName
+            name
+            firstName
+            lastName
           }
           customAttributes {
             key
@@ -143,7 +145,16 @@ export function serializeOrderDetail(
       amount: moneyAmount(tl.priceSet as MoneyBag),
     }));
     const variant = li.variant as { title?: string; barcode?: string } | null;
-    const staff = li.staffMember as { id?: string; displayName?: string } | null;
+    const staff = li.staffMember as {
+      id?: string;
+      name?: string;
+      firstName?: string;
+      lastName?: string;
+    } | null;
+    const staffName =
+      staff?.name?.trim() ||
+      [staff?.firstName, staff?.lastName].filter(Boolean).join(" ").trim() ||
+      "";
     return {
       id: li.id,
       title: String(li.title ?? li.name ?? ""),
@@ -155,7 +166,7 @@ export function serializeOrderDetail(
       discountedUnitPrice: moneyAmount(li.discountedUnitPriceSet as MoneyBag),
       lineTotal: String(Math.round(unit * qty)),
       refundableQuantity: Number(li.refundableQuantity ?? 0),
-      staffMemberName: staff?.displayName ?? "",
+      staffMemberName: staffName,
       customAttributes: ((li.customAttributes as { key?: string; value?: string }[]) ?? []).map((a) => ({
         key: a.key,
         value: a.value,
