@@ -15,7 +15,10 @@ import {
   DEFAULT_LOYALTY_SETTINGS,
   SETTLEMENT_SETTINGS_KEY,
   DEFAULT_SETTLEMENT_SETTINGS,
+  SPECIAL_REFUND_SETTINGS_KEY,
+  DEFAULT_SPECIAL_REFUND_SETTINGS,
   type SettlementSettings,
+  type SpecialRefundSettings,
 } from "../utils/appSettings.server";
 import { fetchLegacyGiftCardIssuanceForDay } from "./settlementLegacyGiftCards.server";
 import {
@@ -1104,12 +1107,35 @@ async function buildSettlementPreviewImpl(
     },
   });
 
-  const voucherAdjustments = specialRefundEvents.filter(
-    (e) => e.eventType === "voucher_change_adjustment"
+  const srSettingsRaw = await getAppSetting<Partial<SpecialRefundSettings>>(
+    shopId,
+    SPECIAL_REFUND_SETTINGS_KEY,
   );
-  const otherEvents = specialRefundEvents.filter(
-    (e) => e.eventType !== "voucher_change_adjustment"
+  const srSettings: SpecialRefundSettings = {
+    ...DEFAULT_SPECIAL_REFUND_SETTINGS,
+    ...srSettingsRaw,
+  };
+
+  const voucherAdjustmentsAll = specialRefundEvents.filter(
+    (e) => e.eventType === "voucher_change_adjustment",
   );
+  const otherEventsAll = specialRefundEvents.filter(
+    (e) => e.eventType !== "voucher_change_adjustment",
+  );
+
+  const voucherAdjustments = srSettings.reflectVoucherAdjustmentToSettlement
+    ? voucherAdjustmentsAll
+    : [];
+  const otherEvents = otherEventsAll.filter((e) => {
+    if (e.eventType === "cash_refund") return srSettings.reflectCashRefundToSettlement;
+    if (e.eventType === "payment_method_override") {
+      return srSettings.reflectPaymentOverrideToSettlement;
+    }
+    if (e.eventType === "receipt_cash_adjustment") {
+      return srSettings.reflectReceiptCashAdjustmentToSettlement;
+    }
+    return true;
+  });
 
   /** DB の手入力調整 + ノート観測（GAS _voucher_change_total と同系） */
   const voucherChangeAmount =

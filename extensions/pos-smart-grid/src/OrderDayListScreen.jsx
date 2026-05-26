@@ -7,6 +7,7 @@ import { searchOrders } from "../../common/orderPickerApi.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
+import { LIST_SEGMENTS, matchesListSegment, formatListBadges } from "./orderDisplayUtils.js";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -31,19 +32,15 @@ function ymdToStr(y, m, day) {
  * @returns {string[]}
  */
 export function formatPosBadgeLabels(item, badgeMode) {
-  const b = item?.posBadges ?? {};
-  const out = [];
   if (badgeMode === "receipt") {
+    const b = item?.posBadges ?? {};
+    const out = [];
     if (b.receiptIssued) out.push("領収書発行済");
     if (b.refundedShopify) out.push("返金");
     if (b.voucherLikeGateway) out.push("商品券決済");
-  } else {
-    if (b.hasSpecialRefund) out.push("特殊返金あり");
-    if (b.hasVoucherAdjustment) out.push("商品券調整あり");
-    if (b.refundedShopify) out.push("返金");
-    if (b.voucherLikeGateway) out.push("商品券決済");
+    return out;
   }
-  return out;
+  return formatListBadges(item).map((x) => x.label);
 }
 
 /**
@@ -81,6 +78,7 @@ export function OrderDayListScreen({
   const [listError, setListError] = useState("");
   const [nextCursor, setNextCursor] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [listSegment, setListSegment] = useState("all");
 
   const availableYears = useMemo(() => {
     return [t0.y, t0.y - 1, t0.y - 2];
@@ -312,6 +310,21 @@ export function OrderDayListScreen({
               </s-box>
             ) : null}
 
+            {badgeMode === "specialRefund" ? (
+              <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%" }}>
+                {LIST_SEGMENTS.map((seg) => (
+                  <s-button
+                    key={seg.value}
+                    kind={listSegment === seg.value ? "primary" : "secondary"}
+                    style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
+                    onClick={() => setListSegment(seg.value)}
+                  >
+                    {seg.label}
+                  </s-button>
+                ))}
+              </s-stack>
+            ) : null}
+
             {dayMenuOpen ? (
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
@@ -366,7 +379,10 @@ export function OrderDayListScreen({
                 <s-text tone="subdued" size="small">この日の取引はありません。</s-text>
               ) : (
                 <s-stack gap="base">
-                  {items.map((order) => {
+                  {items.filter((order) => matchesListSegment(order, listSegment)).length === 0 ? (
+                    <s-text tone="subdued" size="small">この条件の取引はありません。</s-text>
+                  ) : null}
+                  {items.filter((order) => matchesListSegment(order, listSegment)).map((order) => {
                     const badges = formatPosBadgeLabels(order, badgeMode);
                     return (
                       <s-clickable
@@ -383,9 +399,14 @@ export function OrderDayListScreen({
                                 ¥{Number(order.totalPrice).toLocaleString()}
                               </s-text>
                             </s-stack>
-                            <s-text tone="subdued" fontSize="small">
-                              {order.customerName || "顧客なし"}
-                            </s-text>
+                            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
+                              <s-text tone="subdued" fontSize="small">
+                                {order.customerName || "顧客なし"}
+                              </s-text>
+                              {order.transactionTime ? (
+                                <s-text tone="subdued" fontSize="small">{order.transactionTime}</s-text>
+                              ) : null}
+                            </s-stack>
                             {badges.length > 0 ? (
                               <s-text tone="subdued" fontSize="small">
                                 {badges.map((b) => `［${b}］`).join(" ")}

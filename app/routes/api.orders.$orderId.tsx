@@ -1,37 +1,21 @@
 /**
  * GET /api/orders/:orderId
- * 要件書 21.2: 注文詳細（core, transactions, refunds, customer, location, line items）
+ * 注文詳細（Shopify POS 同等のサマリー）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
-
-const ORDER_DETAIL_QUERY = `#graphql
-  query OrderDetail($id: ID!) {
-    order(id: $id) {
-      id
-      name
-      createdAt
-      displayFinancialStatus
-      totalPriceSet { shopMoney { amount currencyCode } }
-      retailLocation {
-        id
-        name
-      }
-    }
-  }
-`;
+import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
+import { ORDER_DETAIL_QUERY, serializeOrderDetail } from "../services/orderDetail.server";
+import { getPaymentMethodVoucherInfo } from "../utils/paymentMethod.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
-    const { admin, corsJson } = authResult;
+    const { admin, shop, corsJson } = authResult;
     const orderId = params.orderId;
     if (!orderId) {
-      return corsJson(
-        { ok: false, error: "orderId required" },
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      return corsJson({ ok: false, error: "orderId required" }, { status: 400 });
     }
 
     const gid = orderId.startsWith("gid://") ? orderId : `gid://shopify/Order/${orderId}`;
@@ -44,35 +28,35 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (json.errors?.length) {
       return corsJson(
         { ok: false, error: "GraphQL error", details: json.errors },
-        { status: 500, headers: { "Content-Type": "application/json" } }
+        { status: 500 },
       );
     }
 
     const order = json.data?.order;
     if (!order) {
-      return corsJson(
-        { ok: false, error: "Order not found" },
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
+      return corsJson({ ok: false, error: "Order not found" }, { status: 404 });
     }
 
-    const result = {
-      orderId: order.id?.replace("gid://shopify/Order/", "") ?? order.id,
-      orderName: order.name,
-      createdAt: order.createdAt,
-      financialStatus: order.displayFinancialStatus,
-      totalPrice: order.totalPriceSet?.shopMoney ?? {},
-      customer: null,
-      location: order.retailLocation
-        ? { id: order.retailLocation.id, name: order.retailLocation.name }
-        : null,
-      lineItems: [],
-      transactions: [],
-      refunds: [],
-    };
+    const timezone = await getShopTimezoneForDaily(admin, shop.id);
+    const result = serializeOrderDetail(order as Record<string, unknown>, { timezone });
 
-    return corsJson(result, {
-      headers: { "Content-Type": "application/json" },
+    const gateways = ((result.transactions as { gateway?: string }[]) ?? []).map((t) => t.gateway ?? "");
+    let hasVoucherChange = false;
+    for (const gw of gateways) {
+      if (!gw) continue;
+      const info = await getPaymentMethodVoucherInfo(shop.id, gw);
+      if (info.voucherChangeSupported) {
+        hasVoucherChange = true;
+        break;
+      }
+    }
+    if (!hasVoucherChange && /商品券/.test(String(result.note ?? ""))) {
+      hasVoucherChange = true;
+    }
+
+    return corsJson({
+      ...result,
+      estimatedVoucherChange: hasVoucherChange,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";

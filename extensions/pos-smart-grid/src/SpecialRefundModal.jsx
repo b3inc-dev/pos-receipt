@@ -22,6 +22,8 @@ import {
 import { toUserMessage } from "../../common/errorMessage.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
+import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
+import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 
 const STORAGE_KEY_REFUND = "pos_special_refund_order_id";
 const STORAGE_KEY_VOUCHER = "pos_voucher_adjustment_order_id";
@@ -46,15 +48,9 @@ const REFUND_EVENT_TYPES = [
   { value: "receipt_cash_adjustment", label: "レシート現金調整" },
 ];
 
-// 支払手段選択肢
-const PAYMENT_METHODS = [
+const FALLBACK_PAYMENT_METHODS = [
   { value: "cash", label: "現金" },
-  { value: "credit_card", label: "クレジットカード" },
-  { value: "e_money", label: "電子マネー" },
-  { value: "qr_code", label: "QRコード決済" },
-  { value: "voucher", label: "商品券" },
-  { value: "points", label: "ポイント" },
-  { value: "other", label: "その他" },
+  { value: "manual", label: "手動決済" },
 ];
 
 const ADJUST_KINDS = [
@@ -252,7 +248,7 @@ function OrderDetailView({
   const voidedEvents = events.filter((e) => e.status === "voided");
 
   return (
-    <s-page heading="特殊返金・商品券調整">
+    <s-page heading="特殊返金調整・商品券釣銭調整">
       <s-stack
         gap="none"
         blockSize="100%"
@@ -289,15 +285,19 @@ function OrderDetailView({
         >
           <s-box padding="base">
             <s-stack gap="base">
+              <OrderDetailSummary order={order} />
+
+              <s-divider />
+
+              <s-text fontWeight="bold" size="small">アプリイベント</s-text>
               {activeEvents.length > 0 ? (
                 <s-stack gap="small">
-                  <s-text fontWeight="bold" size="small">登録済みイベント ({activeEvents.length}件)</s-text>
                   {activeEvents.map((ev) => (
                     <EventCard key={ev.id} event={ev} onVoid={onVoid} loading={loading} />
                   ))}
                 </s-stack>
               ) : (
-                <s-text tone="subdued" size="small">この取引のイベントはありません。</s-text>
+                <s-text tone="subdued" size="small">登録済みのイベントはありません。</s-text>
               )}
 
               {voidedEvents.length > 0 ? (
@@ -318,10 +318,10 @@ function OrderDetailView({
           leftLabel={fromOrderEntry ? "閉じる" : "戻る"}
           onLeft={onBack}
           leftDisabled={loading}
-          middleLabel="特殊返金"
+          middleLabel="特殊返金調整"
           onMiddle={onRefund}
           middleDisabled={loading}
-          rightLabel="商品券調整"
+          rightLabel="商品券釣銭調整"
           onRight={onVoucher}
           rightDisabled={loading}
         />
@@ -348,10 +348,10 @@ function EventCard({ event, onVoid, loading }) {
           </s-text>
         ) : null}
 
-        {event.originalPaymentMethod || event.actualRefundMethod ? (
+            {event.originalPaymentMethod || event.actualRefundMethod ? (
           <s-text tone="subdued" fontSize="small">
-            {event.originalPaymentMethod ? `元: ${paymentLabel(event.originalPaymentMethod)}` : ""}
-            {event.actualRefundMethod ? ` → 返金: ${paymentLabel(event.actualRefundMethod)}` : ""}
+            {event.originalPaymentMethod ? `元: ${event.originalPaymentMethod}` : ""}
+            {event.actualRefundMethod ? ` → 返金: ${event.actualRefundMethod}` : ""}
           </s-text>
         ) : null}
 
@@ -383,11 +383,28 @@ function EventCard({ event, onVoid, loading }) {
 function SpecialRefundForm({ order, loading, error, setLoading, setError, onBack, onSuccess }) {
   const [eventType, setEventType] = useState("cash_refund");
   const [amount, setAmount] = useState("");
-  const [originalPaymentMethod, setOriginalPaymentMethod] = useState("credit_card");
+  const [paymentMethods, setPaymentMethods] = useState(FALLBACK_PAYMENT_METHODS);
+  const [originalPaymentMethod, setOriginalPaymentMethod] = useState("cash");
   const [actualRefundMethod, setActualRefundMethod] = useState("cash");
   const [adjustKind, setAdjustKind] = useState("undo");
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    listSelectablePaymentMethods({ sync: true })
+      .then((res) => {
+        const items = res.items ?? [];
+        if (items.length > 0) {
+          setPaymentMethods(items);
+          setOriginalPaymentMethod(items[0].value);
+          const cash = items.find((m) => m.category === "cash" || m.value === "cash");
+          setActualRefundMethod(cash?.value ?? items[0].value);
+        }
+      })
+      .catch(() => {
+        setPaymentMethods(FALLBACK_PAYMENT_METHODS);
+      });
+  }, []);
 
   const showPaymentFields =
     eventType === "cash_refund" || eventType === "payment_method_override";
@@ -442,8 +459,8 @@ function SpecialRefundForm({ order, loading, error, setLoading, setError, onBack
                   <Row label="金額" value={`¥${Number(amount).toLocaleString()}`} />
                   {showPaymentFields ? (
                     <>
-                      <Row label="元の手段" value={paymentLabel(originalPaymentMethod)} />
-                      <Row label="返金手段" value={paymentLabel(actualRefundMethod)} />
+                      <Row label="元の手段" value={paymentLabel(originalPaymentMethod, paymentMethods)} />
+                      <Row label="返金手段" value={paymentLabel(actualRefundMethod, paymentMethods)} />
                     </>
                   ) : null}
                   {showAdjustKind ? (
@@ -469,7 +486,7 @@ function SpecialRefundForm({ order, loading, error, setLoading, setError, onBack
   }
 
   return (
-    <s-page heading="特殊返金を登録">
+    <s-page heading="特殊返金調整を登録">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
@@ -508,7 +525,7 @@ function SpecialRefundForm({ order, loading, error, setLoading, setError, onBack
                     setOriginalPaymentMethod(e?.currentTarget?.value ?? e?.currentValue?.value ?? originalPaymentMethod)
                   }
                 >
-                  {PAYMENT_METHODS.map((m) => (
+                  {paymentMethods.map((m) => (
                     <s-option key={m.value} value={m.value}>{m.label}</s-option>
                   ))}
                 </s-select>
@@ -519,7 +536,7 @@ function SpecialRefundForm({ order, loading, error, setLoading, setError, onBack
                     setActualRefundMethod(e?.currentTarget?.value ?? e?.currentValue?.value ?? actualRefundMethod)
                   }
                 >
-                  {PAYMENT_METHODS.map((m) => (
+                  {paymentMethods.map((m) => (
                     <s-option key={m.value} value={m.value}>{m.label}</s-option>
                   ))}
                 </s-select>
@@ -626,7 +643,7 @@ function VoucherAdjustmentForm({ order, loading, error, setLoading, setError, on
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
-              <s-text fontWeight="bold">商品券調整を登録します</s-text>
+              <s-text fontWeight="bold">商品券釣銭調整を登録します</s-text>
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <Row label="取引" value={order?.orderName ?? "-"} />
@@ -653,13 +670,18 @@ function VoucherAdjustmentForm({ order, loading, error, setLoading, setError, on
   }
 
   return (
-    <s-page heading="商品券調整を登録">
+    <s-page heading="商品券釣銭調整を登録">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
             {/* 取引情報 */}
             <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-text tone="subdued">対象取引: {order?.orderName ?? "-"}</s-text>
+              <s-stack gap="extraSmall">
+                <s-text tone="subdued">対象取引: {order?.orderName ?? "-"}</s-text>
+                {order?.estimatedVoucherChange ? (
+                  <s-text tone="subdued" fontSize="small">この取引は商品券釣有りの可能性があります</s-text>
+                ) : null}
+              </s-stack>
             </s-box>
 
             {/* 商品券額面 */}
@@ -728,6 +750,6 @@ function Row({ label, value }) {
   );
 }
 
-function paymentLabel(value) {
-  return PAYMENT_METHODS.find((m) => m.value === value)?.label ?? value ?? "-";
+function paymentLabel(value, methods = FALLBACK_PAYMENT_METHODS) {
+  return methods.find((m) => m.value === value)?.label ?? value ?? "-";
 }

@@ -28,6 +28,7 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, MASTER_TABS } from "../components/TabGroupBar";
+import { syncPaymentMethodsFromRecentOrders } from "../services/paymentMethodSync.server";
 
 const CATEGORY_OPTIONS = [
   { label: "現金", value: "cash" },
@@ -50,18 +51,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
 
+  let syncResult: { created: number; gatewaysFound: number } | null = null;
+  try {
+    const r = await syncPaymentMethodsFromRecentOrders(admin, shop.id, 90);
+    syncResult = { created: r.created, gatewaysFound: r.gatewaysFound };
+  } catch {
+    syncResult = null;
+  }
+
   const items = await prisma.paymentMethodMaster.findMany({
     where: { shopId: shop.id },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
   });
 
-  return { items };
+  return { items, syncResult };
 }
 
 type Item = Awaited<ReturnType<typeof loader>>["items"][number];
 
 export default function PaymentMethodsPage() {
-  const { items } = useLoaderData<typeof loader>();
+  const { items, syncResult } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const location = useLocation();
   const navigate = useNavigate();
@@ -237,8 +246,13 @@ export default function PaymentMethodsPage() {
         <Layout>
           <Layout.Section>
             <Banner tone="info">
-              精算レシートの支払方法表示名・特殊返金で選択可能な手段をここで設定します。Shopify の gateway 名に合わせてパターン（含む/完全一致/前方一致）を指定してください。
+              精算レシートの支払方法表示名・特殊返金で選択可能な手段をここで設定します。直近90日のPOS取引から決済名は自動登録されます。必要に応じて表示名・商品券フラグを手直ししてください。
             </Banner>
+            {syncResult && syncResult.created > 0 ? (
+              <Banner tone="success">
+                直近90日の取引から {syncResult.created} 件の決済方法を自動登録しました（検出 {syncResult.gatewaysFound} 種類）。
+              </Banner>
+            ) : null}
           </Layout.Section>
           <Layout.Section>
             <Card>

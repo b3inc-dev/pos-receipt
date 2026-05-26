@@ -45,8 +45,8 @@ function SpecialRefundVoucherOrderActions() {
 
   return (
     <s-stack gap="small">
-      <s-button onClick={onSpecialRefund}>特殊返金</s-button>
-      <s-button onClick={onVoucher}>商品券調整</s-button>
+      <s-button onClick={onSpecialRefund}>特殊返金調整</s-button>
+      <s-button onClick={onVoucher}>商品券釣銭調整</s-button>
     </s-stack>
   );
 }
