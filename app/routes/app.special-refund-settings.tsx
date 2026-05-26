@@ -15,6 +15,8 @@ import {
   BlockStack,
   Banner,
   InlineStack,
+  ChoiceList,
+  Divider,
 } from "@shopify/polaris";
 import { useState } from "react";
 import { authenticate } from "../shopify.server";
@@ -44,8 +46,17 @@ export async function action({ request }: ActionFunctionArgs) {
   const get = (k: string) => formData.get(k);
   const bool = (k: string, def: boolean) => get(k) === "true" || (def && get(k) !== "false");
   const str = (k: string, d: string) => String(get(k) ?? d).trim();
+  const modeRaw = str("refundProcessingMode", "shopify_execute");
+  const refundProcessingMode =
+    modeRaw === "record_only" ? "record_only" : "shopify_execute";
   const settings: SpecialRefundSettings = {
     ...DEFAULT_SPECIAL_REFUND_SETTINGS,
+    refundProcessingMode,
+    shopifyExecuteCashRefund: bool("shopifyExecuteCashRefund", true),
+    shopifyExecutePaymentMethodOverride: bool("shopifyExecutePaymentMethodOverride", true),
+    shopifyExecuteReceiptCashAdjustment: bool("shopifyExecuteReceiptCashAdjustment", true),
+    correctionUsesRecordOnly: bool("correctionUsesRecordOnly", true),
+    enableOrderRedoDraft: bool("enableOrderRedoDraft", true),
     enableCashRefund: bool("enableCashRefund", true),
     enablePaymentMethodOverride: bool("enablePaymentMethodOverride", true),
     enableVoucherChangeAdjustment: bool("enableVoucherChangeAdjustment", true),
@@ -109,6 +120,78 @@ export default function SpecialRefundSettingsPage() {
               POS で利用できる特殊返金の種別と、各種別の入力要件・表示名を設定します。OFF にした種別は API でも拒否されます。
             </Banner>
           </Layout.Section>
+
+          <Layout.AnnotatedSection
+            title="Shopify 返金の実行"
+            description="POS で特殊返金を登録したとき、Shopify 上でも実際に返金するかどうかを選びます。商品券調整は常に記録のみです。"
+          >
+            <Card>
+              <BlockStack gap="400">
+                <ChoiceList
+                  title="返金処理モード"
+                  choices={[
+                    {
+                      label: "記録のみ",
+                      value: "record_only",
+                      helpText:
+                        "アプリのDBと精算・サマリーにだけ反映します。Shopify の注文には返金を作りません。",
+                    },
+                    {
+                      label: "POS 登録時に Shopify で実返金",
+                      value: "shopify_execute",
+                      helpText:
+                        "POS で登録すると、下で ON にした種別について Shopify Admin API（refundCreate）で返金を実行します。",
+                    },
+                  ]}
+                  selected={[form.refundProcessingMode]}
+                  onChange={(v) =>
+                    set(
+                      "refundProcessingMode",
+                      (v[0] === "record_only" ? "record_only" : "shopify_execute"),
+                    )
+                  }
+                />
+                {form.refundProcessingMode === "shopify_execute" ? (
+                  <>
+                    <Divider />
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      実返金の対象種別（商品券調整は対象外）
+                    </Text>
+                    <Checkbox
+                      label="現金返金"
+                      checked={form.shopifyExecuteCashRefund}
+                      onChange={(v) => set("shopifyExecuteCashRefund", v)}
+                    />
+                    <Checkbox
+                      label="返金手段変更"
+                      checked={form.shopifyExecutePaymentMethodOverride}
+                      onChange={(v) => set("shopifyExecutePaymentMethodOverride", v)}
+                    />
+                    <Checkbox
+                      label="レシート現金調整（取消のみ。追加徴収は実返金しません）"
+                      checked={form.shopifyExecuteReceiptCashAdjustment}
+                      onChange={(v) => set("shopifyExecuteReceiptCashAdjustment", v)}
+                    />
+                  </>
+                ) : null}
+                <Checkbox
+                  label="訂正時は記録のみ（同一取引で無効化したあとの再登録で Shopify 実返金しない）"
+                  checked={form.correctionUsesRecordOnly}
+                  onChange={(v) => set("correctionUsesRecordOnly", v)}
+                  helpText="誤登録を無効化して正しい内容で登録し直すとき、二重返金を防ぎます。ON 推奨です。"
+                />
+                <Checkbox
+                  label="会計やり直し（下書き注文を作成）"
+                  checked={form.enableOrderRedoDraft}
+                  onChange={(v) => set("enableOrderRedoDraft", v)}
+                  helpText="キャンセル・返金済みの取引から、同じ商品構成の下書き注文を POS で作成できます。決済は POS または管理画面で行います。"
+                />
+                <Banner tone="warning">
+                  実返金を ON にすると、POS で登録した金額が Shopify 上の注文に返金として記録されます。誤登録に注意してください。Shopify 返金済みの無効化では返金は自動取り消しされません。
+                </Banner>
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
 
           <Layout.AnnotatedSection title="利用可能イベント種別" description="§8.2.1">
             <Card>

@@ -69,13 +69,27 @@ export async function action({ request, params }: ActionFunctionArgs) {
       }
     }
 
+    let warning: string | null = null;
+    if (existing.shopifyRefundStatus === "success") {
+      warning =
+        "Shopify 上の返金は自動では取り消されません。必要な場合は Shopify 管理画面で手動対応してください。訂正する場合は、正しい内容で再登録してください（再登録は記録のみになります）。";
+    } else if (existing.shopifyRefundStatus === "failed") {
+      warning =
+        "Shopify 返金は失敗しています。無効化後、正しい内容で再登録できます。";
+    } else {
+      warning =
+        "無効化しました。訂正する場合は、正しい内容で再登録してください。";
+    }
+
     return corsJson({
       ok: true,
       event: {
         id: updated.id,
         status: updated.status,
+        shopifyRefundStatus: existing.shopifyRefundStatus,
         updatedAt: updated.updatedAt.toISOString(),
       },
+      warning,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

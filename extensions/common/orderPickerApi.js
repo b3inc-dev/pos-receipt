@@ -34,6 +34,26 @@ async function apiGet(path, params = {}) {
   return json;
 }
 
+async function apiPost(path, body = {}) {
+  const { getAppUrl } = await import("./appUrl.js");
+  const base = getAppUrl();
+  const url = new URL(path, base);
+  const token = await getToken();
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = toUserMessage(json.error || `HTTP ${res.status}`);
+    throw new Error(msg + (res.status ? ` (HTTP ${res.status})` : ""));
+  }
+  return json;
+}
+
 /**
  * GET /api/orders/search
  * @param {Object} opts - q, locationId, dateFrom, dateTo, cursor, limit
@@ -61,4 +81,15 @@ export async function getOrder(orderId) {
   if (!orderId) throw new Error("orderId required");
   const id = String(orderId).replace(/^gid:\/\/shopify\/Order\//, "");
   return apiGet(`/api/orders/${id}`);
+}
+
+/**
+ * POST /api/orders/:orderId/redo-draft
+ * 会計やり直し用の下書き注文を作成
+ * @param {string} orderId
+ */
+export async function createRedoDraft(orderId) {
+  if (!orderId) throw new Error("orderId required");
+  const id = String(orderId).replace(/^gid:\/\/shopify\/Order\//, "");
+  return apiPost(`/api/orders/${id}/redo-draft`, {});
 }

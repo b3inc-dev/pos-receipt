@@ -12,7 +12,7 @@
  */
 import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
-import { getOrder } from "../../common/orderPickerApi.js";
+import { getOrder, createRedoDraft } from "../../common/orderPickerApi.js";
 import {
   listSpecialRefunds,
   createSpecialRefund,
@@ -66,6 +66,97 @@ const EVENT_TYPE_LABELS = {
   voucher_change_adjustment: "商品券調整",
 };
 
+function buildVoidConfirmMessage(event) {
+  let msg =
+    "このイベントを無効化しますか？\n\n精算・アプリの記録からは外れます。";
+  if (event?.shopifyRefundStatus === "success") {
+    msg +=
+      "\n\n【重要】この登録では Shopify 上に返金が作成済みです。";
+    msg += "無効化しても Shopify の返金は自動では取り消されません。";
+    msg += "必要な場合は Shopify 管理画面で手動対応してください。";
+    msg +=
+      "\n\n訂正する場合は、正しい内容で再登録してください（再登録は記録のみになります）。";
+  } else if (event?.shopifyRefundStatus === "failed") {
+    msg +=
+      "\n\nShopify 返金は失敗しています。無効化後、正しい内容で再登録できます。";
+  } else {
+    msg += "\n\n訂正する場合は、正しい内容で再登録してください。";
+  }
+  return msg;
+}
+
+function buildRedoDraftConfirmMessage(order) {
+  const name = order?.orderName ?? "-";
+  return [
+    `取引 ${name} と同じ商品構成で、会計やり直し用の下書き注文を作成します。`,
+    "",
+    "・決済は自動では行いません",
+    "・Shopify POS または管理画面の「下書き注文」から会計してください",
+    "・元の注文の返金・キャンセルは取り消されません",
+    "",
+    "作成しますか？",
+  ].join("\n");
+}
+
+function CorrectionModeBanner({ orderCorrectionContext }) {
+  if (!orderCorrectionContext?.nextRegistrationRecordOnly) return null;
+  return (
+    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+      <s-text tone="info" fontSize="small">
+        この取引には無効化済みの登録があります。次の登録は訂正のため記録のみ（Shopify 実返金なし）になります。
+      </s-text>
+    </s-box>
+  );
+}
+
+function formatShopifyRefundNotice(res) {
+  if (res?.correctionRegistration) {
+    return {
+      tone: "info",
+      text: "訂正として登録しました（記録のみ。Shopify 返金は行っていません）",
+    };
+  }
+  const st = res?.shopifyRefund?.status ?? res?.event?.shopifyRefundStatus;
+  const err = res?.shopifyRefund?.error ?? res?.event?.shopifyRefundError;
+  if (st === "success") {
+    return { tone: "success", text: "登録完了。Shopify で返金を実行しました。" };
+  }
+  if (st === "failed") {
+    return {
+      tone: "warning",
+      text: `登録は完了しましたが、Shopify 返金に失敗しました。${err ? `（${err}）` : ""}`,
+    };
+  }
+  if (st === "skipped") {
+    const isCorrection = String(err ?? "").includes("訂正登録");
+    return {
+      tone: "info",
+      text: isCorrection
+        ? "訂正として登録しました（記録のみ。Shopify 返金は行っていません）"
+        : "登録完了（記録のみ。Shopify 返金は行っていません）",
+    };
+  }
+  return { tone: "success", text: "登録しました。" };
+}
+
+function ShopifyRefundStatusLine({ status, error }) {
+  if (!status || status === "none" || status === "pending") return null;
+  if (status === "success") {
+    return <s-text tone="success" fontSize="small">Shopify 返金済</s-text>;
+  }
+  if (status === "failed") {
+    return (
+      <s-text tone="critical" fontSize="small">
+        Shopify 返金失敗{error ? `: ${error}` : ""}
+      </s-text>
+    );
+  }
+  if (status === "skipped") {
+    return <s-text tone="subdued" fontSize="small">記録のみ（Shopify 返金なし）</s-text>;
+  }
+  return null;
+}
+
 export default async () => {
   render(<SpecialRefundModal />, document.body);
 };
@@ -79,6 +170,8 @@ function SpecialRefundModal() {
   const [bootstrapError, setBootstrapError] = useState("");
   const [fromOrderEntry, setFromOrderEntry] = useState(false);
   const [orderEntryLoading, setOrderEntryLoading] = useState(false);
+  const [submitNotice, setSubmitNotice] = useState(null);
+  const [orderCorrectionContext, setOrderCorrectionContext] = useState(null);
 
   // 取引詳細: 「特殊返金」または「商品券調整」から起動
   useEffect(() => {
@@ -98,6 +191,7 @@ function SpecialRefundModal() {
         setSelectedOrder(order);
         const res = await listSpecialRefunds(order.orderId ?? preId);
         setEvents(res.items ?? []);
+        setOrderCorrectionContext(res.orderCorrectionContext ?? null);
         // 取引詳細メニューからは一覧を挟まず、各処理のフォームへ直行
         setStep(voucherShortcut ? "form_voucher" : "form_refund");
       })
@@ -114,26 +208,11 @@ function SpecialRefundModal() {
       setSelectedOrder(order);
       const res = await listSpecialRefunds(order.orderId ?? orderId);
       setEvents(res.items ?? []);
+      setOrderCorrectionContext(res.orderCorrectionContext ?? null);
       setFromOrderEntry(false);
       setStep("order_detail");
     } catch (e) {
       setBootstrapError(toUserMessage(e?.message) || "取得に失敗しました");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const handleVoid = useCallback(async (id) => {
-    if (!confirm("このイベントを無効化しますか？")) return;
-    setLoading(true);
-    setError("");
-    try {
-      await voidSpecialRefund(id);
-      setEvents((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, status: "voided" } : e))
-      );
-    } catch (e) {
-      setError(toUserMessage(e?.message) || "無効化に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -144,8 +223,57 @@ function SpecialRefundModal() {
     try {
       const res = await listSpecialRefunds(selectedOrder.orderId);
       setEvents(res.items ?? []);
+      setOrderCorrectionContext(res.orderCorrectionContext ?? null);
     } catch {
       // silent
+    }
+  }, [selectedOrder]);
+
+  const handleVoid = useCallback(
+    async (id) => {
+      const ev = events.find((e) => e.id === id);
+      if (!confirm(buildVoidConfirmMessage(ev))) return;
+      setLoading(true);
+      setError("");
+      try {
+        const res = await voidSpecialRefund(id);
+        await refreshEvents();
+        if (res.warning) {
+          setSubmitNotice({
+            tone: ev?.shopifyRefundStatus === "success" ? "warning" : "info",
+            text: res.warning,
+          });
+        }
+      } catch (e) {
+        setError(toUserMessage(e?.message) || "無効化に失敗しました");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [events, refreshEvents],
+  );
+
+  const handleRedoDraft = useCallback(async () => {
+    if (!selectedOrder?.canRedoAsDraft) return;
+    if (!confirm(buildRedoDraftConfirmMessage(selectedOrder))) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await createRedoDraft(selectedOrder.orderId);
+      const draftName = res.draftOrder?.name ?? "";
+      const count = res.draftOrder?.lineItemCount ?? 0;
+      const skipped =
+        res.skippedLineCount > 0
+          ? `（${res.skippedLineCount}行は数量0のためスキップ）`
+          : "";
+      setSubmitNotice({
+        tone: "success",
+        text: `${res.message ?? "下書きを作成しました"} 下書き: ${draftName} / ${count}品目${skipped}`,
+      });
+    } catch (e) {
+      setError(toUserMessage(e?.message) || "下書きの作成に失敗しました");
+    } finally {
+      setLoading(false);
     }
   }, [selectedOrder]);
 
@@ -209,6 +337,7 @@ function SpecialRefundModal() {
           if (fromOrderEntry && tryDismissModal()) return;
           setSelectedOrder(null);
           setEvents([]);
+          setOrderCorrectionContext(null);
           setFromOrderEntry(false);
           setError("");
           setStep("day_list");
@@ -216,6 +345,10 @@ function SpecialRefundModal() {
         onRefund={() => setStep("form_refund")}
         onVoucher={() => setStep("form_voucher")}
         onVoid={handleVoid}
+        onRedoDraft={handleRedoDraft}
+        submitNotice={submitNotice}
+        onDismissNotice={() => setSubmitNotice(null)}
+        orderCorrectionContext={orderCorrectionContext}
       />
     );
   }
@@ -224,6 +357,7 @@ function SpecialRefundModal() {
     return (
       <SpecialRefundForm
         order={selectedOrder}
+        orderCorrectionContext={orderCorrectionContext}
         loading={loading}
         error={error}
         setLoading={setLoading}
@@ -232,7 +366,8 @@ function SpecialRefundModal() {
           if (fromOrderEntry && tryDismissModal()) return;
           setStep("order_detail");
         }}
-        onSuccess={async () => {
+        onSuccess={async (notice) => {
+          if (notice) setSubmitNotice(notice);
           await refreshEvents();
           if (fromOrderEntry && tryDismissModal()) return;
           setStep("order_detail");
@@ -245,6 +380,7 @@ function SpecialRefundModal() {
     return (
       <VoucherAdjustmentForm
         order={selectedOrder}
+        orderCorrectionContext={orderCorrectionContext}
         loading={loading}
         error={error}
         setLoading={setLoading}
@@ -254,6 +390,10 @@ function SpecialRefundModal() {
           setStep("order_detail");
         }}
         onSuccess={async () => {
+          setSubmitNotice({
+            tone: "info",
+            text: "登録完了（商品券調整は記録のみ。Shopify 返金は行いません）",
+          });
           await refreshEvents();
           if (fromOrderEntry && tryDismissModal()) return;
           setStep("order_detail");
@@ -278,6 +418,10 @@ function OrderDetailView({
   onRefund,
   onVoucher,
   onVoid,
+  onRedoDraft,
+  submitNotice,
+  onDismissNotice,
+  orderCorrectionContext,
 }) {
   const activeEvents = events.filter((e) => e.status === "active");
   const voidedEvents = events.filter((e) => e.status === "voided");
@@ -321,6 +465,42 @@ function OrderDetailView({
           <s-box padding="base">
             <s-stack gap="base">
               <OrderDetailSummary order={order} />
+
+              {order?.canRedoAsDraft ? (
+                <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                  <s-stack gap="small">
+                    <s-text fontWeight="bold" size="small">会計をやり直す</s-text>
+                    <s-text tone="subdued" fontSize="small">
+                      キャンセル・返金済みの取引向けです。同じ商品構成の下書き注文を作成します。決済は POS または管理画面で行ってください。
+                    </s-text>
+                    <s-button
+                      kind="secondary"
+                      onClick={onRedoDraft}
+                      disabled={loading}
+                      loading={loading}
+                    >
+                      下書き注文を作成
+                    </s-button>
+                  </s-stack>
+                </s-box>
+              ) : null}
+
+              <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
+
+              {submitNotice ? (
+                <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                  <s-stack gap="small">
+                    <s-text tone={submitNotice.tone === "warning" ? "critical" : submitNotice.tone}>
+                      {submitNotice.text}
+                    </s-text>
+                    {onDismissNotice ? (
+                      <s-button kind="secondary" onClick={onDismissNotice}>
+                        閉じる
+                      </s-button>
+                    ) : null}
+                  </s-stack>
+                </s-box>
+              ) : null}
 
               <s-divider />
 
@@ -394,6 +574,11 @@ function EventCard({ event, onVoid, loading }) {
           <s-text tone="subdued" fontSize="small">メモ: {event.note}</s-text>
         ) : null}
 
+        <ShopifyRefundStatusLine
+          status={event.shopifyRefundStatus}
+          error={event.shopifyRefundError}
+        />
+
         <s-stack direction="horizontal" align="space-between">
           <s-text tone="subdued" fontSize="small">
             {event.createdAt ? event.createdAt.slice(0, 16).replace("T", " ") : ""}
@@ -415,7 +600,16 @@ function EventCard({ event, onVoid, loading }) {
 // ──────────────────────────────────────────────
 // 特殊返金フォーム
 // ──────────────────────────────────────────────
-function SpecialRefundForm({ order, loading, error, setLoading, setError, onBack, onSuccess }) {
+function SpecialRefundForm({
+  order,
+  orderCorrectionContext,
+  loading,
+  error,
+  setLoading,
+  setError,
+  onBack,
+  onSuccess,
+}) {
   const [eventType, setEventType] = useState("cash_refund");
   const [amount, setAmount] = useState("");
   const [paymentMethods, setPaymentMethods] = useState(FALLBACK_PAYMENT_METHODS);
@@ -458,7 +652,7 @@ function SpecialRefundForm({ order, loading, error, setLoading, setError, onBack
     setLoading(true);
     setError("");
     try {
-      await createSpecialRefund({
+      const res = await createSpecialRefund({
         sourceOrderId: order.orderId,
         sourceOrderName: order.orderName,
         locationId: order.location?.id ?? "",
@@ -471,7 +665,7 @@ function SpecialRefundForm({ order, loading, error, setLoading, setError, onBack
         note: note.trim() || null,
       });
       setConfirming(false);
-      await onSuccess();
+      await onSuccess(formatShopifyRefundNotice(res));
     } catch (e) {
       setError(toUserMessage(e?.message) || "登録に失敗しました");
       setConfirming(false);
@@ -529,6 +723,8 @@ function SpecialRefundForm({ order, loading, error, setLoading, setError, onBack
             <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
               <s-text tone="subdued">対象取引: {order?.orderName ?? "-"}</s-text>
             </s-box>
+
+            <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
 
             {/* 種別選択 */}
             <s-select
@@ -619,7 +815,16 @@ function SpecialRefundForm({ order, loading, error, setLoading, setError, onBack
 // ──────────────────────────────────────────────
 // 商品券調整フォーム
 // ──────────────────────────────────────────────
-function VoucherAdjustmentForm({ order, loading, error, setLoading, setError, onBack, onSuccess }) {
+function VoucherAdjustmentForm({
+  order,
+  orderCorrectionContext,
+  loading,
+  error,
+  setLoading,
+  setError,
+  onBack,
+  onSuccess,
+}) {
   const [faceValue, setFaceValue] = useState("");
   const [appliedAmount, setAppliedAmount] = useState("");
   const [changeAmount, setChangeAmount] = useState("");
@@ -718,6 +923,8 @@ function VoucherAdjustmentForm({ order, loading, error, setLoading, setError, on
                 ) : null}
               </s-stack>
             </s-box>
+
+            <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
 
             {/* 商品券額面 */}
             <s-text-field

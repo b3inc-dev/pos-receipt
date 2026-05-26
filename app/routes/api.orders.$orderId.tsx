@@ -6,7 +6,14 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import { ORDER_DETAIL_QUERY, serializeOrderDetail } from "../services/orderDetail.server";
+import { isOrderEligibleForRedoDraft } from "../services/orderRedoDraft.server";
 import { getPaymentMethodVoucherInfo } from "../utils/paymentMethod.server";
+import {
+  getAppSetting,
+  SPECIAL_REFUND_SETTINGS_KEY,
+  DEFAULT_SPECIAL_REFUND_SETTINGS,
+  type SpecialRefundSettings,
+} from "../utils/appSettings.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -54,9 +61,23 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       hasVoucherChange = true;
     }
 
+    const srSettingsRaw = await getAppSetting<Partial<SpecialRefundSettings>>(
+      shop.id,
+      SPECIAL_REFUND_SETTINGS_KEY,
+    );
+    const srSettings = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...srSettingsRaw };
+    const eligible = isOrderEligibleForRedoDraft(
+      order as {
+        cancelledAt?: string | null;
+        displayFinancialStatus?: string | null;
+        refunds?: unknown[];
+      },
+    );
+
     return corsJson({
       ...result,
       estimatedVoucherChange: hasVoucherChange,
+      canRedoAsDraft: srSettings.enableOrderRedoDraft && eligible,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";

@@ -201,6 +201,11 @@ model SpecialRefundEvent {
   note                    String?
   createdBy               String?
   status                  String   @default("active") // active | voided
+  /// none | skipped | pending | success | failed
+  shopifyRefundStatus     String   @default("none")
+  shopifyRefundId         String?
+  shopifyRefundError      String?
+  shopifyRefundProcessedAt DateTime?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 

@@ -51,6 +51,19 @@ function statusBadge(status: string) {
     : <Badge tone="success">有効</Badge>;
 }
 
+function shopifyRefundBadge(status: string) {
+  const map: Record<string, { tone: "success" | "warning" | "info" | "critical"; label: string }> = {
+    success: { tone: "success", label: "Shopify返金済" },
+    failed: { tone: "critical", label: "Shopify返金失敗" },
+    skipped: { tone: "info", label: "記録のみ" },
+    pending: { tone: "warning", label: "返金処理中" },
+    none: { tone: "info", label: "—" },
+  };
+  const item = map[status];
+  if (!item || status === "none") return <Text as="span" tone="subdued">—</Text>;
+  return <Badge tone={item.tone}>{item.label}</Badge>;
+}
+
 function fmtYen(n: string | number) {
   return `¥${Number(n).toLocaleString("ja-JP")}`;
 }
@@ -100,6 +113,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         note: true,
         createdBy: true,
         status: true,
+        shopifyRefundStatus: true,
+        shopifyRefundError: true,
         createdAt: true,
       },
     }),
@@ -121,6 +136,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       note: e.note,
       createdBy: e.createdBy,
       status: e.status,
+      shopifyRefundStatus: e.shopifyRefundStatus,
+      shopifyRefundError: e.shopifyRefundError,
       createdAt: e.createdAt.toISOString(),
     })),
     total,
@@ -222,6 +239,7 @@ export default function SpecialRefundHistoryPage() {
                   { title: "返金手段変更" },
                   { title: "備考" },
                   { title: "ステータス" },
+                  { title: "Shopify返金" },
                   { title: "登録日時" },
                 ]}
                 selectable={false}
@@ -269,6 +287,16 @@ export default function SpecialRefundHistoryPage() {
                       </Text>
                     </IndexTable.Cell>
                     <IndexTable.Cell>{statusBadge(item.status)}</IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <BlockStack gap="100">
+                        {shopifyRefundBadge(item.shopifyRefundStatus)}
+                        {item.shopifyRefundStatus === "failed" && item.shopifyRefundError ? (
+                          <Text as="span" variant="bodySm" tone="subdued">
+                            {item.shopifyRefundError}
+                          </Text>
+                        ) : null}
+                      </BlockStack>
+                    </IndexTable.Cell>
                     <IndexTable.Cell>
                       <Text as="span" variant="bodySm" tone="subdued">
                         {new Date(item.createdAt).toLocaleString("ja-JP", {

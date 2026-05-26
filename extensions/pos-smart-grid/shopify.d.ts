@@ -13,13 +13,13 @@ declare module './src/SalesSummaryTile.jsx' {
 }
 
 //@ts-ignore
-declare module './src/VoucherTile.jsx' {
+declare module './src/SpecialRefundTile.jsx' {
   const shopify: import('@shopify/ui-extensions/pos.home.tile.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
 
 //@ts-ignore
-declare module './src/SpecialRefundTile.jsx' {
+declare module './src/VoucherTile.jsx' {
   const shopify: import('@shopify/ui-extensions/pos.home.tile.render').Api;
   const globalThis: { shopify: typeof shopify };
 }

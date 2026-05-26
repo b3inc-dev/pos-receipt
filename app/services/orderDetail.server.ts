@@ -35,6 +35,9 @@ export const ORDER_DETAIL_QUERY = `#graphql
           name
           quantity
           sku
+          variant {
+            id
+          }
           refundableQuantity
           originalUnitPriceSet { shopMoney { amount currencyCode } }
           discountedUnitPriceSet { shopMoney { amount currencyCode } }
@@ -163,6 +166,7 @@ export function serializeOrderDetail(
       variantTitle,
       quantity: qty,
       sku: li.sku ?? "",
+      variantId: (li.variant as { id?: string } | null)?.id ?? null,
       barcode: "",
       originalUnitPrice: moneyAmount(li.originalUnitPriceSet as MoneyBag),
       discountedUnitPrice: moneyAmount(li.discountedUnitPriceSet as MoneyBag),

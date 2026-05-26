@@ -66,6 +66,7 @@ export async function action({ request }: ActionFunctionArgs) {
         note: note ? String(note) : null,
         createdBy: createdBy ? String(createdBy) : null,
         status: "active",
+        shopifyRefundStatus: "skipped",
       },
     });
 
@@ -106,7 +107,12 @@ export async function action({ request }: ActionFunctionArgs) {
           currency: event.currency,
           note: event.note,
           status: event.status,
+          shopifyRefundStatus: event.shopifyRefundStatus,
           createdAt: event.createdAt.toISOString(),
+        },
+        shopifyRefund: {
+          status: "skipped",
+          reason: "商品券調整は記録のみ（Shopify自動返金なし）",
         },
       },
       { status: 201 }

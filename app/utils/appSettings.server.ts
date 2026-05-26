@@ -229,7 +229,19 @@ export const DEFAULT_VOUCHER_SETTINGS: VoucherSettings = {
 
 export const SPECIAL_REFUND_SETTINGS_KEY = "special_refund_settings";
 
+/** record_only = DB記録のみ / shopify_execute = POS登録時に Shopify refundCreate */
+export type SpecialRefundProcessingMode = "record_only" | "shopify_execute";
+
 export interface SpecialRefundSettings {
+  refundProcessingMode: SpecialRefundProcessingMode;
+  /** shopify_execute 時に API 返金する種別（商品券調整は常に記録のみ） */
+  shopifyExecuteCashRefund: boolean;
+  shopifyExecutePaymentMethodOverride: boolean;
+  shopifyExecuteReceiptCashAdjustment: boolean;
+  /** 同一取引に無効化済みイベントがあるときの再登録は記録のみ（Shopify 実返金しない） */
+  correctionUsesRecordOnly: boolean;
+  /** キャンセル・返金済み注文から会計やり直し用の下書きを作成 */
+  enableOrderRedoDraft: boolean;
   enableCashRefund: boolean;
   enablePaymentMethodOverride: boolean;
   enableVoucherChangeAdjustment: boolean;
@@ -251,6 +263,12 @@ export interface SpecialRefundSettings {
 }
 
 export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
+  refundProcessingMode: "shopify_execute",
+  shopifyExecuteCashRefund: true,
+  shopifyExecutePaymentMethodOverride: true,
+  shopifyExecuteReceiptCashAdjustment: true,
+  correctionUsesRecordOnly: true,
+  enableOrderRedoDraft: true,
   enableCashRefund: true,
   enablePaymentMethodOverride: true,
   enableVoucherChangeAdjustment: true,
