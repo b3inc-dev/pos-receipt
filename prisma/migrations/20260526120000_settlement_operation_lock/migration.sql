@@ -1,8 +1,10 @@
 -- CreateTable
 CREATE TABLE "SettlementOperationLock" (
-    "lockKey" TEXT NOT NULL PRIMARY KEY,
-    "expiresAt" DATETIME NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "lockKey" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SettlementOperationLock_pkey" PRIMARY KEY ("lockKey")
 );
 
 -- CreateIndex
