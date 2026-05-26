@@ -1,6 +1,8 @@
 # Environment Configuration
 .env
 .env.*
+!.env.example
+!.env.migrate.example
 
 # Dependency directory
 node_modules

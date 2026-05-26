@@ -1,5 +1,9 @@
 # Render で「Instance failed / Exited with status 1」が出るときの対処
 
+**P3009 / `20260526120000_settlement_operation_lock` が failed のとき** → 専用手順: [RENDER_FIX_P3009.md](./RENDER_FIX_P3009.md)
+
+---
+
 「Exited with status 1 while running your code」は **アプリのプロセスが起動直後または最初のリクエストで落ちている** 状態です。  
 以下を順に確認してください。
 

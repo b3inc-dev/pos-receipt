@@ -1,14 +1,30 @@
-# Render Blueprint 参考（ダッシュボード設定と合わせること）
+# Render Blueprint 参考（ダッシュボードと合わせること）
 # https://render.com/docs/blueprint-spec
+#
+# 既存サービスがある場合は npm run render:full-deploy（RENDER_API_KEY 要）で
+# Build / Pre-Deploy / Start を API から揃えられます。
+
 services:
   - type: web
     name: pos-receipt
     runtime: node
+    plan: free
     buildCommand: npm install && npx prisma generate && npm run build
-    # 重要: 古い「npx prisma migrate deploy && npx react-router-serve」は使わない
-    # POS の CORS は server.js が処理するため npm run start を使う
     preDeployCommand: npm run render:migrate
     startCommand: npm run start
     envVars:
       - key: NODE_VERSION
         value: "20"
+
+  - type: web
+    name: pos-receipt-ciara
+    runtime: node
+    plan: free
+    buildCommand: npm install && npx prisma generate && npm run build
+    preDeployCommand: npm run render:migrate
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: APP_DISTRIBUTION
+        value: inhouse
