@@ -28,7 +28,6 @@ import {
   loadRefundAggregationContext,
   resolveRefundAggregationLocationGid,
   locationGidMatches,
-  orderHasRefundInDay,
   type RefundAggregationContext,
 } from "./refundAggregation.server";
 import {
@@ -100,16 +99,16 @@ export interface SettlementPreviewDTO {
 }
 
 export interface SettlementPreviewDebugDTO {
-  /** source_name:pos + created_at 検索で取得した件数（retailLocation フィルタ前） */
+  /** created_at クエリ取得件数 */
   ordersRawCount: number;
-  /** 互換用（現状は ordersRawCount と同じ） */
+  /** 互換用（ordersRawCount と同じ） */
   ordersPosSourceMatchedCount: number;
-  /** retailLocation フィルタ後の created∪updated ユニオン件数（GAS 型集計の入力） */
+  /** created∪updated∪cancelled ユニオン後の件数（GAS 型集計の入力） */
   ordersAtLocationCount: number;
   ordersUpdatedRawCount: number;
   ordersUpdatedPosSourceMatchedCount: number;
   ordersUpdatedAtLocationCount: number;
-  /** 精算プレビューはユニオン集計のため常に 0（売上サマリー等の別パスでは従来どおり） */
+  /** ユニオン集計のため常に 0 */
   overlayRefundCount: number;
 }
 
@@ -255,24 +254,6 @@ function extractLocationNumericId(locationId: string | null | undefined): string
   if (/^\d+$/.test(s)) return s;
   const m = s.match(/\/(\d+)$/);
   return m?.[1] ?? null;
-}
-
-/**
- * 注文を対象ロケーションに絞る（fa78e63 当時どおり）。
- * retailLocation が無い注文は除外（オンライン等の取り込みを防ぐ）。
- */
-function filterOrdersByRetailLocation(
-  orders: ShopifyOrder[],
-  locationId: string,
-  locIdRaw: string
-): ShopifyOrder[] {
-  const locationGid = locationId.startsWith("gid://") ? locationId : `gid://shopify/Location/${locIdRaw}`;
-  return orders.filter((o) => {
-    const rid = o.retailLocation?.id;
-    if (!rid) return false;
-    const ridRaw = extractLocationNumericId(rid);
-    return rid === locationGid || ridRaw === locIdRaw;
-  });
 }
 
 /** 返金再集計用: updated_at でその日に更新された注文を取得（refunds.createdAt でフィルタするため） */
@@ -477,7 +458,7 @@ function computeRefundsOnlyForDay(
 
 /**
  * その日の返金オーバーレイ（注文が「その日作成」でない分）の refundTotal を返す。
- * buildSettlementPreview と同じ境界・source_name:pos を使う（fa78e63 方針）。
+ * buildSettlementPreview と同じ境界で updated_at 検索した注文から返金のみを集計する。
  */
 export async function getRefundOverlayForDay(
   admin: AdminClient,
@@ -488,7 +469,7 @@ export async function getRefundOverlayForDay(
   const startIso = dayRange.startUtc.toISOString().replace(/\.000Z$/, "Z");
   const endIso = dayRange.endUtc.toISOString();
   const locationGid = `gid://shopify/Location/${locIdRaw}`;
-  const updatedQuery = `location_id:${locIdRaw} source_name:pos updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement`;
+  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement`;
   const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
   const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationGid, locIdRaw);
   const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
@@ -567,7 +548,7 @@ function gasNormalizeGatewayLabel(gateway: string, formattedGateway?: string | n
   if (raw === "credit_card" || raw === "card" || raw === "creditcard") return "クレジットカード";
   if (s.includes("credit") || s.includes("クレジット")) return "クレジットカード";
 
-  if (s.includes("qr")) return "電子マネー (QR)";
+  if (s.includes("qr")) return "電子マネー(QR)";
   if (s.includes("edy") || s.includes("waon") || s.includes("nanaco")) return "電子マネー";
 
   if (
@@ -582,7 +563,7 @@ function gasNormalizeGatewayLabel(gateway: string, formattedGateway?: string | n
     s.includes("icカード") ||
     s.includes("icｶｰﾄﾞ")
   ) {
-    return "交通系 ICカード決済";
+    return "交通系ICカード決済";
   }
 
   if (s.includes("id") || s.includes("felica")) return "電子マネー";
@@ -630,7 +611,7 @@ const GAS_GATEWAY_CASH = "現金";
 
 /**
  * GAS aggregate の注文ループ（todaysTx・pay・refundsGross・割引/VIP 按分・税 Shopify 相当）。
- * ノート観測: observeVoucherChangeFromFace（キャンセル除外）・observeGenericCashChange。
+ * ノート観測: observeVoucherChangeFromFace（キャンセル除外）・GAS cash cap（effectiveCashSale）。
  */
 export type GasAggregateAttributionOpts = {
   attributionCtx: RefundAggregationContext;
@@ -696,7 +677,6 @@ function aggregateGasStyleForOrders(
       return byTime || (String(tx.kind) === "REFUND" && byRefundLink);
     });
 
-    let orderSaleToday = 0;
     let orderRefundToday = 0;
     const gwSaleMapToday: Record<string, number> = {};
 
@@ -707,9 +687,7 @@ function aggregateGasStyleForOrders(
       ensurePayBucket(pay, gw);
 
       if (kind === "SALE" || kind === "CAPTURE") {
-        orderSaleToday += amt;
         gwSaleMapToday[gw] = (gwSaleMapToday[gw] || 0) + amt;
-        pay[gw].sale += amt;
         pay[gw].saleTx += 1;
       } else if (kind === "REFUND") {
         if (!countRefundsForThisLocation) continue;
@@ -720,6 +698,28 @@ function aggregateGasStyleForOrders(
         refundOrderSet.add(o.id);
       }
     }
+
+    // GAS cash cap: effectiveCashSale = min(rawCash, max(0, orderFinal - nonCash))
+    // 返金有無に関わらず常に適用（GAS observeGenericCashChange と同式）
+    const rawCashSale = Number(gwSaleMapToday[GAS_GATEWAY_CASH] || 0);
+    const nonCashSaleTotal = Object.entries(gwSaleMapToday)
+      .filter(([k]) => k !== GAS_GATEWAY_CASH)
+      .reduce((acc, [, v]) => acc + Number(v || 0), 0);
+    const orderFinal = Number(o.totalPriceSet?.shopMoney?.amount ?? 0);
+    let effectiveCashSale = rawCashSale;
+    let orderVoucherCashChange = 0;
+    if (rawCashSale > 0) {
+      const neededCashForOrder = Math.max(0, orderFinal - nonCashSaleTotal);
+      effectiveCashSale = Math.min(rawCashSale, neededCashForOrder);
+      orderVoucherCashChange = Math.max(0, rawCashSale - effectiveCashSale);
+    }
+    const hasVoucherInNote = /商品券/.test(o.note ?? "");
+    const hasVoucherInGateway = Object.keys(gwSaleMapToday).some((k) => /商品券/.test(k));
+    for (const [gw, amt] of Object.entries(gwSaleMapToday)) {
+      ensurePayBucket(pay, gw);
+      pay[gw].sale += gw === GAS_GATEWAY_CASH ? effectiveCashSale : Number(amt);
+    }
+    const effectiveOrderSaleToday = nonCashSaleTotal + effectiveCashSale;
 
     const hasRefundObjToday = refundTxIdsInDay.size > 0;
     const hasRefundTxToday = todaysTx.some((tx) => String(tx.kind) === "REFUND");
@@ -749,6 +749,7 @@ function aggregateGasStyleForOrders(
     const isCancelled = Boolean(o.cancelledAt);
 
     // GAS observeVoucherChangeFromFace（キャンセル済み注文はノート観測しない）
+    let orderVoucherFaceChange = 0;
     if (!isCancelled) {
       const face = parseVoucherFaceFromNote(o.note);
       if (face > 0) {
@@ -756,44 +757,26 @@ function aggregateGasStyleForOrders(
           Number(gwSaleMapToday["商品券釣有り"] || 0) +
           Number(gwSaleMapToday["商品券釣無し"] || 0) +
           Number(gwSaleMapToday["商品券"] || 0);
-        const netToday = orderSaleToday - orderRefundToday;
+        const netToday = effectiveOrderSaleToday - orderRefundToday;
         if (netToday > 0) {
-          const change = Math.max(0, face - giftAppliedToday);
-          if (change > 0) voucherChangeObserved += change;
+          orderVoucherFaceChange = Math.max(0, face - giftAppliedToday);
         }
       }
     }
-
-    // GAS observeGenericCashChange（合計・現金バケットを調整し、商品券文脈なら観測額に加算）
-    {
-      const saleSumToday = Object.values(gwSaleMapToday).reduce((acc, v) => acc + Number(v || 0), 0);
-      const orderFinal = Number(o.totalPriceSet?.shopMoney?.amount ?? 0);
-      if (orderRefundToday <= 0 && saleSumToday > orderFinal) {
-        const change = saleSumToday - orderFinal;
-        const cashSaleToday = Number(gwSaleMapToday[GAS_GATEWAY_CASH] || 0);
-        const dec = Math.min(change, cashSaleToday);
-        if (dec > 0) {
-          ensurePayBucket(pay, GAS_GATEWAY_CASH);
-          pay[GAS_GATEWAY_CASH].sale -= dec;
-          const noteStr = o.note ?? "";
-          const hasVoucherInNote = /商品券/.test(noteStr);
-          const hasVoucherInGateway = Object.keys(gwSaleMapToday).some((gw) => /商品券/.test(gw));
-          if (hasVoucherInNote || hasVoucherInGateway) {
-            voucherChangeObserved += dec;
-          }
-        }
-      }
+    // cashChange と faceChange はどちらか大きい方を1回だけ計上（GAS と同式）
+    if ((hasVoucherInNote || hasVoucherInGateway) && (orderVoucherCashChange > 0 || orderVoucherFaceChange > 0)) {
+      voucherChangeObserved += Math.max(orderVoucherCashChange, orderVoucherFaceChange);
     }
 
     if (countRefundsForThisLocation) {
       refundsGross += orderRefundToday;
     }
 
-    if (orderSaleToday - (countRefundsForThisLocation ? orderRefundToday : 0) > 0) {
+    if (effectiveOrderSaleToday - (countRefundsForThisLocation ? orderRefundToday : 0) > 0) {
       saleOrderSet.add(o.id);
     }
 
-    if (orderSaleToday > 0) {
+    if (effectiveOrderSaleToday > 0) {
       const nodes = o.lineItems?.nodes ?? [];
       itemCount += nodes.reduce((s, n) => s + Number(n.quantity ?? 0), 0);
     }
@@ -824,8 +807,8 @@ function aggregateGasStyleForOrders(
     }
 
     let keepRatioToday = 0;
-    if (orderSaleToday > 0) {
-      keepRatioToday = Math.max(0, orderSaleToday - orderRefundToday) / orderSaleToday;
+    if (effectiveOrderSaleToday > 0) {
+      keepRatioToday = Math.max(0, effectiveOrderSaleToday - orderRefundToday) / effectiveOrderSaleToday;
     }
     discountsTotal += orderDiscount * keepRatioToday;
     vipPointsUsed += orderVip * keepRatioToday;
@@ -849,81 +832,6 @@ function aggregateGasStyleForOrders(
   };
 }
 
-type GasAggregateResult = ReturnType<typeof aggregateGasStyleForOrders>;
-
-/**
- * 売上店舗と異なる帰属先の返金を、対象ロケーションの精算に加算する。
- */
-function mergeCrossLocationAttributedRefunds(
-  gas: GasAggregateResult,
-  ordersBroad: ShopifyOrder[],
-  orderIdsInUnion: Set<string>,
-  inRange: (iso?: string) => boolean,
-  attributionOpts: GasAggregateAttributionOpts,
-): void {
-  for (const o of ordersBroad) {
-    if (orderIdsInUnion.has(o.id)) continue;
-    if (!orderHasRefundInDay(o, inRange)) continue;
-    if (!orderRefundsCountForSettlement(o, inRange, attributionOpts)) continue;
-
-    const refundTxIdsInDay = new Set<string>();
-    for (const r of o.refunds ?? []) {
-      if (!inRange(r.createdAt)) continue;
-      for (const e of r.transactions ?? []) {
-        if (e?.id) refundTxIdsInDay.add(e.id);
-      }
-    }
-
-    const txs = o.transactions ?? [];
-    const todaysTx = txs.filter((tx) => {
-      const byTime = inRange(tx.createdAt);
-      const byRefundLink = refundTxIdsInDay.has(tx.id);
-      return byTime || (String(tx.kind) === "REFUND" && byRefundLink);
-    });
-
-    let orderRefundToday = 0;
-    for (const tx of todaysTx) {
-      const amt = Number(tx.amountSet?.shopMoney?.amount ?? 0);
-      if (String(tx.kind ?? "") !== "REFUND") continue;
-      const r = Math.abs(amt);
-      const gw = gasTxLabel(tx);
-      ensurePayBucket(gas.pay, gw);
-      orderRefundToday += r;
-      gas.pay[gw].refund += r;
-      gas.pay[gw].refundTx += 1;
-    }
-
-    const hasRefundObjToday = refundTxIdsInDay.size > 0;
-    const hasRefundTxToday = todaysTx.some((tx) => String(tx.kind) === "REFUND");
-    if (hasRefundObjToday && !hasRefundTxToday) {
-      let amt = 0;
-      let cnt = 0;
-      for (const r of o.refunds ?? []) {
-        if (!inRange(r.createdAt)) continue;
-        for (const e of r.transactions ?? []) {
-          const v = Math.abs(Number(e?.amountSet?.shopMoney?.amount ?? 0));
-          if (v > 0) {
-            amt += v;
-            cnt += 1;
-          }
-        }
-      }
-      if (amt > 0) {
-        const k = GAS_UNKNOWN_GATEWAY;
-        ensurePayBucket(gas.pay, k);
-        gas.pay[k].refund += amt;
-        gas.pay[k].refundTx += Math.max(1, cnt);
-        orderRefundToday += amt;
-      }
-    }
-
-    if (orderRefundToday > 0) {
-      gas.refundsGross += orderRefundToday;
-      gas.refundOrderSet.add(o.id);
-    }
-  }
-}
-
 function totalFromPayBuckets(
   pay: Record<string, { sale: number; refund: number; saleTx: number; refundTx: number }>,
 ): number {
@@ -931,7 +839,7 @@ function totalFromPayBuckets(
   for (const p of Object.values(pay)) {
     sum += Math.round((p.sale || 0) - (p.refund || 0));
   }
-  return Math.max(0, Math.round(sum));
+  return Math.round(sum);
 }
 
 async function payBucketsToPaymentSections(
@@ -1087,37 +995,34 @@ async function buildSettlementPreviewImpl(
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
 
-  // GAS と同型: created 当日 ∪ updated 当日を ID ユニオンし、todaysTx / pay で total・返金・割引/VIP を集計
-  const shopifyQueryCreated = `location_id:${locIdRaw} source_name:pos created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
-  const shopifyQueryUpdated = `location_id:${locIdRaw} source_name:pos updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
+  // GAS fetchAllOrdersSmart と同型: created∪updated∪cancelled の3クエリ union
+  // source_name:pos フィルタなし・retailLocation 二次フィルタなし（GAS と同一）
+  const qCreated   = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
+  const qUpdated   = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
+  const qCancelled = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement status:cancelled`;
 
-  const createdRaw = await fetchAllOrders(admin, shopifyQueryCreated, "CREATED_AT");
+  const createdRaw   = await fetchAllOrders(admin, qCreated, "CREATED_AT");
   await sleep(GRAPHQL_PAGE_DELAY_MS);
-  const updatedRaw = await fetchAllOrders(admin, shopifyQueryUpdated, "UPDATED_AT");
+  const updatedRaw   = await fetchAllOrders(admin, qUpdated, "UPDATED_AT");
+  await sleep(GRAPHQL_PAGE_DELAY_MS);
+  const cancelledRaw = await fetchAllOrders(admin, qCancelled, "UPDATED_AT");
   await sleep(GRAPHQL_PAGE_DELAY_MS);
 
-  const shopifyQueryUpdatedBroad = `source_name:pos updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
-  const updatedBroadRaw = await fetchAllOrders(admin, shopifyQueryUpdatedBroad, "UPDATED_AT");
+  let ordersUnion = unionSettlementOrdersById(
+    unionSettlementOrdersById(createdRaw, updatedRaw),
+    cancelledRaw,
+  );
 
-  const createdAtLoc = filterOrdersByRetailLocation(createdRaw, locationId, locIdRaw);
-  const updatedAtLoc = filterOrdersByRetailLocation(updatedRaw, locationId, locIdRaw);
-  let ordersUnion = unionSettlementOrdersById(createdAtLoc, updatedAtLoc);
-
-  // GAS fetchAllOrdersSmart ③: created∪updated が 0 件のとき processed_at（店舗TZの暦日）でフォールバック
+  // GAS fetchAllOrdersSmart ③: 0件のとき processed_at（店舗TZの暦日）でフォールバック
   if (ordersUnion.length === 0) {
     const processedRange = getDayRangeShopifySearchIso(targetDate, timezone);
-    const shopifyQueryProcessed = `location_id:${locIdRaw} source_name:pos processed_at:>=${processedRange.start} processed_at:<=${processedRange.end} tag_not:settlement -status:cancelled`;
-    const processedRaw = await fetchAllOrders(admin, shopifyQueryProcessed, "CREATED_AT");
-    const processedAtLoc = filterOrdersByRetailLocation(
-      processedRaw.filter((o) => {
-        if (!o.processedAt) return false;
-        const t = new Date(o.processedAt).getTime();
-        return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
-      }),
-      locationId,
-      locIdRaw,
-    );
-    ordersUnion = processedAtLoc;
+    const qProcessed = `location_id:${locIdRaw} processed_at:>=${processedRange.start} processed_at:<=${processedRange.end} tag_not:settlement -status:cancelled`;
+    const processedRaw = await fetchAllOrders(admin, qProcessed, "CREATED_AT");
+    ordersUnion = processedRaw.filter((o) => {
+      if (!o.processedAt) return false;
+      const t = new Date(o.processedAt).getTime();
+      return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
+    });
   }
 
   const attributionCtx = await loadRefundAggregationContext(shopId);
@@ -1132,8 +1037,7 @@ async function buildSettlementPreviewImpl(
   const ordersAtLocationCount = ordersUnion.length;
   const ordersUpdatedRawCount = updatedRaw.length;
   const ordersUpdatedPosSourceMatchedCount = updatedRaw.length;
-  const ordersUpdatedAtLocationCount = updatedAtLoc.length;
-  /** ユニオン集計後は返金オーバーレイをマージしない（二重計上防止） */
+  const ordersUpdatedAtLocationCount = updatedRaw.length;
   const overlayRefundCount = 0;
 
   const inDay = (iso?: string) => {
@@ -1143,13 +1047,6 @@ async function buildSettlementPreviewImpl(
   };
 
   const gas = aggregateGasStyleForOrders(ordersUnion, inDay, attributionOpts);
-  mergeCrossLocationAttributedRefunds(
-    gas,
-    updatedBroadRaw,
-    new Set(ordersUnion.map((o) => o.id)),
-    inDay,
-    attributionOpts,
-  );
 
   const settlementSettings = await getAppSetting<Partial<SettlementSettings>>(shopId, SETTLEMENT_SETTINGS_KEY);
   const settlementMerged: SettlementSettings = { ...DEFAULT_SETTLEMENT_SETTINGS, ...settlementSettings };

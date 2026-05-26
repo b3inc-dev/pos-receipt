@@ -18,6 +18,7 @@ import {
 } from "@shopify/polaris";
 import { useState } from "react";
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
   getAppSetting,
@@ -29,6 +30,14 @@ import {
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
 
+const LOCATIONS_QUERY = `#graphql
+  query Locations {
+    locations(first: 50, includeLegacy: false) {
+      nodes { id name isActive }
+    }
+  }
+`;
+
 const TAX_DISPLAY_OPTIONS = [
   { label: "税込のみ", value: "inclusive_only" },
   { label: "税込＋監査用", value: "inclusive_and_audit" },
@@ -39,12 +48,24 @@ const TAX_ROUNDING_OPTIONS = [
   { label: "切り上げ", value: "ceil" },
 ];
 const REFUND_AGGREGATION_MODE_OPTIONS = [
-  { label: "注文トランザクション基準（デフォルト）", value: "order_transaction" },
-  { label: "返金トランザクションのPOSロケーション基準", value: "refund_transaction_pos_location" },
+  {
+    label: "注文の売上ロケーションに計上（GAS準拠・デフォルト）",
+    value: "order_transaction",
+  },
+  {
+    label: "返金処理のPOSロケーションに計上（他店での返品を返品店に集計）",
+    value: "refund_transaction_pos_location",
+  },
 ];
 const NON_POS_REFUND_FALLBACK_OPTIONS = [
-  { label: "注文の売上店（retailLocation）にフォールバック", value: "order_retail_location" },
-  { label: "POS精算から除外", value: "exclude" },
+  {
+    label: "注文の売上ロケーションにフォールバック",
+    value: "order_retail_location",
+  },
+  {
+    label: "POS精算から除外（どの店にも載せない）",
+    value: "exclude",
+  },
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -55,7 +76,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (typeof settings.taxRatePercent !== "number" || !Number.isFinite(settings.taxRatePercent)) {
     settings.taxRatePercent = 10;
   }
-  return { settings };
+
+  const locRes = await admin.graphql(LOCATIONS_QUERY);
+  const locJson = await locRes.json() as {
+    data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
+  };
+  const locations = (locJson.data?.locations?.nodes ?? [])
+    .filter((l) => l.isActive)
+    .map((l) => ({ id: l.id, name: l.name }));
+
+  const nonPosLoc = await prisma.location.findFirst({
+    where: { shopId: shop.id, nonPosRefundAttributionEnabled: true },
+    select: { shopifyLocationGid: true },
+  });
+  const nonPosRefundTargetLocationGid = nonPosLoc?.shopifyLocationGid ?? "";
+
+  return { settings, locations, nonPosRefundTargetLocationGid };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -71,6 +107,31 @@ export async function action({ request }: ActionFunctionArgs) {
     const n = Number(v);
     return Number.isFinite(n) ? n : d;
   };
+
+  const nonPosTargetGid = str("nonPosRefundTargetLocationGid", "");
+  const nonPosTargetName = str("nonPosRefundTargetLocationName", "");
+  if (nonPosTargetGid) {
+    await prisma.location.updateMany({
+      where: { shopId: shop.id, shopifyLocationGid: { not: nonPosTargetGid } },
+      data: { nonPosRefundAttributionEnabled: false },
+    });
+    await prisma.location.upsert({
+      where: { shopId_shopifyLocationGid: { shopId: shop.id, shopifyLocationGid: nonPosTargetGid } },
+      update: { nonPosRefundAttributionEnabled: true },
+      create: {
+        shopId: shop.id,
+        shopifyLocationGid: nonPosTargetGid,
+        name: nonPosTargetName || nonPosTargetGid,
+        nonPosRefundAttributionEnabled: true,
+      },
+    });
+  } else {
+    await prisma.location.updateMany({
+      where: { shopId: shop.id, nonPosRefundAttributionEnabled: true },
+      data: { nonPosRefundAttributionEnabled: false },
+    });
+  }
+
   const settings: SettlementSettings = {
     ...DEFAULT_SETTLEMENT_SETTINGS,
     settlementReceiptTitle: str("settlementReceiptTitle", "精算レシート"),
@@ -123,19 +184,29 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function SettlementSettingsPage() {
-  const { settings: initial } = useLoaderData<typeof loader>();
+  const { settings: initial, locations, nonPosRefundTargetLocationGid: initialTarget } =
+    useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<SettlementSettings>({ ...initial });
+  const [nonPosTargetGid, setNonPosTargetGid] = useState(initialTarget);
+
+  const nonPosLocationOptions = [
+    { label: "未設定（フォールバック設定に従う）", value: "" },
+    ...locations.map((l) => ({ label: l.name, value: l.id })),
+  ];
 
   const handleSave = () => {
     const fd = new FormData();
     Object.entries(form).forEach(([k, v]) => {
       fd.set(k, typeof v === "boolean" ? (v ? "true" : "false") : String(v));
     });
+    fd.set("nonPosRefundTargetLocationGid", nonPosTargetGid);
+    const targetLoc = locations.find((l) => l.id === nonPosTargetGid);
+    fd.set("nonPosRefundTargetLocationName", targetLoc?.name ?? "");
     submit(fd, { method: "post" });
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
@@ -212,26 +283,36 @@ export default function SettlementSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="返金の計上ロケーション" description="日次精算に載せる返金の帰属先">
+          <Layout.AnnotatedSection
+            title="返金の計上ロケーション"
+            description="日次精算に載せる返金の帰属先ロケーションを設定します。"
+          >
             <Card>
               <BlockStack gap="400">
                 <Select
-                  label="返金の計上ロケーション"
+                  label="返金の計上モード"
                   options={REFUND_AGGREGATION_MODE_OPTIONS}
                   value={form.refundAggregationLocationMode}
                   onChange={(v) =>
                     set("refundAggregationLocationMode", v as SettlementSettings["refundAggregationLocationMode"])
                   }
-                  helpText="ON のとき、返金トランザクションに付く POS 店舗の精算に返金を載せます（他店で売上・別店で返金した場合など）。"
+                  helpText="「注文の売上ロケーション基準」は GAS と同じ動作です。「返金処理のPOSロケーション基準」は返品を処理した店舗の精算に返金を計上します。"
                 />
                 <Select
-                  label="POSロケーション以外の返金（計上先未設定時）"
+                  label="POSロケーション以外の返金の計上先"
+                  options={nonPosLocationOptions}
+                  value={nonPosTargetGid}
+                  onChange={setNonPosTargetGid}
+                  helpText="管理画面からの返金など、POSロケーションが付かない返金の計上先を指定します。ショップ内で1店舗のみ設定可。未設定の場合は下のフォールバック設定に従います。"
+                />
+                <Select
+                  label="POSロケーション以外の返金（計上先未設定時のフォールバック）"
                   options={NON_POS_REFUND_FALLBACK_OPTIONS}
                   value={form.nonPosRefundFallbackMode}
                   onChange={(v) =>
                     set("nonPosRefundFallbackMode", v as SettlementSettings["nonPosRefundFallbackMode"])
                   }
-                  helpText="管理画面返金などで POS 店舗が付かない場合。計上先ロケーションは「設定」タブのロケーション設定で1店舗指定できます。"
+                  helpText="計上先ロケーションが未設定の場合のみ適用されます。"
                 />
               </BlockStack>
             </Card>
