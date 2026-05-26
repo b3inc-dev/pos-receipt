@@ -6,9 +6,11 @@
  */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
-import prisma from "../db.server";
 import { buildSettlementPreview } from "../services/settlementEngine.server";
+import { syncSettlementOrderLikeGas } from "../services/settlementOrderGas.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
+import { resolveSettlementOrderSyncOptions } from "../services/settlementSyncSettings.server";
+import prisma from "../db.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method === "OPTIONS") return corsPreflightResponse(request);
@@ -72,7 +74,35 @@ export async function action({ request }: ActionFunctionArgs) {
       // キャッシュ更新失敗は精算結果に影響させない
     }
 
-    return corsJson({ ok: true, preview });
+    // GAS uiReupsertByOrder / upsertSettlement: 再集計後に Shopify 精算注文を更新
+    let sourceOrderId: string | null = null;
+    let sourceOrderName: string | null = null;
+    const locIdStr = String(locationId);
+    const locGid = locIdStr.startsWith("gid://") ? locIdStr : `gid://shopify/Location/${locIdStr}`;
+    const dbLoc = await prisma.location.findFirst({
+      where: { shopId: shop.id, shopifyLocationGid: locGid },
+    });
+    const printMode = dbLoc?.printMode ?? "order_based";
+    const syncOpts = await resolveSettlementOrderSyncOptions(shop.id, printMode);
+    if (syncOpts.createOrder) {
+      const isInspection = Boolean(
+        settlementId &&
+          (await prisma.settlement.findFirst({
+            where: { id: String(settlementId), shopId: shop.id },
+            select: { periodLabel: true },
+          }))?.periodLabel?.startsWith("点検_"),
+      );
+      if (!isInspection) {
+        const sync = await syncSettlementOrderLikeGas(admin, shop.id, preview, {
+          attachNote: syncOpts.attachNote,
+          attachMetafields: syncOpts.attachMetafields,
+        });
+        sourceOrderId = sync.orderId;
+        sourceOrderName = sync.orderName;
+      }
+    }
+
+    return corsJson({ ok: true, preview, sourceOrderId, sourceOrderName });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);

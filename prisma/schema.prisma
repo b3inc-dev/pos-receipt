@@ -172,6 +172,15 @@ model Settlement {
   @@index([locationId, targetDate])
 }
 
+// GAS LockService.tryLock 相当（精算注文の同時作成防止）
+model SettlementOperationLock {
+  lockKey   String   @id
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
 // ========== 20.5 特殊返金・商品券調整イベント ==========
 model SpecialRefundEvent {
   id                      String   @id @default(cuid())

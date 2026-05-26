@@ -18,7 +18,12 @@ import {
   type SettlementSettings,
 } from "../utils/appSettings.server";
 import { fetchLegacyGiftCardIssuanceForDay } from "./settlementLegacyGiftCards.server";
-import { getShopTimezoneForDaily, getDayRangeInUtc, formatTimeHmInTimeZone } from "../utils/shopTimezone.server";
+import {
+  getShopTimezoneForDaily,
+  getDayRangeInUtc,
+  getDayRangeShopifySearchIso,
+  formatTimeHmInTimeZone,
+} from "../utils/shopTimezone.server";
 import {
   loadRefundAggregationContext,
   resolveRefundAggregationLocationGid,
@@ -163,6 +168,8 @@ interface ShopifyOrder {
   refunds: ShopifyRefund[];
   tags: string[];
   retailLocation?: { id: string } | null;
+  /** GAS fetchAllOrdersSmart フォールバック（processed_at）用 */
+  processedAt?: string | null;
 }
 
 type AdminClient = {
@@ -227,6 +234,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
           }
         }
         tags
+        processedAt
         retailLocation { id }
       }
       pageInfo { hasNextPage endCursor }
@@ -1066,7 +1074,24 @@ export async function buildSettlementPreview(
 
   const createdAtLoc = filterOrdersByRetailLocation(createdRaw, locationId, locIdRaw);
   const updatedAtLoc = filterOrdersByRetailLocation(updatedRaw, locationId, locIdRaw);
-  const ordersUnion = unionSettlementOrdersById(createdAtLoc, updatedAtLoc);
+  let ordersUnion = unionSettlementOrdersById(createdAtLoc, updatedAtLoc);
+
+  // GAS fetchAllOrdersSmart ③: created∪updated が 0 件のとき processed_at（店舗TZの暦日）でフォールバック
+  if (ordersUnion.length === 0) {
+    const processedRange = getDayRangeShopifySearchIso(targetDate, timezone);
+    const shopifyQueryProcessed = `location_id:${locIdRaw} source_name:pos processed_at:>=${processedRange.start} processed_at:<=${processedRange.end} tag_not:settlement -status:cancelled`;
+    const processedRaw = await fetchAllOrders(admin, shopifyQueryProcessed, "CREATED_AT");
+    const processedAtLoc = filterOrdersByRetailLocation(
+      processedRaw.filter((o) => {
+        if (!o.processedAt) return false;
+        const t = new Date(o.processedAt).getTime();
+        return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
+      }),
+      locationId,
+      locIdRaw,
+    );
+    ordersUnion = processedAtLoc;
+  }
 
   const attributionCtx = await loadRefundAggregationContext(shopId);
   const attributionOpts: GasAggregateAttributionOpts = {
