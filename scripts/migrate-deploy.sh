@@ -25,17 +25,23 @@ fi
 echo "==> prisma generate"
 npx prisma generate
 
+LOCK_MIGRATION="20260526120000_settlement_operation_lock"
+
 echo "==> prisma migrate status"
 npx prisma migrate status || true
 
-FAILED="$(npx prisma migrate status 2>&1 | grep -c 'failed' || true)"
-if [[ "${FAILED}" != "0" ]]; then
-  echo "==> 失敗したマイグレーションを rolled-back にマーク（必要な場合のみ）"
-  npx prisma migrate resolve --rolled-back 20260526120000_settlement_operation_lock || true
-fi
-
 echo "==> prisma migrate deploy"
-npx prisma migrate deploy
+if npx prisma migrate deploy; then
+  echo "==> migrate deploy 成功"
+else
+  echo "==> migrate deploy 失敗 → 復旧を試行"
+  npx prisma migrate resolve --rolled-back "$LOCK_MIGRATION" 2>/dev/null || true
+  npx prisma db execute \
+    --file scripts/ensure-settlement-operation-lock.sql \
+    --schema prisma/schema.prisma
+  npx prisma migrate resolve --applied "$LOCK_MIGRATION"
+  npx prisma migrate deploy
+fi
 
 echo "==> 完了"
 npx prisma migrate status
