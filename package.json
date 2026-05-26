@@ -16,6 +16,7 @@
     "start": "prisma migrate deploy && node server.js",
     "check:cors": "node scripts/check-options-cors.js",
     "setup": "prisma generate && prisma migrate deploy",
+    "db:migrate:deploy": "bash scripts/migrate-deploy.sh",
     "shopify": "shopify",
     "prisma": "prisma"
   },
