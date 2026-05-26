@@ -1,15 +1,17 @@
 api_version = "2026-01"
 
 # ============================================================
-# 特殊返金（ホームタイル + 取引詳細メニュー「特殊返金調整」）
-# 取引詳細の表示名は name。menu-item は 1 拡張 = 1 行のため商品券は別ブロック。
+# 特殊返金・商品券（ホームタイル + 取引詳細メニュー）
+# name … POS のタイル一覧・取引詳細メニューのラベル（同一）
+# タイル上の文言は SpecialRefundTile.jsx の heading / subheading
+# 取引詳細を「特殊返金調整」と短く出す行は pos-voucher-adjustment と別拡張で分割
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "特殊返金調整"
+name = "返金・商品券 / 特殊返金・商品券調整"
 uid = "149c1d23-b280-f51c-42ee-3a558fd9cf8a2b8ba0cd"
 handle = "pos-special-refund"
-description = "特殊返金調整"
+description = "返金・商品券 / 特殊返金・商品券調整"
 
 [[extensions.targeting]]
 module = "./src/SpecialRefundTile.jsx"
@@ -24,24 +26,27 @@ module = "./src/SpecialRefundOrderAction.jsx"
 target = "pos.order-details.action.menu-item.render"
 
 # ============================================================
-# 商品券釣銭調整（取引詳細メニューのみ。モーダルは SpecialRefundModal を共有）
-# 新規 UID: shopify app deploy 時に未登録なら Partner で自動付与される想定
+# 商品券釣銭調整（取引詳細メニュー用。ホームタイルは任意で追加）
+# タイルをスマートグリッドに置かなくても、取引詳細メニュー表示のために tile target を定義
 # ============================================================
 [[extensions]]
 type = "ui_extension"
 name = "商品券釣銭調整"
 uid = "b8e4f2a1-6c3d-4e5f-9a0b-1d2e3f4a5b6c7d8e9f0a"
 handle = "pos-voucher-adjustment"
-description = "商品券釣銭調整"
+description = "商品券釣銭調整（取引詳細・任意タイル）"
+
+[[extensions.targeting]]
+module = "./src/VoucherTile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/SpecialRefundModal.jsx"
+target = "pos.home.modal.render"
 
 [[extensions.targeting]]
 module = "./src/VoucherOrderAction.jsx"
 target = "pos.order-details.action.menu-item.render"
-
-# home.modal は tile 必須のため、取引詳細専用モーダル target を使用
-[[extensions.targeting]]
-module = "./src/SpecialRefundModal.jsx"
-target = "pos.order-details.action.render"
 
 # ============================================================
 # 精算タイル（Phase 5 実装済み）

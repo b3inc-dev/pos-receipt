@@ -92,13 +92,14 @@ function SpecialRefundModal() {
 
     setOrderEntryLoading(true);
     setBootstrapError("");
+    setFromOrderEntry(true);
     getOrder(preId)
       .then(async (order) => {
         setSelectedOrder(order);
         const res = await listSpecialRefunds(order.orderId ?? preId);
         setEvents(res.items ?? []);
-        setFromOrderEntry(true);
-        setStep(voucherShortcut ? "form_voucher" : "order_detail");
+        // 取引詳細メニューからは一覧を挟まず、各処理のフォームへ直行
+        setStep(voucherShortcut ? "form_voucher" : "form_refund");
       })
       .catch((e) => setBootstrapError(toUserMessage(e?.message) || "取得に失敗しました"))
       .finally(() => setOrderEntryLoading(false));
@@ -158,6 +159,32 @@ function SpecialRefundModal() {
     );
   }
 
+  if (bootstrapError && fromOrderEntry) {
+    return (
+      <s-page heading="返金・商品券">
+        <s-box padding="base">
+          <s-stack gap="base">
+            <s-text tone="critical">{bootstrapError}</s-text>
+            <s-text tone="subdued" size="small">
+              取引詳細から開けませんでした。アプリの権限更新後に再度お試しください。
+            </s-text>
+            <s-button
+              kind="primary"
+              onClick={() => {
+                if (tryDismissModal()) return;
+                setBootstrapError("");
+                setFromOrderEntry(false);
+                setStep("day_list");
+              }}
+            >
+              閉じる
+            </s-button>
+          </s-stack>
+        </s-box>
+      </s-page>
+    );
+  }
+
   if (step === "day_list") {
     return (
       <OrderDayListScreen
@@ -201,9 +228,13 @@ function SpecialRefundModal() {
         error={error}
         setLoading={setLoading}
         setError={setError}
-        onBack={() => setStep("order_detail")}
+        onBack={() => {
+          if (fromOrderEntry && tryDismissModal()) return;
+          setStep("order_detail");
+        }}
         onSuccess={async () => {
           await refreshEvents();
+          if (fromOrderEntry && tryDismissModal()) return;
           setStep("order_detail");
         }}
       />
@@ -218,9 +249,13 @@ function SpecialRefundModal() {
         error={error}
         setLoading={setLoading}
         setError={setError}
-        onBack={() => setStep("order_detail")}
+        onBack={() => {
+          if (fromOrderEntry && tryDismissModal()) return;
+          setStep("order_detail");
+        }}
         onSuccess={async () => {
           await refreshEvents();
+          if (fromOrderEntry && tryDismissModal()) return;
           setStep("order_detail");
         }}
       />

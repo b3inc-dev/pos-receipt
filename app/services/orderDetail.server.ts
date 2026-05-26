@@ -38,10 +38,6 @@ export const ORDER_DETAIL_QUERY = `#graphql
           refundableQuantity
           originalUnitPriceSet { shopMoney { amount currencyCode } }
           discountedUnitPriceSet { shopMoney { amount currencyCode } }
-          variant {
-            title
-            barcode
-          }
           staffMember {
             id
             name
@@ -144,7 +140,13 @@ export function serializeOrderDetail(
       rate: tl.rate,
       amount: moneyAmount(tl.priceSet as MoneyBag),
     }));
-    const variant = li.variant as { title?: string; barcode?: string } | null;
+    const lineName = String(li.name ?? "");
+    const titleOnly = String(li.title ?? "");
+    let variantTitle = "";
+    if (lineName && titleOnly && lineName !== titleOnly) {
+      const suffix = lineName.slice(titleOnly.length).replace(/^[\s\-–—]+/, "");
+      if (suffix) variantTitle = suffix;
+    }
     const staff = li.staffMember as {
       id?: string;
       name?: string;
@@ -157,11 +159,11 @@ export function serializeOrderDetail(
       "";
     return {
       id: li.id,
-      title: String(li.title ?? li.name ?? ""),
-      variantTitle: variant?.title ?? "",
+      title: titleOnly || lineName,
+      variantTitle,
       quantity: qty,
       sku: li.sku ?? "",
-      barcode: variant?.barcode ?? "",
+      barcode: "",
       originalUnitPrice: moneyAmount(li.originalUnitPriceSet as MoneyBag),
       discountedUnitPrice: moneyAmount(li.discountedUnitPriceSet as MoneyBag),
       lineTotal: String(Math.round(unit * qty)),

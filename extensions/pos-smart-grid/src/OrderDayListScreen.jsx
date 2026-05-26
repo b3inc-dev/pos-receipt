@@ -172,11 +172,6 @@ export function OrderDayListScreen({
     }
   }, [sessionReady, locationIdParam, buildSearchParams]);
 
-  const runSearch = useCallback(() => {
-    setSearchQuery(searchDraft.trim());
-    setListError("");
-  }, [searchDraft]);
-
   const clearSearch = useCallback(() => {
     setSearchDraft("");
     setSearchQuery("");
@@ -186,6 +181,17 @@ export function OrderDayListScreen({
   useEffect(() => {
     reloadList();
   }, [reloadList]);
+
+  // 入力のたびに一覧を更新（POS Stock の商品検索と同様。短い語は誤ヒットを避けるため最小文字数あり）
+  useEffect(() => {
+    const trimmed = searchDraft.trim();
+    if (trimmed.length > 0 && trimmed.length < 2) return;
+    const timer = setTimeout(() => {
+      setSearchQuery(trimmed);
+      setListError("");
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchDraft]);
 
   const onLoadMore = useCallback(async () => {
     if (!nextCursor || !locationIdParam) return;
@@ -327,19 +333,17 @@ export function OrderDayListScreen({
             <s-text-field
               label="注文番号・顧客名で検索"
               value={searchDraft}
-              placeholder="例: 30388542 または 山田"
+              placeholder="例: 30388542 または 山田（2文字以上で自動検索）"
               onInput={(e) => setSearchDraft(e?.currentTarget?.value ?? "")}
             />
-            <s-stack direction="inline" gap="small" style={{ width: "100%", flexWrap: "wrap" }}>
-              <s-button kind="primary" onClick={runSearch} disabled={listLoading}>
-                検索
+            {searchDraft.trim().length === 1 ? (
+              <s-text tone="subdued" fontSize="small">あと1文字入力すると検索します</s-text>
+            ) : null}
+            {isSearchMode ? (
+              <s-button kind="secondary" onClick={clearSearch} disabled={listLoading}>
+                検索をクリア
               </s-button>
-              {isSearchMode ? (
-                <s-button kind="secondary" onClick={clearSearch} disabled={listLoading}>
-                  検索をクリア
-                </s-button>
-              ) : null}
-            </s-stack>
+            ) : null}
             {isSearchMode ? (
               <s-text tone="subdued" fontSize="small">
                 日付は使わず、この店舗の過去の取引から検索しています（「{searchQuery}」）
