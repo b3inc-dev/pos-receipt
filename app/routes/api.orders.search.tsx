@@ -77,11 +77,15 @@ function buildSearchQuery(params: {
     parts.push(`location_id:${locIdRaw}`);
     parts.push("source_name:pos");
   }
-  if (params.dateFrom) {
-    parts.push(`created_at:>=${params.dateFrom}T00:00:00Z`);
-  }
-  if (params.dateTo) {
-    parts.push(`created_at:<=${params.dateTo}T23:59:59Z`);
+  // 検索語があるときは日付条件を付けない（店舗内の過去注文を横断検索）
+  const hasQuery = Boolean(params.q?.trim());
+  if (!hasQuery) {
+    if (params.dateFrom) {
+      parts.push(`created_at:>=${params.dateFrom}T00:00:00Z`);
+    }
+    if (params.dateTo) {
+      parts.push(`created_at:<=${params.dateTo}T23:59:59Z`);
+    }
   }
   if (parts.length === 0) return undefined;
   return parts.join(" AND ");
@@ -233,6 +237,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         items,
         nextCursor: pageInfo.hasNextPage ? pageInfo.endCursor : null,
         timezone,
+        searchMode: Boolean(q?.trim()),
       },
       { headers: { "Content-Type": "application/json" } },
     );

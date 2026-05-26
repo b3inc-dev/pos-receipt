@@ -79,6 +79,9 @@ export function OrderDayListScreen({
   const [nextCursor, setNextCursor] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [listSegment, setListSegment] = useState("all");
+  const [searchDraft, setSearchDraft] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const isSearchMode = searchQuery.trim().length > 0;
 
   const availableYears = useMemo(() => {
     return [t0.y, t0.y - 1, t0.y - 2];
@@ -137,6 +140,17 @@ export function OrderDayListScreen({
     }
   }, [maxDayForSelection, selectedDay]);
 
+  const buildSearchParams = useCallback(
+    (cursor) => {
+      const base = { locationId: locationIdParam, limit: 50, cursor };
+      if (isSearchMode) {
+        return { ...base, q: searchQuery.trim() };
+      }
+      return { ...base, dateFrom: dateStr, dateTo: dateStr };
+    },
+    [locationIdParam, isSearchMode, searchQuery, dateStr],
+  );
+
   const reloadList = useCallback(async () => {
     if (!sessionReady || !locationIdParam) {
       setItems([]);
@@ -146,12 +160,7 @@ export function OrderDayListScreen({
     setListLoading(true);
     setListError("");
     try {
-      const res = await searchOrders({
-        locationId: locationIdParam,
-        dateFrom: dateStr,
-        dateTo: dateStr,
-        limit: 50,
-      });
+      const res = await searchOrders(buildSearchParams());
       setItems(res.items ?? []);
       setNextCursor(res.nextCursor ?? null);
     } catch (e) {
@@ -161,7 +170,18 @@ export function OrderDayListScreen({
     } finally {
       setListLoading(false);
     }
-  }, [sessionReady, locationIdParam, dateStr]);
+  }, [sessionReady, locationIdParam, buildSearchParams]);
+
+  const runSearch = useCallback(() => {
+    setSearchQuery(searchDraft.trim());
+    setListError("");
+  }, [searchDraft]);
+
+  const clearSearch = useCallback(() => {
+    setSearchDraft("");
+    setSearchQuery("");
+    setListError("");
+  }, []);
 
   useEffect(() => {
     reloadList();
@@ -171,13 +191,7 @@ export function OrderDayListScreen({
     if (!nextCursor || !locationIdParam) return;
     setLoadingMore(true);
     try {
-      const res = await searchOrders({
-        locationId: locationIdParam,
-        dateFrom: dateStr,
-        dateTo: dateStr,
-        limit: 50,
-        cursor: nextCursor,
-      });
+      const res = await searchOrders(buildSearchParams(nextCursor));
       setItems((prev) => [...prev, ...(res.items ?? [])]);
       setNextCursor(res.nextCursor ?? null);
     } catch {
@@ -185,7 +199,7 @@ export function OrderDayListScreen({
     } finally {
       setLoadingMore(false);
     }
-  }, [nextCursor, locationIdParam, dateStr]);
+  }, [nextCursor, locationIdParam, buildSearchParams]);
 
   return (
     <s-page heading={pageHeading}>
@@ -310,6 +324,28 @@ export function OrderDayListScreen({
               </s-box>
             ) : null}
 
+            <s-text-field
+              label="注文番号・顧客名で検索"
+              value={searchDraft}
+              placeholder="例: 30388542 または 山田"
+              onInput={(e) => setSearchDraft(e?.currentTarget?.value ?? "")}
+            />
+            <s-stack direction="inline" gap="small" style={{ width: "100%", flexWrap: "wrap" }}>
+              <s-button kind="primary" onClick={runSearch} disabled={listLoading}>
+                検索
+              </s-button>
+              {isSearchMode ? (
+                <s-button kind="secondary" onClick={clearSearch} disabled={listLoading}>
+                  検索をクリア
+                </s-button>
+              ) : null}
+            </s-stack>
+            {isSearchMode ? (
+              <s-text tone="subdued" fontSize="small">
+                日付は使わず、この店舗の過去の取引から検索しています（「{searchQuery}」）
+              </s-text>
+            ) : null}
+
             {badgeMode === "specialRefund" ? (
               <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%" }}>
                 {LIST_SEGMENTS.map((seg) => (
@@ -376,7 +412,9 @@ export function OrderDayListScreen({
                   <s-button kind="secondary" onClick={reloadList}>再読み込み</s-button>
                 </s-stack>
               ) : items.length === 0 ? (
-                <s-text tone="subdued" size="small">この日の取引はありません。</s-text>
+                <s-text tone="subdued" size="small">
+                  {isSearchMode ? "該当する取引は見つかりませんでした。" : "この日の取引はありません。"}
+                </s-text>
               ) : (
                 <s-stack gap="base">
                   {items.filter((order) => matchesListSegment(order, listSegment)).length === 0 ? (
