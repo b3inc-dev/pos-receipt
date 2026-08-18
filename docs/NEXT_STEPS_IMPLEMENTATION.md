@@ -1,7 +1,28 @@
 # POS Receipt 残り実装の進め方
 
 このドキュメントは、Epic A〜H 完了後の「残タスク」とオプション項目の進め方をまとめたものです。  
-最終更新: 2026-03-12
+最終更新: 2026-08-18
+
+---
+
+## 0. 優先: 精算レシート印字の1本化（Shopify Printing API）
+
+Shopify POS UI Extensions `2026-07` の Printing API により、CloudPRNT 直印字と精算注文経由印字を標準の二系統にする必要がなくなった。
+
+- **正本**: `docs/SETTLEMENT_PRINT_UNIFICATION.md`
+- **要件改訂**: `docs/posreceipt_requirements_spec.md` §6.7 / §6.8 / §13 / §21.3
+- **結論**: 標準経路は `shopify_printing` の1本。精算注文作成は監査用の任意同期。CloudPRNT / order_based は互換。
+
+実装順（コード変更は本書 Phase 0 のドキュメント承認後）:
+
+| フェーズ | 内容 |
+|----------|------|
+| 0 | 要件・設定ドキュメント改訂（本変更） |
+| 1 | POS 拡張 `api_version` を 2026-07 へ。`print.html` + `shopify.printing.print` |
+| 2 | 58/80mm 向け HTML レンダラ |
+| 3 | 印字と精算注文同期の分離。新規デフォルトを `shopify_printing` |
+| 4 | 領収書も同一 Print Adapter（任意） |
+| 5 | レガシー縮退（実機検証後） |
 
 ---
 
@@ -58,7 +79,7 @@
   - **商品券判定**: 「商品券として扱う」に説明文を追加（gateway に gift_card 等を登録してONにする旨）。`formattedGatewayPattern` が空のときは formatted ではマッチしないよう `paymentMethod.server.ts` のマッチングを修正。
   - **API**: `getPaymentMethodVoucherInfo(shopId, gateway)` を追加。gateway に一致するマスタの `isVoucher` / `voucherChangeSupported` を返し、特殊返金・精算で利用可能。
 
-### 2.4 CloudPRNT 実機連携（payload をプリンタに送る導線） ✅ 実装済み
+### 2.4 CloudPRNT 実機連携（payload をプリンタに送る導線） ✅ 実装済み（互換経路として維持）
 
 - **実装内容**:
   1. **印字用 payload の生成と返却** ✅
@@ -69,9 +90,11 @@
 
 **POS 導線** ✅: CloudPRNT 直印字の完了画面で、印字用データ取得URL（`GET /api/settlements/:id/print-payload`）を表示。実機確認時にプリンタのポーリング先に設定できる旨を案内。
 
-**残り（オプション）**:
-- **A. POS から送る**: create 成功後の `printPayload` を Star の POS 用 SDK 等で直接プリンタに送る導線（実機・SDK に合わせて実装）。
-- 実機での印字確認。
+**方針変更（2026-08-18）**: 新規の標準印字は CloudPRNT ではなく Shopify Printing API。CloudPRNT の「POS から Star SDK で送る」は実装しない。詳細は `docs/SETTLEMENT_PRINT_UNIFICATION.md`。
+
+**残り（互換・オプション）**:
+- 既存 CloudPRNT 店舗の実機ポーリング確認。
+- Printing API 1本化後も、POS 非ペアのネットワークプリンタ店舗だけ CloudPRNT を残す。
 
 ---
 
@@ -79,9 +102,13 @@
 
 | 優先度 | 項目                         | 状態 |
 |--------|------------------------------|------|
-| 高     | CloudPRNT payload の生成・返却 | ✅ 完了 |
-| 中     | CloudPRNT 実機への送信導線   | ポーリング用 GET・POS 完了画面の URL 案内まで完了。実機確認は後述 |
-| 中     | 税率の設定化                 | ✅ 完了 |
+| 高     | Printing API 1本化（要件）   | ✅ ドキュメント完了。コードは Phase 1 以降 |
+| 高     | POS `api_version` 2026-07 + print.html | 未着手 |
+| 中     | レシート向け HTML レンダラ   | 未着手 |
+| 中     | 印字と精算注文同期の分離     | 未着手 |
+| 低     | CloudPRNT payload の生成・返却 | ✅ 完了（互換として維持） |
+| 低     | CloudPRNT 実機への送信導線   | 標準経路にはしない。ポーリング互換のみ |
+| 低     | 税率の設定化                 | ✅ 完了 |
 | 低     | 支払方法マスタ・商品券の拡張 | ✅ 完了（一覧列・説明・VoucherInfo API） |
 | 低     | location_settings key-value  | 新しいロケーション別設定が必要になったら対応 |
 
@@ -98,6 +125,7 @@
 | 精算設定（税率追加候補） | `app/utils/appSettings.server.ts`, `app/routes/app.settlement-settings.tsx` |
 | 支払方法マスタ       | `app/routes/app.payment-methods.tsx`, `app/utils/paymentMethod.server.ts`, Prisma `PaymentMethodMaster` |
 | 印字設定・CloudPRNT  | `app/routes/app.print-settings.tsx`, `app/utils/appSettings.server.ts` (PrintSettings) |
+| 印字1本化の正本      | `docs/SETTLEMENT_PRINT_UNIFICATION.md` |
 | POS 精算 UI          | `extensions/pos-smart-grid/src/SettlementModal.jsx` |
 
 ---
