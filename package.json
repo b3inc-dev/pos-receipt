@@ -22,7 +22,11 @@
     "setup": "prisma generate && prisma migrate deploy",
     "db:migrate:deploy": "bash scripts/migrate-deploy.sh",
     "shopify": "shopify",
-    "prisma": "prisma"
+    "prisma": "prisma",
+    "lint": "npm run lint:docs",
+    "lint:docs": "node scripts/check-development-docs.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

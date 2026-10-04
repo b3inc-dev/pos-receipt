@@ -60,3 +60,16 @@ Shopify POS 店舗向けに、日次精算・特殊返金／商品券調整・�
 共通ルールの正本は本書と既存docsです。Cursor・Codex・Claude Codeは開始前に [docs/DEV_FIRST_THEN_DEPLOY.md](docs/DEV_FIRST_THEN_DEPLOY.md) の共通開発運用・引き継ぎ・リリース境界を確認してください。1 workstreamにつきowner toolは1つ。main直push・force push、本番操作の無承認実行、Backlogへの勝手な着手は禁止です。
 
 作業分離は毎回の指示を待たず自動で行う。編集前にGitHubのowner・進行中PRとローカル変更を確認し、同じworkstreamの自分の専用branch/worktreeがあれば再利用、なければGitHubの適切なbaseから作成する。main/stagingの共有checkoutや他toolのworktreeへ直接編集しない。詳細手順は上記の共通運用docsを参照する。
+
+## Codex継続開発（2026-10-04のユーザー方針）
+
+今後の実装ownerはCodex。GitHubを正本とし、原則このチャットだけで完結する。依頼された変更は調査・実装・レシート回帰検証・自己レビュー・push・PR作成まで自律実行する。合理的に判断できる事項は確認を待たず進める。既存他tool作業はowner・停止・handoffを確認し、他toolのbranchを直接編集しない。
+
+- main直commit/push禁止。最新baseから専用feature branch/worktreeを使用する。
+- 既存レシートの店舗名・スタッフ名・割引名/合計・配送案内/配送先住所・営業日・QR・ロゴ・ギフト/精算レシート・POS Lite（Light表記含む）/Pro・mPOP等の印刷経路を優先して調査し、不要なフォーマット変更や印刷不能になる変更を避ける。
+- API versionを確認し、Printing API変更時は最新公式仕様と既存実装を両方読む。未確認事項はコード・docs・Git履歴から調べる。
+- lint/typecheck/test/build、sample order/fixtureによる出力比較、POS表示/印刷影響確認を行う。実行不可・未整備・実機未確認を成功扱いしない。詳細はworkflowのCodex継続開発節。
+- production app deploy、POS/Shopify本番設定変更、本番注文書き込み、main merge、不可逆な本番操作は明示承認まで停止する。調査・実装・テスト・branch・push・PR作成は本方針で許可される。
+- PR本文にレシート表示、印刷、POS Lite/Pro、API変更、テスト結果、本番反映時の注意点を記載する。
+
+開発環境・品質コマンド・fixtureの検証範囲は [docs/DEVELOPMENT_TESTING.md](docs/DEVELOPMENT_TESTING.md)、未完了候補は [docs/BACKLOG.md](docs/BACKLOG.md) を確認する。BACKLOGは実行指示ではない。
