@@ -62,6 +62,7 @@ npx shopify app dev
 | やりたいこと       | コマンド |
 |--------------------|----------|
 | 開発してプレビュー | `npm run dev` または `npx shopify app dev` |
+| PR を専用 worktree で確認（ポート 3001） | `npm run preview:setup` → `npm run preview:pr -- <番号>` → Preview 側で `npm run preview:dev`（詳細は `docs/DEV_FIRST_THEN_DEPLOY.md` の「PR Preview Workflow」） |
 | アプリ情報を表示   | `npx shopify app info` |
 | 拡張を追加したい   | `npx shopify app generate extension` |
 

@@ -6,6 +6,61 @@
 
 ---
 
+## 0. PR Preview Workflow（main 作業 dir を触らない確認）
+
+GitHub 上の PR を、**専用 Preview worktree** で番号指定して確認する手順です。本体（main 作業ディレクトリ）の branch は切り替えません。通常の `npm run dev`（ポート 3000）と並行でき、Preview は常に **http://127.0.0.1:3001** です。本番操作（merge / deploy / DB migration apply / secrets 変更）は行いません。
+
+既定の Preview パスは `../ciara-system-preview` です（repo 実ディレクトリ名が `pos-receipt` でもこの sibling 名を既定にする。場所を変えたいときは `PREVIEW_WORKTREE_PATH` またはリポジトリ直下の `.preview-worktree.path`）。
+
+### 0.1 初回だけ（setup → Preview へ移動 → 起動）
+
+main 側の作業ディレクトリで:
+
+```bash
+npm run preview:setup
+cd ../ciara-system-preview
+# 初回のみ: Preview worktree は node_modules / .env を共有しない
+npm ci
+# 必要なら main 側の .env を参照用にコピー（secrets を commit しない）
+npm run preview:dev
+```
+
+ブラウザ: http://127.0.0.1:3001
+
+`preview:setup` 後は必ず `npm run preview:pr -- <PR番号>` で確認したい PR を載せてから `preview:dev` する（既存のローカル `preview/current` tip が残っていても、`preview:pr` が最新 HEAD に付け替える）。
+
+### 0.2 以後（PR を切り替えて確認）
+
+main 側で PR 番号を指定（本体 branch は変わらない）:
+
+```bash
+npm run preview:pr -- <PR番号>
+cd ../ciara-system-preview
+npm run preview:dev
+```
+
+例（PR #27）:
+
+```bash
+npm run preview:pr -- 27
+cd ../ciara-system-preview
+npm run preview:dev
+```
+
+- Preview が dirty（未コミット変更）のときは破棄せず安全停止します。
+- `package.json` / `package-lock.json` が main から変わっている場合は `npm ci` が必要かもしれない旨を表示します（既存破壊を避けるため自動実行しません）。
+- Prisma schema / migration の差分は**警告のみ**です。`db push` / migration apply / 本番 DB 操作は自動実行しません。
+
+### 0.3 プレビュー確認後 → 本番反映ワークフローへ
+
+プレビューで問題なければ、次の一文で既存の production release 判断フローへ進みます（本セクション自体は Preview まで。main merge や本番 deploy は別途承認）:
+
+> プレビュー確認済み。問題ないので本番反映まで進めて。
+
+以降は本書の「2. 検証後は専用branchからPRを更新する」および Shopify / Render のリリース境界に従います。
+
+---
+
 ## 1. 開発環境で確実に動かす
 
 ### 1.1 クリーンに開発サーバーを起動する
