@@ -2,7 +2,7 @@
 
 # 開発環境で確実に動かしてからコミット・デプロイする手順
 
-修正後は **まず開発環境で動作を確認** し、問題なければ **コミット → プッシュ → デプロイ** する流れにすると安全です。
+修正後は **開発環境で動作確認 → 専用branchへコミット・push → PRの品質確認・独立レビュー → Ready** の順で進めます。mainへのmergeはRender本番deployを伴うため、本依頼では停止します。Shopify release・手動deploy・publishも停止します。
 
 ---
 
@@ -13,7 +13,7 @@
 キャッシュや古いビルドを消してからビルドし直し、そのあと dev を起動します。
 
 ```bash
-cd /Users/develop/ShopifyApps/pos-receipt
+cd /path/to/your/pos-receipt-worktree
 npm run dev:clean
 ```
 
@@ -73,43 +73,33 @@ npm run dev
 
 ---
 
-## 2. 問題なければコミット・プッシュ・デプロイ
+## 2. 検証後は専用branchからPRを更新する
 
-開発環境で上記がすべて問題ないことを確認してから、以下を実行します。
-
-### 2.1 コミット
+ownerと変更範囲を確認した専用worktreeで、今回変更したファイルだけをstageします。共有main checkoutや他toolのbranchへcommit/pushしません。
 
 ```bash
-git add -A
-git status   # 変更内容を確認
-git commit -m "fix: OrderTransactionConnection nodes, locations like POS Stock, dev:clean script"
+git status --short --branch
+git add <今回変更したファイル>
+git diff --cached --check
+git diff --cached
+git commit -m "docs: integrate shared development instructions"
+git push origin HEAD:<自分の専用branch>
 ```
 
-### 2.2 プッシュ
+PRにowner・base/HEAD・品質結果・独立レビュー・未完了事項を記録してReadyで停止します。main mergeはRender public/inhouse backendの本番deployとpredeploy migrationを起動します。Shopify設定・拡張releaseは別経路です。以下は明示承認後に判断する運用情報であり、本依頼では実行しません。
 
-```bash
-git push
-```
+- main反映: 承認済みPRのmergeのみ。direct commit/push・force push禁止。
+- Shopify公開用release: `npm run deploy:public`。
+- Shopify自社用release: `npm run deploy:inhouse`。
+- Render backend: 下記の確認済みmain / On Commit経路。専用branchへのpushを本番releaseと混同しない。
 
-### 2.3 デプロイ
+## 3. ドキュメントの役割と競合時の扱い
 
-- **拡張＋バックエンドをまとめてデプロイする場合**
-  - 公開用: `npm run deploy:public`
-  - 自社用: `npm run deploy:inhouse`
-- **Render が Git 連携している場合**
-  - push 後に自動でビルド・デプロイされることが多いので、Render のデプロイ状況を確認する。
+`AGENTS.md`は共通入口、本書は開発運用・owner・引き継ぎ・品質・リリース境界の正本です。業務・構成は `PROJECT_CONTEXT.md`、`ARCHITECTURE.md`、`BUSINESS_RULES.md`、`SHOPIFY.md`、`DECISIONS.md` に分担します。古い詳細メモとコードの差分は `DECISIONS.md` を参照し、コードの現状を正とします。未承認の将来要件を現行実装として扱いません。
 
----
+PR #2（Cursorの基盤docs、HEAD `013fd67`）の確定内容をPR #3（Codexの共通運用）へ履歴を保持して取り込み、AGENTS.mdの業務指示・索引・公開/自社の区分と3ツール共通指示を統合しました。他toolのbranchは変更しません。取り込んだHEAD以降の変更は再度owner・競合を確認して統合します。
 
-## 3. まとめ
-
-| 段階 | やること |
-|------|----------|
-| **開発で確実に動かす** | `npm run dev:clean` → 表示された URL から開く → ロケーション・精算プレビューを確認 |
-| **問題なければ** | コミット → プッシュ → デプロイ（または push で自動デプロイを確認） |
-
-「まず開発環境で確実に処理される」→「そのあとコミット・プッシュ・デプロイ」という順で進められるようにしています。
-
+PR #1の印字移行要件は別workstreamです。Printing API移行は本初期設定に含めず、現行の印字実装と移行候補を区別します。取り込みだけでCursorのworkstream全体のownerや未完了作業を引き継いだことにはしません。
 
 ## Cursor・Codex・Claude Code 共通開発運用
 
@@ -171,7 +161,7 @@ Renderの下記確認済みサービスはmainを監視しOn Commit auto-deploy�
 
 ### 初期設定監査（2026-10-04、本番コード/deploy設定変更なし）
 
-main protectionなし（API404 Branch not protected）、rulesetなし。GitHub Actions workflowなし、GitHub auto-merge機能は無効。ツールによる既存merge運用とこのAPI設定は別物として扱う。提案はmainのPR必須・force push/削除禁止・必須人間review 0・bypassなし。存在しないCI checkをrequiredに追加しない。保護設定適用は差分を提示して人間承認後のみ。
+初回監査時はmain protectionなし（API404 Branch not protected）、rulesetなし。現在は下記の「承認後の更新」を参照。GitHub Actions workflowなし、GitHub auto-merge機能は無効。ツールによる既存merge運用とこのAPI設定は別物として扱う。提案はmainのPR必須・force push/削除禁止・必須人間review 0・bypassなし。存在しないCI checkをrequiredに追加しない。保護設定適用は差分を提示して人間承認後のみ。
 
 品質: build成功。package.jsonにlint/test/typecheck scriptなし。 実行Nodeは24.11.1、既存ローカルnode_modulesを再利用したためNode20での完全再現は未確認。アプリコードの差分はなし。既存gateエラーは初期設定PRでrefactorせず別課題とする。
 
