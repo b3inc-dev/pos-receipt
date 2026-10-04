@@ -159,7 +159,7 @@ Handoff: 前owner停止確認・次owner受領
 
 OAuth・scopes・webhooks・App Proxy・billing・inventory/order mutation・本番env変更はHIGH RISK。手動production deployは明示承認時のみ。旧手順のmain直pushは使わず、PR経由に読み替える。`shopify app deploy`によるShopify設定/拡張のreleaseと、hosted backendのdeployは別経路。開発時も本番アプリのURLを更新しないようapp/config/storeの接続先を確認する。
 
-Renderの監視branch・auto-deploy・build filter・実際のbuild/predeploy/start・public/inhouseの対象は外部設定で未確認。main mergeが本番deployを起こす場合はproduction releaseとして扱う。今回は確認・人間承認までmergeしない。
+Renderの下記確認済みサービスはmainを監視しOn Commit auto-deploy。main merge = backend production releaseとして扱い、今回は人間承認までmergeしない。Shopify app config/extension releaseは別経路で、Render deployだけではShopify版のreleaseを意味しない。
 
 品質ゲートはpackage.jsonに存在するlint/typecheck/buildを実行し、存在しないtestコマンドを捏造しない。開発用credentialsが必要な検証は未実行理由をPRに残す。本番DBへのmigrationや接続を品質確認に使わない。
 
@@ -167,7 +167,7 @@ Renderの監視branch・auto-deploy・build filter・実際のbuild/predeploy/st
 
 ### repoから確認した運用証拠（2026-10-04）
 
-`render.yaml`は参考Blueprintとしてpos-receipt/pos-receipt-ciara、Node20、build=`npm install && npx prisma generate && npm run build`、preDeploy=`npm run render:migrate`、start=`npm run start`を定義する。実適用/監視branchは未確認。`package.json`のdeploy系scriptはShopify releaseを実行し、backendは別経路。既存API方針の参照: `app/lib/shopifyGraphqlThrottle.server.ts`、`app/services/salesSummaryWebhookQueue.server.ts`（retryLimit=5/backoff）、receipts.issue/settlements.create経路のidempotency。全mutationの再送安全性・secret/log処理は網羅監査未完了。
+`render.yaml`は参考Blueprintとしてpos-receipt/pos-receipt-ciara、Node20、build=`npm install && npx prisma generate && npm run build`、preDeploy=`npm run render:migrate`、start=`npm run start`を定義する。Render Dashboardでpublic/inhouse双方のGitHub main、On Commit auto-deploy、build/predeploy/start一致とinclude/ignore filter未指定を確認した。Blueprintとの管理上の紐付け自体は未確認。`package.json`のdeploy系scriptはShopify releaseを実行し、backendは別経路。既存API方針の参照: `app/lib/shopifyGraphqlThrottle.server.ts`、`app/services/salesSummaryWebhookQueue.server.ts`（retryLimit=5/backoff）、receipts.issue/settlements.create経路のidempotency。全mutationの再送安全性・secret/log処理は網羅監査未完了。
 
 ### 初期設定監査（2026-10-04、本番コード/deploy設定変更なし）
 
@@ -177,8 +177,12 @@ main protectionなし（API404 Branch not protected）、rulesetなし。GitHub 
 
 ツール: Cursor desktop CLI 3.23.12、Codex CLI 0.160.0、Claude Code 2.1.246、Shopify CLI 3.88.1。Codexはread-only実セッションで共通指示と参照docsを読み、owner/PR/停止条件/引き継ぎを確認。Cursorの実Agent読込は未確認（cursor-agentは未検出）、Claude Codeは未ログインで実セッション未確認。rootから起動して上記の無編集確認promptを実行し、Claudeは/contextのMemory files、Cursorは適用ルールを照合する。
 
-既存権限/接続: Codexユーザー設定にapproval/sandboxの明示キーはなく、このPRはrepo側だけsafe defaultを追加。現在のdesktop sessionはworkspace-write相当。Cursor CLIはapprovalMode=allowlistだがsandbox.mode=disabled（既存ユーザー設定を保持、要確認）。Claudeユーザー設定にはallow rule 28件がありdefaultModeは明示なし（実効権限は未確認）。Codex/ Cursorの既存MCP、App repoのShopify MCPは保持し、新規MCP・credentialsを追加しない。個人認証/接続情報はコピーしていない。
+既存権限/接続: Codexユーザー設定にapproval/sandboxの明示キーはなく、このPRはrepo側だけsafe defaultを追加。repo設定はon-request/workspace-writeを維持するが、再監査時のこのCodex desktop sessionは起動側のdanger-full-access/approval neverで上書きされている。repo設定だけでは実効権限を保証できないため、通常開発ではdesktopの承認・sandbox表示を確認して開始する。今回こちらからFull Accessへ変更した事実はない。Cursor CLIはapprovalMode=allowlistだがsandbox.mode=disabled（既存ユーザー設定を保持、要確認）。Claudeユーザー設定はallow 28件・defaultMode明示なし。Edit(**)、git push、npx prisma、gcloud buildsの広いallowがある。production禁止はdocs上の指示でありpermission denyではない。未ログインのため実効モードとimportは未確認。個人権限は変更していない。Codex/ Cursorの既存MCP、App repoのShopify MCPは保持し、新規MCP・credentialsを追加しない。個人認証/接続情報はコピーしていない。
 
 承認後の更新: 2026-10-04にユーザー承認を受けmain ruleset `main-pr-required-no-force-push` をactiveで適用し、有効ルールをGETで再確認済み。PR必須、force push/削除禁止、required approvals=0、追加承認/Code Owner/last push approvalは無効、bypassなし。required checksは追加せず、既存auto-merge設定は変更していない。
 
 独立レビュー: 別Agentによる読み取りレビューで旧deploy手順の矛盾を修正し、重大な追加指摘なし。実行できないツール/外部設定と既存品質エラーは上記・PRで未確認/未完了として残す。
+
+### 外部設定再監査（2026-10-04、read-only）
+
+Render Settings: `pos-receipt`（srv-d6nuu4chg0os73cd4jg0）と `pos-receipt-ciara`（srv-d6p70sua2pns73f7p0vg）はともに `b3inc-dev/pos-receipt` / main / Auto-Deploy On Commit。Root DirectoryとBuild Filtersは未指定。build=`npm install && npx prisma generate && npm run build`、preDeploy=`npm run render:migrate`、start=`npm run start`。docs mergeでも本番backend deployとpredeploy migrationが走る経路なので承認待ち。設定/手動deploy/Shopify releaseは未実施。
