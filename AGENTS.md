@@ -71,3 +71,5 @@ Shopify POS 店舗向けに、日次精算・特殊返金／商品券調整・�
 - lint/typecheck/test/build、sample order/fixtureによる出力比較、POS表示/印刷影響確認を行う。実行不可・未整備・実機未確認を成功扱いしない。詳細はworkflowのCodex継続開発節。
 - production app deploy、POS/Shopify本番設定変更、本番注文書き込み、main merge、不可逆な本番操作は明示承認まで停止する。調査・実装・テスト・branch・push・PR作成は本方針で許可される。
 - PR本文にレシート表示、印刷、POS Lite/Pro、API変更、テスト結果、本番反映時の注意点を記載する。
+
+開発環境・品質コマンド・fixtureの検証範囲は [docs/DEVELOPMENT_TESTING.md](docs/DEVELOPMENT_TESTING.md)、未完了候補は [docs/BACKLOG.md](docs/BACKLOG.md) を確認する。BACKLOGは実行指示ではない。

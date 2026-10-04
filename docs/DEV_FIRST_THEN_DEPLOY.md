@@ -217,7 +217,7 @@ Printing API変更時は [最新公式Printing API](https://shopify.dev/docs/api
 ### 検証と完了条件
 
 1. 開発専用app/store/DB/Backendを使用し、API接続先を確認。本番URLfallback、automatically_update_urls_on_dev、本番DBに向くmigrationに注意。`setup`はmigrationを含むため接続先未確認で実行しない。
-2. lint/typecheck/test/buildを実行する。現行mainにはbuildのみ存在し、他3scriptは未整備。存在しないscriptは成功と記録せず、必要な変更時に専用PR範囲で品質基盤を整備する。Backend buildだけでPOS拡張を検証済みとしない。
+2. lint/typecheck/test/buildを実行する。整備前mainにはbuildのみ存在。整備branchではdocs限定lint、Backend typecheck、限定fixture testを追加した（[開発手順](DEVELOPMENT_TESTING.md)参照）。アプリlint・POS統合gateは未整備。存在しないscriptは成功と記録せず、必要な変更時に専用PR範囲で品質基盤を整備する。Backend buildだけでPOS拡張を検証済みとしない。
 3. 匿名化sample order/fixtureで変更前後を比較。スタッフあり/なし、長い店名、manual/code/automatic割引、VIP、0円/返金/一部返金、配送あり/なしと住所、日付境界、QR/ロゴあり/なし、ギフト価格非表示、精算/点検/再印字を変更に応じ確認する。金額・丸め・件数・順序・改行・文字幅・既存フォーマットを維持する。
 4. 58/80mm等の実使用紙幅とmPOP等の実機、iOS/Android、店舗POS Lite/Pro、切断/復帰・再試行・二重印刷を確認する。実機にアクセスできない場合も安全な実装・自動検証・PRまで進め、紙面保証とrelease判断は未確認として残す。本番注文で検証しない。
 5. 差分を自己レビューし、AGENTSに従う独立レビュー結果と未実行理由を記録する。docs-only変更に本番機能や印刷の実機成功を主張しない。
@@ -233,3 +233,5 @@ Printing API変更時は [最新公式Printing API](https://shopify.dev/docs/api
 - 本番反映時の注意点: Render main auto-deploy/predeploy migration、Shopify別release、承認対象、検証/復旧方針
 
 Readyで停止する。PR作成・pushの許可はmain merge、本番deploy、Shopify/POS本番設定、本番注文mutationの包括承認を意味しない。
+
+再現可能な準備・品質コマンドと検証限界は [DEVELOPMENT_TESTING.md](DEVELOPMENT_TESTING.md)、未完了候補は [BACKLOG.md](BACKLOG.md) を参照。

@@ -141,3 +141,9 @@ app/routes/webhooks.orders.updated.tsx     … キャッシュ・metafield
 - CloudPRNT 実機が payload URL をどう認証するか（アプリ側のプリンタ認証実装は見当たらない）
 - Render 以外の本番ホストの有無
 - Admin API バージョン（October25）と webhook TOML（2026-04）の運用上の意図的差分の公式根拠
+
+## 開発時の検証境界
+
+Backend/AdminのReact Router buildとPOS拡張のbuild/実機は別gate。testsは実コードのpure関数（精算text・注文表示データ・日付境界）を限定評価し、Prisma/Shopify importの副作用を回避する。API/集計全体/UI/実印字の統合テストを代替しない。[DEVELOPMENT_TESTING.md](DEVELOPMENT_TESTING.md)を参照。
+
+Render経路は共通workflowの2026-10-04監査でpublic/inhouse両方main/On Commitと確認済み。上記の古い「docs上の言及」は監査前の記述。本番反映は明示承認まで停止し、Shopify設定/拡張releaseと分離する。

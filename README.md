@@ -137,3 +137,7 @@ LINE LIFF を使った会員証表示機能です。LINE リッチメニュー�
 - [App extensions](https://shopify.dev/docs/apps/build/app-extensions)
 - [Extension only apps](https://shopify.dev/docs/apps/build/app-extensions/build-extension-only-app)
 - [Shopify CLI](https://shopify.dev/docs/apps/tools/cli)
+
+## 継続開発の品質確認
+
+[開発/テスト手順](docs/DEVELOPMENT_TESTING.md)に従い `npm run lint`（docs限定）、`npm run typecheck`（Backend）、`npm test`（匿名fixture回帰）、`npm run build` を実行します。POS実機検証は別途記録します。[BACKLOG](docs/BACKLOG.md)は未完了候補の正本です。

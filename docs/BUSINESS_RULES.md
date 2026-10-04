@@ -189,4 +189,10 @@ order_based の Shopify 注文ノート／metafields は `settlementOrderGas` �
 
 ## 16. タイムゾーン
 
-日次境界は Shopify `shop.ianaTimezone`（フォールバック: 一般設定 defaultTimezone）で UTC 範囲に変換（`shopTimezone.server`）。
+日次境界は保存済み一般設定 `defaultTimezone` → Shopify `shop.ianaTimezone` → `Asia/Tokyo` の順でタイムゾーンを決定し、UTC範囲に変換します（`shopTimezone.server` の `getShopTimezoneForDaily`）。以前のShopify優先記述を現行コードに合わせて訂正しました。
+
+## レシート回帰の基準
+
+精算本文の改行・項目順・値引額/返金/件数/商品券条件行はtests/fixtures/settlement.txtで現行出力を固定。注文表示のスタッフ名・割引名/合計・店名と東京暦日境界も非本番sampleで検証する。スタッフ/住所/QR/ロゴ/ギフトの実紙面は既存コードで未使用/未収録の部分があるため、回帰fixtureに存在しないことを表示不要の仕様と解釈しない。
+
+日次timezoneは一般設定defaultTimezone→Shopify ianaTimezone→Asia/Tokyo。現在の暦日境界を営業時間/配送営業日へ勝手に置換しない。詳細・未確認は [開発手順](DEVELOPMENT_TESTING.md) と [BACKLOG](BACKLOG.md)。
