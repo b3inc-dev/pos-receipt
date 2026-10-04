@@ -187,3 +187,49 @@ Render Settings: `pos-receipt`（srv-d6nuu4chg0os73cd4jg0）と `pos-receipt-cia
 4. owner tool/agent・branch/worktree・base/HEAD・scope・quality・未完了・次actionをIssue/PRへ記録し、関連品質確認と必要な独立reviewまで進める。依頼外Backlogへ着手しない。merge/releaseは既存の分類・DoD・承認条件に従う。本依頼のproduction merge停止は継続する。
 
 実行環境がworktree作成を許可しない場合は共有mainへ編集せず、具体的な制約と最小限の対応を報告する。これは各toolの読込後の行動規則であり、GUIでworktree作成を強制する仕組みや権限の全面省略ではない。PR未mergeの間はこのbranchの規則を読めるセッションで利用し、共有baseへの反映後は新規セッションで読込を確認する。
+
+## Codex継続開発とレシート回帰確認
+
+2026-10-04のユーザー指定により、今後の依頼はCodexが調査→実装→検証→自己レビュー→push→PRまで担当する。原則このチャット以外へ確認を求めない。既存の他tool作業は勝手に所有権を移さず、GitHubと既存handoffを確認する。明示承認が必要なのはproduction app deploy、POS/Shopify本番設定変更、本番注文書き込み、main merge、不可逆な本番操作。新しい依頼の合理的な判断・非本番作業は自律実行する。
+
+### 開始時と既存仕様
+
+`git fetch origin`、status、最新main、worktree、open PR/owner、履歴、AGENTS/README/docs/package、POS依存とdeploy設定を確認する。共有checkoutのdirty変更は保持し、専用feature branch（Codexはcodex/）を作る。PR #1（印字要件）とPR #4（preview環境）は2026-10-04調査時点でCursor ownerの未統合PR。未統合案を現行仕様と混同せず、毎回GitHubで最新状態を取得する。
+
+| 確認対象 | main 1557d9eで確認した現状と回帰観点 |
+|---|---|
+| 店舗名 | sessionLocation、注文retailLocation、DB name/displayNameの経路差。preview APIのlocationNameはPOS領収書画面では未表示 |
+| スタッフ名 | orderDetailのlineItems.staffMember.name/firstName/lastName→staffMemberName→OrderDetailSummary。領収書発行createdByはPOS未送信 |
+| 割引名/値引合計 | 注文詳細のallocationsとtotalDiscounts、精算のVIP-分離を維持。領収書APIは合計金額のみ |
+| 配送案内/住所 | 注文詳細・領収書・精算に配送先住所/案内を出す処理は見当たらない。Shopify標準レシートの実設定は未確認 |
+| 営業日 | shopTimezoneの店舗暦日00:00〜翌日直前、精算のcreated/updated/cancelled unionとprocessed fallback。営業時間による独自締め時刻や配送営業日計算は未確認。注文検索の日付条件はUTCで経路差あり |
+| QR/ロゴ | レシートQRコード生成は見当たらない。ロゴは管理画面template previewで扱うがPOS領収書画面へ同等に反映されない。会員証barcode/開発QRと区別 |
+| ギフト | 独自Gift Receipt連携未実装。標準POSの実紙面/価格非表示条件は別途確認 |
+| 精算 | order_basedは設定に従う注文同期＋POS手動印刷。cloudprnt_directはtext payload提供まで。printed statusは物理印刷成功を保証しない |
+| 点検 | DoneViewの「注文を作らない」説明とorder_based同期の不一致はDECISIONSに記録済み。勝手にどちらかへ統一しない |
+| POS Lite/Pro、mPOP | アプリ課金Lite/Proとは別。店舗プラン・POS/OS version・機種・紙幅・接続と実印字は未確認。mPOP専用アダプタを実装済みと扱わない |
+| Liquid | tracked filesと全取得refのGit履歴に.liquidファイルなし。会員証用Liquid例はレシート正本ではない。実店舗のLiquid/visual editor設定の非secret写しと紙面が必要 |
+
+API宣言はAdmin 2025-10、webhook 2026-04、POS 2026-01、ui-extensions依存2025.10.x。使用API/target/propsの互換性を確認し、番号だけ一括更新しない。スタッフフィールドの修正履歴c2cf658と、精算母集団の変更履歴（881ca9c等）を参照する。
+
+Printing API変更時は [最新公式Printing API](https://shopify.dev/docs/api/pos-ui-extensions/latest/target-apis/platform-apis/printing-api) を再確認する。2026-10-04取得の公式表示は2026-07。HTML/画像の直接印刷、PDFはsystem dialog、srcはapplication_urlと同一origin、接続済みPrinter確認と未接続fallback、session token認証を確認した。現行repoには呼び出しなし。POS app version・機種・プランの実動作はこのAPI記述だけで保証しない。
+
+### 検証と完了条件
+
+1. 開発専用app/store/DB/Backendを使用し、API接続先を確認。本番URLfallback、automatically_update_urls_on_dev、本番DBに向くmigrationに注意。`setup`はmigrationを含むため接続先未確認で実行しない。
+2. lint/typecheck/test/buildを実行する。現行mainにはbuildのみ存在し、他3scriptは未整備。存在しないscriptは成功と記録せず、必要な変更時に専用PR範囲で品質基盤を整備する。Backend buildだけでPOS拡張を検証済みとしない。
+3. 匿名化sample order/fixtureで変更前後を比較。スタッフあり/なし、長い店名、manual/code/automatic割引、VIP、0円/返金/一部返金、配送あり/なしと住所、日付境界、QR/ロゴあり/なし、ギフト価格非表示、精算/点検/再印字を変更に応じ確認する。金額・丸め・件数・順序・改行・文字幅・既存フォーマットを維持する。
+4. 58/80mm等の実使用紙幅とmPOP等の実機、iOS/Android、店舗POS Lite/Pro、切断/復帰・再試行・二重印刷を確認する。実機にアクセスできない場合も安全な実装・自動検証・PRまで進め、紙面保証とrelease判断は未確認として残す。本番注文で検証しない。
+5. 差分を自己レビューし、AGENTSに従う独立レビュー結果と未実行理由を記録する。docs-only変更に本番機能や印刷の実機成功を主張しない。
+
+### PR本文の必須項目
+
+- Workstream / Owner（Codex）/ State / branch・worktree / base・HEAD / scope・handoff
+- レシート表示への影響: 対象項目、変更前後、既存フォーマット、sample/fixture比較
+- 印刷への影響: 経路、機種/紙幅、未接続fallback、再印刷、実機未確認
+- POS Lite（Light表記含む）/Proへの影響: アプリ課金と分離、確認済み/未確認
+- API変更: version・targets・fields・scopes・認証・mutation・再送/冪等性
+- テスト結果: lint/typecheck/test/build・POS拡張検証・生成出力・自己/独立レビュー、失敗/未実行理由
+- 本番反映時の注意点: Render main auto-deploy/predeploy migration、Shopify別release、承認対象、検証/復旧方針
+
+Readyで停止する。PR作成・pushの許可はmain merge、本番deploy、Shopify/POS本番設定、本番注文mutationの包括承認を意味しない。

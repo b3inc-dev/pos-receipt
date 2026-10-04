@@ -1,10 +1,12 @@
-# Shopify App Template - Extension only
+# POS Receipt
 
-This is a template for building an [extension-only Shopify app](https://shopify.dev/docs/apps/build/app-extensions/build-extension-only-app). It contains the basics for building a Shopify app that uses only app extensions.
+Shopify POS向けの領収書・日次精算・特殊返金/商品券調整・売上サマリーを提供するアプリです。管理画面とBackendはReact Router + Express + Prisma、POS UI ExtensionはPreactです。公開用とCiara自社用は別Shopifyアプリ/Renderサービスで運用します。
 
-This template doesn't include a server or the ability to embed a page in the Shopify Admin. If you want either of these capabilities, choose the [Remix app template](https://github.com/Shopify/shopify-app-template-remix) instead.
+開発前に [AGENTS.md](AGENTS.md)、[開発運用](docs/DEV_FIRST_THEN_DEPLOY.md)、[構成](docs/ARCHITECTURE.md)、[現行業務仕様](docs/BUSINESS_RULES.md)、[Shopify/印字](docs/SHOPIFY.md)、[既知の差分](docs/DECISIONS.md) を確認してください。継続実装はCodexが専用branch/worktreeで担当し、GitHub PRへ結果を保存します。main mergeは本番Backend反映を伴うため明示承認まで停止します。
 
-Whether you choose to use this template or another one, you can use your preferred package manager and the Shopify CLI with [these steps](#installing-the-template).
+現行の領収書は画面プレビューとDB発行記録、精算は注文経由の手動印刷またはCloudPRNT向けpayload提供です。Printing API・ギフトレシート独自連携は未実装。店舗の本番Liquid/visual editor設定・実紙面はrepo未収録のため、アプリ画面と同一と仮定しません。
+
+以下のテンプレート導入情報は参考です。既存repoでアプリを再作成せず、専用開発アプリ・ストア・DBの接続先を確認して利用してください。
 
 ## Benefits
 
