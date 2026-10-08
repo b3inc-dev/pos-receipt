@@ -51,20 +51,25 @@ export function extractLocationNumericId(locationId: string | null | undefined):
   return gid.replace("gid://shopify/Location/", "");
 }
 
-/** 精算対象ロケーションと GID が一致するか */
+/**
+ * 精算対象ロケーションと返金計上 GID が一致するか。
+ * 比較は常に数値 ID 同士（GID / 数値 / 末尾パスの表記ゆれを吸収）。
+ * settlementLocationId・locIdRaw のどちらからでも数値を復元できれば照合する。
+ */
 export function locationGidMatches(
   aggregationGid: string | null | undefined,
   settlementLocationId: string,
-  locIdRaw: string,
+  locIdRaw?: string | null,
 ): boolean {
-  if (!aggregationGid) return false;
-  const target = normalizeLocationGid(aggregationGid);
-  if (!target) return false;
-  const settlementGid = settlementLocationId.startsWith("gid://")
-    ? settlementLocationId
-    : `gid://shopify/Location/${locIdRaw}`;
-  const aggRaw = extractLocationNumericId(target);
-  return target === settlementGid || aggRaw === locIdRaw;
+  const aggRaw = extractLocationNumericId(aggregationGid);
+  if (!aggRaw) return false;
+
+  const settlementRaw =
+    extractLocationNumericId(settlementLocationId) ??
+    (locIdRaw && /^\d+$/.test(String(locIdRaw).trim()) ? String(locIdRaw).trim() : null);
+
+  if (!settlementRaw) return false;
+  return aggRaw === settlementRaw;
 }
 
 /** 返金トランザクション（refunds 配下）から POS ロケーション ID を取得 */

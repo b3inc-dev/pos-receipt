@@ -11,6 +11,7 @@ import express from "express";
 import compression from "compression";
 import morgan from "morgan";
 import { createRequestHandler } from "@react-router/express";
+import { validateServerStartupEnv } from "./scripts/lib/deployGuard.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const buildPath = new URL("./build/server/index.js", import.meta.url).href;
@@ -46,6 +47,20 @@ async function main() {
       "[server] 必須の環境変数が未設定です:",
       missing.join(", "),
       "— Render の Environment を確認してください。",
+    );
+    process.exit(1);
+  }
+
+  const distGuard = validateServerStartupEnv(process.env);
+  for (const w of distGuard.warnings ?? []) {
+    console.warn(`[server] ${w}`);
+  }
+  if (!distGuard.ok) {
+    for (const e of distGuard.errors ?? []) {
+      console.error(`[server] ${e}`);
+    }
+    console.error(
+      "[server] 公開/自社の取り違え防止ガードに失敗しました。docs/DEPLOY_PUBLIC_AND_INHOUSE.md を確認するか、緊急時のみ SKIP_DISTRIBUTION_GUARD=1 を設定してください。",
     );
     process.exit(1);
   }

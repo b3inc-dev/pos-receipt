@@ -6,14 +6,14 @@
 
 | ID | 判断 | 根拠 |
 |----|------|------|
-| D1 | 精算の日次注文取得は GAS 同型（`location_id` + created∪updated∪cancelled）。`source_name:pos` と retailLocation 二次フィルタは付けない | `settlementEngine` コメント 1001–1005 行付近 |
+| D1 | 精算の日次注文取得は GAS 同型（`location_id` + created∪updated∪cancelled）。`source_name:pos` と retailLocation 二次フィルタは付けない。注文検索ピッカーとは境界が異なる（BUSINESS_RULES §1） | `settlementEngine` `buildSettlementPreviewImpl` |
 | D2 | 売上サマリー日次の基礎数値は精算プレビューと同一関数で差分ゼロ化 | `salesSummaryEngine.computeAndCacheDailySummary` → `buildSettlementPreview` |
 | D3 | 実効 printMode は DB `Location.printMode`。リクエスト body は決定に使わない | `api.settlements.create.tsx` |
 | D4 | `cloudprnt_direct` では Shopify 精算注文を作らない | `settlementSyncSettings` + create 分岐 |
 | D5 | 精算の冪等キーは `shopId:locationId:targetDate:printMode`。点検は除外 | create ルート |
 | D6 | 返金の店舗帰属は設定可能な metafield / Location フラグで制御 | `refundAggregation.server.ts` |
 | D7 | VIP は割引コード接頭辞 `VIP-` | `aggregateGasStyleForOrders` |
-| D8 | 公開／自社は別 toml・別 Render・APP_MODE | `DEPLOY_PUBLIC_AND_INHOUSE.md` + package scripts |
+| D8 | 公開／自社は別 toml・別 Render・APP_MODE。起動時に APP_DISTRIBUTION typo と既知 Render ホスト取り違えを拒否。deploy 後に APP_MODE を verify | `DEPLOY_PUBLIC_AND_INHOUSE.md` + `scripts/lib/deployGuard.mjs` + `server.js` |
 | D9 | アプリ課金プラン（Lite/Pro）でサマリー系を制限。精算・領収書・特殊返金は全プラン | `planFeatures.server.ts` |
 | D10 | 特殊返金の正本は Gift Card ではなく `SpecialRefundEvent` | schema + API + GAS_vs_APP 記載 |
 
@@ -30,11 +30,11 @@
 
 | 項目 | 内容 |
 |------|------|
-| 決済名称の二重系 | 集計は `gasNormalizeGatewayLabel` のハードコード日本語。表示マスタは `PaymentMethodMaster`。英数字キーのみマスタ差し替え |
-| ロケーション ID 正規化の重複 | `extractLocationNumericId` / `normalizeLocationGid` が複数ファイルに存在 |
+| 決済名称の二重系（軽減） | 集計バケットキーは依然 `gasNormalizeGatewayLabel`。表示は `resolvePaymentSectionLabel` で raw/formatted/displayLabel を単一マッチ（日本語キー含む）。集計キー自体のハードコードは残存 |
+| ロケーション ID 正規化の重複 | `extractLocationNumericId` / `normalizeLocationGid` が複数ファイルに存在（返金照合は `refundAggregationPure` の数値 ID 比較に寄せた） |
 | 返金オーバーレイ死コード | `getRefundOverlayForDay` / `computeRefundsOnlyForDay` は定義・export されるが、プレビュー本体からの適用は無く、他ファイルからの import も見当たらない |
 | 売上サマリー死コード | `SUMMARY_ORDERS_QUERY` / `fetchSummaryOrders` / `filterSummaryOrdersByRetailLocation` が未使用のまま残存 |
-| 表示と集計の混在 | payment section の `label` が集計キー由来のまま残るケース（日本語 GAS ラベルはマスタ非適用） |
+| 表示と集計の混在（軽減） | payment section の `gateway` は集計キーのまま。`label` はマスタ解決。マスタ未登録の日本語キーはキー＝表示のまま |
 | 精算設定ラベル未使用 | UI で項目名を変えられても `buildSettlementReceiptText` は固定文言 |
 | 点検 UI と実装 | DoneView は点検で Shopify 注文を作らない旨を示しうるが、`order_based` では `syncInspectionOrderLikeGas` を呼びうる |
 | customAttributes | 取得するが UI 非表示 |

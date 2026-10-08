@@ -24,6 +24,19 @@ describe("normalizeLocationGid / locationGidMatches", () => {
     assert.equal(locationGidMatches(null, locA, "100"), false);
     assert.equal(locationGidMatches(locB, locA, "100"), false);
   });
+
+  it("表記ゆれ（数値 vs GID、locIdRaw フォールバック、空白）でも一致する", () => {
+    assert.equal(locationGidMatches("100", locA, "100"), true);
+    assert.equal(locationGidMatches(locA, "100", "100"), true);
+    assert.equal(locationGidMatches("100", "100"), true);
+    assert.equal(locationGidMatches(" 100 ", locA), true);
+    assert.equal(locationGidMatches("/Location/100", "gid://shopify/Location/100"), true);
+    // settlementLocationId がパース不能なときだけ locIdRaw を使う
+    assert.equal(locationGidMatches(locA, "not-a-location", "100"), true);
+    // settlement が別ロケ GID なら locIdRaw が一致しても不一致（取り違え防止）
+    assert.equal(locationGidMatches(locA, "gid://shopify/Location/999", "100"), false);
+    assert.equal(locationGidMatches(locB, "100", "100"), false);
+  });
 });
 
 describe("resolveRefundAggregationLocationGid", () => {
