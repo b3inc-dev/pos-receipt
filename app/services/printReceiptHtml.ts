@@ -33,6 +33,10 @@ export type SalesReceiptPrintModel = {
   footerNote?: string;
   showOrderAttributes: boolean;
   showLineAttributes: boolean;
+  /** Admin layoutJson — プレビューと実印字で同一適用 */
+  showSku?: boolean;
+  showPayments?: boolean;
+  showLocation?: boolean;
   paperWidthMm: 58 | 80;
 };
 
@@ -143,15 +147,24 @@ ${body}
 }
 
 function renderSales(m: SalesReceiptPrintModel): string {
+  const showSku = m.showSku === true;
+  const showPayments = m.showPayments !== false;
+  const showLocation = m.showLocation !== false;
+
   const lines = m.lineItems
     .map((li) => {
       const name = li.variantTitle ? `${li.title} (${li.variantTitle})` : li.title;
+      const skuLine =
+        showSku && String(li.sku ?? "").trim()
+          ? `<div class="muted" style="padding-left:0;">SKU: ${esc(li.sku)}</div>`
+          : "";
       const lineAttrs =
         m.showLineAttributes && li.customAttributes?.length
           ? attrsHtml(li.customAttributes, true)
           : "";
       return `<div class="item">
   <div class="item-title">${esc(name)}</div>
+  ${skuLine}
   <div class="row muted"><span>×${esc(li.quantity)} @ ${esc(yen(li.unitPrice, m.currency))}</span><span>${esc(yen(li.lineTotal, m.currency))}</span></div>
   ${lineAttrs}
 </div>`;
@@ -163,17 +176,24 @@ function renderSales(m: SalesReceiptPrintModel): string {
       ? `<div class="hr"></div><div class="muted">注文属性</div>${attrsHtml(m.orderAttributes)}`
       : "";
 
-  const payments = (m.payments ?? [])
-    .map(
-      (p) =>
-        `<div class="row"><span>${esc(p.label)}</span><span>${esc(yen(p.amount, m.currency))}</span></div>`,
-    )
-    .join("");
+  const payments = showPayments
+    ? (m.payments ?? [])
+        .map(
+          (p) =>
+            `<div class="row"><span>${esc(p.label)}</span><span>${esc(yen(p.amount, m.currency))}</span></div>`,
+        )
+        .join("")
+    : "";
+
+  const locationBlock =
+    showLocation && m.locationName
+      ? `<div class="center muted">${esc(m.locationName)}</div>`
+      : "";
 
   const body = `
 <h1>${esc(m.shopName || "レシート")}</h1>
 <div class="center muted">${esc(m.createdAtLabel)}</div>
-${m.locationName ? `<div class="center muted">${esc(m.locationName)}</div>` : ""}
+${locationBlock}
 <div class="center muted">${esc(m.orderName)}</div>
 <div class="hr"></div>
 ${lines}

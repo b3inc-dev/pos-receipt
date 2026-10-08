@@ -19,7 +19,6 @@ export interface LocationProfileFields {
   summaryTargetGroup?: string | null;
   budgetTargetEnabled?: boolean;
   footfallTargetEnabled?: boolean;
-  salesReceiptEnabled?: boolean;
 }
 
 export interface LocationSettingProfile {
@@ -53,7 +52,6 @@ export const LOCATION_PROFILE_FIELD_KEYS: (keyof LocationProfileFields)[] = [
   "summaryTargetGroup",
   "budgetTargetEnabled",
   "footfallTargetEnabled",
-  "salesReceiptEnabled",
 ];
 
 export const LOCATION_PROFILES_KEY = "location_setting_profiles";

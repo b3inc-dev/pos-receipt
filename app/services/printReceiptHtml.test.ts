@@ -83,6 +83,57 @@ describe("printReceiptHtml", () => {
     assert.doesNotMatch(html, />x</);
   });
 
+  it("applies layoutJson showSku/showPayments/showLocation on real print model", () => {
+    const baseOrder = {
+      name: "#1003",
+      createdAt: "2026-10-08T04:00:00Z",
+      customAttributes: [],
+      totalPriceSet: { shopMoney: { amount: "1100", currencyCode: "JPY" } },
+      subtotalPriceSet: { shopMoney: { amount: "1000", currencyCode: "JPY" } },
+      totalTaxSet: { shopMoney: { amount: "100", currencyCode: "JPY" } },
+      totalDiscountsSet: { shopMoney: { amount: "0", currencyCode: "JPY" } },
+      retailLocation: { name: "渋谷" },
+      lineItems: {
+        nodes: [
+          {
+            title: "Tea",
+            quantity: 1,
+            sku: "T1",
+            discountedUnitPriceSet: { shopMoney: { amount: "1000", currencyCode: "JPY" } },
+            customAttributes: [],
+          },
+        ],
+      },
+      transactions: [
+        {
+          kind: "SALE",
+          formattedGateway: "現金",
+          amountSet: { shopMoney: { amount: "1100", currencyCode: "JPY" } },
+        },
+      ],
+    };
+
+    const offHtml = renderPrintReceiptHtml(
+      buildSalesReceiptPrintModel(baseOrder, {
+        ...DEFAULT_SALES_RECEIPT_SETTINGS,
+        layoutJson: { showSku: false, showPayments: false, showLocation: false },
+      }),
+    );
+    assert.doesNotMatch(offHtml, /SKU:\s*T1/);
+    assert.doesNotMatch(offHtml, /渋谷/);
+    assert.doesNotMatch(offHtml, /現金/);
+
+    const onHtml = renderPrintReceiptHtml(
+      buildSalesReceiptPrintModel(baseOrder, {
+        ...DEFAULT_SALES_RECEIPT_SETTINGS,
+        layoutJson: { showSku: true, showPayments: true, showLocation: true },
+      }),
+    );
+    assert.match(onHtml, /SKU:\s*T1/);
+    assert.match(onHtml, /渋谷/);
+    assert.match(onHtml, /現金/);
+  });
+
   it("renders settlement and gift receipt HTML", () => {
     const settlementHtml = renderPrintReceiptHtml(
       settlementPreviewToPrintModel({

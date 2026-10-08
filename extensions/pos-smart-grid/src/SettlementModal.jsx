@@ -23,7 +23,7 @@ import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { formatYmdSlash } from "../../common/dateDisplay.js";
-import { printSettlementReceipt } from "../../common/printApi.js";
+import { printSettlementReceipt, getPrintSettings } from "../../common/printApi.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 
 /**
@@ -1132,6 +1132,34 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
   const doneTotal = result?.preview?.total;
   const [printBusy, setPrintBusy] = useState(false);
   const [printMsg, setPrintMsg] = useState("");
+  const [printFlags, setPrintFlags] = useState({
+    preferPrintingApi: false,
+    settlementPrintingApiEnabled: false,
+  });
+  const [flagsLoaded, setFlagsLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getPrintSettings()
+      .then((s) => {
+        if (!cancelled) {
+          setPrintFlags({
+            preferPrintingApi: !!s.preferPrintingApi,
+            settlementPrintingApiEnabled: !!s.settlementPrintingApiEnabled,
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setFlagsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const showPrintingApi =
+    flagsLoaded && !!printFlags.settlementPrintingApiEnabled && !!result?.settlementId;
+  const preferNew = showPrintingApi && !!printFlags.preferPrintingApi;
 
   const handlePrintingApi = async () => {
     if (!result?.settlementId) {
@@ -1154,6 +1182,113 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
     }
   };
 
+  const printingApiBox = showPrintingApi ? (
+    <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+      <s-stack gap="small">
+        <s-text fontWeight="bold">
+          {preferNew ? "Shopify Printing API（推奨）" : "Shopify Printing API（代替）"}
+        </s-text>
+        {!preferNew ? (
+          <s-text tone="caution" fontSize="small">
+            ※ 旧経路で印字済みの場合は押さないでください（二重印字になります）。
+          </s-text>
+        ) : null}
+        <s-button
+          variant={preferNew ? "primary" : "secondary"}
+          onClick={handlePrintingApi}
+          disabled={printBusy}
+        >
+          {printBusy ? "送信中…" : "Printing API で印字"}
+        </s-button>
+        {printMsg ? <s-text tone="subdued">{printMsg}</s-text> : null}
+      </s-stack>
+    </s-box>
+  ) : null;
+
+  const legacyBox = (() => {
+    if (isInspection) {
+      return (
+        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+          <s-stack gap="small">
+            <s-text fontWeight="bold">
+              {preferNew ? "点検レシート（従来）" : "点検レシート"}
+            </s-text>
+            <s-text tone="subdued">
+              点検では Shopify 上に精算用の注文は作りません。保存した内容をレシートテンプレートで印刷してください。
+            </s-text>
+            {preferNew ? (
+              <s-text tone="caution" fontSize="small">
+                ※ Printing API で印字した場合は、こちらでは再印字しないでください（二重印字）。
+              </s-text>
+            ) : null}
+          </s-stack>
+        </s-box>
+      );
+    }
+    if (isOrderBased && result?.sourceOrderName) {
+      return (
+        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+          <s-stack gap="small">
+            <s-text fontWeight="bold">
+              {preferNew ? "注文経由印字（従来・代替）" : "注文経由印字"}
+            </s-text>
+            <s-text tone="subdued">
+              精算注文 <s-text fontWeight="bold">{result.sourceOrderName}</s-text> を作成しました。
+            </s-text>
+            <s-text tone="subdued" fontSize="small">
+              POS の注文一覧からこの注文を開き、レシートを印刷してください。
+            </s-text>
+            {showPrintingApi ? (
+              <s-text tone="caution" fontSize="small">
+                ※ Printing API と両方で印字すると二重になります。どちらか一方だけ使ってください。
+              </s-text>
+            ) : null}
+          </s-stack>
+        </s-box>
+      );
+    }
+    if (isOrderBased && !result?.sourceOrderName) {
+      return (
+        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+          <s-stack gap="small">
+            <s-text fontWeight="bold" tone="critical">
+              注文番号を取得できませんでした
+            </s-text>
+            <s-text tone="subdued" fontSize="small">
+              印字方式は注文経由（order_based）ですが、精算注文の名前が返っていません。管理画面の Shopify 注文一覧で tag SETTLEMENT
+              を確認するか、アプリを再インストールして権限を更新してください。
+            </s-text>
+          </s-stack>
+        </s-box>
+      );
+    }
+    return (
+      <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+        <s-stack gap="small">
+          <s-text fontWeight="bold">
+            {preferNew ? "CloudPRNT 直印字（従来・代替）" : "CloudPRNT 直印字"}
+          </s-text>
+          <s-text tone="subdued">精算データを保存しました。プリンタから印刷されます。</s-text>
+          {showPrintingApi ? (
+            <s-text tone="caution" fontSize="small">
+              ※ Printing API と両方で印字すると二重になります。どちらか一方だけ使ってください。
+            </s-text>
+          ) : null}
+          {result?.settlementId ? (
+            <>
+              <s-text tone="subdued" fontSize="small">
+                印字用データは以下のURLで取得できます。実機確認時に CloudPRNT 対応プリンタのポーリング先に設定してください。
+              </s-text>
+              <s-text fontSize="small" fontWeight="bold">
+                {getAppUrl()}/api/settlements/{result.settlementId}/print-payload
+              </s-text>
+            </>
+          ) : null}
+        </s-stack>
+      </s-box>
+    );
+  })();
+
   return (
     <s-page heading="発行完了">
       <s-scroll-box>
@@ -1163,71 +1298,17 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
               {isInspection ? "点検レシートを保存しました" : "精算レシートを保存しました"}
             </s-text>
 
-            {result?.settlementId ? (
-              <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <s-text fontWeight="bold">Shopify Printing API（新経路）</s-text>
-                  <s-text tone="subdued" fontSize="small">
-                    旧 order_based / CloudPRNT はそのまま残しています。実機確認用に Printing API でも印字できます。
-                  </s-text>
-                  <s-button variant="primary" onClick={handlePrintingApi} disabled={printBusy}>
-                    {printBusy ? "送信中…" : "Printing API で印字"}
-                  </s-button>
-                  {printMsg ? <s-text tone="subdued">{printMsg}</s-text> : null}
-                </s-stack>
-              </s-box>
-            ) : null}
-
-            {isInspection ? (
-              <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <s-text fontWeight="bold">点検レシート</s-text>
-                  <s-text tone="subdued">
-                    点検では Shopify 上に精算用の注文は作りません。保存した内容をレシートテンプレートで印刷してください。
-                  </s-text>
-                </s-stack>
-              </s-box>
-            ) : isOrderBased && result?.sourceOrderName ? (
-              <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <s-text fontWeight="bold">注文経由印字</s-text>
-                  <s-text tone="subdued">
-                    精算注文 <s-text fontWeight="bold">{result.sourceOrderName}</s-text> を作成しました。
-                  </s-text>
-                  <s-text tone="subdued" fontSize="small">
-                    POS の注文一覧からこの注文を開き、レシートを印刷してください。
-                  </s-text>
-                </s-stack>
-              </s-box>
-            ) : isOrderBased && !result?.sourceOrderName ? (
-              <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <s-text fontWeight="bold" tone="critical">
-                    注文番号を取得できませんでした
-                  </s-text>
-                  <s-text tone="subdued" fontSize="small">
-                    印字方式は注文経由（order_based）ですが、精算注文の名前が返っていません。管理画面の Shopify 注文一覧で tag SETTLEMENT
-                    を確認するか、アプリを再インストールして権限を更新してください。
-                  </s-text>
-                </s-stack>
-              </s-box>
+            {/* preferPrintingApi ON → Printing API を primary、旧経路は secondary＋警告 */}
+            {preferNew ? (
+              <>
+                {printingApiBox}
+                {legacyBox}
+              </>
             ) : (
-              <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <s-text fontWeight="bold">CloudPRNT 直印字</s-text>
-                  <s-text tone="subdued">精算データを保存しました。プリンタから印刷されます。</s-text>
-                  {result?.settlementId ? (
-                    <>
-                      <s-text tone="subdued" fontSize="small">
-                        印字用データは以下のURLで取得できます。実機確認時に CloudPRNT 対応プリンタのポーリング先に設定してください。
-                      </s-text>
-                      <s-text fontSize="small" fontWeight="bold">
-                        {getAppUrl()}/api/settlements/{result.settlementId}/print-payload
-                      </s-text>
-                    </>
-                  ) : null}
-                </s-stack>
-              </s-box>
+              <>
+                {legacyBox}
+                {printingApiBox}
+              </>
             )}
 
             <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">

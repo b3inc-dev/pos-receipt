@@ -202,12 +202,17 @@ export default function PrintSettingsPage() {
 
           <Layout.AnnotatedSection
             title="Shopify Printing API（新経路）"
-            description="Conditional-Go: 旧 order_based / cloudprnt は残置。実機 Go まで並存"
+            description="Conditional-Go: 旧 order_based / cloudprnt は残置。POS 完了画面は下のフラグを読んで primary/secondary を切替"
           >
             <Card>
               <BlockStack gap="400">
+                <Banner tone="info">
+                  これらのフラグは POS（精算・領収書の完了画面）で実際に参照されます。OFF のときは Printing API
+                  ボタンを出さず、従来導線（order_based / CloudPRNT）を案内します。ON かつ「優先」ON
+                  のときだけ Printing API を primary にし、旧経路は secondary＋二重印字警告にします。
+                </Banner>
                 <Checkbox
-                  label="Printing API を優先して試す"
+                  label="Printing API を優先する（ON のとき POS で新経路を primary）"
                   checked={form.preferPrintingApi ?? true}
                   onChange={(v) => set("preferPrintingApi", v)}
                 />
@@ -222,7 +227,7 @@ export default function PrintSettingsPage() {
                   onChange={(v) => set("receiptPrintingApiEnabled", v)}
                 />
                 <Text as="p" tone="subdued">
-                  Location.printMode（order_based / cloudprnt_direct）は変更しません。POS 拡張 api_version 2026-07+ と POS 11.11+ が必要です。
+                  Location.printMode（order_based / cloudprnt_direct）は変更しません。POS 拡張 api_version 2026-07+ と POS 11.11+ が必要です。両方の導線で印字すると二重印字になります。
                 </Text>
               </BlockStack>
             </Card>

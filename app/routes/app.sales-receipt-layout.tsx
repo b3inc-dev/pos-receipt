@@ -80,12 +80,13 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 function buildSampleHtml(settings: SalesReceiptSettings): string {
+  // 実印字（buildSalesReceiptPrintModel）と同じく layoutJson フラグで描画制御する
   return renderPrintReceiptHtml({
     kind: "sales",
     shopName: settings.headerTitle || "レシート",
     orderName: "#1042",
     createdAtLabel: "2026/10/08 13:45",
-    locationName: settings.layoutJson.showLocation ? "渋谷店" : "",
+    locationName: "渋谷店",
     currency: "JPY",
     subtotal: 3300,
     tax: 300,
@@ -98,7 +99,7 @@ function buildSampleHtml(settings: SalesReceiptSettings): string {
         quantity: 1,
         unitPrice: 2000,
         lineTotal: 2000,
-        sku: settings.layoutJson.showSku ? "SKU-A" : "",
+        sku: "SKU-A",
         customAttributes: settings.printLineAttributes
           ? [
               { key: "名入れ", value: "太郎" },
@@ -111,6 +112,7 @@ function buildSampleHtml(settings: SalesReceiptSettings): string {
         quantity: 2,
         unitPrice: 750,
         lineTotal: 1500,
+        sku: "SKU-B",
         customAttributes: [],
       },
     ],
@@ -120,15 +122,16 @@ function buildSampleHtml(settings: SalesReceiptSettings): string {
           { key: "スタッフメモ", value: "袋不要" },
         ]
       : [],
-    payments: settings.layoutJson.showPayments
-      ? [
-          { label: "現金", amount: 2000 },
-          { label: "クレジットカード", amount: 1400 },
-        ]
-      : [],
+    payments: [
+      { label: "現金", amount: 2000 },
+      { label: "クレジットカード", amount: 1400 },
+    ],
     footerNote: settings.footerNote,
     showOrderAttributes: settings.printOrderAttributes,
     showLineAttributes: settings.printLineAttributes,
+    showSku: !!settings.layoutJson.showSku,
+    showPayments: settings.layoutJson.showPayments !== false,
+    showLocation: settings.layoutJson.showLocation !== false,
     paperWidthMm: settings.paperWidthMm,
   });
 }

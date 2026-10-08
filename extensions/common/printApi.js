@@ -1,24 +1,19 @@
 /**
  * Shopify Printing API ヘルパー（POS UI Extensions 2026-07+）
  * shopify.printing.getPrinters / print
+ *
+ * print src は相対パスのみ渡す。Shopify が application_url を付与する。
+ * getAppUrl() 絶対 URL は使わない（公開アプリ／DEV トンネルでオリジン不一致になり得る）。
  */
 import { getAppUrl } from "./appUrl.js";
 import { toUserMessage } from "./errorMessage.js";
 
 /**
  * @param {string} relativePath 例: /api/print/sales/123
- * @returns {string} Printing API 用の同一オリジン相対パス（または絶対 URL）
+ * @returns {string} Printing API 用の同一オリジン相対パス
  */
 export function printSrc(relativePath) {
   const path = relativePath.startsWith("/") ? relativePath : `/${relativePath}`;
-  // 公式: 相対パスは application_url に付与。絶対は同一オリジン必須。
-  // 開発トンネルでは絶対 URL の方が確実なことがある。
-  try {
-    const base = getAppUrl();
-    if (base && typeof base === "string") {
-      return `${base.replace(/\/$/, "")}${path}`;
-    }
-  } catch (_) {}
   return path;
 }
 
@@ -26,12 +21,17 @@ export function printSrc(relativePath) {
  * @returns {Promise<{ ok: boolean, printer?: object, error?: string, usedDialog?: boolean }>}
  */
 export async function printHtml(relativeOrAbsoluteSrc) {
-  const src =
-    relativeOrAbsoluteSrc.startsWith("http") || relativeOrAbsoluteSrc.startsWith("/")
-      ? relativeOrAbsoluteSrc.startsWith("http")
-        ? relativeOrAbsoluteSrc
-        : printSrc(relativeOrAbsoluteSrc)
-      : printSrc(relativeOrAbsoluteSrc);
+  // 絶対 URL が渡ってきた場合もパス部分だけ使う（誤用防止）
+  let src = relativeOrAbsoluteSrc;
+  if (typeof src === "string" && /^https?:\/\//i.test(src)) {
+    try {
+      src = new URL(src).pathname + new URL(src).search;
+    } catch (_) {
+      src = printSrc(String(relativeOrAbsoluteSrc).replace(/^https?:\/\/[^/]+/i, "") || "/");
+    }
+  } else {
+    src = printSrc(String(relativeOrAbsoluteSrc || "/"));
+  }
 
   const printing = globalThis?.shopify?.printing;
   if (!printing?.print) {
@@ -74,4 +74,32 @@ export async function printSettlementReceipt(settlementId) {
 
 export async function printGiftReceipt(receiptIssueId) {
   return printHtml(`/api/print/receipt/${encodeURIComponent(receiptIssueId)}`);
+}
+
+/**
+ * Admin 印字設定（Printing API フラグ）を POS から取得。
+ * 失敗時は安全側（旧導線 primary / Printing API 非表示）を返す。
+ */
+export async function getPrintSettings() {
+  const defaults = {
+    preferPrintingApi: false,
+    settlementPrintingApiEnabled: false,
+    receiptPrintingApiEnabled: false,
+  };
+  try {
+    const session = globalThis?.shopify?.session;
+    const token = session?.getSessionToken ? await session.getSessionToken() : null;
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${getAppUrl()}/api/settings/print`, { headers });
+    if (!res.ok) return defaults;
+    const j = await res.json();
+    return {
+      preferPrintingApi: !!j?.preferPrintingApi,
+      settlementPrintingApiEnabled: !!j?.settlementPrintingApiEnabled,
+      receiptPrintingApiEnabled: !!j?.receiptPrintingApiEnabled,
+    };
+  } catch (_) {
+    return defaults;
+  }
 }

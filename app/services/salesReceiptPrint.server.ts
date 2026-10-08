@@ -108,6 +108,10 @@ export function buildSalesReceiptPrintModel(
 
   const totalSet = order.totalPriceSet as MoneyBag;
   const loc = order.retailLocation as { name?: string } | null;
+  const layout = {
+    ...{ showSku: false, showPayments: true, showLocation: true },
+    ...(settings.layoutJson ?? {}),
+  };
 
   const paperWidthMm = settings.paperWidthMm === 58 ? 58 : 80;
 
@@ -128,6 +132,9 @@ export function buildSalesReceiptPrintModel(
     footerNote: settings.footerNote || undefined,
     showOrderAttributes: settings.printOrderAttributes,
     showLineAttributes: settings.printLineAttributes,
+    showSku: !!layout.showSku,
+    showPayments: layout.showPayments !== false,
+    showLocation: layout.showLocation !== false,
     paperWidthMm,
   };
 }

@@ -44,7 +44,7 @@ type LocRow = {
 };
 
 const FIELD_LABELS: Record<keyof LocationProfileFields, string> = {
-  printMode: "印字方式",
+  printMode: "印字方式（printMode）",
   salesSummaryEnabled: "売上サマリー",
   settlementEnabled: "精算",
   receiptEnabled: "領収書",
@@ -59,8 +59,17 @@ const FIELD_LABELS: Record<keyof LocationProfileFields, string> = {
   summaryTargetGroup: "サマリー対象グループ",
   budgetTargetEnabled: "予算対象",
   footfallTargetEnabled: "入店数対象",
-  salesReceiptEnabled: "販売レシート",
 };
+
+function formatFieldValue(key: keyof LocationProfileFields, value: unknown): string {
+  if (key === "printMode") {
+    if (value === "order_based") return "注文経由（order_based）";
+    if (value === "cloudprnt_direct") return "CloudPRNT 直印字";
+  }
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "ON" : "OFF";
+  return String(value);
+}
 
 function pickFields(loc: Record<string, unknown>): LocationProfileFields {
   const out: LocationProfileFields = {};
@@ -122,7 +131,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       summaryTargetGroup: db?.summaryTargetGroup ?? null,
       budgetTargetEnabled: db?.budgetTargetEnabled ?? false,
       footfallTargetEnabled: db?.footfallTargetEnabled ?? false,
-      salesReceiptEnabled: true,
     };
     return {
       id: sl.id,
@@ -189,7 +197,6 @@ export async function action({ request }: ActionFunctionArgs) {
       });
       const data: Record<string, unknown> = {};
       for (const k of LOCATION_PROFILE_FIELD_KEYS) {
-        if (k === "salesReceiptEnabled") continue; // AppSetting 側。Location カラムなし
         if (k in fields) data[k] = fields[k];
       }
       if (!existing) {
@@ -249,12 +256,20 @@ export default function LocationProfilesPage() {
         rows.push([
           loc.displayName || loc.name,
           FIELD_LABELS[d.key] || d.key,
-          String(d.from ?? "—"),
-          String(d.to ?? "—"),
+          formatFieldValue(d.key, d.from),
+          formatFieldValue(d.key, d.to),
         ]);
       }
     }
     return rows;
+  }, [locations, targetIds, sourceFields]);
+
+  const changingFieldSummary = useMemo(() => {
+    const keys = new Set<keyof LocationProfileFields>();
+    for (const loc of locations.filter((l) => targetIds.includes(l.id))) {
+      for (const d of diffFields(loc.fields, sourceFields)) keys.add(d.key);
+    }
+    return [...keys];
   }, [locations, targetIds, sourceFields]);
 
   const toggleTarget = (id: string) => {
@@ -277,9 +292,16 @@ export default function LocationProfilesPage() {
       setMessage("対象ロケーションを選んでください");
       return;
     }
+    const fieldList =
+      changingFieldSummary.length > 0
+        ? changingFieldSummary.map((k) => FIELD_LABELS[k] || k).join("、")
+        : "（差分なし）";
+    const printModeNote = changingFieldSummary.includes("printMode")
+      ? "\n※ 印字方式（printMode）も上書きされます。"
+      : "";
     if (
       !window.confirm(
-        `${targetIds.length} 件のロケーションに上書き適用します。よろしいですか？`,
+        `${targetIds.length} 件のロケーションに上書き適用します。\n変更フィールド: ${fieldList}${printModeNote}\nよろしいですか？`,
       )
     ) {
       return;
@@ -309,7 +331,7 @@ export default function LocationProfilesPage() {
         <Layout>
           <Layout.Section>
             <Banner tone="info">
-              設定軸（プロファイル）または「このロケをコピー」で複数ロケーションへ反映できます。適用前に差分プレビューを確認してください。個別ロケ編集は「ロケーション」タブに残しています。
+              設定軸（プロファイル）または「このロケをコピー」で複数ロケーションへ反映できます。適用前に差分プレビューを確認してください。印字方式（printMode）を含む全フィールドが一括上書き対象です。個別ロケ編集は「ロケーション」タブに残しています。
             </Banner>
           </Layout.Section>
           {message ? (
@@ -417,13 +439,24 @@ export default function LocationProfilesPage() {
                     対象を選択すると差分が表示されます。
                   </Text>
                 ) : (
-                  <Box overflowX="scroll">
-                    <DataTable
-                      columnContentTypes={["text", "text", "text", "text"]}
-                      headings={["ロケーション", "項目", "現在", "適用後"]}
-                      rows={previewRows}
-                    />
-                  </Box>
+                  <BlockStack gap="200">
+                    <Text as="p" tone="subdued">
+                      変更されるフィールド:{" "}
+                      {changingFieldSummary.length > 0
+                        ? changingFieldSummary.map((k) => FIELD_LABELS[k] || k).join("、")
+                        : "なし"}
+                      {changingFieldSummary.includes("printMode")
+                        ? "（※ 印字方式 printMode を含みます）"
+                        : ""}
+                    </Text>
+                    <Box overflowX="scroll">
+                      <DataTable
+                        columnContentTypes={["text", "text", "text", "text"]}
+                        headings={["ロケーション", "項目", "現在", "適用後"]}
+                        rows={previewRows}
+                      />
+                    </Box>
+                  </BlockStack>
                 )}
                 <InlineStack align="end">
                   <Button
