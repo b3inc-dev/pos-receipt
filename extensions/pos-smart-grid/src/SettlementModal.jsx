@@ -23,6 +23,7 @@ import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { formatYmdSlash } from "../../common/dateDisplay.js";
+import { printSettlementReceipt } from "../../common/printApi.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 
 /**
@@ -1129,6 +1130,29 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
   const isOrderBased = result?.printMode === "order_based";
   const doneTargetDate = result?.preview?.targetDate ?? result?.targetDate ?? targetDateYmd ?? "-";
   const doneTotal = result?.preview?.total;
+  const [printBusy, setPrintBusy] = useState(false);
+  const [printMsg, setPrintMsg] = useState("");
+
+  const handlePrintingApi = async () => {
+    if (!result?.settlementId) {
+      setPrintMsg("精算 ID が無いため Printing API を実行できません");
+      return;
+    }
+    setPrintBusy(true);
+    setPrintMsg("");
+    try {
+      const res = await printSettlementReceipt(result.settlementId);
+      if (res.ok) {
+        setPrintMsg(res.usedDialog ? "印刷ダイアログを開きました" : "プリンタへ送信しました");
+      } else {
+        setPrintMsg(res.error || "印字に失敗しました");
+      }
+    } catch (e) {
+      setPrintMsg(toUserMessage(e?.message) || "印字に失敗しました");
+    } finally {
+      setPrintBusy(false);
+    }
+  };
 
   return (
     <s-page heading="発行完了">
@@ -1138,6 +1162,21 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
             <s-text fontWeight="bold">
               {isInspection ? "点検レシートを保存しました" : "精算レシートを保存しました"}
             </s-text>
+
+            {result?.settlementId ? (
+              <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+                <s-stack gap="small">
+                  <s-text fontWeight="bold">Shopify Printing API（新経路）</s-text>
+                  <s-text tone="subdued" fontSize="small">
+                    旧 order_based / CloudPRNT はそのまま残しています。実機確認用に Printing API でも印字できます。
+                  </s-text>
+                  <s-button variant="primary" onClick={handlePrintingApi} disabled={printBusy}>
+                    {printBusy ? "送信中…" : "Printing API で印字"}
+                  </s-button>
+                  {printMsg ? <s-text tone="subdued">{printMsg}</s-text> : null}
+                </s-stack>
+              </s-box>
+            ) : null}
 
             {isInspection ? (
               <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">

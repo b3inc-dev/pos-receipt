@@ -1,40 +1,54 @@
 /**
- * 管理画面用の常時表示ナビゲーション。
- * React Router の Link で遷移するため、Embedded App でも確実にページが切り替わる。
- * （左サイドバー s-app-nav が表示されない環境でもメニューを提供する）
+ * 管理画面用の常時表示ナビゲーション（5グループ）。
+ * レシート / 精算 / 店舗 / レポート / システム
  */
 import { Link, useLocation } from "react-router";
 
 /** グループに属するパス（アクティブ判定用） */
 const GROUP_PATHS: Record<string, string[]> = {
+  "/app/sales-receipt-layout": [
+    "/app/sales-receipt-layout",
+    "/app/sales-receipt-settings",
+    "/app/receipt-template",
+    "/app/receipt-history",
+    "/app/print-settings",
+  ],
+  "/app/settlement-settings": [
+    "/app/settlement-settings",
+    "/app/settlement-history",
+    "/app/special-refund-settings",
+    "/app/special-refund-history",
+    "/app/voucher-settings",
+  ],
   "/app/settings": [
     "/app/settings",
-    "/app/general-settings",
-    "/app/print-settings",
-    "/app/settlement-settings",
-    "/app/sales-summary-settings",
-    "/app/loyalty-settings",
-    "/app/voucher-settings",
-    "/app/special-refund-settings",
-    "/app/budget-settings",
+    "/app/location-profiles",
+    "/app/payment-methods",
   ],
-  "/app/receipt-template": ["/app/receipt-template", "/app/payment-methods"],
-  "/app/settlement-history": [
+  "/app/sales-summary": [
     "/app/sales-summary",
-    "/app/settlement-history",
-    "/app/special-refund-history",
-    "/app/receipt-history",
+    "/app/sales-summary-settings",
+    "/app/sales-channels",
     "/app/budget-management",
+    "/app/budget-settings",
     "/app/channel-budget-management",
   ],
-  "/app/plan": ["/app/plan", "/app/diagnostics", "/app/backfill", "/app/member-card-admin"],
+  "/app/plan": [
+    "/app/plan",
+    "/app/general-settings",
+    "/app/loyalty-settings",
+    "/app/diagnostics",
+    "/app/backfill",
+    "/app/member-card-admin",
+  ],
 };
 
 const NAV_ITEMS = [
   { path: "/app", label: "ホーム" },
-  { path: "/app/settings", label: "設定" },
-  { path: "/app/receipt-template", label: "マスタ管理" },
-  { path: "/app/settlement-history", label: "レポート・履歴" },
+  { path: "/app/sales-receipt-layout", label: "レシート" },
+  { path: "/app/settlement-settings", label: "精算" },
+  { path: "/app/settings", label: "店舗" },
+  { path: "/app/sales-summary", label: "レポート" },
   { path: "/app/plan", label: "システム" },
 ];
 
@@ -64,7 +78,8 @@ export function AppNavBar() {
       {NAV_ITEMS.map(({ path, label }) => {
         const to = path + search;
         const groupPaths = GROUP_PATHS[path];
-        const isActive = location.pathname === path ||
+        const isActive =
+          location.pathname === path ||
           (groupPaths !== undefined && groupPaths.includes(location.pathname));
         return (
           <Link

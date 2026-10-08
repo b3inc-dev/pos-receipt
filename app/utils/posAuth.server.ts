@@ -57,6 +57,22 @@ export function corsErrorJson(
   );
 }
 
+/** Printing API 用: CORS 付き text/html レスポンス */
+export function corsHtml(request: Request, html: string, init?: ResponseInit): Response {
+  const origin = request.headers.get("Origin") || "*";
+  const headers = new Headers(init?.headers);
+  headers.set("Content-Type", "text/html; charset=utf-8");
+  headers.set("Access-Control-Allow-Origin", origin);
+  headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  headers.set("Cache-Control", "no-store");
+  return new Response(html, {
+    status: init?.status ?? 200,
+    statusText: init?.statusText,
+    headers,
+  });
+}
+
 export async function authenticatePosRequest(request: Request) {
   const { sessionToken, cors } = await authenticate.pos(request);
   const shopDomain = new URL(sessionToken.dest as string).hostname;

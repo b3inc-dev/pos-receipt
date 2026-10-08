@@ -60,9 +60,10 @@ export default function AppLayout() {
       {/* @ts-expect-error s-app-nav / s-link は polaris.js の Web コンポーネント */}
       <s-app-nav>
         <s-link href="/app" rel="home">ホーム</s-link>
-        <s-link href="/app/settings">設定</s-link>
-        <s-link href="/app/receipt-template">マスタ管理</s-link>
-        <s-link href="/app/settlement-history">レポート・履歴</s-link>
+        <s-link href="/app/sales-receipt-layout">レシート</s-link>
+        <s-link href="/app/settlement-settings">精算</s-link>
+        <s-link href="/app/settings">店舗</s-link>
+        <s-link href="/app/sales-summary">レポート</s-link>
         <s-link href="/app/plan">システム</s-link>
       </s-app-nav>
       {/* 上部メニュー（s-app-nav が表示されない環境用・常に表示） */}

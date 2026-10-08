@@ -28,7 +28,7 @@ import {
   type ReceiptTemplateData,
 } from "./api.settings.receipt-template";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, MASTER_TABS } from "../components/TabGroupBar";
+import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
 import { useState } from "react";
 
 function formDataToTemplate(formData: FormData): ReceiptTemplateData {
@@ -199,7 +199,7 @@ export default function ReceiptTemplatePage() {
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
-          <TabGroupBar tabs={MASTER_TABS} />
+          <TabGroupBar tabs={RECEIPT_TABS} />
         </Card>
         <Layout>
           {saved && (

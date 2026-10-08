@@ -14,6 +14,7 @@ import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
 import { getOrder } from "../../common/orderPickerApi.js";
 import { previewReceipt, issueReceipt, getReceiptHistory } from "../../common/receiptApi.js";
+import { printGiftReceipt } from "../../common/printApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 
@@ -377,6 +378,30 @@ function ConfirmView({ preview, isReissue, loading, error, onIssue, onBack }) {
 
 // ── 完了 ──────────────────────────────────────────────────────────────────────
 function DoneView({ receipt, onClose, onReissue }) {
+  const [printBusy, setPrintBusy] = useState(false);
+  const [printMsg, setPrintMsg] = useState("");
+
+  const handlePrintingApi = async () => {
+    if (!receipt?.receiptIssueId) {
+      setPrintMsg("発行 ID が無いため Printing API を実行できません");
+      return;
+    }
+    setPrintBusy(true);
+    setPrintMsg("");
+    try {
+      const res = await printGiftReceipt(receipt.receiptIssueId);
+      if (res.ok) {
+        setPrintMsg(res.usedDialog ? "印刷ダイアログを開きました" : "プリンタへ送信しました");
+      } else {
+        setPrintMsg(res.error || "印字に失敗しました");
+      }
+    } catch (e) {
+      setPrintMsg(toUserMessage(e?.message) || "印字に失敗しました");
+    } finally {
+      setPrintBusy(false);
+    }
+  };
+
   return (
     <s-page heading="発行完了">
       <s-scroll-box>
@@ -396,6 +421,16 @@ function DoneView({ receipt, onClose, onReissue }) {
                 <Row label="注文番号" value={receipt?.orderName ?? ""} />
                 <Row label="発行日" value={receipt?.issueDate ?? ""} />
                 {receipt?.companyName ? <Row label="発行者" value={receipt.companyName} /> : null}
+              </s-stack>
+            </s-box>
+
+            <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+              <s-stack gap="small">
+                <s-text fontWeight="bold">Shopify Printing API（新経路）</s-text>
+                <s-button variant="primary" onClick={handlePrintingApi} disabled={printBusy}>
+                  {printBusy ? "送信中…" : "Printing API で印字"}
+                </s-button>
+                {printMsg ? <s-text tone="subdued">{printMsg}</s-text> : null}
               </s-stack>
             </s-box>
 

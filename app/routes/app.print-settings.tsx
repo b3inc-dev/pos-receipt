@@ -27,7 +27,7 @@ import {
   type PrintSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
+import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
 
 const PRINT_MODE_OPTIONS = [
   { label: "CloudPRNT 直印字", value: "cloudprnt_direct" },
@@ -65,6 +65,9 @@ export async function action({ request }: ActionFunctionArgs) {
     attachSettlementMetafieldsToOrder: bool("attachSettlementMetafieldsToOrder", true),
     receiptPrintMode: str("receiptPrintMode", "order_based"),
     receiptPreviewBeforePrintRequired: bool("receiptPreviewBeforePrintRequired", true),
+    preferPrintingApi: bool("preferPrintingApi", true),
+    settlementPrintingApiEnabled: bool("settlementPrintingApiEnabled", true),
+    receiptPrintingApiEnabled: bool("receiptPrintingApiEnabled", true),
   };
   await setAppSetting(shop.id, PRINT_SETTINGS_KEY, settings);
   return Response.json({ ok: true });
@@ -111,7 +114,7 @@ export default function PrintSettingsPage() {
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
-          <TabGroupBar tabs={SETTINGS_TABS} />
+          <TabGroupBar tabs={RECEIPT_TABS} />
         </Card>
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
@@ -191,8 +194,36 @@ export default function PrintSettingsPage() {
           <Layout.AnnotatedSection title="領収書印字" description="§12.2.4">
             <Card>
               <BlockStack gap="400">
-                <TextField label="領収書印字方式" value={form.receiptPrintMode} onChange={(v) => set("receiptPrintMode", v)} helpText="例: order_based" autoComplete="off" />
+                <TextField label="領収書印字方式（旧）" value={form.receiptPrintMode} onChange={(v) => set("receiptPrintMode", v)} helpText="例: order_based。Printing API 並存時は下のフラグを優先試行" autoComplete="off" />
                 <Checkbox label="印字前にプレビュー必須" checked={form.receiptPreviewBeforePrintRequired} onChange={(v) => set("receiptPreviewBeforePrintRequired", v)} />
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection
+            title="Shopify Printing API（新経路）"
+            description="Conditional-Go: 旧 order_based / cloudprnt は残置。実機 Go まで並存"
+          >
+            <Card>
+              <BlockStack gap="400">
+                <Checkbox
+                  label="Printing API を優先して試す"
+                  checked={form.preferPrintingApi ?? true}
+                  onChange={(v) => set("preferPrintingApi", v)}
+                />
+                <Checkbox
+                  label="精算完了後に Printing API 印字を案内"
+                  checked={form.settlementPrintingApiEnabled ?? true}
+                  onChange={(v) => set("settlementPrintingApiEnabled", v)}
+                />
+                <Checkbox
+                  label="領収書発行後に Printing API 印字を案内"
+                  checked={form.receiptPrintingApiEnabled ?? true}
+                  onChange={(v) => set("receiptPrintingApiEnabled", v)}
+                />
+                <Text as="p" tone="subdued">
+                  Location.printMode（order_based / cloudprnt_direct）は変更しません。POS 拡張 api_version 2026-07+ と POS 11.11+ が必要です。
+                </Text>
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
