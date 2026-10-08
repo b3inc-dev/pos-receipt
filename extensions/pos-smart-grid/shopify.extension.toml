@@ -115,13 +115,19 @@ target = "pos.home.modal.render"
 
 # ============================================================
 # 販売レシート（Print-1 / Printing API）
-# purchase.post + order-details 導線。UID は初回 deploy 時に Partner 側で確定する場合あり。
+# purchase.post + order-details 導線。
+#
+# uid: 手書き仮 ID は置かない。Shopify 公式は CLI が handle から決定的に生成する。
+# 正しい生成手順（本番/承認付きリリース時）:
+#   1. shopify app deploy（または generate 後の初回 deploy）
+#   2. CLI が shopify.extension.toml に uid を書き込む
+#   3. その uid を commit して public/inhouse 双方で同じ値を使う
+# 未 deploy のため uid 行は省略（デプロイ時に CLI が追加する）。
 # ============================================================
 [[extensions]]
 type = "ui_extension"
 name = "販売レシート / 属性付き印字"
 handle = "pos-sales-receipt"
-uid = "a1b2c3d4-e5f6-7890-ab12-cd34ef56a7809b1c2d3e"
 description = "販売レシート / 属性付き印字（Shopify Printing API）"
 
 [[extensions.targeting]]

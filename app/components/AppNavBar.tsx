@@ -10,11 +10,13 @@ const GROUP_PATHS: Record<string, string[]> = {
     "/app/sales-receipt-layout",
     "/app/sales-receipt-settings",
     "/app/receipt-template",
+    "/app/receipt-print-layout",
     "/app/receipt-history",
     "/app/print-settings",
   ],
   "/app/settlement-settings": [
     "/app/settlement-settings",
+    "/app/settlement-print-layout",
     "/app/settlement-history",
     "/app/special-refund-settings",
     "/app/special-refund-history",
