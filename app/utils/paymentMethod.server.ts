@@ -1,52 +1,57 @@
 /**
  * 支払方法マスタから表示ラベルを解決（要件 §6）
  * 精算レシートの payment sections で使用
+ *
+ * マッチング本体は paymentMethodMatch.server.ts（純関数）に集約。
  */
 import prisma from "../db.server";
+import {
+  matchPaymentMethodMaster,
+  resolvePaymentSectionLabel,
+  type PaymentMethodMatchInput,
+} from "./paymentMethodMatch.server";
 
-const FALLBACK_LABELS: Record<string, string> = {
-  cash: "現金",
-  shopify_payments: "クレジットカード",
-  bogus: "クレジットカード（テスト）",
-  gift_card: "ギフトカード",
-  manual: "手動決済",
-  "": "その他",
-};
-
-function matches(
-  value: string,
-  pattern: string,
-  matchType: string
-): boolean {
-  const v = (value ?? "").toLowerCase();
-  const p = (pattern ?? "").toLowerCase();
-  if (matchType === "exact_match") return v === p;
-  if (matchType === "starts_with_match") return v.startsWith(p);
-  return v.includes(p); // contains_match
+async function loadEnabledMasters(shopId: string): Promise<PaymentMethodMatchInput[]> {
+  return prisma.paymentMethodMaster.findMany({
+    where: { shopId, enabled: true },
+    orderBy: { sortOrder: "asc" },
+    select: {
+      rawGatewayPattern: true,
+      formattedGatewayPattern: true,
+      matchType: true,
+      displayLabel: true,
+      isVoucher: true,
+      voucherChangeSupported: true,
+      enabled: true,
+    },
+  });
 }
 
 /**
- * ショップの支払方法マスタを取得し、gateway に一致する displayLabel を返す。
- * 複数一致する場合は sortOrder が小さいものを優先。一致なしならフォールバック。
+ * ショップの支払方法マスタを取得し、gateway（または GAS 日本語バケットキー）に
+ * 一致する displayLabel を返す。一致なしならフォールバック。
  */
 export async function getPaymentMethodDisplayLabel(
   shopId: string,
-  gateway: string
+  gateway: string,
 ): Promise<string> {
-  const masters = await prisma.paymentMethodMaster.findMany({
-    where: { shopId, enabled: true },
-    orderBy: { sortOrder: "asc" },
-  });
+  const masters = await loadEnabledMasters(shopId);
+  return resolvePaymentSectionLabel(gateway, masters);
+}
 
-  for (const m of masters) {
-    const rawMatch = matches(gateway, m.rawGatewayPattern, m.matchType);
-    const fmtMatch = m.formattedGatewayPattern
-      ? matches(gateway, m.formattedGatewayPattern, m.matchType)
-      : false;
-    if (rawMatch || fmtMatch) return m.displayLabel;
+/**
+ * 精算 payment sections 用: マスタを1回読み、全バケットの表示ラベルを解決する。
+ */
+export async function resolvePaymentSectionLabels(
+  shopId: string,
+  bucketKeys: string[],
+): Promise<Map<string, string>> {
+  const masters = await loadEnabledMasters(shopId);
+  const out = new Map<string, string>();
+  for (const key of bucketKeys) {
+    out.set(key, resolvePaymentSectionLabel(key, masters));
   }
-
-  return FALLBACK_LABELS[gateway] ?? gateway ?? "その他";
+  return out;
 }
 
 /**
@@ -55,25 +60,15 @@ export async function getPaymentMethodDisplayLabel(
  */
 export async function getPaymentMethodVoucherInfo(
   shopId: string,
-  gateway: string
+  gateway: string,
 ): Promise<{ isVoucher: boolean; voucherChangeSupported: boolean }> {
-  const masters = await prisma.paymentMethodMaster.findMany({
-    where: { shopId, enabled: true },
-    orderBy: { sortOrder: "asc" },
-  });
-
-  for (const m of masters) {
-    const rawMatch = matches(gateway, m.rawGatewayPattern, m.matchType);
-    const fmtMatch = m.formattedGatewayPattern
-      ? matches(gateway, m.formattedGatewayPattern, m.matchType)
-      : false;
-    if (rawMatch || fmtMatch) {
-      return {
-        isVoucher: m.isVoucher,
-        voucherChangeSupported: m.voucherChangeSupported,
-      };
-    }
+  const masters = await loadEnabledMasters(shopId);
+  const m = matchPaymentMethodMaster(gateway, masters);
+  if (m) {
+    return {
+      isVoucher: m.isVoucher === true,
+      voucherChangeSupported: m.voucherChangeSupported === true,
+    };
   }
-
   return { isVoucher: false, voucherChangeSupported: false };
 }

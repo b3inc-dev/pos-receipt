@@ -14,9 +14,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const key = process.env.SHOPIFY_API_KEY?.trim() ?? "";
   const secret = process.env.SHOPIFY_API_SECRET?.trim() ?? "";
   const appUrl = process.env.SHOPIFY_APP_URL?.trim() ?? "";
+  const distribution = (process.env.APP_DISTRIBUTION ?? "").trim();
+  const distributionNorm = distribution.toLowerCase();
+  const distributionOk =
+    distributionNorm === "" || distributionNorm === "public" || distributionNorm === "inhouse";
 
   const body = {
-    message: "401 デバッグ用。本番では不要になったらこのルートを削除してください。",
+    message: "401 / 公開自社取り違えデバッグ用。本番では不要になったらこのルートを削除してください。",
     SHOPIFY_API_KEY: {
       set: key.length > 0,
       length: key.length,
@@ -32,6 +36,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     SHOPIFY_APP_URL: {
       set: appUrl.length > 0,
       prefix: appUrl.slice(0, 40) + (appUrl.length > 40 ? "…" : ""),
+    },
+    APP_DISTRIBUTION: {
+      set: distribution.length > 0,
+      value: distribution.length > 0 ? distribution : "(unset → public扱い)",
+      ok: distributionOk,
+      note: "inhouse / public / 未設定のみ。typo は server.js 起動ガードで拒否。",
     },
   };
 

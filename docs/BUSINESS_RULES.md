@@ -8,23 +8,27 @@
 
 ## 1. 注文の取得範囲（精算・売上サマリー）
 
+### 1.1 精算・売上サマリー（店舗日次の正）
+
 精算プレビュー（売上サマリーも `buildSettlementPreview` を再利用）:
 
 1. `location_id:{数値}` + ショップ TZ の当日 UTC 範囲で次を **union（注文 id 重複排除）**
    - `created_at` かつ `-status:cancelled` かつ `tag_not:settlement`
    - `updated_at` かつ `-status:cancelled` かつ `tag_not:settlement`
    - `updated_at` かつ `status:cancelled` かつ `tag_not:settlement`
-2. **`source_name:pos` は付けない**（コメントで GAS と同型と明記）
+2. **`source_name:pos` は付けない**（D1: GAS 同型。注文検索とは意図的に異なる）
 3. **retailLocation による二次フィルタはメイン集計では行わない**
 4. 結果が空のとき `processed_at` 当日のフォールバッククエリあり
 5. タグに `settlement`（大小無視）がある注文は集計から除外
 
-注文検索（領収書・特殊返金のピッカー）:
+**境界の要約**: 精算の一次フィルタは **Shopify の `location_id` + 日付**。POS 端末ソースや retailLocation での再絞り込みはしない。返金の店舗帰属は別途 §5（解決 GID と精算ロケの数値 ID 照合）。
+
+### 1.2 注文検索（領収書・特殊返金のピッカー）
 
 - `locationId` 指定時は `location_id` **かつ** `source_name:pos`
 - 返却前に retailLocation がそのロケーションのものに絞り込み
 
-販売チャネル集計（`salesChannelEngine`）:
+### 1.3 販売チャネル集計（`salesChannelEngine`）
 
 - POS 系 `source_name` を除外して非 POS を扱う
 
@@ -46,12 +50,12 @@
 
 1. 当日対象 TX: `tx.createdAt` が当日、または当日 refund オブジェクトにリンクする REFUND
 2. `SALE` / `CAPTURE` → sale、`REFUND` → refund（計上ロケーション一致時のみ）
-3. ゲートウェイ表示はまず `gasNormalizeGatewayLabel` で日本語ラベル化（現金・クレジット・QR・交通系 IC・商品券系・PayPal・それ以外）
-4. 英数字キーのみ、後段で `PaymentMethodMaster` の `displayLabel` に差し替えうる
+3. 集計バケットキーは `gasNormalizeGatewayLabel` で日本語ラベル化（現金・クレジット・QR・交通系 IC・商品券系・PayPal・それ以外）
+4. 表示ラベルは `resolvePaymentSectionLabel`（`paymentMethodMatch.server.ts`）で `PaymentMethodMaster` を参照。raw / formatted / displayLabel のいずれかに一致すれば `displayLabel` に差し替え（英数字キーに限らない）
 5. 現金は **cash cap**: `effectiveCashSale = min(生現金, max(0, 注文合計 − 非現金))`
 6. REFUND TX が無く refund オブジェクト金額のみある場合 → バケット `"未分類"` に加算
 
-カスタム決済: マスタ未一致時は `formattedGateway` または raw gateway、それも無ければ未分類ラベル。
+カスタム決済: マスタ未一致時は `formattedGateway` または raw gateway、それも無ければ未分類ラベル。集計キー自体のハードコード日本語は残る（表示のみマスタ単一化）。
 
 ---
 
@@ -82,7 +86,8 @@
 3. POS ロケーションなし（管理画面返金等）→ `nonPosRefundAttributionEnabled` 先があればそこ
 4. なければ fallback: exclude なら null（精算に載せない）／さもなくば retailLocation
 
-精算集計では、解決 GID が精算対象ロケーションと一致しない返金は **件数・金額とも加算しない**。
+精算集計では、解決 GID が精算対象ロケーションと一致しない返金は **件数・金額とも加算しない**。  
+照合は `locationGidMatches` で **数値ロケーション ID 同士**（GID / 数値 / 末尾パスの表記ゆれを吸収）。
 
 ---
 

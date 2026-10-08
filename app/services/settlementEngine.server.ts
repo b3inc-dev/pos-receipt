@@ -8,7 +8,7 @@
  * - 支払方法マスタ・ポイント/会員施策設定を参照
  */
 import prisma from "../db.server";
-import { getPaymentMethodDisplayLabel } from "../utils/paymentMethod.server";
+import { resolvePaymentSectionLabels } from "../utils/paymentMethod.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import {
   LOYALTY_SETTINGS_KEY,
@@ -38,6 +38,7 @@ import {
   totalFromPayBuckets,
   type GasAggregateAttributionOpts,
 } from "./settlementAggregatePure.server";
+import { extractLocationNumericId } from "./refundAggregationPure.server";
 
 export type { GasAggregateAttributionOpts } from "./settlementAggregatePure.server";
 import {
@@ -502,21 +503,20 @@ async function payBucketsToPaymentSections(
 ): Promise<PaymentSectionDTO[]> {
   const entries = Object.entries(pay);
   entries.sort((a, b) => a[0].localeCompare(b[0], "ja"));
+  const labels = await resolvePaymentSectionLabels(
+    shopId,
+    entries.map(([key]) => key),
+  );
   const out: PaymentSectionDTO[] = [];
   for (const [key, p] of entries) {
     out.push({
       gateway: key,
-      label: key,
+      label: labels.get(key) ?? key,
       net: p.sale,
       refund: p.refund,
       txCount: p.saleTx,
       refundCount: p.refundTx,
     });
-  }
-  for (const sec of out) {
-    if (/^[a-z0-9_.]+$/i.test(sec.gateway)) {
-      sec.label = await getPaymentMethodDisplayLabel(shopId, sec.gateway);
-    }
   }
   return out;
 }
@@ -640,8 +640,8 @@ async function buildSettlementPreviewImpl(
   opts?: { debug?: boolean },
 ): Promise<SettlementPreviewDTO> {
   const debugEnabled = opts?.debug === true;
-  const locIdRaw = locationId.replace("gid://shopify/Location/", "");
-  if (!locIdRaw || !/^\d+$/.test(locIdRaw)) {
+  const locIdRaw = extractLocationNumericId(locationId);
+  if (!locIdRaw) {
     throw new Error(`Invalid locationId: "${locationId}"`);
   }
 
@@ -649,8 +649,10 @@ async function buildSettlementPreviewImpl(
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
 
-  // GAS fetchAllOrdersSmart と同型: created∪updated∪cancelled の3クエリ union
-  // source_name:pos フィルタなし・retailLocation 二次フィルタなし（GAS と同一）
+  // 精算の注文境界（D1 / BUSINESS_RULES §1）:
+  // - 絞り込みは location_id（数値）+ 日付レンジ + tag_not:settlement のみ
+  // - source_name:pos は付けない（注文検索ピッカーとは意図的に異なる）
+  // - retailLocation 二次フィルタもメイン集計では行わない（GAS fetchAllOrdersSmart 同型）
   const qCreated   = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const qUpdated   = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const qCancelled = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement status:cancelled`;
@@ -686,6 +688,7 @@ async function buildSettlementPreviewImpl(
     locIdRaw,
   };
 
+  // debug フィールド名に PosSource とあるが、精算は source_name:pos 未適用のため件数は raw と同値（互換のためキー名維持）
   const ordersRawCount = createdRaw.length;
   const ordersPosSourceMatchedCount = createdRaw.length;
   const ordersAtLocationCount = ordersUnion.length;
@@ -816,11 +819,7 @@ async function buildSettlementPreviewImpl(
   const tax = split.tax;
   const netSales = split.netSales;
 
-  for (const sec of paymentSections) {
-    if (/^[a-z0-9_.]+$/i.test(sec.gateway) && sec.label === sec.gateway) {
-      sec.label = await getPaymentMethodDisplayLabel(shopId, sec.gateway);
-    }
-  }
+  // 表示ラベルは payBucketsToPaymentSections でマスタ解決済み（英数字・日本語キーとも）
 
   paymentSections = paymentSections.map((sec) => ({
     ...sec,

@@ -49,6 +49,11 @@ POS Stock と同様に、**自社用**と**公開用**で **別々の Shopify �
 - **重要**: 自社用の Render では、必ず **SHOPIFY_API_KEY** と **SHOPIFY_API_SECRET** を「POS Receipt - Ciara」用の値にしてください。公開用アプリの値のままにすると認証エラーになります。
 - **SHOPIFY_APP_URL** が空や違う URL のままだと、管理画面からアプリを開いたときに **何も表示されない（真っ白）** になります。必ず自社用の URL に設定してください。
 - **APP_DISTRIBUTION** が未設定や typo だと「公開用」扱いになり、Billing による制限がかかります。値は大文字小文字どちらでも構いません（`inhouse` / `INHOUSE` など）。
+- **起動時ガード**（`server.js` → `scripts/lib/deployGuard.mjs`）:
+  - `APP_DISTRIBUTION` が `inhouse` / `public` / 未設定以外（typo）→ **起動失敗**
+  - 既知 Render ホスト（`pos-receipt.onrender.com` / `pos-receipt-ciara.onrender.com`）と distribution の取り違え → **起動失敗**
+  - 独自ドメインの `SHOPIFY_APP_URL` はホスト照合をスキップ（警告のみ）
+  - 緊急回避のみ `SKIP_DISTRIBUTION_GUARD=1`（常用しない）
 
 ---
 
@@ -62,15 +67,15 @@ POS Stock と同様に、**自社用**と**公開用**で **別々の Shopify �
   ```bash
   npm run deploy:public
   ```
-  → APP_MODE を "public" に書き換え → 公開用の config を有効化 → `shopify app deploy` を実行します。
+  → APP_MODE を "public" に書き換え → **verify-app-mode** で確認 → 公開用の config を有効化 → `shopify app deploy` を実行します。
 
 - **自社用にデプロイするとき**
   ```bash
   npm run deploy:inhouse
   ```
-  → APP_MODE を "inhouse" に書き換え → 自社用の config を有効化 → `shopify app deploy` を実行します。
+  → APP_MODE を "inhouse" に書き換え → **verify-app-mode** で確認 → 自社用の config を有効化 → `shopify app deploy` を実行します。
 
-実行後、ディスク上の `extensions/common/appUrl.js` は、**いまデプロイした方のモード**に変わります。次に別の方をデプロイするときは、もう一方のスクリプトを実行すれば切り替わります。
+実行後、ディスク上の `extensions/common/appUrl.js` は、**いまデプロイした方のモード**に変わります。次に別の方をデプロイするときは、もう一方のスクリプトを実行すれば切り替わります。`verify-app-mode` が失敗した場合は deploy に進みません。
 
 **本番サーバー（Render など）**: `npm run start` は **`node server.js`** を実行します。このカスタムサーバーが POS からの CORS プリフライト（OPTIONS）を処理するため、Render の Start Command はそのままで問題ありません。
 
