@@ -26,6 +26,10 @@ import {
   DEFAULT_GENERAL_SETTINGS,
   type GeneralSettings,
 } from "../utils/appSettings.server";
+import {
+  isAllowedPrivacyPolicyUrl,
+  resolvePrivacyPolicyUrl,
+} from "../utils/privacyPolicyUrl";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
 
@@ -40,7 +44,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shop = await resolveShop(session.shop, admin);
   const saved = await getAppSetting<Partial<GeneralSettings>>(shop.id, GENERAL_SETTINGS_KEY);
   const settings: GeneralSettings = { ...DEFAULT_GENERAL_SETTINGS, ...saved };
-  return { settings };
+  const effectivePrivacyPolicyUrl = resolvePrivacyPolicyUrl(settings.privacyPolicyUrl);
+  const privacyPolicyFromEnvOnly =
+    !settings.privacyPolicyUrl?.trim() && Boolean(effectivePrivacyPolicyUrl);
+  return { settings, effectivePrivacyPolicyUrl, privacyPolicyFromEnvOnly };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -50,10 +57,18 @@ export async function action({ request }: ActionFunctionArgs) {
   const get = (k: string) => formData.get(k);
   const str = (k: string, d: string) => String(get(k) ?? d).trim();
   const bool = (k: string, def: boolean) => get(k) === "true" || (def && get(k) !== "false");
+  const privacyPolicyUrlRaw = str("privacyPolicyUrl", "");
+  if (privacyPolicyUrlRaw && !isAllowedPrivacyPolicyUrl(privacyPolicyUrlRaw)) {
+    return Response.json(
+      { ok: false, error: "プライバシーポリシー URL は http(s) で始まる有効な URL を指定してください。" },
+      { status: 400 }
+    );
+  }
   const settings: GeneralSettings = {
     ...DEFAULT_GENERAL_SETTINGS,
     appDisplayName: str("appDisplayName", ""),
     supportContactEmail: str("supportContactEmail", ""),
+    privacyPolicyUrl: privacyPolicyUrlRaw,
     defaultTimezone: str("defaultTimezone", "Asia/Tokyo"),
     defaultCurrency: str("defaultCurrency", "JPY"),
     currentPlanCode: str("currentPlanCode", "lite"),
@@ -69,15 +84,25 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function GeneralSettingsPage() {
-  const { settings: initial } = useLoaderData<typeof loader>();
+  const {
+    settings: initial,
+    effectivePrivacyPolicyUrl,
+    privacyPolicyFromEnvOnly,
+  } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [form, setForm] = useState<GeneralSettings>({ ...initial });
 
   const handleSave = () => {
+    setSaveError(null);
+    if (form.privacyPolicyUrl.trim() && !isAllowedPrivacyPolicyUrl(form.privacyPolicyUrl)) {
+      setSaveError("プライバシーポリシー URL は http(s) で始まる有効な URL を指定してください。");
+      return;
+    }
     const fd = new FormData();
     Object.entries(form).forEach(([k, v]) => {
       fd.set(k, typeof v === "boolean" ? (v ? "true" : "false") : String(v));
@@ -103,6 +128,7 @@ export default function GeneralSettingsPage() {
         </Card>
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
+          {saveError && <Layout.Section><Banner tone="critical">{saveError}</Banner></Layout.Section>}
           <Layout.Section>
             <Banner tone="info">アプリ全体の基本情報・タイムゾーン・デバッグ表示を設定します。</Banner>
           </Layout.Section>
@@ -112,6 +138,23 @@ export default function GeneralSettingsPage() {
               <BlockStack gap="400">
                 <TextField label="アプリ表示名" value={form.appDisplayName} onChange={(v) => set("appDisplayName", v)} autoComplete="off" />
                 <TextField label="サポート連絡先メール" value={form.supportContactEmail} onChange={(v) => set("supportContactEmail", v)} type="email" autoComplete="off" />
+                <TextField
+                  label="プライバシーポリシー URL"
+                  value={form.privacyPolicyUrl}
+                  onChange={(v) => set("privacyPolicyUrl", v)}
+                  type="url"
+                  autoComplete="off"
+                  helpText="https で始まる公開 URL。未設定時はサーバー環境変数 PRIVACY_POLICY_URL があればそれを使います。ダミー URL は置かないでください。"
+                />
+                {effectivePrivacyPolicyUrl && (
+                  <Text as="p" tone="subdued">
+                    現在有効:{" "}
+                    <a href={effectivePrivacyPolicyUrl} target="_blank" rel="noopener noreferrer">
+                      {effectivePrivacyPolicyUrl}
+                    </a>
+                    {privacyPolicyFromEnvOnly ? "（環境変数）" : ""}
+                  </Text>
+                )}
                 <TextField label="デフォルトタイムゾーン" value={form.defaultTimezone} onChange={(v) => set("defaultTimezone", v)} helpText="例: Asia/Tokyo" autoComplete="off" />
                 <TextField label="デフォルト通貨" value={form.defaultCurrency} onChange={(v) => set("defaultCurrency", v)} autoComplete="off" />
               </BlockStack>

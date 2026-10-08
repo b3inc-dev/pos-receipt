@@ -17,23 +17,33 @@ import {
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { planLabel, getFullAccess, isInhouseMode } from "../utils/planFeatures.server";
+import {
+  getAppSetting,
+  GENERAL_SETTINGS_KEY,
+  type GeneralSettings,
+} from "../utils/appSettings.server";
+import { resolvePrivacyPolicyUrl } from "../utils/privacyPolicyUrl";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
   const fullAccess = await getFullAccess(admin, session);
+  const general = await getAppSetting<Partial<GeneralSettings>>(shop.id, GENERAL_SETTINGS_KEY);
+  const privacyPolicyUrl = resolvePrivacyPolicyUrl(general?.privacyPolicyUrl);
   return {
     planCode: shop.planCode === "standard" ? "lite" : (shop.planCode ?? "lite"),
     planLabel: fullAccess
       ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
       : planLabel(shop.planCode),
     isInhouse: fullAccess,
+    privacyPolicyUrl,
   };
 }
 
 export default function AppIndex() {
-  const { planCode, planLabel: label, isInhouse } = useLoaderData<typeof loader>();
+  const { planCode, planLabel: label, isInhouse, privacyPolicyUrl } =
+    useLoaderData<typeof loader>();
   const location = useLocation();
   const navigate = useNavigate();
   const isPro = isInhouse || planCode === "pro" || planCode === "unlimited";
@@ -145,6 +155,34 @@ export default function AppIndex() {
                 接続中のショップ情報・直近アクティビティ・必須環境変数の設定状態を一覧で確認できます。
               </Text>
               <Button onClick={to("/app/diagnostics")}>診断ページを開く</Button>
+            </BlockStack>
+          </Card>
+        </Layout.AnnotatedSection>
+
+        {/* ── プライバシー ── */}
+        <Layout.AnnotatedSection
+          title="プライバシー"
+          description="顧客データの取り扱いに関する方針です。"
+        >
+          <Card>
+            <BlockStack gap="200">
+              {privacyPolicyUrl ? (
+                <>
+                  <Text tone="subdued" as="p">
+                    プライバシーポリシーを確認できます。
+                  </Text>
+                  <Button url={privacyPolicyUrl} external>
+                    プライバシーポリシーを開く
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Text tone="subdued" as="p">
+                    プライバシーポリシー URL が未設定です。一般設定または環境変数 PRIVACY_POLICY_URL で設定してください。
+                  </Text>
+                  <Button onClick={to("/app/general-settings")}>一般設定を開く</Button>
+                </>
+              )}
             </BlockStack>
           </Card>
         </Layout.AnnotatedSection>

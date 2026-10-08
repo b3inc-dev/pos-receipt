@@ -296,6 +296,8 @@ export const GENERAL_SETTINGS_KEY = "general_settings";
 export interface GeneralSettings {
   appDisplayName: string;
   supportContactEmail: string;
+  /** プライバシーポリシー URL（https）。未設定時は env PRIVACY_POLICY_URL を参照 */
+  privacyPolicyUrl: string;
   defaultTimezone: string;
   defaultCurrency: string;
   currentPlanCode: string;
@@ -310,6 +312,7 @@ export interface GeneralSettings {
 export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   appDisplayName: "",
   supportContactEmail: "",
+  privacyPolicyUrl: "",
   defaultTimezone: "Asia/Tokyo",
   defaultCurrency: "JPY",
   currentPlanCode: "lite",

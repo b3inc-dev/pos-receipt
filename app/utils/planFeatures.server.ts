@@ -129,7 +129,9 @@ export const PLAN_FEATURES: Record<"lite" | "pro", { key: FeatureKey; label: str
 /** 後方互換: standard を lite として参照 */
 export const PLAN_FEATURES_LEGACY = { standard: PLAN_FEATURES.lite } as const;
 
-// ── Shopify Billing プラン（POS Receipt: Lite $100/3ロケーション、Pro $200/10ロケーション、11ロケーション以降 $20/ロケーション） ───
+// ── Shopify Billing プラン（POS Receipt: Lite $100、Pro $200） ───
+// maxLocations はプラン説明上の目安。アプリ側のハード上限ゲートは未実装。
+// 追加ロケーション従量（$20）の appUsageRecord / capped amount も未配線（D11）。
 
 export const BILLING_PLANS = {
   lite: {
@@ -138,7 +140,7 @@ export const BILLING_PLANS = {
     currencyCode: "USD",
     planCode: "lite" as PlanCode,
     maxLocations: 3,
-    priceNote: "3ロケーションまで",
+    priceNote: "定額（目安: 3ロケーション）",
   },
   pro: {
     name: "Proプラン",
@@ -146,9 +148,15 @@ export const BILLING_PLANS = {
     currencyCode: "USD",
     planCode: "pro" as PlanCode,
     maxLocations: 10,
-    priceNote: "10ロケーションまで",
+    priceNote: "定額（目安: 10ロケーション）",
   },
 } as const;
 
-/** 11ロケーション以降の追加料金（USD/月・1ロケーションあたり） */
+/**
+ * 将来の追加ロケーション従量課金の予定単価（USD/月）。
+ * 現状 Billing lineItems は定額のみ。UI で課金済みのように表示してはならない。
+ */
 export const EXTRA_LOCATION_PRICE_USD = 20;
+
+/** 追加ロケーション従量課金が実装済みか（false のあいだは定額のみ請求） */
+export const EXTRA_LOCATION_USAGE_BILLING_ENABLED = false;
