@@ -8,8 +8,15 @@
 - 実装は Cursor を用いて進める
 - Shopify POS Extension / Admin App / Backend / App DB を用いて構築する
 - 日本の商業施設運用を想定し、Shopify POS標準では不足する業務を補完する
-- CloudPRNT対応プリンタと非対応プリンタの両方に対応する
+- **精算・点検レシートの標準印字は Shopify Printing API（`shopify.printing`）とする**（POS UI Extensions `2026-07` / POS 11.11+）
+- CloudPRNT直印字と精算注文経由印字は、移行・例外店舗向けの互換経路とする（必須の二系統ではない）
 - **公開用（App Store 販売）と自社用（カスタムアプリ）の2種デプロイ**を同一コードベースでサポートする（POS Stock / Location Stock と同様の構成）
+
+印字1本化の詳細・実装フェーズは `docs/SETTLEMENT_PRINT_UNIFICATION.md` を正本とする。
+
+改訂履歴:
+
+- 2026-08-18: 精算レシートの標準印字を Shopify Printing API に1本化。CloudPRNT / 精算注文経由は互換経路へ降格。精算注文作成は印字と独立した任意同期とする。
 
 ---
 
@@ -222,19 +229,30 @@ POSログイン中ロケーションの売上を集計し、日本の商業施�
 - 0点検対象店舗設定は不要とする
 
 ### 6.7 印字方式
-印字方式は両対応必須とする。
+標準経路は Shopify Printing API の1本とする。CloudPRNT と精算注文経由は互換経路とする。
 
-#### A. CloudPRNT対応
-- 集計後、直接印字する
-- 精算注文は作成しない
+#### A. 標準: Shopify Printing API（`shopify_printing`）
+- 精算（または点検）をアプリDBに保存したあと、POS拡張が印字用HTMLを `shopify.printing.print` で出力する
+- 接続中のハードウェアレシートプリンタがあればダイアログなしで直印字する
+- プリンタ未検出時は同一HTMLをシステム印刷ダイアログへフォールバックする
+- 印字失敗時も精算レコードは保存済みとし、画面から再印字できる
+- 精算注文の有無は印字成否に依存しない
 
-#### B. CloudPRNT非対応
-- 印字用の精算注文を作成する
-- 既存の注文レシート導線を用いて印字する
+#### B. 互換: CloudPRNT（`cloudprnt_direct`）
+- ロケーション設定で明示した店舗のみ
+- 集計後に印字用payloadを返し、プリンタ側ポーリングで印字する
+- 新規店舗のデフォルトにはしない
+
+#### C. 互換: 注文経由（`order_based`）
+- 印字用の精算注文を作成し、既存の注文レシート導線で印字する
+- 移行期間の互換として残してよい
+- 新規店舗のデフォルトにはしない
 
 ### 6.8 精算注文の扱い
-- CloudPRNT対応時は精算注文を作成しない
-- CloudPRNT非対応時のみ精算注文を作成する
+- 精算注文の作成は印字方式から独立した任意同期とする（監査・Shopify検索が必要な店舗のみON）
+- 互換の CloudPRNT 経路では精算注文を作成しない（現行維持）
+- 互換の order_based 経路では従来どおり精算注文を作成してよい
+- 点検レシートは精算注文を作成しない（現行維持）
 
 ### 6.9 保存先
 - 正本はアプリDBに保存する
@@ -242,7 +260,7 @@ POSログイン中ロケーションの売上を集計し、日本の商業施�
 
 ### 6.10 必要な再処理
 - 最新精算の再集計
-- 再印字
+- 再印字（標準経路は Printing API。注文画面を開き直さない）
 - 過去日の再実行
 
 ---
@@ -454,8 +472,10 @@ MVP から以下を含める。
 
 #### A. プリンタ / 印字設定
 - ロケーションごとの印字方式
-  - CloudPRNT direct
-  - order-based print
+  - Shopify Printing API（標準・新規デフォルト）
+  - CloudPRNT direct（互換）
+  - order-based print（互換）
+- 精算確定時の Shopify 精算注文同期（印字方式とは独立）
 
 #### B. 領収書設定
 - テンプレート編集
@@ -634,15 +654,17 @@ Backend は以下を担う。
 ## 13. 印字方針
 
 ### 13.1 精算
-- CloudPRNT対応: 直接印字
-- 非対応: 精算注文経由で印字
+- 標準: アプリがHTMLをレンダリングし、POS拡張が Shopify Printing API で印字する
+- プリンタ未検出: システム印刷ダイアログ
+- 互換: CloudPRNT 直印字 / 精算注文経由印字（設定した店舗のみ）
 
 ### 13.2 領収書
-- アプリ側レンダリング + 印字
+- アプリ側レンダリング + 同一 Print Adapter（Printing API）で印字する（精算の後続フェーズ可）
+- 帳票HTMLは領収書テンプレートから生成する（精算レイアウトとは別）
 - 詳細なプリント制御は店舗設定で切り替え可能な設計にする
 
 ### 13.3 点検レシート
-- 精算レイアウトと同系統で出力
+- 精算レイアウトと同系統のHTMLで出力し、同じ Printing API 経路で印字する
 
 ---
 
@@ -673,7 +695,7 @@ MVP は日本語固定でよい。
 ### 15.1 MVPに含む
 - POSタイル4つ
 - 取引検索一覧 + 取引詳細起動
-- 精算（CloudPRNT direct / order-based 両対応）
+- 精算（Shopify Printing API を標準。CloudPRNT / order-based は互換）
 - 点検レシート
 - 特殊返金イベント登録
 - 商品券後処理イベント登録
@@ -709,7 +731,8 @@ MVP は日本語固定でよい。
 ### 16.2 先に固定してよい前提
 - 権限分離は実装しない
 - 領収書テンプレートは1種類
-- CloudPRNT対応時は精算注文を作成しない
+- 標準印字は Printing API。精算注文作成は任意同期
+- CloudPRNT互換経路では精算注文を作成しない
 - 入店数報告は売上サマリー内に内包する
 - 商品券釣有りは精算で自動反映しつつ、後処理イベントも持てる
 
@@ -738,8 +761,11 @@ MVP は日本語固定でよい。
 - 元データは Shopify、独自業務データはアプリDB正本
 - 権限分離は MVP 不要
 - 料金プランはスタンダード / プロ
-- CloudPRNT直印字と注文経由印字は両対応必須
-- CloudPRNT時は精算注文を作らない
+- **標準印字は Shopify Printing API の1経路とする**
+- CloudPRNT直印字と注文経由印字は互換経路であり、新規必須ではない
+- 精算注文作成は印字と独立した任意同期とする
+- CloudPRNT互換経路では精算注文を作らない
+- 点検レシートは精算注文を作らない
 - 特殊返金イベント種別は4種類で分ける
 - 領収書テンプレートは1つ固定、管理画面編集
 - 売上サマリーは日付指定・期間指定を最初から含む
@@ -782,7 +808,7 @@ MVP は日本語固定でよい。
 
 成果物:
 - Settlement Engine
-- 印字分岐（CloudPRNT / order-based）
+- 標準印字（Shopify Printing API）と互換経路（CloudPRNT / order-based）
 - 点検レシート
 - 精算履歴
 
@@ -930,7 +956,7 @@ MVP は日本語固定でよい。
 - shopify_location_gid
 - name
 - code_nullable
-- print_mode (`cloudprnt_direct` / `order_based`)
+- print_mode (`shopify_printing` / `cloudprnt_direct` / `order_based`)
 - sales_summary_enabled
 - footfall_reporting_enabled
 - created_at
@@ -1169,12 +1195,23 @@ Body:
 
 Response:
 - settlementId
-- printable payload or order-based print reference
+- printUrl（標準: 印字用HTML。Printing API の src）
+- printable payload（互換 CloudPRNT 時）
+- order-based print reference（互換 order_based 時、または監査同期ON時）
 - created resources
 
 Rules:
-- cloudprnt_direct: Shopify精算注文を作らない
-- order_based: Shopify精算注文を作る
+- shopify_printing: HTML を Printing API で印字する。精算注文は監査同期設定が ON のときのみ作る
+- cloudprnt_direct: Shopify精算注文を作らない（互換）
+- order_based: Shopify精算注文を作る（互換）
+
+#### GET /api/settlements/:id/print.html
+- POS Printing API がセッショントークン付きで取得する印字用HTML
+- Content-Type: text/html; charset=utf-8
+- 同一オリジン必須
+
+#### GET /api/settlements/:id/print-payload
+- CloudPRNT互換の印字用テキスト
 
 #### POST /api/settlements/recalculate
 Body:
@@ -1425,8 +1462,11 @@ Settings keys example:
 - 再集計
 
 Acceptance:
-- CloudPRNT直印字店舗で直接印字できる
-- 非対応店舗では注文経由導線に遷移できる
+- POS 11.11 以降かつレシートプリンタ接続時、精算完了後にダイアログなしで印字できる
+- プリンタ未検出時、システム印刷ダイアログで印字できる
+- 再印字が注文画面を経由せずにできる
+- 精算注文作成が OFF でも印字できる
+- 互換の CloudPRNT / order_based 店舗では従来導線が残る
 
 ### 23.2 特殊返金・商品券調整タイル画面
 
@@ -1611,9 +1651,10 @@ Responsibility:
 - settlement engine
 - preview API
 - create API
-- print adapter interface
-- cloudprnt adapter
-- order-based adapter
+- print adapter interface（標準: Shopify Printing API）
+- shopify printing HTML endpoint
+- cloudprnt adapter（互換）
+- order-based adapter（互換）
 - POS settlement UI
 
 ### Phase 7. Sales summary
@@ -1653,7 +1694,8 @@ Responsibility:
 
 ### Epic C 受け入れ条件
 - 精算プレビューが出る
-- 印字方式に応じて処理が分岐する
+- 標準経路（Printing API）で印字できる
+- 互換経路（CloudPRNT / order-based）が設定店舗で残る
 - 点検レシートが発行できる
 
 ### Epic D 受け入れ条件
@@ -1685,7 +1727,8 @@ Responsibility:
 ## 28. 実装で後回しにしない注意点
 
 - Shopify order data と app DB event data を混同しないこと
-- CloudPRNT時に精算注文を作らないこと
+- 標準印字は Printing API。精算注文作成は任意同期であり印字の前提にしないこと
+- CloudPRNT互換経路では精算注文を作らないこと
 - 商品券釣有りは自動推定だけに依存しないこと
 - 領収書テンプレートは1つでも version を持つこと
 - 取引選択UIは特殊返金・領収書で共通化すること
@@ -1710,7 +1753,7 @@ Responsibility:
 特殊返金・商品券調整イベントの create/list/void API と POS UI を実装してください。event_type は要件書の4種に対応してください。
 
 ### Prompt 5
-精算プレビュー API と print adapter interface を実装してください。印字方式は cloudprnt_direct と order_based を切り替えられるようにしてください。
+精算プレビュー API と print adapter を実装してください。標準印字は Shopify Printing API（`shopify_printing`）とし、CloudPRNT / order_based は互換経路として残してください。詳細は `docs/SETTLEMENT_PRINT_UNIFICATION.md`。
 
 ### Prompt 6
 領収書テンプレート編集画面、プレビュー API、発行 API、履歴保存を実装してください。テンプレートは1つ固定です。
@@ -1766,7 +1809,8 @@ Responsibility:
 
 ### 30.4 次のステップ
 
-- **UID 発行**: `shopify app generate extension --type ui_extension --name "領収書発行"` および `--name "売上サマリー"` を実行し、TOML に `uid` を追加する。
+- **精算レシート印字の1本化**: Shopify Printing API（`shopify.printing`）を標準経路にする。要件改訂と実装フェーズは `docs/SETTLEMENT_PRINT_UNIFICATION.md`。
+- **UID 発行**: `shopify app generate extension --type ui_extension --name "領収書発行"` および `--name "売上サマリー"` を実行し、TOML に `uid` を追加する（4タイル分は設定済みの場合あり）。
 - **Prompt 8（Billing）**: スタンダード / プロプランのサブスクリプション、feature flag、機能制御。
 - **管理画面 UI**: 領収書テンプレート編集、予算管理、精算履歴、ロケーション設定など。
 

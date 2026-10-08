@@ -62,7 +62,7 @@
 - **§9.5 領収書**: プレビュー即反映・再発行文言切り替え → **対応済み**
 - **§9A.5 ポイント/会員施策**: 表示名変更・抽出元切り替え・無効化 → **対応済み**
 - **§10.5 売上サマリー**: 入店数報告OFF・KPI ON/OFF・loyalty 表示 → **設定保存・API で displayOptions 返却済み。POS 側で表示制御する前提**
-- **§12.4 印字**: ロケーション別 print_mode 切替・ショップ全体印字設定 → **対応済み**。cloudprnt_direct / order_based の挙動は既存実装に依存。
+- **§12.4 印字**: ロケーション別 print_mode 切替・ショップ全体印字設定 → **設定画面は対応済み**。標準経路を `shopify_printing`（Printing API）へ寄せる改訂は `docs/SETTLEMENT_PRINT_UNIFICATION.md`。コード実装は Phase 1 以降。
 
 ---
 
