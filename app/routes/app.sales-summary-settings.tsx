@@ -36,7 +36,7 @@ import {
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
+import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
 const LOCATIONS_QUERY = `#graphql
   query Locations {
@@ -321,7 +321,7 @@ export default function SalesSummarySettingsPage() {
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
-          <TabGroupBar tabs={SETTINGS_TABS} />
+          <TabGroupBar tabs={REPORTS_TABS} />
         </Card>
         <Layout>
           {saved && (

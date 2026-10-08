@@ -26,7 +26,7 @@ import { resolveShop } from "../utils/shopResolver.server";
 import prisma from "../db.server";
 import { autoDiscoverChannels } from "../services/salesChannelEngine.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
+import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
 // ── Loader ────────────────────────────────────────────────────────────────────
 
@@ -401,7 +401,7 @@ export default function SalesChannelsPage() {
         subtitle="オンラインストア・外部モール等のチャネルを設定し、売上サマリーに表示します"
         backAction={{ content: "設定", onAction: () => navigate("/app/sales-summary-settings") }}
       >
-        <TabGroupBar tabs={SETTINGS_TABS} />
+        <TabGroupBar tabs={REPORTS_TABS} />
         <Layout>
           <Layout.Section>
             {savedBanner && (

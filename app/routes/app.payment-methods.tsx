@@ -27,7 +27,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, MASTER_TABS } from "../components/TabGroupBar";
+import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
 import { syncPaymentMethodsFromRecentOrders } from "../services/paymentMethodSync.server";
 
 const CATEGORY_OPTIONS = [
@@ -241,7 +241,7 @@ export default function PaymentMethodsPage() {
         primaryAction={{ content: "追加", onAction: openCreate }}
       >
         <Card padding="0">
-          <TabGroupBar tabs={MASTER_TABS} />
+          <TabGroupBar tabs={STORE_TABS} />
         </Card>
         <Layout>
           <Layout.Section>

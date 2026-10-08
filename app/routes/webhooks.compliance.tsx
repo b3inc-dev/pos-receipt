@@ -7,10 +7,24 @@
  * - shop/redact:            ショップデータの削除要求（アンインストール 48 時間後）
  *
  * HMAC 検証は authenticate.webhook(request) 内で実施され、不正な場合は 401 を返す。
+ *
+ * customers/data_request 方針:
+ * - Shopify への必須応答は 200（受理）。開示データ本体は webhook レスポンスに載せない。
+ * - アプリ DB に customer.email / phone は保存していない（根拠は inventory.rationale）。
+ * - 注文 ID に紐づく ReceiptIssue / SpecialRefundEvent を列挙し、PII 本文を含めない
+ *   サマリのみログする（新規の個人情報永続化は行わない）。
+ * - ストアオーナーへの開示は 30 日以内の運用（管理画面の領収書・特殊返金履歴、
+ *   またはサポート連絡先）で対応する。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import {
+  buildCustomerDataInventory,
+  expandOrderIdVariants,
+  summarizeInventoryForLog,
+  type CustomerDataRequestPayload,
+} from "../services/gdprCustomerDataRequest.server";
 
 export const loader = async (_: LoaderFunctionArgs) => {
   return new Response("Method Not Allowed", { status: 405 });
@@ -26,10 +40,63 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const topicStr = String(topic ?? "");
 
     if (topicStr === "customers/data_request") {
-      // 顧客データの開示要求。
-      // 本アプリは顧客の個人情報（メール・電話番号等）を個別には保存しておらず、
-      // 領収書の宛名（任意入力テキスト）のみを保存している。
-      // App Store 審査上は 200 を返すことで要求を受理した扱いとなる。
+      const body = payload as CustomerDataRequestPayload;
+      const shopDomain = body.shop_domain ?? shop;
+      const orderVariants = expandOrderIdVariants(body.orders_requested);
+
+      let receiptIssues: Awaited<ReturnType<typeof prisma.receiptIssue.findMany>> = [];
+      let specialRefundEvents: Awaited<
+        ReturnType<typeof prisma.specialRefundEvent.findMany>
+      > = [];
+
+      const dbShop = await prisma.shop.findFirst({ where: { shopDomain } });
+      if (dbShop && orderVariants.length > 0) {
+        [receiptIssues, specialRefundEvents] = await Promise.all([
+          prisma.receiptIssue.findMany({
+            where: { shopId: dbShop.id, orderId: { in: orderVariants } },
+            select: {
+              orderId: true,
+              orderName: true,
+              recipientName: true,
+              amount: true,
+              currency: true,
+              proviso: true,
+              locationId: true,
+              createdAt: true,
+              isReissue: true,
+            },
+          }),
+          prisma.specialRefundEvent.findMany({
+            where: { shopId: dbShop.id, sourceOrderId: { in: orderVariants } },
+            select: {
+              sourceOrderId: true,
+              sourceOrderName: true,
+              eventType: true,
+              amount: true,
+              currency: true,
+              originalPaymentMethod: true,
+              actualRefundMethod: true,
+              note: true,
+              status: true,
+              createdAt: true,
+            },
+          }),
+        ]);
+      }
+
+      const inventory = buildCustomerDataInventory({
+        shopDomain,
+        payload: body,
+        receiptIssues,
+        specialRefundEvents,
+      });
+
+      // PII 本文（宛名等）はログに出さない。新規 DB 行も作らない。
+      console.info(
+        "[webhooks.compliance] customers/data_request inventory",
+        JSON.stringify(summarizeInventoryForLog(inventory))
+      );
+
       return new Response(null, { status: 200 });
     }
 
@@ -41,10 +108,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         orders_to_redact?: number[];
       };
       const shopDomain = body.shop_domain ?? shop;
-      const orderIds = (body.orders_to_redact ?? []).map(String);
+      const orderIds = expandOrderIdVariants(body.orders_to_redact);
 
       if (orderIds.length > 0) {
-        // 対象注文の領収書発行履歴の宛名を匿名化
         const dbShop = await prisma.shop.findFirst({ where: { shopDomain } });
         if (dbShop) {
           await prisma.receiptIssue.updateMany({

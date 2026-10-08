@@ -296,6 +296,8 @@ export const GENERAL_SETTINGS_KEY = "general_settings";
 export interface GeneralSettings {
   appDisplayName: string;
   supportContactEmail: string;
+  /** プライバシーポリシー URL（https）。未設定時は env PRIVACY_POLICY_URL を参照 */
+  privacyPolicyUrl: string;
   defaultTimezone: string;
   defaultCurrency: string;
   currentPlanCode: string;
@@ -310,6 +312,7 @@ export interface GeneralSettings {
 export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   appDisplayName: "",
   supportContactEmail: "",
+  privacyPolicyUrl: "",
   defaultTimezone: "Asia/Tokyo",
   defaultCurrency: "JPY",
   currentPlanCode: "lite",
@@ -436,6 +439,12 @@ export interface PrintSettings {
   attachSettlementMetafieldsToOrder: boolean;
   receiptPrintMode: string;
   receiptPreviewBeforePrintRequired: boolean;
+  /** Shopify Printing API を優先して試す（旧経路は残置） */
+  preferPrintingApi: boolean;
+  /** 精算完了後に shopify.printing を案内／実行 */
+  settlementPrintingApiEnabled: boolean;
+  /** 領収書発行後に shopify.printing を案内／実行 */
+  receiptPrintingApiEnabled: boolean;
 }
 
 export const DEFAULT_PRINT_SETTINGS: PrintSettings = {
@@ -449,7 +458,26 @@ export const DEFAULT_PRINT_SETTINGS: PrintSettings = {
   attachSettlementMetafieldsToOrder: true,
   receiptPrintMode: "order_based",
   receiptPreviewBeforePrintRequired: true,
+  /** Conditional-Go: Printing API を既定で試す（旧 order_based/cloudprnt は Location.printMode で残置） */
+  preferPrintingApi: true,
+  settlementPrintingApiEnabled: true,
+  receiptPrintingApiEnabled: true,
 };
+
+// ── 販売レシート設定 / ロケーション設定軸（共有モジュールを再エクスポート） ──
+export {
+  SALES_RECEIPT_SETTINGS_KEY,
+  DEFAULT_SALES_RECEIPT_SETTINGS,
+  type SalesReceiptSettings,
+} from "./salesReceiptSettings";
+export {
+  LOCATION_PROFILES_KEY,
+  DEFAULT_LOCATION_PROFILES,
+  LOCATION_PROFILE_FIELD_KEYS,
+  type LocationProfileFields,
+  type LocationSettingProfile,
+  type LocationProfilesState,
+} from "./locationProfiles";
 
 // ── 予算設定（要件 §11） ──────────────────────────────────────────────────────
 

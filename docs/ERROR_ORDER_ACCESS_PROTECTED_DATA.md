@@ -2,6 +2,8 @@
 
 領収書の「取引を選択」や注文検索で、注文（Order）にアクセスした際にこのメッセージが出る場合の対処です。
 
+運用チェックリスト（公開前の短い確認リスト）: [PROTECTED_CUSTOMER_DATA_OPS_CHECKLIST.md](./PROTECTED_CUSTOMER_DATA_OPS_CHECKLIST.md)
+
 ## 公式情報
 
 - [Protected customer data（保護された顧客データ）](https://shopify.dev/docs/apps/launch/protected-customer-data)  

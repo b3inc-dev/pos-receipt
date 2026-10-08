@@ -28,7 +28,7 @@ import {
   type SettlementSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
+import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 
 const LOCATIONS_QUERY = `#graphql
   query Locations {
@@ -224,7 +224,7 @@ export default function SettlementSettingsPage() {
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
-          <TabGroupBar tabs={SETTINGS_TABS} />
+          <TabGroupBar tabs={SETTLEMENT_TABS} />
         </Card>
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}

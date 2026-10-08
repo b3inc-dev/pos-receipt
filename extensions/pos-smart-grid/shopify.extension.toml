@@ -1,4 +1,4 @@
-api_version = "2026-01"
+api_version = "2026-07"
 
 # ============================================================
 # 特殊返金・商品券（ホームタイル + 取引詳細メニュー）
@@ -112,3 +112,36 @@ target = "pos.home.tile.render"
 [[extensions.targeting]]
 module = "./src/SalesSummaryModal.jsx"
 target = "pos.home.modal.render"
+
+# ============================================================
+# 販売レシート（Print-1 / Printing API）
+# purchase.post + order-details 導線。
+#
+# uid: 手書き仮 ID は置かない。Shopify 公式は CLI が handle から決定的に生成する。
+# 正しい生成手順（本番/承認付きリリース時）:
+#   1. shopify app deploy（または generate 後の初回 deploy）
+#   2. CLI が shopify.extension.toml に uid を書き込む
+#   3. その uid を commit して public/inhouse 双方で同じ値を使う
+# 未 deploy のため uid 行は省略（デプロイ時に CLI が追加する）。
+# ============================================================
+[[extensions]]
+type = "ui_extension"
+name = "販売レシート / 属性付き印字"
+handle = "pos-sales-receipt"
+description = "販売レシート / 属性付き印字（Shopify Printing API）"
+
+[[extensions.targeting]]
+module = "./src/SalesReceiptTile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/SalesReceiptModal.jsx"
+target = "pos.home.modal.render"
+
+[[extensions.targeting]]
+module = "./src/SalesReceiptOrderAction.jsx"
+target = "pos.order-details.action.menu-item.render"
+
+[[extensions.targeting]]
+module = "./src/SalesReceiptOrderAction.jsx"
+target = "pos.purchase.post.action.menu-item.render"

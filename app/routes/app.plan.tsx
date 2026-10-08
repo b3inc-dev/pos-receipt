@@ -21,7 +21,7 @@ import {
   Divider,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
-import { TabGroupBar, buildSystemTabs } from "../components/TabGroupBar";
+import { SystemPageNav } from "../components/SystemPageNav";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
@@ -31,6 +31,7 @@ import {
   PLAN_FEATURES,
   BILLING_PLANS,
   EXTRA_LOCATION_PRICE_USD,
+  EXTRA_LOCATION_USAGE_BILLING_ENABLED,
 } from "../utils/planFeatures.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 
@@ -92,6 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     liteFeatures: PLAN_FEATURES.lite,
     proFeatures: PLAN_FEATURES.pro,
     extraLocationPriceUsd: EXTRA_LOCATION_PRICE_USD,
+    extraLocationUsageBillingEnabled: EXTRA_LOCATION_USAGE_BILLING_ENABLED,
     memberCardEnabled: isInhouseMode(),
   };
 }
@@ -174,6 +176,7 @@ export default function PlanPage() {
     liteFeatures,
     proFeatures,
     extraLocationPriceUsd,
+    extraLocationUsageBillingEnabled,
     memberCardEnabled,
   } = useLoaderData<typeof loader>();
 
@@ -188,9 +191,7 @@ export default function PlanPage() {
   return (
     <PolarisPageWrapper>
     <Page title="料金プラン" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
-      <Card padding="0">
-        <TabGroupBar tabs={buildSystemTabs(memberCardEnabled)} />
-      </Card>
+      <SystemPageNav memberCardEnabled={memberCardEnabled} />
       <Layout>
         {/* エラー */}
         {actionError && (
@@ -232,10 +233,14 @@ export default function PlanPage() {
           </Card>
         </Layout.AnnotatedSection>
 
-        {/* ── 料金プラン（POS Stock 風：Lite / Pro カード＋11ロケーション以降の注釈） ── */}
+        {/* ── 料金プラン（定額 Billing のみ。追加ロケ従量は未実装） ── */}
         <Layout.AnnotatedSection
           title="料金プラン"
-          description="Lite は3ロケーションまで、Pro は10ロケーションまで。11ロケーション以降は1ロケーションあたりの追加料金がかかります。"
+          description={
+            extraLocationUsageBillingEnabled
+              ? `Lite は${litePlan.maxLocations}ロケーションまで、Pro は${proPlan.maxLocations}ロケーションまで。追加ロケーションは1件あたり $${extraLocationPriceUsd}/月です。`
+              : "現在の請求は下記の月額定額のみです（Shopify Billing の recurring charge）。"
+          }
         >
           <BlockStack gap="400">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
@@ -263,9 +268,19 @@ export default function PlanPage() {
               />
             </div>
             <Box paddingBlockStart="200">
-              <Text as="p" tone="subdued">
-                11ロケーション以降は1ロケーションあたり <strong>${extraLocationPriceUsd}</strong>/月 の追加料金がかかります。
-              </Text>
+              {extraLocationUsageBillingEnabled ? (
+                <Text as="p" tone="subdued">
+                  プラン上限を超えるロケーションは1件あたり <strong>${extraLocationPriceUsd}</strong>/月 の追加料金です。
+                </Text>
+              ) : (
+                <Banner tone="info">
+                  <Text as="p">
+                    ロケーション数の目安は Lite {litePlan.maxLocations} / Pro {proPlan.maxLocations} です。
+                    追加ロケーションの従量課金（予定単価 ${extraLocationPriceUsd}/月）は未実装のため、
+                    現状の Shopify 請求は上記定額のみです。上限の強制ゲートもありません。
+                  </Text>
+                </Banner>
+              )}
             </Box>
           </BlockStack>
         </Layout.AnnotatedSection>
