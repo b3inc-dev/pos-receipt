@@ -28,4 +28,7 @@ extensions/*/dist
 
 # Ignore shopify files created during app dev
 .shopify/*
-.shopify.lockbuild/
+.shopify.lock
+
+# App build output
+build/
