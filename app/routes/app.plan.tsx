@@ -21,7 +21,7 @@ import {
   Divider,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
-import { TabGroupBar, buildSystemTabs } from "../components/TabGroupBar";
+import { SystemPageNav } from "../components/SystemPageNav";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
@@ -191,9 +191,7 @@ export default function PlanPage() {
   return (
     <PolarisPageWrapper>
     <Page title="料金プラン" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
-      <Card padding="0">
-        <TabGroupBar tabs={buildSystemTabs(memberCardEnabled)} />
-      </Card>
+      <SystemPageNav memberCardEnabled={memberCardEnabled} />
       <Layout>
         {/* エラー */}
         {actionError && (

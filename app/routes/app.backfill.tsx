@@ -22,7 +22,7 @@ import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import prisma from "../db.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, buildSystemTabs } from "../components/TabGroupBar";
+import { SystemPageNav } from "../components/SystemPageNav";
 import { isInhouseMode } from "../utils/planFeatures.server";
 import { useState, useCallback, useRef } from "react";
 
@@ -157,9 +157,7 @@ export default function BackfillPage() {
         title="過去データ一括取込"
         backAction={{ content: "ホーム", onAction: to("/app") }}
       >
-        <Card padding="0">
-          <TabGroupBar tabs={buildSystemTabs(memberCardEnabled)} />
-        </Card>
+        <SystemPageNav memberCardEnabled={memberCardEnabled} />
         <Layout>
           <Layout.Section>
             <Banner tone="info">

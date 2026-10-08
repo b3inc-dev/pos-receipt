@@ -29,7 +29,7 @@ import {
   type LoyaltyUsageSourceType,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
+import { SystemPageNav } from "../components/SystemPageNav";
 
 const SOURCE_TYPE_OPTIONS: { label: string; value: LoyaltyUsageSourceType }[] = [
   { label: "使用しない", value: "manual_off" },
@@ -135,9 +135,7 @@ export default function LoyaltySettingsPage() {
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
-        <Card padding="0">
-          <TabGroupBar tabs={SETTINGS_TABS} />
-        </Card>
+        <SystemPageNav memberCardEnabled={false} />
         <Layout>
           {saved && (
             <Layout.Section>

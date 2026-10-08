@@ -31,7 +31,7 @@ import {
   resolvePrivacyPolicyUrl,
 } from "../utils/privacyPolicyUrl";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
+import { SystemPageNav } from "../components/SystemPageNav";
 
 const PLAN_OPTIONS = [
   { label: "Lite", value: "lite" },
@@ -123,9 +123,7 @@ export default function GeneralSettingsPage() {
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
-        <Card padding="0">
-          <TabGroupBar tabs={SETTINGS_TABS} />
-        </Card>
+        <SystemPageNav memberCardEnabled={false} />
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
           {saveError && <Layout.Section><Banner tone="critical">{saveError}</Banner></Layout.Section>}

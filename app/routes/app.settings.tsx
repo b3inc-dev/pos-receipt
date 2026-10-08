@@ -31,7 +31,7 @@ import { resolveShop } from "../utils/shopResolver.server";
 import { validateNonPosRefundAttributionLocations } from "../services/refundAggregation.server";
 import { planLabel, getFullAccess, isInhouseMode, PLAN_FEATURES } from "../utils/planFeatures.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
+import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
 
 const LOCATIONS_QUERY = `#graphql
   query Locations {
@@ -304,7 +304,7 @@ export default function SettingsPage() {
       backAction={{ content: "ホーム", onAction: to("/app") }}
     >
       <Card padding="0">
-        <TabGroupBar tabs={SETTINGS_TABS} />
+        <TabGroupBar tabs={STORE_TABS} />
       </Card>
       <Layout>
         {saveErr && (

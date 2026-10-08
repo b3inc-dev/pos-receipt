@@ -26,7 +26,7 @@ import {
   type BudgetSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, SETTINGS_TABS } from "../components/TabGroupBar";
+import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
 const INPUT_UNIT_OPTIONS = [
   { label: "日別", value: "daily" },
@@ -94,7 +94,7 @@ export default function BudgetSettingsPage() {
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
-          <TabGroupBar tabs={SETTINGS_TABS} />
+          <TabGroupBar tabs={REPORTS_TABS} />
         </Card>
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}

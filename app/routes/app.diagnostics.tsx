@@ -26,7 +26,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, isInhouseMode, planLabel } from "../utils/planFeatures.server";
-import { TabGroupBar, buildSystemTabs } from "../components/TabGroupBar";
+import { SystemPageNav } from "../components/SystemPageNav";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 
 // 環境変数の存在チェック（値は返さない）
@@ -147,9 +147,7 @@ export default function DiagnosticsPage() {
       subtitle={`確認日時: ${new Date(checkedAt).toLocaleString("ja-JP")}`}
       backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
     >
-      <Card padding="0">
-        <TabGroupBar tabs={buildSystemTabs(memberCardEnabled)} />
-      </Card>
+      <SystemPageNav memberCardEnabled={memberCardEnabled} />
       <Layout>
         {/* ── 環境変数エラー ── */}
         {!allEnvOk && (

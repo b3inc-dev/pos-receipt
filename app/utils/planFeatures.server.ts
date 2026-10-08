@@ -16,6 +16,8 @@ export type FeatureKey =
   | "settlement"          // 精算（全プラン）
   | "special_refund"      // 特殊返金・商品券調整（全プラン）
   | "receipt"             // 領収書（全プラン）
+  | "sales_receipt"       // 販売レシート印字（Lite+）
+  | "sales_receipt_layout" // 販売レシート・レイアウト編集（Lite+）
   | "sales_summary"       // 売上サマリー（Pro+）
   | "footfall_reporting"  // 入店数報告（Pro+）
   | "budget_management";  // 予算管理（Pro+）
@@ -115,11 +117,15 @@ export const PLAN_FEATURES: Record<"lite" | "pro", { key: FeatureKey; label: str
     { key: "settlement",     label: "精算・点検レシート" },
     { key: "special_refund", label: "特殊返金・商品券調整" },
     { key: "receipt",        label: "領収書発行・再発行" },
+    { key: "sales_receipt",  label: "販売レシート印字" },
+    { key: "sales_receipt_layout", label: "販売レシート・レイアウト編集" },
   ],
   pro: [
     { key: "settlement",        label: "精算・点検レシート" },
     { key: "special_refund",    label: "特殊返金・商品券調整" },
     { key: "receipt",           label: "領収書発行・再発行" },
+    { key: "sales_receipt",     label: "販売レシート印字" },
+    { key: "sales_receipt_layout", label: "販売レシート・レイアウト編集" },
     { key: "sales_summary",     label: "売上サマリー（日次・期間）" },
     { key: "footfall_reporting", label: "入店数報告" },
     { key: "budget_management", label: "予算管理・CSVインポート" },
