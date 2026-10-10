@@ -25,6 +25,8 @@ import {
   setAppSetting,
   PRINT_SETTINGS_KEY,
   DEFAULT_PRINT_SETTINGS,
+  resolvePrintPaperWidthMm,
+  syncPrintPaperWidthFields,
   type PrintSettings,
 } from "../utils/appSettings.server";
 import {
@@ -57,8 +59,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
   const saved =
     (await getAppSetting<Partial<SettlementPreviewPrefs>>(shop.id, PREVIEW_KEY)) ?? {};
-  const paperFromPrint =
-    printSettings.cloudprntPaperWidth === "58mm" ? (58 as const) : (80 as const);
+  const paperFromPrint = resolvePrintPaperWidthMm(printSettings);
   const prefs: SettlementPreviewPrefs = {
     ...DEFAULT_PREFS,
     paperWidthMm: paperFromPrint,
@@ -78,11 +79,11 @@ export async function action({ request }: ActionFunctionArgs) {
   };
   await setAppSetting(shop.id, PREVIEW_KEY, prefs);
 
-  // 用紙幅は印字設定にも反映（精算 HTML 経路が参照）
+  // 用紙幅は印字設定にも反映（paperWidthMm ↔ cloudprntPaperWidth 同期）
   const printSettings = {
     ...DEFAULT_PRINT_SETTINGS,
     ...((await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {}),
-    cloudprntPaperWidth: prefs.paperWidthMm === 58 ? "58mm" : "80mm",
+    ...syncPrintPaperWidthFields(prefs.paperWidthMm),
   };
   await setAppSetting(shop.id, PRINT_SETTINGS_KEY, printSettings);
   return Response.json({ ok: true });

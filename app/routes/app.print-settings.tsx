@@ -24,6 +24,8 @@ import {
   setAppSetting,
   PRINT_SETTINGS_KEY,
   DEFAULT_PRINT_SETTINGS,
+  resolvePrintPaperWidthMm,
+  syncPrintPaperWidthFields,
   type PrintSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
@@ -58,7 +60,6 @@ export async function action({ request }: ActionFunctionArgs) {
     defaultPrintMode: (get("defaultPrintMode") as PrintSettings["defaultPrintMode"]) || "order_based",
     locationPrintModeOverrideEnabled: bool("locationPrintModeOverrideEnabled", true),
     cloudprntProfileName: str("cloudprntProfileName", ""),
-    cloudprntPaperWidth: str("cloudprntPaperWidth", "80mm"),
     cloudprntEnabled: bool("cloudprntEnabled", false),
     createSettlementOrderWhenPrinting: bool("createSettlementOrderWhenPrinting", true),
     attachSettlementNoteToOrder: bool("attachSettlementNoteToOrder", true),
@@ -69,6 +70,11 @@ export async function action({ request }: ActionFunctionArgs) {
     settlementPrintingApiEnabled: bool("settlementPrintingApiEnabled", true),
     receiptPrintingApiEnabled: bool("receiptPrintingApiEnabled", true),
   };
+  // 用紙幅: 中立 paperWidthMm とレガシー cloudprntPaperWidth を同期
+  const widthRaw = str("paperWidthMm", str("cloudprntPaperWidth", "80mm"));
+  const widthMm: 58 | 80 =
+    widthRaw === "58" || widthRaw === "58mm" ? 58 : 80;
+  Object.assign(settings, syncPrintPaperWidthFields(widthMm));
   await setAppSetting(shop.id, PRINT_SETTINGS_KEY, settings);
   return Response.json({ ok: true });
 }
@@ -131,12 +137,39 @@ export default function PrintSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="CloudPRNT" description="§12.2.2">
+          <Layout.AnnotatedSection
+            title="用紙幅"
+            description="Printing API HTML と CloudPRNT で共用。中立キー paperWidthMm（レガシー cloudprntPaperWidth と同期）"
+          >
             <Card>
               <BlockStack gap="400">
+                <Select
+                  label="用紙幅"
+                  options={PAPER_WIDTH_OPTIONS}
+                  value={
+                    resolvePrintPaperWidthMm(form) === 58 ? "58mm" : "80mm"
+                  }
+                  onChange={(v) => {
+                    const mm = v === "58mm" ? (58 as const) : (80 as const);
+                    setForm((p) => ({ ...p, ...syncPrintPaperWidthFields(mm) }));
+                  }}
+                  helpText="精算・領収書の Printing HTML および CloudPRNT payload に反映されます。"
+                />
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection
+            title="CloudPRNT（Advanced / レガシー）"
+            description="§12.2.2 — 旧経路。Printing API 主経路店舗では通常不要。廃止候補"
+          >
+            <Card>
+              <BlockStack gap="400">
+                <Banner tone="warning">
+                  CloudPRNT は Advanced／レガシー経路です。新規店舗は Shopify Printing API を優先してください。紙幅は上の「用紙幅」を正とします（保存時に cloudprntPaperWidth へも同期）。
+                </Banner>
                 <Checkbox label="CloudPRNT を有効にする" checked={form.cloudprntEnabled} onChange={(v) => set("cloudprntEnabled", v)} />
                 <TextField label="プロファイル名" value={form.cloudprntProfileName} onChange={(v) => set("cloudprntProfileName", v)} autoComplete="off" />
-                <Select label="用紙幅" options={PAPER_WIDTH_OPTIONS} value={form.cloudprntPaperWidth} onChange={(v) => set("cloudprntPaperWidth", v)} />
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>

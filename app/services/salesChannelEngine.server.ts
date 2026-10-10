@@ -12,7 +12,7 @@
 import prisma from "../db.server";
 import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
 import { getAppSetting, setAppSetting, SETTLEMENT_SETTINGS_KEY } from "../utils/appSettings.server";
-import { splitTaxInclusiveToNetAndTax } from "./settlementEngine.server";
+import { splitTaxInclusiveToNetAndTax } from "./settlementTaxPure.server";
 
 // ── 既知の source_name → 表示名マッピング ────────────────────────────────────
 

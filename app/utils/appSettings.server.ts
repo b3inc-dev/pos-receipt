@@ -418,8 +418,8 @@ export const DEFAULT_SETTLEMENT_SETTINGS: SettlementSettings = {
   orderBasedCreateSettlementOrderEnabled: true,
   orderBasedAttachMetafieldsEnabled: true,
   orderBasedAttachNoteEnabled: true,
-  /** 検証用のためデフォルト ON（本番では管理画面で OFF にできる） */
-  legacyGiftCardAggregationEnabled: true,
+  /** レガシー Gift Card API 加算。本番既定 OFF（検証時のみ管理画面で ON） */
+  legacyGiftCardAggregationEnabled: false,
   refundAggregationLocationMode: "order_transaction",
   nonPosRefundFallbackMode: "order_retail_location",
 };
@@ -432,7 +432,13 @@ export interface PrintSettings {
   defaultPrintMode: "cloudprnt_direct" | "order_based";
   locationPrintModeOverrideEnabled: boolean;
   cloudprntProfileName: string;
+  /**
+   * レガシー CloudPRNT キー（"58mm" | "80mm"）。
+   * Printing HTML も参照する。中立キーは `paperWidthMm`（同期エイリアス）。
+   */
   cloudprntPaperWidth: string;
+  /** 用紙幅 mm（Printing / CloudPRNT 共用の中立キー。cloudprntPaperWidth と同期） */
+  paperWidthMm?: 58 | 80;
   cloudprntEnabled: boolean;
   createSettlementOrderWhenPrinting: boolean;
   attachSettlementNoteToOrder: boolean;
@@ -452,6 +458,7 @@ export const DEFAULT_PRINT_SETTINGS: PrintSettings = {
   locationPrintModeOverrideEnabled: true,
   cloudprntProfileName: "",
   cloudprntPaperWidth: "80mm",
+  paperWidthMm: 80,
   cloudprntEnabled: false,
   createSettlementOrderWhenPrinting: true,
   attachSettlementNoteToOrder: true,
@@ -463,6 +470,11 @@ export const DEFAULT_PRINT_SETTINGS: PrintSettings = {
   settlementPrintingApiEnabled: true,
   receiptPrintingApiEnabled: true,
 };
+
+export {
+  resolvePrintPaperWidthMm,
+  syncPrintPaperWidthFields,
+} from "./printPaperWidth";
 
 // ── 販売レシート設定 / ロケーション設定軸（共有モジュールを再エクスポート） ──
 export {

@@ -268,6 +268,70 @@ describe("aggregateGasStyleForOrders — 返金帰属", () => {
   });
 });
 
+describe("aggregateGasStyleForOrders — 商品券ノート・taxShopify 診断", () => {
+  it("ノート「商品券 N円」から額面観測し voucherChangeObserved に載せる", () => {
+    const order = saleOrder({
+      id: "o-voucher",
+      note: "商品券 2000円",
+      totalPriceSet: money(1000),
+      transactions: [
+        {
+          id: "ov-gift",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "gift_card",
+        },
+      ],
+    });
+    const gas = aggregateGasStyleForOrders([order], alwaysInRange);
+    assert.equal(gas.pay["商品券"]?.sale, 1000);
+    assert.equal(gas.voucherChangeObserved, 1000);
+  });
+
+  it("taxTotalShopify は注文税×keepRatio（診断値。印字主値は税率逆算）", () => {
+    const order = saleOrder({
+      id: "o-tax",
+      totalPriceSet: money(1100),
+      totalTaxSet: { shopMoney: { amount: "100" } },
+      currentTotalTaxSet: { shopMoney: { amount: "100" } },
+      transactions: [
+        {
+          id: "ot-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1100),
+          gateway: "cash",
+        },
+        {
+          id: "ot-refund",
+          createdAt: "2026-10-08T02:00:00Z",
+          kind: "REFUND",
+          amountSet: money(550),
+          gateway: "cash",
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T02:00:00Z",
+          refundLineItems: [{ quantity: 0 }],
+          transactions: [
+            {
+              id: "ot-refund",
+              kind: "REFUND",
+              amountSet: money(550),
+              gateway: "cash",
+            },
+          ],
+        },
+      ],
+    });
+    const gas = aggregateGasStyleForOrders([order], alwaysInRange);
+    // keepRatio = (1100-550)/1100 = 0.5 → taxShopify ≈ 50
+    assert.equal(gas.taxTotalShopify, 50);
+  });
+});
+
 describe("aggregateGasStyleForOrders — 支払バケット", () => {
   it("現金キャップ: お釣り分は現金 sale に載せない", () => {
     const order = saleOrder({

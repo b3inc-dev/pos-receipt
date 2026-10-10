@@ -8,6 +8,8 @@ import {
   validateAppDistributionValue,
   validateAppUrlAgainstDistribution,
   validateServerStartupEnv,
+  validateTomlAppModeMapping,
+  readApplicationUrlFromToml,
 } from "./deployGuard.mjs";
 
 describe("validateAppDistributionValue", () => {
@@ -54,5 +56,41 @@ describe("assertAppModeEquals / validateServerStartupEnv", () => {
       SHOPIFY_APP_URL: "https://pos-receipt.onrender.com",
     });
     assert.equal(r.ok, true);
+  });
+});
+
+describe("validateTomlAppModeMapping（toml↔mode 対応）", () => {
+  it("application_url を toml から読む", () => {
+    assert.equal(
+      readApplicationUrlFromToml('application_url = "https://pos-receipt.onrender.com"\n'),
+      "https://pos-receipt.onrender.com",
+    );
+  });
+
+  it("正しい public/inhouse 対応を許可する", () => {
+    const r = validateTomlAppModeMapping({
+      publicToml: 'application_url = "https://pos-receipt.onrender.com"\n',
+      inhouseToml: 'application_url = "https://pos-receipt-ciara.onrender.com"\n',
+      appUrlJs: `
+        const PROD_APP_URL_PUBLIC = "https://pos-receipt.onrender.com";
+        const PROD_APP_URL_INHOUSE = "https://pos-receipt-ciara.onrender.com";
+        const APP_MODE = "inhouse";
+      `,
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.errors.length, 0);
+  });
+
+  it("toml ホスト取り違えを拒否する", () => {
+    const r = validateTomlAppModeMapping({
+      publicToml: 'application_url = "https://pos-receipt-ciara.onrender.com"\n',
+      inhouseToml: 'application_url = "https://pos-receipt.onrender.com"\n',
+      appUrlJs: `
+        const PROD_APP_URL_PUBLIC = "https://pos-receipt.onrender.com";
+        const PROD_APP_URL_INHOUSE = "https://pos-receipt-ciara.onrender.com";
+      `,
+    });
+    assert.equal(r.ok, false);
+    assert.ok(r.errors.length >= 2);
   });
 });
