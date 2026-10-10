@@ -18,7 +18,7 @@ export interface LocationProfileFields {
   cloudprntEnabled?: boolean;
   summaryTargetGroup?: string | null;
   budgetTargetEnabled?: boolean;
-  footfallTargetEnabled?: boolean;
+  // footfallTargetEnabled はプロファイル対象外（実行時正本は sales_summary_settings.footfallTargetLocationIds）
 }
 
 export interface LocationSettingProfile {
@@ -51,7 +51,6 @@ export const LOCATION_PROFILE_FIELD_KEYS: (keyof LocationProfileFields)[] = [
   "cloudprntEnabled",
   "summaryTargetGroup",
   "budgetTargetEnabled",
-  "footfallTargetEnabled",
 ];
 
 export const LOCATION_PROFILES_KEY = "location_setting_profiles";

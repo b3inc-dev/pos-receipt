@@ -136,8 +136,8 @@ export const PLAN_FEATURES: Record<"lite" | "pro", { key: FeatureKey; label: str
 export const PLAN_FEATURES_LEGACY = { standard: PLAN_FEATURES.lite } as const;
 
 // ── Shopify Billing プラン（POS Receipt: Lite $100、Pro $200） ───
-// maxLocations はプラン説明上の目安。アプリ側のハード上限ゲートは未実装。
-// 追加ロケーション従量（$20）の appUsageRecord / capped amount も未配線（D11）。
+// maxLocations はプラン説明上の目安。ハード上限ゲートは未実装（従量未実装のため）。
+// 超過時は /app/plan でソフト警告のみ。追加ロケ従量（$20）の appUsageRecord も未配線（D11）。
 
 export const BILLING_PLANS = {
   lite: {

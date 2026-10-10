@@ -16,6 +16,7 @@ import {
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
 import { getBudgetAmountsByDateForLocation } from "../utils/salesSummaryBudgetFromDb.server";
+import { resolveDefaultLocationPrintMode } from "../utils/resolveDefaultPrintMode.server";
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
@@ -79,11 +80,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
       };
       const shopifyLocs = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
+      const defaultPrintMode = await resolveDefaultLocationPrintMode(shop.id);
       for (const l of shopifyLocs) {
         await prisma.location.upsert({
           where: { shopId_shopifyLocationGid: { shopId: shop.id, shopifyLocationGid: l.id } },
           update: { name: l.name, salesSummaryEnabled: true },
-          create: { shopId: shop.id, shopifyLocationGid: l.id, name: l.name, salesSummaryEnabled: true },
+          create: {
+            shopId: shop.id,
+            shopifyLocationGid: l.id,
+            name: l.name,
+            salesSummaryEnabled: true,
+            printMode: defaultPrintMode,
+          },
         });
       }
       loc = await prisma.location.findFirst({

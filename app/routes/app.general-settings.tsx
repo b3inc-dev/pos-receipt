@@ -123,7 +123,7 @@ export default function GeneralSettingsPage() {
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
-        <SystemPageNav memberCardEnabled={false} />
+        <SystemPageNav />
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
           {saveError && <Layout.Section><Banner tone="critical">{saveError}</Banner></Layout.Section>}

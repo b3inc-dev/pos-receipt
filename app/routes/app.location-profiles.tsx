@@ -33,6 +33,7 @@ import {
   type LocationSettingProfile,
   type LocationProfileFields,
 } from "../utils/locationProfiles";
+import { resolveDefaultLocationPrintMode } from "../utils/resolveDefaultPrintMode.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
 
@@ -58,7 +59,6 @@ const FIELD_LABELS: Record<keyof LocationProfileFields, string> = {
   cloudprntEnabled: "CloudPRNT",
   summaryTargetGroup: "サマリー対象グループ",
   budgetTargetEnabled: "予算対象",
-  footfallTargetEnabled: "入店数対象",
 };
 
 function formatFieldValue(key: keyof LocationProfileFields, value: unknown): string {
@@ -112,11 +112,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shopifyLocations = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
   const dbLocations = await prisma.location.findMany({ where: { shopId: shop.id } });
   const dbMap = new Map(dbLocations.map((l) => [l.shopifyLocationGid, l]));
+  const shopDefaultPrintMode = await resolveDefaultLocationPrintMode(shop.id);
 
   const locations: LocRow[] = shopifyLocations.map((sl) => {
     const db = dbMap.get(sl.id);
     const raw = {
-      printMode: db?.printMode ?? "order_based",
+      printMode: db?.printMode ?? shopDefaultPrintMode,
       salesSummaryEnabled: db?.salesSummaryEnabled ?? false,
       settlementEnabled: db?.settlementEnabled ?? true,
       receiptEnabled: db?.receiptEnabled ?? true,
@@ -130,7 +131,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       cloudprntEnabled: db?.cloudprntEnabled ?? false,
       summaryTargetGroup: db?.summaryTargetGroup ?? null,
       budgetTargetEnabled: db?.budgetTargetEnabled ?? false,
-      footfallTargetEnabled: db?.footfallTargetEnabled ?? false,
     };
     return {
       id: sl.id,
@@ -191,6 +191,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json({ ok: false, error: "confirm required" }, { status: 400 });
     }
 
+    const shopDefaultPrintMode = await resolveDefaultLocationPrintMode(shop.id);
     for (const gid of targetIds) {
       const existing = await prisma.location.findFirst({
         where: { shopId: shop.id, shopifyLocationGid: gid },
@@ -206,6 +207,7 @@ export async function action({ request }: ActionFunctionArgs) {
             shopId: shop.id,
             shopifyLocationGid: gid,
             name: nameFromShopify,
+            printMode: shopDefaultPrintMode,
             ...(data as object),
           },
         });
@@ -331,7 +333,7 @@ export default function LocationProfilesPage() {
         <Layout>
           <Layout.Section>
             <Banner tone="info">
-              設定軸（プロファイル）または「このロケをコピー」で複数ロケーションへ反映できます。適用前に差分プレビューを確認してください。印字方式（printMode）を含む全フィールドが一括上書き対象です。個別ロケ編集は「ロケーション」タブに残しています。
+              設定軸（プロファイル）または「このロケをコピー」で複数ロケーションへ反映できます。適用前に差分プレビューを確認してください。印字方式（printMode）を含むフィールドが一括上書き対象です。入店数対象（footfall）は実行時正本が売上サマリー設定の ID リストのため、プロファイル対象外です。個別ロケ編集は「ロケーション」タブに残しています。
             </Banner>
           </Layout.Section>
           {message ? (

@@ -23,7 +23,6 @@ import { resolveShop } from "../utils/shopResolver.server";
 import prisma from "../db.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SystemPageNav } from "../components/SystemPageNav";
-import { isInhouseMode } from "../utils/planFeatures.server";
 import { useState, useCallback, useRef } from "react";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -34,7 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     select: { shopifyLocationGid: true, name: true },
     orderBy: { name: "asc" },
   });
-  return { locations, memberCardEnabled: isInhouseMode() };
+  return { locations };
 }
 
 function buildMonthOptions() {
@@ -65,7 +64,7 @@ function getDaysInMonth(ym: string): string[] {
 type DayResult = { targetDate: string; status: "pending" | "processing" | "done" | "skipped" | "error"; reason?: string };
 
 export default function BackfillPage() {
-  const { locations, memberCardEnabled } = useLoaderData<typeof loader>();
+  const { locations } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -157,7 +156,7 @@ export default function BackfillPage() {
         title="過去データ一括取込"
         backAction={{ content: "ホーム", onAction: to("/app") }}
       >
-        <SystemPageNav memberCardEnabled={memberCardEnabled} />
+        <SystemPageNav />
         <Layout>
           <Layout.Section>
             <Banner tone="info">

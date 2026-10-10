@@ -44,6 +44,7 @@ import {
   getCalendarDateStringInTimeZone,
   addCalendarDaysToIsoDate,
 } from "../utils/shopTimezone.server";
+import { resolveDefaultLocationPrintMode } from "../utils/resolveDefaultPrintMode.server";
 
 type AdminClient = {
   graphql: (query: string, opts?: { variables?: Record<string, unknown> }) => Promise<{ json: () => Promise<unknown> }>;
@@ -114,12 +115,19 @@ async function syncActiveLocationsForSalesSummary(admin: AdminClient, shopId: st
     cursor = pageInfo?.endCursor ?? null;
   }
 
+  const defaultPrintMode = await resolveDefaultLocationPrintMode(shopId);
   for (const loc of activeLocations) {
     await prisma.location.upsert({
       where: { shopId_shopifyLocationGid: { shopId, shopifyLocationGid: loc.id } },
       // 既存設定を壊さないため、有効/無効フラグは既存値を維持する
       update: { name: loc.name },
-      create: { shopId, shopifyLocationGid: loc.id, name: loc.name, salesSummaryEnabled: true },
+      create: {
+        shopId,
+        shopifyLocationGid: loc.id,
+        name: loc.name,
+        salesSummaryEnabled: true,
+        printMode: defaultPrintMode,
+      },
     });
   }
 }

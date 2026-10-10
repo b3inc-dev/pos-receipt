@@ -119,14 +119,29 @@ export default function PrintSettingsPage() {
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
           <Layout.Section>
-            <Banner tone="info">ショップ全体のデフォルト印字方式・CloudPRNT・order_based 時の挙動・領収書印字を設定します。ロケーション別の上書きは設定ページのロケーション設定で行います。</Banner>
+            <Banner tone="info">
+              ショップ全体のデフォルト印字方式・CloudPRNT・order_based 時の挙動・領収書印字を設定します。実効の印字方式は常に各 Location.printMode です。デフォルト印字方式は新規ロケーション同期時の初期コピーに使います。
+            </Banner>
           </Layout.Section>
 
-          <Layout.AnnotatedSection title="印字方式" description="§12.2.1">
+          <Layout.AnnotatedSection
+            title="印字方式（新規ロケ初期値）"
+            description="実効 printMode は Location のみ。ここは新規作成時の初期コピー用です。"
+          >
             <Card>
               <BlockStack gap="400">
-                <Select label="デフォルト印字方式" options={PRINT_MODE_OPTIONS} value={form.defaultPrintMode} onChange={(v) => set("defaultPrintMode", v as PrintSettings["defaultPrintMode"])} />
-                <Checkbox label="ロケーション別で印字方式を上書き可能" checked={form.locationPrintModeOverrideEnabled} onChange={(v) => set("locationPrintModeOverrideEnabled", v)} />
+                <Select
+                  label="デフォルト印字方式（新規ロケーションの初期値）"
+                  options={PRINT_MODE_OPTIONS}
+                  value={form.defaultPrintMode}
+                  onChange={(v) => set("defaultPrintMode", v as PrintSettings["defaultPrintMode"])}
+                  helpText="既存ロケーションの printMode は変更しません。個別変更は店舗設定のロケーションで行います。"
+                />
+                <Checkbox
+                  label="ロケーション別で印字方式を上書き可能（UI 表示用・実効は Location.printMode）"
+                  checked={form.locationPrintModeOverrideEnabled}
+                  onChange={(v) => set("locationPrintModeOverrideEnabled", v)}
+                />
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
@@ -144,7 +159,12 @@ export default function PrintSettingsPage() {
           <Layout.AnnotatedSection title="order-based 時の挙動" description="§12.2.3">
             <Card>
               <BlockStack gap="300">
-                <Checkbox label="印字時に精算注文を作成" checked={form.createSettlementOrderWhenPrinting} onChange={(v) => set("createSettlementOrderWhenPrinting", v)} />
+                <Checkbox
+                  label="精算注文を作成（監査アーカイブ／旧 order_based 印字）"
+                  checked={form.createSettlementOrderWhenPrinting}
+                  onChange={(v) => set("createSettlementOrderWhenPrinting", v)}
+                  helpText="Printing API 優先時は印字用には作りません。監査アーカイブが必要なときだけ ON（未設定のままなら作成スキップ）。Printing API を OFF にした旧 order_based 印字では従来どおり作成します。"
+                />
                 <Checkbox label="精算メモを注文に付与" checked={form.attachSettlementNoteToOrder} onChange={(v) => set("attachSettlementNoteToOrder", v)} />
                 <Checkbox label="精算メタフィールドを注文に付与" checked={form.attachSettlementMetafieldsToOrder} onChange={(v) => set("attachSettlementMetafieldsToOrder", v)} />
                 <Text as="p" tone="subdued">
