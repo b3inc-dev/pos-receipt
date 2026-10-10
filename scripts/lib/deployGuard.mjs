@@ -94,6 +94,90 @@ export function assertAppModeEquals(expected, appUrlJsContent) {
   return { ok: true, actual };
 }
 
+/** toml 本文から application_url の値を読む */
+export function readApplicationUrlFromToml(content) {
+  const m = String(content ?? "").match(/^\s*application_url\s*=\s*"([^"]+)"/m);
+  return m?.[1] ?? null;
+}
+
+/** appUrl.js から PROD_APP_URL_PUBLIC / INHOUSE を読む */
+export function readProdAppUrlsFromSource(content) {
+  const pub = String(content ?? "").match(
+    /const\s+PROD_APP_URL_PUBLIC\s*=\s*"([^"]+)"/,
+  );
+  const inh = String(content ?? "").match(
+    /const\s+PROD_APP_URL_INHOUSE\s*=\s*"([^"]+)"/,
+  );
+  return {
+    publicUrl: pub?.[1] ?? null,
+    inhouseUrl: inh?.[1] ?? null,
+  };
+}
+
+/**
+ * CI 用: public/inhouse toml の application_url と appUrl.js の PROD URL が
+ * 既知ホスト対応どおりか検証する（APP_MODE の現在値は問わない）。
+ *
+ * @returns {{ ok: boolean, errors: string[], warnings: string[] }}
+ */
+export function validateTomlAppModeMapping({ publicToml, inhouseToml, appUrlJs }) {
+  const errors = [];
+  const warnings = [];
+
+  const publicAppUrl = readApplicationUrlFromToml(publicToml);
+  const inhouseAppUrl = readApplicationUrlFromToml(inhouseToml);
+  const { publicUrl: prodPublic, inhouseUrl: prodInhouse } =
+    readProdAppUrlsFromSource(appUrlJs);
+
+  if (!publicAppUrl) {
+    errors.push('shopify.app.public.toml に application_url がありません。');
+  } else if (!KNOWN_PUBLIC_HOST_RE.test(publicAppUrl)) {
+    errors.push(
+      `shopify.app.public.toml の application_url (${publicAppUrl}) が公開用ホスト (pos-receipt.onrender.com) ではありません。`,
+    );
+  }
+
+  if (!inhouseAppUrl) {
+    errors.push('shopify.app.toml に application_url がありません。');
+  } else if (!KNOWN_INHOUSE_HOST_RE.test(inhouseAppUrl)) {
+    errors.push(
+      `shopify.app.toml の application_url (${inhouseAppUrl}) が自社用ホスト (pos-receipt-ciara.onrender.com) ではありません。`,
+    );
+  }
+
+  if (!prodPublic || !KNOWN_PUBLIC_HOST_RE.test(prodPublic)) {
+    errors.push(
+      `extensions/common/appUrl.js の PROD_APP_URL_PUBLIC (${prodPublic ?? "未検出"}) が公開用ホストと一致しません。`,
+    );
+  }
+  if (!prodInhouse || !KNOWN_INHOUSE_HOST_RE.test(prodInhouse)) {
+    errors.push(
+      `extensions/common/appUrl.js の PROD_APP_URL_INHOUSE (${prodInhouse ?? "未検出"}) が自社用ホストと一致しません。`,
+    );
+  }
+
+  if (
+    publicAppUrl &&
+    prodPublic &&
+    publicAppUrl.replace(/\/$/, "") !== prodPublic.replace(/\/$/, "")
+  ) {
+    warnings.push(
+      `public toml application_url (${publicAppUrl}) と PROD_APP_URL_PUBLIC (${prodPublic}) が一致しません。`,
+    );
+  }
+  if (
+    inhouseAppUrl &&
+    prodInhouse &&
+    inhouseAppUrl.replace(/\/$/, "") !== prodInhouse.replace(/\/$/, "")
+  ) {
+    warnings.push(
+      `inhouse toml application_url (${inhouseAppUrl}) と PROD_APP_URL_INHOUSE (${prodInhouse}) が一致しません。`,
+    );
+  }
+
+  return { ok: errors.length === 0, errors, warnings };
+}
+
 /**
  * サーバー起動時の総合チェック。SKIP_DISTRIBUTION_GUARD=1 なら ok。
  */

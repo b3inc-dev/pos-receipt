@@ -29,6 +29,9 @@ jobs:
           # schema 生成のみ。実 DB には接続しない
           DATABASE_URL: "postgresql://user:pass@localhost:5432/ci"
 
+      - name: Verify toml ↔ APP_MODE mapping
+        run: npm run verify:toml-app-mode
+
       - name: Test
         run: npm test
 
