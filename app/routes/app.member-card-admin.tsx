@@ -45,7 +45,7 @@ export default function MemberCardAdminPage() {
   return (
     <PolarisPageWrapper>
       <Page title="会員証（LIFF）" backAction={{ content: "ホーム", url: "/app" }}>
-        <SystemPageNav memberCardEnabled={true} />
+        <SystemPageNav />
         <Layout>
           <Layout.Section>
             <Card>

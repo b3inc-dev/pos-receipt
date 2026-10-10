@@ -56,6 +56,13 @@ export type SettlementReceiptPrintModel = {
   itemCount: number;
   voucherChangeAmount: number;
   paymentSections: { label: string; net: number; txCount?: number; refund?: number; refundCount?: number }[];
+  /** preferences C: 販売レシート設定と同じ ON/OFF */
+  showOrderAttributes: boolean;
+  showLineAttributes: boolean;
+  /** 対象注文の属性サマリ（注文まとめて） */
+  orderAttributes?: PrintAttr[];
+  /** 対象注文の商品別属性サマリ */
+  lineAttributes?: PrintAttr[];
   paperWidthMm: 58 | 80;
 };
 
@@ -74,6 +81,11 @@ export type GiftReceiptPrintModel = {
   phone?: string;
   showOrderNumber?: boolean;
   showDate?: boolean;
+  /** preferences C: 販売レシート設定と同じ ON/OFF */
+  showOrderAttributes: boolean;
+  showLineAttributes: boolean;
+  orderAttributes?: PrintAttr[];
+  lineAttributes?: PrintAttr[];
   paperWidthMm: 58 | 80;
 };
 
@@ -239,11 +251,29 @@ ${
 }
 <div class="hr"></div>
 ${payments}
+${
+  m.showOrderAttributes && m.orderAttributes?.length
+    ? `<div class="hr"></div><div class="muted">注文属性</div>${attrsHtml(m.orderAttributes)}`
+    : ""
+}
+${
+  m.showLineAttributes && m.lineAttributes?.length
+    ? `<div class="hr"></div><div class="muted">商品属性</div>${attrsHtml(m.lineAttributes)}`
+    : ""
+}
 `;
   return shell(m.paperWidthMm, body, m.title);
 }
 
 function renderGiftReceipt(m: GiftReceiptPrintModel): string {
+  const orderAttrs =
+    m.showOrderAttributes && m.orderAttributes?.length
+      ? `<div class="hr"></div><div class="muted">注文属性</div>${attrsHtml(m.orderAttributes)}`
+      : "";
+  const lineAttrs =
+    m.showLineAttributes && m.lineAttributes?.length
+      ? `<div class="hr"></div><div class="muted">商品属性</div>${attrsHtml(m.lineAttributes)}`
+      : "";
   const body = `
 <h1>${esc(m.title || "領　収　書")}</h1>
 ${m.companyName ? `<div class="center">${esc(m.companyName)}</div>` : ""}
@@ -256,6 +286,8 @@ ${m.phone ? `<div class="center muted">${esc(m.phone)}</div>` : ""}
 ${m.showDate !== false ? `<div class="row"><span>発行日</span><span>${esc(m.issueDate)}</span></div>` : ""}
 ${m.showOrderNumber !== false && m.orderName ? `<div class="row"><span>注文</span><span>${esc(m.orderName)}</span></div>` : ""}
 ${m.locationName ? `<div class="row"><span>店舗</span><span>${esc(m.locationName)}</span></div>` : ""}
+${orderAttrs}
+${lineAttrs}
 `;
   return shell(m.paperWidthMm, body, "領収書");
 }
@@ -299,7 +331,14 @@ export function settlementPreviewToPrintModel(
       refundCount?: number;
     }[];
   },
-  opts?: { isInspection?: boolean; paperWidthMm?: 58 | 80 },
+  opts?: {
+    isInspection?: boolean;
+    paperWidthMm?: 58 | 80;
+    showOrderAttributes?: boolean;
+    showLineAttributes?: boolean;
+    orderAttributes?: PrintAttr[];
+    lineAttributes?: PrintAttr[];
+  },
 ): SettlementReceiptPrintModel {
   return {
     kind: "settlement",
@@ -317,6 +356,10 @@ export function settlementPreviewToPrintModel(
     itemCount: preview.itemCount,
     voucherChangeAmount: preview.voucherChangeAmount,
     paymentSections: preview.paymentSections,
+    showOrderAttributes: opts?.showOrderAttributes === true,
+    showLineAttributes: opts?.showLineAttributes === true,
+    orderAttributes: opts?.orderAttributes,
+    lineAttributes: opts?.lineAttributes,
     paperWidthMm: opts?.paperWidthMm ?? 80,
   };
 }

@@ -81,6 +81,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const planCode = shop.planCode === "standard" ? "lite" : (shop.planCode ?? "lite");
+  const locationCount = await prisma.location.count({ where: { shopId: shop.id } });
+  const planMaxLocations =
+    planCode === "pro" || planCode === "unlimited"
+      ? BILLING_PLANS.pro.maxLocations
+      : BILLING_PLANS.lite.maxLocations;
+  const locationSoftWarn =
+    !fullAccess && locationCount > planMaxLocations
+      ? {
+          locationCount,
+          maxLocations: planMaxLocations,
+          planCode,
+        }
+      : null;
+
   return {
     planCode,
     planLabel: fullAccess
@@ -94,7 +108,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     proFeatures: PLAN_FEATURES.pro,
     extraLocationPriceUsd: EXTRA_LOCATION_PRICE_USD,
     extraLocationUsageBillingEnabled: EXTRA_LOCATION_USAGE_BILLING_ENABLED,
-    memberCardEnabled: isInhouseMode(),
+    locationCount,
+    locationSoftWarn,
   };
 }
 
@@ -102,7 +117,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export async function action({ request }: ActionFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
-  const shop = await resolveShop(session.shop, admin);
+  await resolveShop(session.shop, admin);
 
   if (isInhouseMode()) {
     return { ok: false, error: "自社用モードでは課金不要です" };
@@ -153,13 +168,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: false, error: "課金URLの取得に失敗しました" };
   }
 
-  // planCode を仮更新
-  await prisma.shop.update({
-    where: { id: shop.id },
-    data: { planCode: planKey },
-  });
-
-  // Shopify の課金承認ページへリダイレクト
+  // planCode は callback 成功時のみ更新（承認前の仮更新はしない）
   return redirect(confirmationUrl);
 }
 
@@ -177,7 +186,8 @@ export default function PlanPage() {
     proFeatures,
     extraLocationPriceUsd,
     extraLocationUsageBillingEnabled,
-    memberCardEnabled,
+    locationCount,
+    locationSoftWarn,
   } = useLoaderData<typeof loader>();
 
   const fetcher = useFetcher<typeof action>();
@@ -191,12 +201,24 @@ export default function PlanPage() {
   return (
     <PolarisPageWrapper>
     <Page title="料金プラン" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
-      <SystemPageNav memberCardEnabled={memberCardEnabled} />
+      <SystemPageNav />
       <Layout>
         {/* エラー */}
         {actionError && (
           <Layout.Section>
             <Banner tone="critical">{actionError}</Banner>
+          </Layout.Section>
+        )}
+
+        {locationSoftWarn && (
+          <Layout.Section>
+            <Banner tone="warning">
+              <Text as="p">
+                登録ロケーション数（{locationSoftWarn.locationCount}）が{" "}
+                {locationSoftWarn.planCode === "pro" ? "Pro" : "Lite"} の目安上限（
+                {locationSoftWarn.maxLocations}）を超えています。従量課金は未実装のため機能は制限しません（ソフト警告のみ）。
+              </Text>
+            </Banner>
           </Layout.Section>
         )}
 
@@ -273,11 +295,12 @@ export default function PlanPage() {
                   プラン上限を超えるロケーションは1件あたり <strong>${extraLocationPriceUsd}</strong>/月 の追加料金です。
                 </Text>
               ) : (
-                <Banner tone="info">
+                <Banner tone="warning">
                   <Text as="p">
-                    ロケーション数の目安は Lite {litePlan.maxLocations} / Pro {proPlan.maxLocations} です。
-                    追加ロケーションの従量課金（予定単価 ${extraLocationPriceUsd}/月）は未実装のため、
-                    現状の Shopify 請求は上記定額のみです。上限の強制ゲートもありません。
+                    ロケーション数の目安は Lite {litePlan.maxLocations} / Pro {proPlan.maxLocations}{" "}
+                    です（現在の登録数: {locationCount}）。追加ロケーションの従量課金（予定単価 $
+                    {extraLocationPriceUsd}/月）は未実装のため、Shopify 請求は上記定額のみです。
+                    maxLocations のハードゲートは設けず、超過時はソフト警告のみ表示します。
                   </Text>
                 </Banner>
               )}

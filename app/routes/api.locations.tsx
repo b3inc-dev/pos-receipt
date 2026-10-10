@@ -12,6 +12,7 @@ import {
   isFootfallReportingAllowedForLocation,
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
+import { resolveDefaultLocationPrintMode } from "../utils/resolveDefaultPrintMode.server";
 
 const LOCATIONS_QUERY = `#graphql
   query {
@@ -73,6 +74,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const settings = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
     const merged = mergeAndNormalizeSalesSummarySettings(settings ?? undefined);
+    const shopDefaultPrintMode = await resolveDefaultLocationPrintMode(shop.id);
 
     const locations = nodes
       .filter((node) => node.isActive)
@@ -81,7 +83,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         return {
           locationId: node.id,
           locationName: node.name,
-          printMode: db?.printMode ?? "order_based",
+          printMode: db?.printMode ?? shopDefaultPrintMode,
           salesSummaryEnabled: db?.salesSummaryEnabled ?? false,
           footfallReportingEnabled: isFootfallReportingAllowedForLocation(merged, node.id),
         };

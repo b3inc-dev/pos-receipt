@@ -30,6 +30,7 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { validateNonPosRefundAttributionLocations } from "../services/refundAggregation.server";
 import { planLabel, getFullAccess, isInhouseMode, PLAN_FEATURES } from "../utils/planFeatures.server";
+import { resolveDefaultLocationPrintMode } from "../utils/resolveDefaultPrintMode.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
 
@@ -59,6 +60,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // DB ロケーション設定取得
   const dbLocations = await prisma.location.findMany({ where: { shopId: shop.id } });
   const dbMap = new Map(dbLocations.map((l) => [l.shopifyLocationGid, l]));
+  const shopDefaultPrintMode = await resolveDefaultLocationPrintMode(shop.id);
 
   const locations = shopifyLocations.map((sl) => {
     const db = dbMap.get(sl.id);
@@ -68,7 +70,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       displayName: db?.displayName ?? null,
       shortName: db?.shortName ?? null,
       sortOrder: db?.sortOrder ?? 0,
-      printMode: db?.printMode ?? "order_based",
+      // 未登録ロケはショップ defaultPrintMode を初期表示（保存時に create へコピー）
+      printMode: db?.printMode ?? shopDefaultPrintMode,
       salesSummaryEnabled: db?.salesSummaryEnabled ?? false,
       settlementEnabled: db?.settlementEnabled ?? true,
       receiptEnabled: db?.receiptEnabled ?? true,
@@ -156,6 +159,7 @@ export async function action({ request }: ActionFunctionArgs) {
           data: { nonPosRefundAttributionEnabled: false },
         });
       }
+      const shopDefaultPrintMode = await resolveDefaultLocationPrintMode(shop.id);
       for (const loc of locations) {
         if (!loc?.id) continue;
         await prisma.location.upsert({
@@ -164,7 +168,7 @@ export async function action({ request }: ActionFunctionArgs) {
             displayName: loc.displayName ?? null,
             shortName: loc.shortName ?? null,
             sortOrder: loc.sortOrder ?? 0,
-            printMode: loc.printMode ?? "order_based",
+            printMode: loc.printMode ?? shopDefaultPrintMode,
             salesSummaryEnabled: Boolean(loc.salesSummaryEnabled),
             settlementEnabled: loc.settlementEnabled !== false,
             receiptEnabled: loc.receiptEnabled !== false,
@@ -187,7 +191,7 @@ export async function action({ request }: ActionFunctionArgs) {
             displayName: loc.displayName ?? null,
             shortName: loc.shortName ?? null,
             sortOrder: loc.sortOrder ?? 0,
-            printMode: loc.printMode ?? "order_based",
+            printMode: loc.printMode ?? shopDefaultPrintMode,
             salesSummaryEnabled: Boolean(loc.salesSummaryEnabled),
             settlementEnabled: loc.settlementEnabled !== false,
             receiptEnabled: loc.receiptEnabled !== false,
