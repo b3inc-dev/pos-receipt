@@ -47,7 +47,8 @@ export async function printHtml(relativeOrAbsoluteSrc) {
     if (typeof printing.getPrinters === "function") {
       const printers = await printing.getPrinters();
       const list = Array.isArray(printers) ? printers : printers?.printers ?? [];
-      printer = list.find((p) => p?.connected) ?? list[0] ?? null;
+      // connected のみ。未接続の list[0] は渡さない（公式: printer 省略＝ダイアログ）
+      printer = list.find((p) => p?.connected) ?? null;
     }
 
     if (printer) {
@@ -55,7 +56,7 @@ export async function printHtml(relativeOrAbsoluteSrc) {
       return { ok: true, printer };
     }
 
-    // 未接続時はダイアログ fallback（printer 省略）
+    // 接続プリンタ無し: printer 省略でダイアログ
     await printing.print(src);
     return { ok: true, usedDialog: true };
   } catch (e) {
