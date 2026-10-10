@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   aggregateGasStyleForOrders,
+  decideRefundAttributionForSettlement,
   gasNormalizeGatewayLabel,
   totalFromPayBuckets,
   type GasAggregateAttributionOpts,
@@ -265,6 +266,125 @@ describe("aggregateGasStyleForOrders — 返金帰属", () => {
     assert.equal(gas.pay["現金"]?.refund, 400);
     assert.equal(gas.itemCount, 1);
     assert.equal(gas.refundsGross, 400);
+  });
+
+  it("metafield があれば resolve より優先し、当該ロケに載せる", () => {
+    // resolve は refund TX locB → 非加算だが、metafield が locA なら加算
+    const order = saleOrder({
+      id: "o4mf",
+      lineItems: { nodes: [{ quantity: 2 }] },
+      retailLocation: { id: locA },
+      refundAggregationLocationGid: locA,
+      transactions: [
+        {
+          id: "o4mf-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "cash",
+        },
+        {
+          id: "o4mf-refund",
+          createdAt: "2026-10-08T02:00:00Z",
+          kind: "REFUND",
+          amountSet: money(400),
+          gateway: "cash",
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T02:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o4mf-refund",
+              kind: "REFUND",
+              amountSet: money(400),
+              gateway: "cash",
+              location: { id: locB },
+            },
+          ],
+        },
+      ],
+    });
+
+    const gas = aggregateGasStyleForOrders([order], alwaysInRange, attributionOpts(locA, "100"));
+    assert.equal(gas.refundOrderSet.size, 1);
+    assert.equal(gas.pay["現金"]?.refund, 400);
+    assert.equal(gas.refundsGross, 400);
+    assert.equal(gas.refundAttributionMismatchCount, 1);
+  });
+
+  it("metafield 無しなら従来どおり resolve", () => {
+    const order = saleOrder({
+      id: "o4resolve",
+      retailLocation: { id: locA },
+      refundAggregationLocationGid: null,
+      transactions: [
+        {
+          id: "o4r-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "cash",
+        },
+        {
+          id: "o4r-refund",
+          createdAt: "2026-10-08T02:00:00Z",
+          kind: "REFUND",
+          amountSet: money(400),
+          gateway: "cash",
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T02:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o4r-refund",
+              kind: "REFUND",
+              amountSet: money(400),
+              gateway: "cash",
+              location: { id: locB },
+            },
+          ],
+        },
+      ],
+    });
+    const gas = aggregateGasStyleForOrders([order], alwaysInRange, attributionOpts(locA, "100"));
+    assert.equal(gas.refundsGross, 0);
+    assert.equal(gas.refundAttributionMismatchCount, 0);
+  });
+
+  it("decideRefundAttributionForSettlement は不一致でも metafield を usedGid にする", () => {
+    const order = saleOrder({
+      id: "o-dec",
+      retailLocation: { id: locA },
+      refundAggregationLocationGid: locA,
+      refunds: [
+        {
+          createdAt: "2026-10-08T02:00:00Z",
+          transactions: [
+            {
+              id: "o-dec-r",
+              kind: "REFUND",
+              location: { id: locB },
+            },
+          ],
+        },
+      ],
+    });
+    const d = decideRefundAttributionForSettlement(
+      order,
+      alwaysInRange,
+      attributionOpts(locA, "100"),
+    );
+    assert.equal(d.metafieldGid, locA);
+    assert.equal(d.resolvedGid, locB);
+    assert.equal(d.usedGid, locA);
+    assert.equal(d.mismatch, true);
+    assert.equal(d.counts, true);
   });
 });
 

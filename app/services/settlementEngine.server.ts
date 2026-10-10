@@ -39,6 +39,7 @@ import {
   type GasAggregateAttributionOpts,
 } from "./settlementAggregatePure.server";
 import { extractLocationNumericId } from "./refundAggregationPure.server";
+import { applySpecialRefundEventsToTotals } from "./specialRefundOverlayPure.server";
 
 export type { GasAggregateAttributionOpts } from "./settlementAggregatePure.server";
 import {
@@ -121,6 +122,11 @@ export interface SettlementPreviewDebugDTO {
   ordersUpdatedAtLocationCount: number;
   /** ユニオン集計のため常に 0 */
   overlayRefundCount: number;
+  /**
+   * 返金帰属: 注文 metafield(pos.refund_aggregation_location_gid) と
+   * 実行時 resolve 結果が不一致だった件数（金額ロジックは metafield 優先のまま）
+   */
+  refundAttributionMismatchCount?: number;
 }
 
 // ── Gateway Labels（支払方法マスタ未設定時はフォールバックを paymentMethod.server で使用） ───
@@ -186,6 +192,8 @@ interface ShopifyOrder {
   retailLocation?: { id: string } | null;
   /** GAS fetchAllOrdersSmart フォールバック（processed_at）用 */
   processedAt?: string | null;
+  /** pos.refund_aggregation_location_gid（集計時 metafield 優先） */
+  refundAggregationLocationGid?: string | null;
 }
 
 type AdminClient = {
@@ -252,6 +260,9 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
         tags
         processedAt
         retailLocation { id }
+        metafield(namespace: "pos", key: "refund_aggregation_location_gid") {
+          value
+        }
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -329,6 +340,10 @@ async function fetchAllOrders(
       // クエリで -tag:SETTLEMENT 済みだが、タグ表記ゆれ（SETTLEMENT / settlement）に備えて大文字小文字無視で除外
       const isSettlement = (node.tags ?? []).some((t) => String(t).toLowerCase() === "settlement");
       if (!isSettlement) {
+        const nodeWithMf = node as ShopifyOrder & {
+          metafield?: { value?: string | null } | null;
+        };
+        const mfVal = nodeWithMf.metafield?.value?.trim() || null;
         const order: ShopifyOrder = {
           ...node,
           transactions: node.transactions ?? [],
@@ -337,6 +352,7 @@ async function fetchAllOrders(
             refundLineItems: r.refundLineItems?.nodes ?? [],
             transactions: r.transactions?.nodes ?? [],
           })),
+          refundAggregationLocationGid: mfVal,
         };
         orders.push(order);
       }
@@ -519,64 +535,6 @@ async function payBucketsToPaymentSections(
     });
   }
   return out;
-}
-
-/** payment sections から gateway または label で該当セクションのインデックスを返す */
-function findSectionIndex(sections: PaymentSectionDTO[], gatewayOrLabel: string | null): number {
-  if (!gatewayOrLabel) return -1;
-  const s = String(gatewayOrLabel).trim().toLowerCase();
-  const i = sections.findIndex(
-    (sec) => sec.gateway.toLowerCase() === s || sec.label.toLowerCase() === s
-  );
-  if (i >= 0) return i;
-  // 現金系の表記ゆれ
-  if (["現金", "cash"].some((k) => s.includes(k) || k.includes(s))) {
-    return sections.findIndex((sec) => sec.gateway.toLowerCase() === "cash" || sec.label === "現金");
-  }
-  return -1;
-}
-
-/** 特殊返金イベントを total / refundTotal / paymentSections に反映（GAS overlay 相当） */
-function applySpecialRefundEventsToTotals(
-  sections: PaymentSectionDTO[],
-  otherEvents: { eventType: string; amount: { toString(): string }; originalPaymentMethod: string | null; actualRefundMethod: string | null; adjustKind: string | null }[],
-  totals: { total: number; refundTotal: number }
-): void {
-  for (const e of otherEvents) {
-    const amount = Number(e.amount);
-    if (!Number.isFinite(amount) || amount <= 0) continue;
-
-    switch (e.eventType) {
-      case "cash_refund": {
-        totals.refundTotal += amount;
-        const idx = findSectionIndex(sections, e.actualRefundMethod ?? "cash");
-        if (idx >= 0) sections[idx].refund += amount;
-        else if (sections.length > 0) sections[0].refund += amount;
-        break;
-      }
-      case "receipt_cash_adjustment": {
-        const kind = (e.adjustKind ?? "undo").toLowerCase();
-        const method = e.originalPaymentMethod ?? e.actualRefundMethod ?? "cash";
-        const idx = findSectionIndex(sections, method);
-        if (kind === "undo") {
-          totals.refundTotal -= amount;
-          if (idx >= 0) sections[idx].refund = Math.max(0, sections[idx].refund - amount);
-        } else {
-          totals.total += amount;
-          if (idx >= 0) sections[idx].net += amount;
-        }
-        break;
-      }
-      case "payment_method_override": {
-        totals.refundTotal += amount;
-        const idx = findSectionIndex(sections, e.actualRefundMethod ?? "cash");
-        if (idx >= 0) sections[idx].refund += amount;
-        break;
-      }
-      default:
-        break;
-    }
-  }
 }
 
 /**
@@ -804,9 +762,26 @@ async function buildSettlementPreviewImpl(
 
   let paymentSections = await payBucketsToPaymentSections(gas.pay, shopId);
   const eventTotals = { total, refundTotal };
-  applySpecialRefundEventsToTotals(paymentSections, otherEvents, eventTotals);
+  applySpecialRefundEventsToTotals(
+    paymentSections,
+    otherEvents.map((e) => ({
+      eventType: e.eventType,
+      amount: e.amount,
+      originalPaymentMethod: e.originalPaymentMethod,
+      actualRefundMethod: e.actualRefundMethod,
+      adjustKind: e.adjustKind,
+      shopifyRefundStatus: e.shopifyRefundStatus,
+    })),
+    eventTotals,
+  );
   total = eventTotals.total;
   refundTotal = eventTotals.refundTotal;
+
+  if (gas.refundAttributionMismatchCount > 0) {
+    console.warn(
+      `[settlement] refund attribution metafield≠resolve mismatches=${gas.refundAttributionMismatchCount} shop=${shopId} location=${locationId} date=${targetDate}`,
+    );
+  }
 
   // 小数は不要運用のため、精算数値はすべて四捨五入（整数）で統一
   const roundInt = (n: number) => Math.round(n);
@@ -852,6 +827,7 @@ async function buildSettlementPreviewImpl(
           ordersUpdatedPosSourceMatchedCount,
           ordersUpdatedAtLocationCount,
           overlayRefundCount,
+          refundAttributionMismatchCount: gas.refundAttributionMismatchCount,
         }
       : undefined,
     appliedSpecialRefundEvents: otherEvents.map((e) => ({

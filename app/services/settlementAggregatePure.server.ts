@@ -4,6 +4,7 @@
  */
 import {
   locationGidMatches,
+  normalizeLocationGid,
   resolveRefundAggregationLocationGid,
   type RefundAggregationContext,
 } from "./refundAggregationPure.server";
@@ -63,6 +64,8 @@ export interface GasStyleOrder {
     }>;
   }>;
   retailLocation?: { id: string } | null;
+  /** pos.refund_aggregation_location_gid（集計時優先。無ければ resolve） */
+  refundAggregationLocationGid?: string | null;
 }
 
 export const GAS_UNKNOWN_GATEWAY = "未分類";
@@ -195,14 +198,58 @@ function parseVoucherFaceFromNote(note: string | null | undefined): number {
   return m ? Number(m[1]) : 0;
 }
 
+export type RefundAttributionDecision = {
+  /** 精算対象ロケに返金を載せるか */
+  counts: boolean;
+  /** metafield と resolve が両方あり不一致 */
+  mismatch: boolean;
+  /** 実際に使った計上 GID（metafield 優先） */
+  usedGid: string | null;
+  resolvedGid: string | null;
+  metafieldGid: string | null;
+};
+
+/**
+ * 返金計上ロケ: metafield 優先、無ければ resolve。
+ * 不一致でも金額ロジックは metafield 側を使い、mismatch フラグのみ立てる。
+ */
+export function decideRefundAttributionForSettlement(
+  order: GasStyleOrder,
+  inRange: (iso?: string) => boolean,
+  opts?: GasAggregateAttributionOpts,
+): RefundAttributionDecision {
+  if (!opts) {
+    return {
+      counts: true,
+      mismatch: false,
+      usedGid: null,
+      resolvedGid: null,
+      metafieldGid: null,
+    };
+  }
+  const metafieldGid = normalizeLocationGid(order.refundAggregationLocationGid);
+  const resolvedGid = resolveRefundAggregationLocationGid(
+    order,
+    opts.attributionCtx,
+    inRange,
+  );
+  const mismatch = !!(metafieldGid && resolvedGid && metafieldGid !== resolvedGid);
+  const usedGid = metafieldGid ?? resolvedGid;
+  return {
+    counts: locationGidMatches(usedGid, opts.settlementLocationId, opts.locIdRaw),
+    mismatch,
+    usedGid,
+    resolvedGid,
+    metafieldGid,
+  };
+}
+
 export function orderRefundsCountForSettlement(
   order: GasStyleOrder,
   inRange: (iso?: string) => boolean,
   opts?: GasAggregateAttributionOpts,
 ): boolean {
-  if (!opts) return true;
-  const attr = resolveRefundAggregationLocationGid(order, opts.attributionCtx, inRange);
-  return locationGidMatches(attr, opts.settlementLocationId, opts.locIdRaw);
+  return decideRefundAttributionForSettlement(order, inRange, opts).counts;
 }
 
 /**
@@ -224,6 +271,8 @@ export function aggregateGasStyleForOrders(
   taxTotalShopify: number;
   /** GAS _voucher_change_total 相当（ノート・現金お釣りヒューリスティックの観測値のみ） */
   voucherChangeObserved: number;
+  /** metafield と resolve の不一致件数（診断用。金額は metafield 優先） */
+  refundAttributionMismatchCount: number;
 } {
   const pay: Record<string, GasPayBucket> = {};
   let refundsGross = 0;
@@ -234,13 +283,12 @@ export function aggregateGasStyleForOrders(
   let itemCount = 0;
   let taxTotalShopify = 0;
   let voucherChangeObserved = 0;
+  let refundAttributionMismatchCount = 0;
 
   for (const o of orders) {
-    const countRefundsForThisLocation = orderRefundsCountForSettlement(
-      o,
-      inRange,
-      attributionOpts,
-    );
+    const attribution = decideRefundAttributionForSettlement(o, inRange, attributionOpts);
+    if (attribution.mismatch) refundAttributionMismatchCount += 1;
+    const countRefundsForThisLocation = attribution.counts;
 
     const refundTxIdsInDay = new Set<string>();
     for (const r of o.refunds ?? []) {
@@ -409,6 +457,7 @@ export function aggregateGasStyleForOrders(
     itemCount,
     taxTotalShopify: Math.round(taxTotalShopify),
     voucherChangeObserved: Math.round(voucherChangeObserved),
+    refundAttributionMismatchCount,
   };
 }
 
