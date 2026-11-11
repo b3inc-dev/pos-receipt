@@ -137,6 +137,7 @@ function lineIsBlocking(line) {
 function canSplit(line) {
   return (
     line.quantityValid &&
+    line.staffState !== "unclassified" &&
     line.variantId != null &&
     line.discounts === 0 &&
     line.propertyCount === 0 &&
@@ -212,6 +213,7 @@ export function reduceCartStaff(state, action, roster) {
     if (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1 || quantity >= line.quantity) {
       return fail(current, "quantity_invalid");
     }
+    if (line.staffState === "unclassified") return fail(current, "split_unclassified");
     if (!canSplit(line)) return fail(current, "split_blocked");
 
     const rest = {

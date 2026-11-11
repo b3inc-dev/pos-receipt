@@ -14,6 +14,7 @@ import {
   parseStableStaffId,
   reduceCartStaff,
   rosterFromSessionAndLines,
+  runCartStaffAction,
 } from "../../extensions/common/cartStaffAssignment.js";
 
 const ROSTER = [{ id: 101 }, { id: 202 }];
@@ -270,6 +271,53 @@ describe("カートAPIへの反映", () => {
     assert.equal(cart.calls.includes("externalDispatch"), false);
     assert.equal(cart.calls.includes("addLineItemProperties"), false);
     assert.equal(CART_STAFF_EXTERNAL_SEND_ENABLED, false);
+  });
+
+  it("未分類の明細は数量を分けず、残数量の担当を未割当にしない", async () => {
+    const state = createCartStaffState([
+      {
+        uuid: "shirt",
+        title: "シャツ",
+        variantId: 11,
+        quantity: 3,
+        attributedUserId: "田中",
+      },
+    ]);
+    const cart = fakeCart([
+      { uuid: "shirt", variantId: 11, quantity: 3, staffId: null },
+    ]);
+    const blocked = await runCartStaffAction(
+      state.lines,
+      { type: "assign_partial", lineUuid: "shirt", quantity: 1, staffId: 101 },
+      ROSTER,
+      cart,
+    );
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.code, "split_unclassified");
+    assert.deepEqual(blocked.mutations, []);
+    assert.equal(blocked.state.lines.length, 1);
+    assert.equal(blocked.state.lines[0].quantity, 3);
+    assert.equal(blocked.state.lines[0].staffState, "unclassified");
+    assert.deepEqual(cart.calls, []);
+    assert.deepEqual(cart.lines, [
+      { uuid: "shirt", variantId: 11, quantity: 3, staffId: null },
+    ]);
+
+    const assigned = reduceCartStaff(
+      state,
+      { type: "assign_line", lineUuid: "shirt", staffId: 101 },
+      ROSTER,
+    );
+    assert.equal(assigned.ok, true);
+    const partial = reduceCartStaff(
+      assigned.state,
+      { type: "assign_partial", lineUuid: "shirt", quantity: 1, staffId: null },
+      ROSTER,
+    );
+    assert.equal(partial.ok, true);
+    assert.equal(partial.state.lines.find((item) => item.quantity === 2).staffId, 101);
+    assert.equal(partial.state.lines.find((item) => item.quantity === 2).staffState, "assigned");
+    assert.equal(partial.state.lines.find((item) => item.quantity === 1).staffState, "unassigned");
   });
 
   it("追加に失敗した分割は元明細を残し、増えた数量を戻す", async () => {

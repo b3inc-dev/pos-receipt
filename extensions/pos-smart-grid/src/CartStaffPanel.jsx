@@ -11,6 +11,7 @@ const ERROR_TEXT = {
   line_missing: "対象の明細がカートにありません。",
   quantity_invalid: "分ける数量が明細の数量と合いません。",
   split_blocked: "割引、付属情報、定期購買のある明細は数量を分けられません。明細全体の担当は変更できます。",
+  split_unclassified: "担当を確認できない明細は数量を分けられません。先に明細全体の担当を設定してください。",
   cart_unclassified: "未分類の明細があるため、カート全体は変更しません。明細ごとに設定してください。",
   apply_failed: "カートへの反映に失敗しました。数量と担当を確認してください。",
   unsupported_action: "この操作はできません。",
@@ -213,7 +214,11 @@ export function CartStaffPanel({
                         </s-button>
                       </s-stack>
                     ) : line.quantityValid && line.quantity > 1 ? (
-                      <s-text color="subdued">この明細は数量を分けられません。</s-text>
+                      <s-text color="subdued">
+                        {line.staffState === "unclassified"
+                          ? "担当を確認できないため、先に明細全体の担当を設定してください。"
+                          : "この明細は数量を分けられません。"}
+                      </s-text>
                     ) : null}
                     <s-button
                       tone="critical"

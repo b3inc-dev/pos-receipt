@@ -120,7 +120,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | `pos-sales-receipt` | home.tile, home.modal, order-details.action, purchase.post.action |
 | `pos-cart-staff` | home.tile, home.modal, cart.line-item-details.action |
 
-`pos-cart-staff` はカートの `setAttributedStaff` / `setAttributedStaffToLineItem` だけを呼ぶ。注文・メタフィールド・外部送信は行わない。明細の数量分割は、バリアントがあり割引・属性・定期購買が無い場合に追加してから元明細を外す。それ以外は分割しない。実機の紙印字と POS Lite での操作は未確認。
+`pos-cart-staff` はカートの `setAttributedStaff` / `setAttributedStaffToLineItem` だけを呼ぶ。注文・メタフィールド・外部送信は行わない。明細の数量分割は、バリアントがあり、担当が未分類でなく、割引・属性・定期購買が無い場合に追加してから元明細を外す。未分類の明細は、明細全体の担当を設定するまで分割しない。それ以外も分割しない。実機の紙印字と POS Lite での操作は未確認。
 
 ## 9. 関連既存 docs
 
