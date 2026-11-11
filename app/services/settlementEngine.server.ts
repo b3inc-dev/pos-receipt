@@ -47,6 +47,7 @@ import {
   runSettlementGraphqlSerial,
   sleep,
 } from "../lib/shopifyGraphqlThrottle.server";
+import { readOrdersPageOrThrow } from "./settlementUpstreamPage.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -321,6 +322,7 @@ async function fetchAllOrders(
       { variables: { first: 100, after: cursor, query, sortKey } },
       "settlementOrders",
     );
+    readOrdersPageOrThrow(json, "settlementOrders");
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
@@ -397,6 +399,7 @@ async function fetchOrdersUpdatedInDayRange(
       { variables: { first: 100, after: cursor, query } },
       "refundsOrders",
     );
+    readOrdersPageOrThrow(json, "refundsOrders");
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
