@@ -768,6 +768,54 @@ describe("カートAPIへの反映", () => {
     );
   });
 
+  it("分割後の下書きは追加行が末尾に入った実カートの順になる", async () => {
+    const roster = mergeStaffRoster([{ id: 202 }], [
+      { key: "app:staffaaaa", label: "A" },
+      { key: "app:staffbbbb", label: "B" },
+    ]);
+    const cart = fakeCart([
+      { uuid: "shirt", variantId: 11, quantity: 5, staffId: null },
+      { uuid: "hat", variantId: 22, quantity: 4, staffId: null },
+    ]);
+    const initial = createCartStaffState([
+      { uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5 },
+      { uuid: "hat", title: "帽子", variantId: 22, quantity: 4 },
+    ]);
+    const withShirt = reduceCartStaff(
+      initial,
+      { type: "assign_line", lineUuid: "shirt", staffId: "app:staffaaaa" },
+      roster,
+    );
+    const withHat = reduceCartStaff(
+      withShirt.state,
+      { type: "assign_line", lineUuid: "hat", staffId: "app:staffbbbb" },
+      roster,
+    );
+    const split = await runCartStaffAction(
+      withHat.state.lines,
+      { type: "assign_partial", lineUuid: "shirt", quantity: 1, staffId: 202 },
+      roster,
+      cart,
+    );
+    assert.equal(split.ok, true);
+    assert.deepEqual(split.state.lines.map((line) => line.uuid), cart.lines.map((line) => line.uuid));
+    assert.deepEqual(cart.lines.map((line) => line.uuid), ["hat", "new-1", "new-2"]);
+    const record = buildCartStaffRecord(split.state.lines);
+    const restored = restoreCartStaffRecord(
+      cart.lines.map((line, index) => ({
+        id: `order-${index}`,
+        variantId: line.variantId,
+        quantity: line.quantity,
+      })),
+      record.lines,
+    );
+    assert.deepEqual(restored.unmatched, []);
+    assert.equal(restored.restored[0].lineId, "order-0");
+    assert.equal(restored.restored[0].slices[0].staffKey, "app:staffbbbb");
+    assert.equal(restored.restored[1].slices[0].staffKey, "app:staffaaaa");
+    assert.equal(restored.restored[1].slices[0].quantity, 4);
+  });
+
   it("追加に失敗した分割は元明細を残し、増えた数量を戻す", async () => {
     const cart = fakeCart([
       { uuid: "shirt", variantId: 11, quantity: 3, staffId: 101 },

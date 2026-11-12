@@ -739,6 +739,40 @@ export function externalStaffDispatch(_snapshot) {
  * @param {Array<{ id: number }>} roster
  * @param {Record<string, Function>} cart
  */
+function readCartLineItems(cart) {
+  const current = cart?.current?.value?.lineItems
+    ?? cart?.current?.lineItems
+    ?? cart?.lineItems
+    ?? cart?.lines;
+  return Array.isArray(current) ? current : null;
+}
+
+/**
+ * 保存する担当順を、反映後のカート明細の並びへ合わせる。
+ * @param {Array<Record<string, unknown>>} lines
+ * @param {Array<Record<string, unknown>> | null | undefined} cartLines
+ */
+export function orderStaffLinesLikeCart(lines, cartLines) {
+  if (!Array.isArray(cartLines) || cartLines.length === 0) return lines ?? [];
+  const byUuid = new Map();
+  for (const line of lines ?? []) {
+    if (line?.uuid && !byUuid.has(line.uuid)) byUuid.set(line.uuid, line);
+  }
+  const ordered = [];
+  const used = new Set();
+  for (const cartLine of cartLines) {
+    const uuid = typeof cartLine === "string" ? cartLine : cartLine?.uuid;
+    const line = uuid ? byUuid.get(uuid) : null;
+    if (!line || used.has(uuid)) continue;
+    ordered.push(line);
+    used.add(uuid);
+  }
+  for (const line of lines ?? []) {
+    if (line?.uuid && !used.has(line.uuid)) ordered.push(line);
+  }
+  return ordered;
+}
+
 function rewriteSplitUuids(state, created) {
   const byPlanned = new Map(
     (created ?? [])
@@ -768,9 +802,13 @@ export async function runCartStaffAction(lines, action, roster, cart) {
       externalSent: false,
     };
   }
+  const rewritten = rewriteSplitUuids(planned.state, applied.created);
   return {
     ...planned,
-    state: rewriteSplitUuids(planned.state, applied.created),
+    state: {
+      ...rewritten,
+      lines: orderStaffLinesLikeCart(rewritten.lines, readCartLineItems(cart)),
+    },
   };
 }
 
