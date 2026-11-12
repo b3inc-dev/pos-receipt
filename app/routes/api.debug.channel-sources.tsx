@@ -80,7 +80,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const response = await admin.graphql(CHANNEL_SOURCES_QUERY, {
         variables: { first: limit, after: cursor, query: shopifyQuery },
       });
-      const json = await response.json();
+      const json = (await response.json()) as {
+        errors?: { message?: string }[];
+        data?: {
+          orders?: {
+            nodes?: OrderNode[];
+            pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+          };
+        };
+      };
       if (json.errors?.length) {
         return corsJson({ ok: false, error: "GraphQL error", details: json.errors }, { status: 500 });
       }
@@ -88,7 +96,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       allOrders.push(...nodes);
       const pageInfo = json.data?.orders?.pageInfo;
       if (!pageInfo?.hasNextPage) break;
-      cursor = pageInfo.endCursor;
+      cursor = pageInfo.endCursor ?? null;
       pages++;
     }
 

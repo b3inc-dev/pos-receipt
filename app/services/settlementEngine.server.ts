@@ -192,6 +192,24 @@ type AdminClient = {
   graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }>;
 };
 
+type GraphqlRefundNode = Omit<ShopifyRefund, "transactions" | "refundLineItems"> & {
+  transactions?: { nodes?: ShopifyRefundTransaction[] };
+  refundLineItems?: { nodes?: { quantity: number }[] };
+};
+
+type SettlementOrderNode = Omit<ShopifyOrder, "refunds"> & {
+  refunds?: GraphqlRefundNode[];
+};
+
+type SettlementOrdersPageJson = {
+  data?: {
+    orders?: {
+      nodes?: SettlementOrderNode[];
+      pageInfo?: { hasNextPage: boolean; endCursor: string };
+    };
+  };
+};
+
 // ── GraphQL Query ─────────────────────────────────────────────────────────────
 
 const SETTLEMENT_ORDERS_QUERY = `#graphql
@@ -306,16 +324,7 @@ async function fetchAllOrders(
   let hasNextPage = true;
 
   while (hasNextPage) {
-    const json = await adminGraphqlWithRetry<{
-      data?: {
-        orders?: {
-          nodes?: (ShopifyOrder & {
-            refunds?: (Omit<ShopifyRefund, "transactions"> & { transactions?: { nodes?: ShopifyRefundTransaction[] } })[];
-          })[];
-          pageInfo?: { hasNextPage: boolean; endCursor: string };
-        };
-      };
-    }>(
+    const json: SettlementOrdersPageJson = await adminGraphqlWithRetry<SettlementOrdersPageJson>(
       admin,
       SETTLEMENT_ORDERS_QUERY,
       { variables: { first: 100, after: cursor, query, sortKey } },
@@ -358,6 +367,21 @@ interface OrderWithRefundsCreatedAt {
   retailLocation?: { id: string } | null;
 }
 
+type RefundOrderNode = Omit<OrderWithRefundsCreatedAt, "refunds"> & {
+  refunds?: (Omit<ShopifyRefund, "transactions" | "refundLineItems"> & {
+    transactions?: { nodes?: ShopifyRefundTransaction[] };
+  })[];
+};
+
+type RefundOrdersPageJson = {
+  data?: {
+    orders?: {
+      nodes?: RefundOrderNode[];
+      pageInfo?: { hasNextPage: boolean; endCursor: string };
+    };
+  };
+};
+
 /** 返金用注文を retailLocation が指定ロケーションと一致するもののみに絞る */
 function filterOrdersUpdatedByRetailLocation(
   orders: OrderWithRefundsCreatedAt[],
@@ -382,16 +406,7 @@ async function fetchOrdersUpdatedInDayRange(
   let hasNextPage = true;
 
   while (hasNextPage) {
-    const json = await adminGraphqlWithRetry<{
-      data?: {
-        orders?: {
-          nodes?: (OrderWithRefundsCreatedAt & {
-            refunds?: (Omit<ShopifyRefund, "transactions"> & { transactions?: { nodes?: ShopifyRefundTransaction[] } })[];
-          })[];
-          pageInfo?: { hasNextPage: boolean; endCursor: string };
-        };
-      };
-    }>(
+    const json: RefundOrdersPageJson = await adminGraphqlWithRetry<RefundOrdersPageJson>(
       admin,
       REFUNDS_ORDERS_QUERY,
       { variables: { first: 100, after: cursor, query } },

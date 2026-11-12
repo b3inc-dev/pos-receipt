@@ -77,3 +77,7 @@
 - 本番で実際に接続している CloudPRNT プリンタ機種・ポーリング設定の運用手順の完全な現行正本
 - Shopify POS の Pro / Light プラン差分への依存の有無（アプリ側に該当チェックは見当たらない）
 - GitHub Actions 等のリポジトリ外 CI
+
+## Codex運用と検証入口
+
+継続実装ownerはCodex。GitHubを正本としてこのチャットで依頼を受け、専用branch/worktreeで調査・実装・品質確認・PRまで完結する。[開発/テスト手順](DEVELOPMENT_TESTING.md)、[BACKLOG](BACKLOG.md)、[共通運用](DEV_FIRST_THEN_DEPLOY.md)を参照。店舗側の実レシート設定/紙面や実機未確認を、アプリrepoだけで再現できると仮定しない。

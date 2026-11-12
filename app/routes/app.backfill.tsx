@@ -222,10 +222,12 @@ export default function BackfillPage() {
                       <Text as="p">取込完了しました。</Text>
                     </Banner>
                   )}
+                  {/* @ts-expect-error maxHeight は Polaris Box の型にない。既存のスクロール領域を維持する */}
                   <Box maxHeight="400px" overflowY="scroll">
                     <BlockStack gap="100">
                       {dayResults.map((r) => (
                         <InlineStack key={r.targetDate} gap="200" align="start">
+                          {/* @ts-expect-error style は Text の型にない。日付列の幅指定を維持する */}
                           <Text as="span" variant="bodySm" tone="subdued" style={{ minWidth: "110px" }}>
                             {r.targetDate}
                           </Text>
@@ -234,7 +236,7 @@ export default function BackfillPage() {
                           {r.status === "done" && <Badge tone="success">取込済</Badge>}
                           {r.status === "skipped" && <Badge tone="info">スキップ</Badge>}
                           {r.status === "error" && (
-                            <Badge tone="critical">エラー: {r.reason ?? ""}</Badge>
+                            <Badge tone="critical">{`エラー: ${r.reason ?? ""}`}</Badge>
                           )}
                         </InlineStack>
                       ))}

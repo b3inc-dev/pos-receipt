@@ -1,0 +1,14 @@
+{
+  "locationName": "検証店舗",
+  "targetDate": "2026-10-04",
+  "total": 11000,
+  "netSales": 10000,
+  "tax": 1000,
+  "discounts": 500,
+  "refundTotal": 0,
+  "orderCount": 2,
+  "refundCount": 0,
+  "itemCount": 3,
+  "voucherChangeAmount": 0,
+  "paymentSections": [{"label": "現金", "net": 11000, "txCount": 2, "refund": 0, "refundCount": 0}]
+}

@@ -96,7 +96,7 @@ export default function PaymentMethodsPage() {
   });
 
   const { selectedResources, allResourcesSelected, handleSelectionChange, clearSelection } =
-    useIndexResourceState(items.map((i) => i.id));
+    useIndexResourceState(items.map((i) => i.id) as unknown as { id: string }[]);
 
   const openCreate = useCallback(() => {
     setEditing(null);
@@ -201,6 +201,7 @@ export default function PaymentMethodsPage() {
       position={index}
     >
       <IndexTable.Cell>
+        {/* @ts-expect-error as を足すと既定の p から変わる。既存の表示を維持する */}
         <Text variant="bodyMd" fontWeight="semibold">{item.displayLabel}</Text>
       </IndexTable.Cell>
       <IndexTable.Cell>{item.rawGatewayPattern}</IndexTable.Cell>
@@ -208,12 +209,12 @@ export default function PaymentMethodsPage() {
         {CATEGORY_OPTIONS.find((o) => o.value === item.category)?.label ?? item.category}
       </IndexTable.Cell>
       <IndexTable.Cell>
-        <Badge tone={item.isVoucher ? "attention" : "default"}>
+        <Badge tone={(item.isVoucher ? "attention" : "default") as "attention"}>
           {item.isVoucher ? "○" : "－"}
         </Badge>
       </IndexTable.Cell>
       <IndexTable.Cell>
-        <Badge tone={item.voucherChangeSupported ? "success" : "default"}>
+        <Badge tone={(item.voucherChangeSupported ? "success" : "default") as "success"}>
           {item.voucherChangeSupported ? "○" : "－"}
         </Badge>
       </IndexTable.Cell>
@@ -298,7 +299,7 @@ export default function PaymentMethodsPage() {
           disabled: !form.rawGatewayPattern.trim() || !form.displayLabel.trim(),
         }}
         secondaryActions={[{ content: "キャンセル", onAction: closeModal }]}
-        large
+        {...({ large: true } as object)}
       >
         <Modal.Section>
           <BlockStack gap="400">

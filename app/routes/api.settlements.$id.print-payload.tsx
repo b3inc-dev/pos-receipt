@@ -7,7 +7,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { buildSettlementReceiptText } from "../services/settlementEngine.server";
-import type { SettlementPreviewDTO } from "../services/settlementEngine.server";
+import type { PaymentSectionDTO, SettlementPreviewDTO } from "../services/settlementEngine.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -32,7 +32,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const locationName = location?.displayName ?? location?.name ?? settlement.locationId;
 
     const paymentSections = settlement.paymentSectionsJson
-      ? (JSON.parse(settlement.paymentSectionsJson) as { label: string; net: number; refund: number }[])
+      ? (JSON.parse(settlement.paymentSectionsJson) as PaymentSectionDTO[])
       : [];
 
     const preview: SettlementPreviewDTO = {

@@ -59,7 +59,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     shopId: shop.id,
     ...(dateFrom && { targetDate: { gte: dateFrom } }),
     ...(dateTo   && { targetDate: dateTo ? { ...(dateFrom ? { gte: dateFrom } : {}), lte: dateTo } : undefined }),
-  } as Parameters<typeof prisma.settlement.findMany>[0]["where"];
+  } as NonNullable<Parameters<typeof prisma.settlement.findMany>[0]>["where"];
 
   // dateFrom + dateTo 両方ある場合は上書き
   const whereClean = {

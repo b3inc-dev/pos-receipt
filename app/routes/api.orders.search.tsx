@@ -122,7 +122,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       variables: { first: limit, after: cursor || null, query: query || null },
     });
 
-    const json = await response.json();
+    const json = (await response.json()) as {
+      errors?: { message?: string }[];
+      data?: {
+        orders?: {
+          nodes?: Record<string, unknown>[];
+          pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+        };
+      };
+    };
     if (json.errors?.length) {
       return corsJson(
         { ok: false, error: "GraphQL error", details: json.errors },
@@ -133,7 +141,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo ?? {};
 
-    let items = nodes.map((node: Record<string, unknown>) => {
+    const searched = nodes.map((node: Record<string, unknown>) => {
       const n = node as {
         id: string;
         name: string;
@@ -184,6 +192,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       };
     });
+    let items = searched;
 
     const requestedLocRaw = normalizeLocationIdForQuery(locationId);
     if (requestedLocRaw) {

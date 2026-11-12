@@ -57,8 +57,8 @@ export default function AppLayout() {
         </div>
       )}
       {/* 左サイドバー用（管理画面でアプリ選択時に下部などに出すメニュー）※他アプリ同様 href はパスのみ */}
-      {/* @ts-expect-error s-app-nav / s-link は polaris.js の Web コンポーネント */}
       <s-app-nav>
+        {/* @ts-expect-error rel="home" は App Home の既存指定。polaris-types 1.1 の Link には無い */}
         <s-link href="/app" rel="home">ホーム</s-link>
         <s-link href="/app/sales-receipt-layout">レシート</s-link>
         <s-link href="/app/settlement-settings">精算</s-link>
