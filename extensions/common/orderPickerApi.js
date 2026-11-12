@@ -105,6 +105,22 @@ export async function saveStaffAttribution(orderId, body) {
   return apiPost(`/api/orders/${orderPathId(orderId)}/staff-attribution`, body);
 }
 
+export async function getPosStaff() {
+  return apiGet("/api/pos-staff");
+}
+
+export async function savePosStaff(label) {
+  return apiPost("/api/pos-staff", { label });
+}
+
+export async function saveCartStaffDraft(draftKey, lines) {
+  return apiPost("/api/pos-staff", { draftKey, lines });
+}
+
+export async function getCartStaffDraft(draftKey) {
+  return apiGet("/api/pos-staff", { draftKey });
+}
+
 /**
  * POST /api/orders/:orderId/redo-draft
  * 会計やり直し用の下書き注文を作成

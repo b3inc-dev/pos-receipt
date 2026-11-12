@@ -1,10 +1,10 @@
 import { useEffect, useState } from "preact/hooks";
-import { getOrder, getStaffAttribution, saveStaffAttribution } from "../../common/orderPickerApi.js";
+import { getCartStaffDraft, getOrder, getPosStaff, getStaffAttribution, saveStaffAttribution } from "../../common/orderPickerApi.js";
 import {
   attributionFromConfirmedLine,
   readLineQuantities,
 } from "../../common/orderStaffAttribution.js";
-import { parseStableStaffId } from "../../common/cartStaffAssignment.js";
+import { parseStableStaffId, restoreCartStaffRecord } from "../../common/cartStaffAssignment.js";
 
 const ERROR_TEXT = {
   staff_unverified: "担当IDを確認できないため、保存しませんでした。",
@@ -37,7 +37,9 @@ function readSession() {
   }
 }
 
-function staffLabel(staffId, pinnedStaffId, knownStaffIds) {
+function staffLabel(staffId, pinnedStaffId, knownStaffIds, staffKey, labels) {
+  if (staffKey && labels?.[staffKey]) return labels[staffKey];
+  if (staffKey) return "アプリの担当";
   if (staffId == null) return "未割当";
   if (staffId === pinnedStaffId) return "ログイン中の担当";
   const others = [...(knownStaffIds ?? [])].filter((id) => id !== pinnedStaffId);
@@ -55,13 +57,18 @@ function sliceSignature(slices) {
   return JSON.stringify(slices ?? []);
 }
 
-function appendPoint(slices, staffId) {
+function sameChoice(slice, choice) {
+  if (choice.staffKey) return slice.staffKey === choice.staffKey;
+  return slice.staffId === choice.staffId && !slice.staffKey;
+}
+
+function appendPoint(slices, choice) {
   const next = (slices ?? []).map((slice) => ({ ...slice }));
   const last = next[next.length - 1];
-  if (last && last.staffId === staffId) {
+  if (last && sameChoice(last, choice)) {
     next[next.length - 1] = { ...last, quantity: last.quantity + 1 };
   } else {
-    next.push({ staffId, quantity: 1 });
+    next.push({ staffId: choice.staffId ?? null, staffKey: choice.staffKey ?? null, quantity: 1 });
   }
   return next;
 }
@@ -88,6 +95,7 @@ export function OrderStaffCorrection({ orderId, onBack }) {
   const [busyLine, setBusyLine] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [labels, setLabels] = useState({});
   const pinnedStaffId = parseStableStaffId(readSession()?.staffMemberId);
 
   const load = async () => {
@@ -101,8 +109,31 @@ export function OrderStaffCorrection({ orderId, onBack }) {
       } catch {
         savedResult = null;
       }
+      let draftLines = null;
+      try {
+        const raw = sessionStorage.getItem("pos_cart_staff_draft_lines");
+        if (raw) draftLines = JSON.parse(raw);
+      } catch {
+        draftLines = null;
+      }
+      try {
+        const key = sessionStorage.getItem("pos_cart_staff_draft_key");
+        if (key) {
+          const remote = await getCartStaffDraft(key);
+          if (Array.isArray(remote?.lines)) draftLines = remote.lines;
+        }
+      } catch {
+        // 下書きが取れなくても、保存済みの訂正は表示する。
+      }
+      const saved = savedResult && Array.isArray(savedResult.lines) ? savedResult.lines : [];
+      const known = new Set(saved.map((line) => line.lineId));
+      const restored = draftLines ? restoreCartStaffRecord(orderResult?.lineItems ?? [], draftLines) : { restored: [] };
+      const merged = [
+        ...saved,
+        ...restored.restored.filter((line) => !known.has(line.lineId)),
+      ];
       setOrder(orderResult);
-      setSavedLines(savedResult && Array.isArray(savedResult.lines) ? savedResult.lines : []);
+      setSavedLines(merged);
     } catch (loadError) {
       setError(errorFromUnknown(loadError));
     } finally {
@@ -112,6 +143,15 @@ export function OrderStaffCorrection({ orderId, onBack }) {
 
   useEffect(() => {
     if (orderId) load();
+    getPosStaff()
+      .then((result) => {
+        const next = {};
+        for (const staff of result?.staff ?? []) {
+          if (staff?.key && staff?.label) next[staff.key] = staff.label;
+        }
+        setLabels(next);
+      })
+      .catch(() => {});
   }, [orderId]);
 
   const savedByLine = new Map((savedLines ?? []).map((line) => [line.lineId, line]));
@@ -226,7 +266,7 @@ export function OrderStaffCorrection({ orderId, onBack }) {
                     {view.sequenceKnown ? (
                       view.slices.map((slice) => (
                         <s-text key={`${line.id}-saved-${slice.sequence}`}>
-                          {`${slice.sequence}. ${staffLabel(slice.staffId, pinnedStaffId, knownStaffIds)} ${slice.quantity}点`}
+                          {`${slice.sequence}. ${staffLabel(slice.staffId, pinnedStaffId, knownStaffIds, slice.staffKey, labels)} ${slice.quantity}点`}
                           {slice.returnedQuantity == null
                             ? ""
                             : ` / 返品 ${slice.returnedQuantity}点 / 残 ${slice.remainingQuantity}点`}
@@ -240,16 +280,19 @@ export function OrderStaffCorrection({ orderId, onBack }) {
                     <s-text>{`指定 ${assigned}点 / 残り ${remaining}点`}</s-text>
                     {(draft ?? []).map((slice, index) => (
                       <s-text key={`${line.id}-draft-${index}`}>
-                        {`${index + 1}. ${staffLabel(slice.staffId, pinnedStaffId, knownStaffIds)} ${slice.quantity}点`}
+                        {`${index + 1}. ${staffLabel(slice.staffId, pinnedStaffId, knownStaffIds, slice.staffKey, labels)} ${slice.quantity}点`}
                       </s-text>
                     ))}
-                    {[...knownStaffIds].map((staffId) => (
+                    {[
+                      ...[...knownStaffIds].map((staffId) => ({ staffId, staffKey: null })),
+                      ...Object.keys(labels).map((staffKey) => ({ staffId: null, staffKey })),
+                    ].map((choice) => (
                       <s-button
-                        key={`${line.id}-add-${staffId}`}
+                        key={`${line.id}-add-${choice.staffKey ?? choice.staffId}`}
                         disabled={busyLine === line.id || remaining <= 0}
-                        onClick={() => changeDraft(line.id, draft, appendPoint(draft, staffId))}
+                        onClick={() => changeDraft(line.id, draft, appendPoint(draft, choice))}
                       >
-                        {`${staffLabel(staffId, pinnedStaffId, knownStaffIds)}を1点追加`}
+                        {`${staffLabel(choice.staffId, pinnedStaffId, knownStaffIds, choice.staffKey, labels)}を1点追加`}
                       </s-button>
                     ))}
                     <s-button

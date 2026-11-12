@@ -4,7 +4,7 @@
  * 順序不明の取引は推測しない。訂正は記録だけで、決済・返金・在庫は変えない。
  * 連携データの送信と本番接続は無効。
  */
-import { parseStableStaffId } from "./cartStaffAssignment.js";
+import { isAppStaffKey, parseStableStaffId } from "./cartStaffAssignment.js";
 
 export const STAFF_ATTRIBUTION_PRODUCTION_CONNECTION_ENABLED = false;
 export const STAFF_ATTRIBUTION_FORMAT = "order-staff-attribution";
@@ -67,11 +67,13 @@ function projectSlices(slices, returnedQuantity) {
     const take = Math.min(slice.quantity, left);
     left -= take;
     if (take > 0) {
-      returnAllocations.push({
+      const allocation = {
         sequence: slice.sequence,
         staffId: slice.staffId,
         quantity: take,
-      });
+      };
+      if (slice.staffKey) allocation.staffKey = slice.staffKey;
+      returnAllocations.push(allocation);
     }
     projected.push({
       ...slice,
@@ -94,19 +96,25 @@ export function normalizeExplicitSlices(rawSlices, quantity) {
     const sliceQuantity = positiveInt(raw?.quantity);
     if (sliceQuantity == null) return fail("quantity_invalid");
     let staffId = null;
+    let staffKey = null;
     let staffState = "unassigned";
-    if (raw?.staffId !== null && raw?.staffId !== undefined) {
+    if (isAppStaffKey(raw?.staffKey)) {
+      staffKey = raw.staffKey;
+      staffState = "assigned";
+    } else if (raw?.staffId !== null && raw?.staffId !== undefined) {
       staffId = parseStableStaffId(raw.staffId);
       if (staffId == null) return fail("staff_unverified");
       staffState = "assigned";
     }
     total += sliceQuantity;
-    slices.push({
+    const slice = {
       sequence: slices.length + 1,
       staffId,
       staffState,
       quantity: sliceQuantity,
-    });
+    };
+    if (staffKey) slice.staffKey = staffKey;
+    slices.push(slice);
   }
   if (total !== quantity) return fail("quantity_mismatch");
   return { ok: true, slices };

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "preact/hooks";
 import {
   createCartStaffState,
+  isAppStaffKey,
   isLineSplitAllowed,
+  mergeStaffRoster,
   rosterFromSessionAndLines,
   summarizeCartStaff,
 } from "../../common/cartStaffAssignment.js";
@@ -17,20 +19,31 @@ const ERROR_TEXT = {
   unsupported_action: "この操作はできません。",
 };
 
+function staffChoice(entry) {
+  return isAppStaffKey(entry?.key) ? entry.key : entry?.id;
+}
+
 function staffLabel(line, pinnedStaffId, roster) {
   if (!line.quantityValid || line.staffState === "unclassified") return "未分類";
+  if (line.staffKey) {
+    const found = (roster ?? []).find((entry) => entry.key === line.staffKey);
+    if (found?.label) return found.label;
+    return "アプリの担当";
+  }
+  const assigned = (line.slices ?? []).filter((slice) => slice.staffState === "assigned");
+  if (assigned.length > 1) return "数量ごとに記録";
   if (line.staffState !== "assigned" || line.staffId == null) return "未割当";
   if (line.staffId === pinnedStaffId) return "ログイン中の担当";
-  const otherIds = (roster ?? []).filter((entry) => entry.id !== pinnedStaffId);
+  const otherIds = (roster ?? []).filter((entry) => entry.id && entry.id !== pinnedStaffId);
   if (otherIds.length > 1) return `明細の担当 ${line.staffId}`;
   return "明細の担当";
 }
 
-function rosterLabel(id, pinnedStaffId, roster) {
-  if (id === pinnedStaffId) return "ログイン中の担当";
-  const otherIds = (roster ?? []).filter((entry) => entry.id !== pinnedStaffId);
-  if (otherIds.length > 1) return `明細の担当 ${id}`;
-  return "明細の担当";
+function rosterLabel(entry, pinnedStaffId) {
+  if (entry?.label) return entry.label;
+  if (entry?.id === pinnedStaffId) return "ログイン中の担当";
+  if (entry?.shopifyStaffId) return "明細の担当";
+  return "アプリの担当";
 }
 
 export function cartStaffErrorText(code) {
@@ -53,7 +66,8 @@ function readSession() {
   }
 }
 
-export function useCartStaffSnapshot() {
+export function useCartStaffSnapshot(appStaff) {
+  const extraStaff = Array.isArray(appStaff) ? appStaff : [];
   const [cart, setCart] = useState(readCart);
   useEffect(() => {
     const current = shopify?.cart?.current;
@@ -61,11 +75,11 @@ export function useCartStaffSnapshot() {
     return current.subscribe((next) => setCart(next));
   }, []);
   const lines = createCartStaffState(cart?.lineItems ?? []).lines;
-  const { roster, pinnedStaffId } = rosterFromSessionAndLines(readSession(), lines);
+  const sessionRoster = rosterFromSessionAndLines(readSession(), lines);
   return {
     lines,
-    roster,
-    pinnedStaffId,
+    roster: mergeStaffRoster(sessionRoster.roster, extraStaff),
+    pinnedStaffId: sessionRoster.pinnedStaffId,
     editable: cart?.editable ?? true,
   };
 }
@@ -80,8 +94,10 @@ export function CartStaffPanel({
   scope = "cart",
   onAction,
   onOpenHistory,
+  onRegisterStaff,
 }) {
   const [splitQty, setSplitQty] = useState({});
+  const [staffName, setStaffName] = useState("");
   const summary = summarizeCartStaff(lines);
   const blocked = (lines ?? []).some((line) => !line.quantityValid || line.staffState === "unclassified");
   const disabled = !editable || busy;
@@ -124,11 +140,11 @@ export function CartStaffPanel({
                 ) : null}
                 {(roster ?? []).map((entry) => (
                   <s-button
-                    key={`cart-${entry.id}`}
+                    key={`cart-${entry.key ?? entry.id}`}
                     disabled={disabled || blocked || (lines ?? []).length === 0}
-                    onClick={() => run({ type: "assign_cart", staffId: entry.id })}
+                    onClick={() => run({ type: "assign_cart", staffId: staffChoice(entry) })}
                   >
-                    {`カート全体を${rosterLabel(entry.id, pinnedStaffId, roster)}にする`}
+                    {`カート全体を${rosterLabel(entry, pinnedStaffId)}にする`}
                   </s-button>
                 ))}
                 <s-button
@@ -138,7 +154,25 @@ export function CartStaffPanel({
                   カート全体を未割当にする
                 </s-button>
                 {(roster ?? []).length === 0 ? (
-                  <s-text color="subdued">ログイン中の担当IDを確認できないため、未割当以外は設定できません。</s-text>
+                  <s-text color="subdued">標準の担当IDがないときは、このアプリの担当を追加して選べます。</s-text>
+                ) : null}
+                {onRegisterStaff ? (
+                  <s-stack gap="base">
+                    <s-text-field
+                      label="担当名"
+                      value={staffName}
+                      onInput={(event) => setStaffName(event?.currentTarget?.value ?? "")}
+                    />
+                    <s-button
+                      disabled={disabled || !staffName.trim()}
+                      onClick={() => {
+                        onRegisterStaff(staffName.trim());
+                        setStaffName("");
+                      }}
+                    >
+                      この担当を追加
+                    </s-button>
+                  </s-stack>
                 ) : null}
               </s-stack>
             ) : null}
@@ -157,11 +191,11 @@ export function CartStaffPanel({
                     <s-text color="subdued">{staffLabel(line, pinnedStaffId, roster)}</s-text>
                     {(roster ?? []).map((entry) => (
                       <s-button
-                        key={`${line.uuid}-${entry.id}`}
+                        key={`${line.uuid}-${entry.key ?? entry.id}`}
                         disabled={disabled || !line.quantityValid}
-                        onClick={() => run({ type: "assign_line", lineUuid: line.uuid, staffId: entry.id })}
+                        onClick={() => run({ type: "assign_line", lineUuid: line.uuid, staffId: staffChoice(entry) })}
                       >
-                        {`この明細を${rosterLabel(entry.id, pinnedStaffId, roster)}にする`}
+                        {`この明細を${rosterLabel(entry, pinnedStaffId)}にする`}
                       </s-button>
                     ))}
                     <s-button
@@ -189,18 +223,18 @@ export function CartStaffPanel({
                         </s-stack>
                         {(roster ?? []).map((entry) => (
                           <s-button
-                            key={`${line.uuid}-part-${entry.id}`}
+                            key={`${line.uuid}-part-${entry.key ?? entry.id}`}
                             disabled={disabled}
                             onClick={() =>
                               run({
                                 type: "assign_partial",
                                 lineUuid: line.uuid,
                                 quantity: selectedSplit,
-                                staffId: entry.id,
+                                staffId: staffChoice(entry),
                               })
                             }
                           >
-                            {`${selectedSplit}点を${rosterLabel(entry.id, pinnedStaffId, roster)}にする`}
+                            {`${selectedSplit}点を${rosterLabel(entry, pinnedStaffId)}にする`}
                           </s-button>
                         ))}
                         <s-button

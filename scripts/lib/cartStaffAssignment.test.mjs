@@ -12,10 +12,19 @@ import {
   createCartStaffState,
   externalStaffDispatch,
   parseStableStaffId,
+  buildCartStaffRecord,
+  mergeStaffRoster,
   reduceCartStaff,
+  restoreCartStaffRecord,
   rosterFromSessionAndLines,
   runCartStaffAction,
 } from "../../extensions/common/cartStaffAssignment.js";
+import {
+  attributionFromConfirmedLine,
+  commitOrderStaffCorrection,
+  createMemoryAttributionStore,
+  mergeSavedLine,
+} from "../../extensions/common/orderStaffAttribution.js";
 
 const ROSTER = [{ id: 101 }, { id: 202 }];
 
@@ -205,6 +214,96 @@ describe("合成カートの担当", () => {
       [101, 202],
     );
     assert.equal(roster.roster.some((entry) => entry.id === 999), false);
+  });
+});
+
+describe("標準の担当設定が使えないカート", () => {
+  it("担当IDが空でもAとBを数量ごとに記録し、決済後に同じ順で戻せる", async () => {
+    const roster = mergeStaffRoster([], [
+      { key: "app:staffaaaa", label: "A" },
+      { key: "app:staffbbbb", label: "B" },
+    ]);
+    const state = createCartStaffState([
+      { uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5 },
+    ]);
+    const cart = {
+      calls: [],
+      async setAttributedStaff() {
+        this.calls.push("setAttributedStaff");
+      },
+      async setAttributedStaffToLineItem() {
+        this.calls.push("setAttributedStaffToLineItem");
+      },
+    };
+    const partial = await runCartStaffAction(
+      state.lines,
+      { type: "assign_partial", lineUuid: "shirt", quantity: 2, staffId: "app:staffaaaa" },
+      roster,
+      cart,
+    );
+    assert.equal(partial.ok, true);
+    const recorded = await runCartStaffAction(
+      partial.state.lines,
+      { type: "assign_partial", lineUuid: "shirt", quantity: 3, staffId: "app:staffbbbb" },
+      roster,
+      cart,
+    );
+    assert.equal(recorded.ok, true);
+    assert.deepEqual(cart.calls, []);
+    assert.equal(recorded.state.lines.length, 1);
+    assert.equal(recorded.state.lines[0].quantity, 5);
+    const draft = buildCartStaffRecord(recorded.state.lines);
+    const restored = restoreCartStaffRecord(
+      [{ id: "line-1", variantId: "gid://shopify/ProductVariant/11", quantity: 5, title: "別の名前" }],
+      draft.lines,
+    );
+    assert.deepEqual(restored.unmatched, []);
+    assert.deepEqual(
+      restored.restored[0].slices.filter((slice) => slice.staffState === "assigned").map((slice) => ({
+        staffKey: slice.staffKey,
+        quantity: slice.quantity,
+      })),
+      [
+        { staffKey: "app:staffaaaa", quantity: 2 },
+        { staffKey: "app:staffbbbb", quantity: 3 },
+      ],
+    );
+    const view = attributionFromConfirmedLine(
+      { id: "line-1", quantity: 5, refundableQuantity: 2 },
+      restored.restored[0],
+    );
+    assert.equal(view.returnAllocations[0].staffKey, "app:staffaaaa");
+    assert.equal(view.returnAllocations[0].quantity, 2);
+    assert.equal(view.returnAllocations[1].staffKey, "app:staffbbbb");
+    const store = createMemoryAttributionStore();
+    const saved = await commitOrderStaffCorrection(store, {
+      orderId: "1001",
+      lineId: "line-1",
+      quantity: 5,
+      returnedQuantity: 3,
+      recordedAt: "2026-11-12T04:00:00.000Z",
+      idempotencyKey: "restore-1",
+      slices: restored.restored[0].slices.filter((slice) => slice.staffState === "assigned"),
+    });
+    const corrected = await commitOrderStaffCorrection(store, {
+      orderId: "1001",
+      lineId: "line-1",
+      quantity: 5,
+      returnedQuantity: 3,
+      recordedAt: "2026-11-12T05:00:00.000Z",
+      idempotencyKey: "restore-2",
+      slices: [
+        { staffKey: "app:staffbbbb", quantity: 1 },
+        { staffKey: "app:staffaaaa", quantity: 4 },
+      ],
+    });
+    const shown = attributionFromConfirmedLine(
+      { id: "line-1", quantity: 5, refundableQuantity: 2 },
+      mergeSavedLine([], corrected.record.after)[0],
+    );
+    assert.equal(shown.returnAllocations[0].staffKey, "app:staffbbbb");
+    assert.equal(shown.returnAllocations[0].quantity, 1);
+    assert.equal(saved.record.after.slices[0].staffKey, "app:staffaaaa");
   });
 });
 

@@ -1,6 +1,7 @@
 import { render } from "preact";
-import { useState } from "preact/hooks";
-import { runCartStaffAction } from "../../common/cartStaffAssignment.js";
+import { useEffect, useState } from "preact/hooks";
+import { buildCartStaffRecord, runCartStaffAction } from "../../common/cartStaffAssignment.js";
+import { getPosStaff, saveCartStaffDraft, savePosStaff } from "../../common/orderPickerApi.js";
 import { CartStaffPanel, cartStaffErrorText, useCartStaffSnapshot } from "./CartStaffPanel.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderStaffCorrection } from "./OrderStaffCorrection.jsx";
@@ -9,12 +10,51 @@ export default async () => {
   render(<CartStaffModal />, document.body);
 };
 
+const DRAFT_KEY_STORAGE = "pos_cart_staff_draft_key";
+const DRAFT_LINES_STORAGE = "pos_cart_staff_draft_lines";
+
+function draftKey() {
+  try {
+    const existing = sessionStorage.getItem(DRAFT_KEY_STORAGE);
+    if (existing) return existing;
+    const created = globalThis.crypto?.randomUUID?.() ?? `draft-${Date.now()}`;
+    sessionStorage.setItem(DRAFT_KEY_STORAGE, created);
+    return created;
+  } catch {
+    return `draft-${Date.now()}`;
+  }
+}
+
 function CartStaffModal() {
-  const snapshot = useCartStaffSnapshot();
+  const [appStaff, setAppStaff] = useState([]);
+  const snapshot = useCartStaffSnapshot(appStaff);
   const [step, setStep] = useState("cart");
   const [orderId, setOrderId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    getPosStaff()
+      .then((result) => {
+        if (Array.isArray(result?.staff)) setAppStaff(result.staff);
+      })
+      .catch(() => {});
+  }, []);
+
+  const onRegisterStaff = async (label) => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await savePosStaff(label);
+      if (result?.staff?.key) {
+        setAppStaff((prev) => prev.some((item) => item.key === result.staff.key) ? prev : [...prev, result.staff]);
+      }
+    } catch {
+      setError("担当を追加できませんでした。");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onAction = async (action) => {
     setBusy(true);
@@ -26,7 +66,21 @@ function CartStaffModal() {
         snapshot.roster,
         shopify.cart,
       );
-      if (!result.ok) setError(cartStaffErrorText(result.code));
+      if (!result.ok) {
+        setError(cartStaffErrorText(result.code));
+        return;
+      }
+      const record = buildCartStaffRecord(result.state?.lines ?? snapshot.lines);
+      try {
+        sessionStorage.setItem(DRAFT_LINES_STORAGE, JSON.stringify(record.lines));
+      } catch {
+        // 端末に残せなくても、保存APIへは送る。
+      }
+      try {
+        await saveCartStaffDraft(draftKey(), record.lines);
+      } catch {
+        setError("担当順は画面に残しています。保存先への記録は失敗しました。");
+      }
     } catch {
       setError(cartStaffErrorText("apply_failed"));
     } finally {
@@ -62,6 +116,7 @@ function CartStaffModal() {
       error={error}
       onAction={onAction}
       onOpenHistory={() => setStep("history")}
+      onRegisterStaff={onRegisterStaff}
     />
   );
 }

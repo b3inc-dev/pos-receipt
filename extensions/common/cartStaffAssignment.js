@@ -89,6 +89,12 @@ export function createCartStaffState(lines) {
  * @param {{ staffMemberId?: unknown, userId?: unknown } | null | undefined} session
  * @param {Array<{ staffId?: number | null }>} lines
  */
+const APP_STAFF_KEY = /^app:[A-Za-z0-9_-]{8,}$/;
+
+export function isAppStaffKey(value) {
+  return typeof value === "string" && APP_STAFF_KEY.test(value);
+}
+
 export function rosterFromSessionAndLines(session, lines) {
   const ids = new Set();
   const pinnedStaffId = parseStableStaffId(session?.staffMemberId);
@@ -100,6 +106,36 @@ export function rosterFromSessionAndLines(session, lines) {
     pinnedStaffId,
     roster: [...ids].map((id) => ({ id })),
   };
+}
+
+/**
+ * 標準の担当IDがある候補を優先し、足りない分はアプリ内の担当を足す。
+ * 表示名は一致キーにしない。
+ * @param {Array<{ id?: number | null, key?: string, label?: string }>} sessionRoster
+ * @param {Array<{ key?: string, label?: string }>} appStaff
+ */
+export function mergeStaffRoster(sessionRoster, appStaff) {
+  const roster = [];
+  for (const entry of sessionRoster ?? []) {
+    const id = parseStableStaffId(entry?.id);
+    if (id == null || roster.some((item) => item.id === id)) continue;
+    roster.push({
+      id,
+      key: `shopify:${id}`,
+      shopifyStaffId: id,
+      label: entry?.label ?? null,
+    });
+  }
+  for (const staff of appStaff ?? []) {
+    if (!isAppStaffKey(staff?.key) || roster.some((item) => item.key === staff.key)) continue;
+    roster.push({
+      id: null,
+      key: staff.key,
+      shopifyStaffId: null,
+      label: typeof staff.label === "string" ? staff.label : "",
+    });
+  }
+  return roster;
 }
 
 function cloneState(state) {
@@ -114,12 +150,104 @@ function rosterHas(roster, staffId) {
 }
 
 function resolveRequestedStaff(staffId, roster) {
-  if (staffId === null) return { ok: true, staffId: null, staffState: "unassigned" };
+  if (staffId === null) {
+    return { ok: true, staffId: null, staffKey: null, shopifyStaffId: null, staffState: "unassigned" };
+  }
+  if (isAppStaffKey(staffId)) {
+    const found = (roster ?? []).find((entry) => entry?.key === staffId);
+    if (!found) return { ok: false, code: "staff_unverified" };
+    return {
+      ok: true,
+      staffId: null,
+      staffKey: found.key,
+      shopifyStaffId: null,
+      staffState: "assigned",
+    };
+  }
   const parsed = parseStableStaffId(staffId);
   if (parsed == null || !rosterHas(roster, parsed)) {
     return { ok: false, code: "staff_unverified" };
   }
-  return { ok: true, staffId: parsed, staffState: "assigned" };
+  return {
+    ok: true,
+    staffId: parsed,
+    staffKey: `shopify:${parsed}`,
+    shopifyStaffId: parsed,
+    staffState: "assigned",
+  };
+}
+
+function applyStaff(line, staff) {
+  return {
+    ...line,
+    staffId: staff.staffId,
+    staffKey: staff.staffKey,
+    shopifyStaffId: staff.shopifyStaffId,
+    staffState: staff.staffState,
+    slices: staff.staffState === "unassigned"
+      ? []
+      : [{
+        staffId: staff.staffId,
+        staffKey: staff.staffKey,
+        staffState: staff.staffState,
+        quantity: line.quantity,
+      }],
+  };
+}
+
+function currentSlices(line) {
+  if (Array.isArray(line.slices) && line.slices.length > 0) {
+    return line.slices.map((slice) => ({ ...slice }));
+  }
+  if (line.staffState === "assigned" && line.quantityValid) {
+    return [{
+      staffId: line.staffId ?? null,
+      staffKey: line.staffKey ?? null,
+      staffState: "assigned",
+      quantity: line.quantity,
+    }];
+  }
+  return [{
+    staffId: null,
+    staffKey: null,
+    staffState: "unassigned",
+    quantity: line.quantity,
+  }];
+}
+
+function assignPartialSlices(line, quantity, staff) {
+  const assigned = currentSlices(line).filter((slice) => slice.staffState === "assigned");
+  const used = assigned.reduce((sum, slice) => sum + slice.quantity, 0);
+  const open = line.quantity - used;
+  if (quantity > open) return null;
+  const next = assigned.map((slice) => ({ ...slice }));
+  const last = next[next.length - 1];
+  if (last && last.staffKey === staff.staffKey && last.staffId === staff.staffId) {
+    next[next.length - 1] = { ...last, quantity: last.quantity + quantity };
+  } else {
+    next.push({
+      staffId: staff.staffId,
+      staffKey: staff.staffKey,
+      staffState: staff.staffState,
+      quantity,
+    });
+  }
+  const remaining = open - quantity;
+  if (remaining > 0) {
+    next.push({
+      staffId: null,
+      staffKey: null,
+      staffState: "unassigned",
+      quantity: remaining,
+    });
+  }
+  return next;
+}
+
+function staffMutation(kind, line, staff) {
+  if (isAppStaffKey(staff.staffKey)) return { op: "record_app_staff" };
+  if (kind === "cart") return { op: "set_cart_staff", staffId: staff.staffId };
+  return { op: "set_line_staff", uuid: line.uuid, staffId: staff.staffId };
 }
 
 function fail(state, code) {
@@ -167,16 +295,12 @@ export function reduceCartStaff(state, action, roster) {
     const staff = resolveRequestedStaff(action.staffId, roster);
     if (!staff.ok) return fail(current, staff.code);
     const changed = current.lines.some(
-      (line) => line.staffId !== staff.staffId || line.staffState !== staff.staffState,
+      (line) => line.staffId !== staff.staffId || line.staffKey !== staff.staffKey || line.staffState !== staff.staffState,
     );
-    const lines = current.lines.map((line) => ({
-      ...line,
-      staffId: staff.staffId,
-      staffState: staff.staffState,
-    }));
+    const lines = current.lines.map((line) => applyStaff(line, staff));
     return succeed(
       { ...current, lines },
-      changed ? [{ op: "set_cart_staff", staffId: staff.staffId }] : [],
+      changed ? [staffMutation("cart", null, staff)] : [],
     );
   }
 
@@ -195,17 +319,15 @@ export function reduceCartStaff(state, action, roster) {
     if (!staff.ok) return fail(current, staff.code);
 
     if (type === "assign_line" || action.quantity === line.quantity) {
-      if (line.staffId === staff.staffId && line.staffState === staff.staffState) {
+      if (line.staffId === staff.staffId && line.staffKey === staff.staffKey && line.staffState === staff.staffState) {
         return succeed(current, []);
       }
       const lines = current.lines.map((item) =>
-        item.uuid === line.uuid
-          ? { ...item, staffId: staff.staffId, staffState: staff.staffState }
-          : item,
+        item.uuid === line.uuid ? applyStaff(item, staff) : item,
       );
       return succeed(
         { ...current, lines },
-        [{ op: "set_line_staff", uuid: line.uuid, staffId: staff.staffId }],
+        [staffMutation("line", line, staff)],
       );
     }
 
@@ -214,6 +336,18 @@ export function reduceCartStaff(state, action, roster) {
       return fail(current, "quantity_invalid");
     }
     if (line.staffState === "unclassified") return fail(current, "split_unclassified");
+
+    if (isAppStaffKey(staff.staffKey)) {
+      const slices = assignPartialSlices(line, quantity, staff);
+      if (!slices) return fail(current, "quantity_invalid");
+      const lines = current.lines.map((item) =>
+        item.uuid === line.uuid
+          ? { ...item, staffId: null, staffKey: null, shopifyStaffId: null, staffState: "assigned", slices }
+          : item,
+      );
+      return succeed({ ...current, lines }, [{ op: "record_app_staff" }]);
+    }
+
     if (!canSplit(line)) return fail(current, "split_blocked");
 
     const rest = {
@@ -267,6 +401,73 @@ export function summarizeCartStaff(lines) {
     else summary.unclassifiedCount += 1;
   }
   return summary;
+}
+
+export function buildCartStaffRecord(lines) {
+  return {
+    lines: (lines ?? []).filter((line) => line.quantityValid).map((line) => ({
+      variantId: line.variantId ?? null,
+      quantity: line.quantity,
+      slices: currentSlices(line),
+    })),
+  };
+}
+
+/**
+ * 決済後の明細へ、記録した順と数量を戻す。表示名では対応づけない。
+ * 同じ商品・数量の並びが一致するときだけ戻す。
+ * @param {Array<Record<string, unknown>>} orderLines
+ * @param {Array<Record<string, unknown>>} draftLines
+ */
+function variantKey(value) {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) return String(value);
+  if (typeof value !== "string") return null;
+  const gid = /\/ProductVariant\/([1-9]\d*)$/.exec(value.trim());
+  if (gid) return gid[1];
+  return /^[1-9]\d*$/.test(value.trim()) ? value.trim() : null;
+}
+
+export function restoreCartStaffRecord(orderLines, draftLines) {
+  const pending = (draftLines ?? []).map((line) => ({
+    variantId: variantKey(line.variantId),
+    quantity: line.quantity,
+    slices: Array.isArray(line.slices) ? line.slices.map((slice) => ({ ...slice })) : [],
+  }));
+  const restored = [];
+  const unmatched = [];
+  for (const orderLine of orderLines ?? []) {
+    const variantId = variantKey(orderLine.variantId);
+    const quantity = orderLine.quantity;
+    const lineId = String(orderLine.id ?? orderLine.lineId ?? "");
+    if (!lineId || variantId == null || typeof quantity !== "number") {
+      unmatched.push(lineId);
+      continue;
+    }
+    if (pending[0] && pending[0].variantId === variantId && pending[0].quantity === quantity) {
+      restored.push({ lineId, quantity, sequenceKnown: true, slices: pending.shift().slices });
+      continue;
+    }
+    let sum = 0;
+    let count = 0;
+    for (const item of pending) {
+      if (item.variantId !== variantId) break;
+      sum += item.quantity;
+      count += 1;
+      if (sum >= quantity) break;
+    }
+    if (count > 0 && sum === quantity) {
+      const taken = pending.splice(0, count);
+      restored.push({
+        lineId,
+        quantity,
+        sequenceKnown: true,
+        slices: taken.flatMap((item) => item.slices),
+      });
+      continue;
+    }
+    unmatched.push(lineId);
+  }
+  return { restored, unmatched, leftover: pending.length };
 }
 
 export function allocationKey(lines) {
@@ -344,7 +545,10 @@ export async function applyCartStaffMutations(mutations, cart) {
 
   try {
     for (const mutation of mutations ?? []) {
-      if (mutation.op === "set_cart_staff") {
+      if (mutation.op === "record_app_staff") {
+        invoked.push("record_app_staff");
+        continue;
+      } else if (mutation.op === "set_cart_staff") {
         await call("setAttributedStaff", mutation.staffId === null ? undefined : mutation.staffId);
       } else if (mutation.op === "set_line_staff") {
         await call(

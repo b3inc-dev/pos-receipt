@@ -337,10 +337,10 @@ describe("連携形式", () => {
     assert.equal(delivery.reason, "production_connection_disabled");
     assert.equal(STAFF_ATTRIBUTION_PRODUCTION_CONNECTION_ENABLED, false);
 
-    const route = readFileSync(
-      new URL("../../app/routes/api.orders.$orderId.staff-attribution.tsx", import.meta.url),
-      "utf8",
-    );
+    const route = [
+      readFileSync(new URL("../../app/routes/api.orders.$orderId.staff-attribution.tsx", import.meta.url), "utf8"),
+      readFileSync(new URL("../../app/routes/api.pos-staff.tsx", import.meta.url), "utf8"),
+    ].join("\n");
     for (const forbidden of ["admin.graphql", "refundCreate", "inventoryAdjust", "orderCapture", "unauthenticated", "recordedAt: \"asc\"", "recordedAt: \"desc\""]) {
       assert.equal(route.includes(forbidden), false, forbidden);
     }
