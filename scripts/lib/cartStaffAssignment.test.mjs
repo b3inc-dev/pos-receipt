@@ -460,7 +460,7 @@ describe("標準担当の数量分割と再表示", () => {
     );
   });
 
-  it("標準担当へ分けるとき残りのアプリ担当順を残し、同じ標準担当のアプリ担当は開き直しても戻る", () => {
+  it("標準担当へ分けるとき残りのアプリ担当順を残し、同じ標準担当のアプリ担当は開き直しても戻る", async () => {
     const roster = mergeStaffRoster([{ id: 101 }, { id: 202 }], [
       { key: "app:staffaaaa", label: "A" },
       { key: "app:staffbbbb", label: "B" },
@@ -511,6 +511,58 @@ describe("標準担当の数量分割と再表示", () => {
     assert.equal(refund.sequenceKnown, true);
     assert.equal(refund.returnAllocations[0].staffKey, "app:staffaaaa");
     assert.equal(refund.returnAllocations[0].quantity, 1);
+    const store = createMemoryAttributionStore();
+    const recorded = await commitOrderStaffCorrection(store, {
+      orderId: "1001",
+      lineId: "rest",
+      quantity: 4,
+      returnedQuantity: 1,
+      recordedAt: "2026-11-12T06:00:00.000Z",
+      idempotencyKey: "mixed-1",
+      slices: restored.restored[0].slices,
+    });
+    assert.equal(recorded.ok, true);
+    assert.equal(recorded.record.before.sequenceKnown, false);
+    assert.deepEqual(recorded.record.after.slices.map((slice) => ({
+      staffKey: slice.staffKey ?? null,
+      staffId: slice.staffId ?? null,
+      quantity: slice.quantity,
+    })), [
+      { staffKey: "app:staffaaaa", staffId: null, quantity: 2 },
+      { staffKey: null, staffId: null, quantity: 2 },
+    ]);
+    assert.equal(recorded.record.after.returnAllocations[0].staffKey, "app:staffaaaa");
+    assert.equal(recorded.record.after.returnAllocations[0].quantity, 1);
+    assert.deepEqual(recorded.effects, { payment: "unchanged", refund: "unchanged", inventory: "unchanged" });
+    const replay = await commitOrderStaffCorrection(store, {
+      orderId: "1001",
+      lineId: "rest",
+      quantity: 4,
+      returnedQuantity: 1,
+      recordedAt: "2026-11-12T06:00:00.000Z",
+      idempotencyKey: "mixed-1",
+      slices: restored.restored[0].slices,
+    });
+    assert.equal(replay.duplicate, true);
+    assert.equal(replay.record.after.slices[0].quantity, 2);
+    const corrected = await commitOrderStaffCorrection(store, {
+      orderId: "1001",
+      lineId: "rest",
+      quantity: 4,
+      returnedQuantity: 1,
+      recordedAt: "2026-11-12T07:00:00.000Z",
+      idempotencyKey: "mixed-2",
+      slices: [
+        { staffKey: "app:staffaaaa", quantity: 1 },
+        { staffId: null, staffKey: null, quantity: 3 },
+      ],
+    });
+    assert.equal(corrected.ok, true);
+    assert.equal(corrected.record.before.slices[0].staffKey, "app:staffaaaa");
+    assert.equal(corrected.record.before.slices[0].quantity, 2);
+    assert.equal(corrected.record.before.slices[1].quantity, 2);
+    assert.equal(corrected.record.after.slices[0].quantity, 1);
+    assert.equal(corrected.record.after.slices[1].quantity, 3);
 
     const cart = createCartStaffState([
       { uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5, attributedUserId: 101 },
