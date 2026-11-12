@@ -538,8 +538,22 @@ export function draftLinesForOrder(draft, orderId) {
   return draft.lines;
 }
 
+function cartHasStandardStaff(cartLine) {
+  return parseStableStaffId(cartLine?.staffId) != null || parseStableStaffId(cartLine?.shopifyStaffId) != null;
+}
+
+function draftIsAppAssignment(draft) {
+  if (!draft || draft.placeholder === true) return false;
+  const assigned = (Array.isArray(draft.slices) ? draft.slices : []).filter((slice) => (
+    slice?.staffState === "assigned" || isAppStaffKey(slice?.staffKey)
+  ));
+  if (assigned.length === 0) return false;
+  return assigned.every((slice) => isAppStaffKey(slice.staffKey) && parseStableStaffId(slice.staffId) == null);
+}
+
 /**
- * 保存した担当順を、同じ明細IDの現在カートへ戻す。商品と数量だけでは対応づけない。
+ * 保存した担当順を、同じ明細IDの現在カートへ戻す。
+ * 戻すのはアプリ内の担当だけで、標準担当が付いている明細は変えない。
  * @param {Array<Record<string, unknown>>} cartLines
  * @param {Array<Record<string, unknown>>} draftLines
  */
@@ -547,20 +561,38 @@ export function overlayFromDraft(cartLines, draftLines) {
   const overlay = {};
   const used = new Set();
   for (const cartLine of cartLines ?? []) {
+    if (cartHasStandardStaff(cartLine)) continue;
     const index = (draftLines ?? []).findIndex((draft, draftIndex) => (
       !used.has(draftIndex) && draft?.uuid && draft.uuid === cartLine.uuid
     ));
     if (index < 0) continue;
     const draft = draftLines[index];
     if (variantKey(draft.variantId) !== variantKey(cartLine.variantId)) continue;
+    if (!draftIsAppAssignment(draft)) continue;
     used.add(index);
     overlay[cartLine.uuid] = reconcileStaffLine(cartLine, {
       ...cartLine,
       slices: draft.slices ?? [],
-      staffState: draft.placeholder ? "unclassified" : "assigned",
+      staffState: "assigned",
     });
   }
   return overlay;
+}
+
+/**
+ * 開き直しの担当順は、端末に残した下書きを優先する。
+ * 操作が始まったあとは、遅い取得結果で上書きしない。
+ * @param {{ localLines?: unknown, remoteLines?: unknown, edited?: boolean }} input
+ */
+export function planDraftRestore(input) {
+  if (input?.edited) return { source: "keep", lines: [] };
+  if (Array.isArray(input?.localLines) && input.localLines.length > 0) {
+    return { source: "local", lines: input.localLines };
+  }
+  if (Array.isArray(input?.remoteLines) && input.remoteLines.length > 0) {
+    return { source: "remote", lines: input.remoteLines };
+  }
+  return { source: "none", lines: [] };
 }
 
 export function restoreCartStaffRecord(orderLines, draftLines) {

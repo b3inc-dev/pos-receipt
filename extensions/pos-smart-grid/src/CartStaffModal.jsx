@@ -1,6 +1,6 @@
 import { render } from "preact";
-import { useEffect, useState } from "preact/hooks";
-import { buildCartStaffRecord, overlayFromDraft, reconcileStaffLine, runCartStaffAction } from "../../common/cartStaffAssignment.js";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { buildCartStaffRecord, overlayFromDraft, planDraftRestore, reconcileStaffLine, runCartStaffAction } from "../../common/cartStaffAssignment.js";
 import { getCartStaffDraft, getPosStaff, saveCartStaffDraft, savePosStaff } from "../../common/orderPickerApi.js";
 import { CartStaffPanel, cartStaffErrorText, useCartStaffSnapshot } from "./CartStaffPanel.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
@@ -33,7 +33,9 @@ function CartStaffModal() {
   const [step, setStep] = useState("cart");
   const [orderId, setOrderId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [restoreReady, setRestoreReady] = useState(false);
   const [error, setError] = useState("");
+  const editedDuringRestore = useRef(false);
 
   useEffect(() => {
     getPosStaff()
@@ -45,30 +47,48 @@ function CartStaffModal() {
 
   const cartIdentity = snapshot.lines.map((line) => `${line.uuid}:${line.quantity}:${line.variantId ?? ""}`).join("|");
   useEffect(() => {
-    if (snapshot.lines.length === 0) return undefined;
+    if (snapshot.lines.length === 0) {
+      setRestoreReady(true);
+      return undefined;
+    }
     let cancelled = false;
-    const restore = async () => {
-      let lines = null;
-      try {
-        const raw = sessionStorage.getItem(DRAFT_LINES_STORAGE);
-        if (raw) lines = JSON.parse(raw);
-      } catch {
-        lines = null;
-      }
+    setRestoreReady(false);
+    const applyPlanned = (planned) => {
+      if (planned.source === "keep" || planned.source === "none") return;
+      setOverlay(overlayFromDraft(snapshot.lines, planned.lines));
+    };
+    let localLines = null;
+    try {
+      const raw = sessionStorage.getItem(DRAFT_LINES_STORAGE);
+      if (raw) localLines = JSON.parse(raw);
+    } catch {
+      localLines = null;
+    }
+    applyPlanned(planDraftRestore({
+      localLines,
+      remoteLines: null,
+      edited: editedDuringRestore.current,
+    }));
+    const restoreRemote = async () => {
+      let remoteLines = null;
       try {
         const key = sessionStorage.getItem(DRAFT_KEY_STORAGE);
         if (key) {
           const remote = await getCartStaffDraft(key);
-          if (Array.isArray(remote?.lines) && remote.lines.length > 0) lines = remote.lines;
+          if (Array.isArray(remote?.lines)) remoteLines = remote.lines;
         }
       } catch {
-        // 端末に残した担当順を使う。
+        remoteLines = null;
       }
-      if (cancelled || !Array.isArray(lines)) return;
-      const incoming = overlayFromDraft(snapshot.lines, lines);
-      setOverlay((prev) => ({ ...incoming, ...prev }));
+      if (cancelled) return;
+      applyPlanned(planDraftRestore({
+        localLines,
+        remoteLines,
+        edited: editedDuringRestore.current,
+      }));
+      setRestoreReady(true);
     };
-    restore();
+    restoreRemote();
     return () => {
       cancelled = true;
     };
@@ -90,6 +110,8 @@ function CartStaffModal() {
   };
 
   const onAction = async (action) => {
+    if (!restoreReady) return;
+    editedDuringRestore.current = true;
     setBusy(true);
     setError("");
     try {
@@ -157,7 +179,7 @@ function CartStaffModal() {
       roster={snapshot.roster}
       pinnedStaffId={snapshot.pinnedStaffId}
       editable={snapshot.editable}
-      busy={busy}
+      busy={busy || !restoreReady}
       error={error}
       onAction={onAction}
       onOpenHistory={() => setStep("history")}

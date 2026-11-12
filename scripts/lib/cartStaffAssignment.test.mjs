@@ -17,6 +17,7 @@ import {
   slicesToRecord,
   mergeStaffRoster,
   overlayFromDraft,
+  planDraftRestore,
   reconcileStaffLine,
   reduceCartStaff,
   restoreCartStaffRecord,
@@ -416,6 +417,46 @@ describe("標準担当の数量分割と再表示", () => {
         { staffKey: "app:staffaaaa", quantity: 2 },
         { staffKey: "app:staffbbbb", quantity: 3 },
       ],
+    );
+  });
+
+  it("現在の標準担当は古い下書きで置き換えず、選び直すとカート操作になる", () => {
+    const roster = [{ id: 101 }, { id: 202 }];
+    const current = createCartStaffState([
+      { uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5, attributedUserId: 202 },
+    ]);
+    const stale = buildCartStaffRecord(
+      reduceCartStaff(
+        createCartStaffState([{ uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5 }]),
+        { type: "assign_line", lineUuid: "shirt", staffId: 101 },
+        roster,
+      ).state.lines,
+    );
+    const overlay = overlayFromDraft(current.lines, stale.lines);
+    assert.equal(overlay.shirt, undefined);
+    const again = reduceCartStaff(
+      current,
+      { type: "assign_line", lineUuid: "shirt", staffId: 101 },
+      roster,
+    );
+    assert.equal(again.ok, true);
+    assert.equal(again.mutations.length, 1);
+    assert.equal(again.mutations[0].staffId, 101);
+    assert.equal(
+      planDraftRestore({
+        localLines: stale.lines,
+        remoteLines: [{ uuid: "other" }],
+        edited: false,
+      }).source,
+      "local",
+    );
+    assert.equal(
+      planDraftRestore({ localLines: null, remoteLines: stale.lines, edited: false }).source,
+      "remote",
+    );
+    assert.equal(
+      planDraftRestore({ localLines: stale.lines, remoteLines: stale.lines, edited: true }).source,
+      "keep",
     );
   });
 });
