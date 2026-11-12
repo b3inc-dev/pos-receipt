@@ -16,6 +16,7 @@ import {
   draftLinesForOrder,
   slicesToRecord,
   mergeStaffRoster,
+  overlayFromDraft,
   reconcileStaffLine,
   reduceCartStaff,
   restoreCartStaffRecord,
@@ -356,6 +357,66 @@ describe("標準の担当設定が使えないカート", () => {
       draftLinesForOrder({ boundOrderId: "1001", lines: mixed.lines }, "2002"),
     );
     assert.deepEqual(otherOrder.restored, []);
+  });
+});
+
+describe("標準担当の数量分割と再表示", () => {
+  it("分割後の担当順は各明細の数量と一致し、開き直してもアプリ担当を戻せる", () => {
+    const roster = [{ id: 101 }, { id: 202 }];
+    const initial = createCartStaffState([
+      { uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5 },
+    ]);
+    const assigned = reduceCartStaff(
+      initial,
+      { type: "assign_line", lineUuid: "shirt", staffId: 101 },
+      roster,
+    );
+    const split = reduceCartStaff(
+      assigned.state,
+      { type: "assign_partial", lineUuid: "shirt", quantity: 2, staffId: 202 },
+      roster,
+    );
+    assert.equal(split.ok, true);
+    const record = buildCartStaffRecord(split.state.lines);
+    assert.deepEqual(record.lines.map((line) => ({
+      quantity: line.quantity,
+      staffId: line.slices[0].staffId,
+      sliceQuantity: line.slices[0].quantity,
+    })), [
+      { quantity: 3, staffId: 101, sliceQuantity: 3 },
+      { quantity: 2, staffId: 202, sliceQuantity: 2 },
+    ]);
+
+    const appRoster = mergeStaffRoster([], [
+      { key: "app:staffaaaa", label: "A" },
+      { key: "app:staffbbbb", label: "B" },
+    ]);
+    const first = reduceCartStaff(
+      initial,
+      { type: "assign_partial", lineUuid: "shirt", quantity: 2, staffId: "app:staffaaaa" },
+      appRoster,
+    );
+    const draft = buildCartStaffRecord(first.state.lines);
+    const reopened = createCartStaffState([
+      { uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5 },
+    ]).lines;
+    const overlay = overlayFromDraft(reopened, draft.lines);
+    const continued = reduceCartStaff(
+      { checkout: "open", lines: [overlay.shirt] },
+      { type: "assign_partial", lineUuid: "shirt", quantity: 3, staffId: "app:staffbbbb" },
+      appRoster,
+    );
+    assert.equal(continued.ok, true);
+    assert.deepEqual(
+      continued.state.lines[0].slices.filter((slice) => slice.staffState === "assigned").map((slice) => ({
+        staffKey: slice.staffKey,
+        quantity: slice.quantity,
+      })),
+      [
+        { staffKey: "app:staffaaaa", quantity: 2 },
+        { staffKey: "app:staffbbbb", quantity: 3 },
+      ],
+    );
   });
 });
 

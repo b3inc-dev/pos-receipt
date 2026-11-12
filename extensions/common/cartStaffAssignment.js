@@ -407,17 +407,37 @@ export function reduceCartStaff(state, action, roster) {
 
     if (!canSplit(line)) return fail(current, "split_blocked");
 
+    const restStaffKey = line.staffKey ?? (line.staffId ? `shopify:${line.staffId}` : null);
+    const restState = line.staffState === "assigned" ? "assigned" : "unassigned";
     const rest = {
       ...line,
       uuid: `${line.uuid}#rest`,
       quantity: line.quantity - quantity,
+      staffId: line.staffId ?? null,
+      staffKey: restStaffKey,
+      shopifyStaffId: line.shopifyStaffId ?? line.staffId ?? null,
+      staffState: restState,
+      slices: [{
+        staffId: line.staffId ?? null,
+        staffKey: restStaffKey,
+        staffState: restState,
+        quantity: line.quantity - quantity,
+      }],
     };
     const slice = {
       ...line,
       uuid: `${line.uuid}#slice`,
       quantity,
       staffId: staff.staffId,
+      staffKey: staff.staffKey,
+      shopifyStaffId: staff.shopifyStaffId,
       staffState: staff.staffState,
+      slices: [{
+        staffId: staff.staffId,
+        staffKey: staff.staffKey,
+        staffState: staff.staffState,
+        quantity,
+      }],
     };
     const lines = [
       ...current.lines.slice(0, index),
@@ -465,6 +485,7 @@ export function buildCartStaffRecord(lines) {
     lines: (lines ?? []).filter((line) => line.quantityValid).map((line) => {
       if (line.staffState === "unclassified") {
         return {
+          uuid: line.uuid ?? null,
           variantId: line.variantId ?? null,
           quantity: line.quantity,
           placeholder: true,
@@ -472,6 +493,7 @@ export function buildCartStaffRecord(lines) {
         };
       }
       return {
+        uuid: line.uuid ?? null,
         variantId: line.variantId ?? null,
         quantity: line.quantity,
         placeholder: false,
@@ -514,6 +536,31 @@ export function draftLinesForOrder(draft, orderId) {
   if (!draft || !Array.isArray(draft.lines)) return [];
   if (draft.boundOrderId && String(draft.boundOrderId) !== String(orderId ?? "")) return [];
   return draft.lines;
+}
+
+/**
+ * 保存した担当順を、同じ明細IDの現在カートへ戻す。商品と数量だけでは対応づけない。
+ * @param {Array<Record<string, unknown>>} cartLines
+ * @param {Array<Record<string, unknown>>} draftLines
+ */
+export function overlayFromDraft(cartLines, draftLines) {
+  const overlay = {};
+  const used = new Set();
+  for (const cartLine of cartLines ?? []) {
+    const index = (draftLines ?? []).findIndex((draft, draftIndex) => (
+      !used.has(draftIndex) && draft?.uuid && draft.uuid === cartLine.uuid
+    ));
+    if (index < 0) continue;
+    const draft = draftLines[index];
+    if (variantKey(draft.variantId) !== variantKey(cartLine.variantId)) continue;
+    used.add(index);
+    overlay[cartLine.uuid] = reconcileStaffLine(cartLine, {
+      ...cartLine,
+      slices: draft.slices ?? [],
+      staffState: draft.placeholder ? "unclassified" : "assigned",
+    });
+  }
+  return overlay;
 }
 
 export function restoreCartStaffRecord(orderLines, draftLines) {

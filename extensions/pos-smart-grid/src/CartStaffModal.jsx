@@ -1,7 +1,7 @@
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { buildCartStaffRecord, reconcileStaffLine, runCartStaffAction } from "../../common/cartStaffAssignment.js";
-import { getPosStaff, saveCartStaffDraft, savePosStaff } from "../../common/orderPickerApi.js";
+import { buildCartStaffRecord, overlayFromDraft, reconcileStaffLine, runCartStaffAction } from "../../common/cartStaffAssignment.js";
+import { getCartStaffDraft, getPosStaff, saveCartStaffDraft, savePosStaff } from "../../common/orderPickerApi.js";
 import { CartStaffPanel, cartStaffErrorText, useCartStaffSnapshot } from "./CartStaffPanel.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderStaffCorrection } from "./OrderStaffCorrection.jsx";
@@ -42,6 +42,37 @@ function CartStaffModal() {
       })
       .catch(() => {});
   }, []);
+
+  const cartIdentity = snapshot.lines.map((line) => `${line.uuid}:${line.quantity}:${line.variantId ?? ""}`).join("|");
+  useEffect(() => {
+    if (snapshot.lines.length === 0) return undefined;
+    let cancelled = false;
+    const restore = async () => {
+      let lines = null;
+      try {
+        const raw = sessionStorage.getItem(DRAFT_LINES_STORAGE);
+        if (raw) lines = JSON.parse(raw);
+      } catch {
+        lines = null;
+      }
+      try {
+        const key = sessionStorage.getItem(DRAFT_KEY_STORAGE);
+        if (key) {
+          const remote = await getCartStaffDraft(key);
+          if (Array.isArray(remote?.lines) && remote.lines.length > 0) lines = remote.lines;
+        }
+      } catch {
+        // 端末に残した担当順を使う。
+      }
+      if (cancelled || !Array.isArray(lines)) return;
+      const incoming = overlayFromDraft(snapshot.lines, lines);
+      setOverlay((prev) => ({ ...incoming, ...prev }));
+    };
+    restore();
+    return () => {
+      cancelled = true;
+    };
+  }, [cartIdentity]);
 
   const onRegisterStaff = async (label) => {
     setBusy(true);
