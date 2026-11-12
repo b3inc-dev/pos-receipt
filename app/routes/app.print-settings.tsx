@@ -24,10 +24,14 @@ import {
   setAppSetting,
   PRINT_SETTINGS_KEY,
   DEFAULT_PRINT_SETTINGS,
+  SALES_RECEIPT_SETTINGS_KEY,
   type PrintSettings,
+  type SalesReceiptSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
+import { PaperWidthCorrespondence } from "../components/PaperWidthCorrespondence";
+import { parseSalesPaperWidth, parseSharedPaperWidth } from "../utils/paperWidthCorrespondence";
 
 const UNIFIED_PRINT_MODE = "shopify_printing" as const;
 
@@ -41,9 +45,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shop = await resolveShop(session.shop, admin);
   const saved = await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY);
   const settings: PrintSettings = { ...DEFAULT_PRINT_SETTINGS, ...saved };
+  const sales = await getAppSetting<Partial<SalesReceiptSettings>>(shop.id, SALES_RECEIPT_SETTINGS_KEY);
   return {
     settings,
     storedDefaultPrintMode: saved?.defaultPrintMode ?? null,
+    salesPaperWidthMm: parseSalesPaperWidth(sales?.paperWidthMm),
   };
 }
 
@@ -83,7 +89,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function PrintSettingsPage() {
-  const { settings: initial, storedDefaultPrintMode } = useLoaderData<typeof loader>();
+  const { settings: initial, storedDefaultPrintMode, salesPaperWidthMm } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
@@ -155,7 +161,10 @@ export default function PrintSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="用紙幅" description="58mm / 80mm。キー名 cloudprntPaperWidth は互換読み取り">
+          <Layout.AnnotatedSection
+            title="用紙幅"
+            description="精算・点検・領収書が使う幅です。販売レシートの幅は別の設定です。"
+          >
             <Card>
               <BlockStack gap="400">
                 <Select
@@ -163,7 +172,12 @@ export default function PrintSettingsPage() {
                   options={PAPER_WIDTH_OPTIONS}
                   value={form.cloudprntPaperWidth}
                   onChange={(v) => set("cloudprntPaperWidth", v)}
-                  helpText="精算・領収書 HTML の幅に使います。CloudPRNT 送信には使いません。"
+                  helpText="精算・点検・領収書の HTML 幅です。販売レシートの幅は販売レシート設定です。"
+                />
+                <PaperWidthCorrespondence
+                  sharedWidthMm={parseSharedPaperWidth(form.cloudprntPaperWidth)}
+                  salesWidthMm={salesPaperWidthMm}
+                  search={q}
                 />
               </BlockStack>
             </Card>
