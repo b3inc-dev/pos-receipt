@@ -78,7 +78,7 @@ export async function getLocationsFromShopify(first = 50) {
     locations: nodes.map((n) => ({
         locationId: n.id,
         locationName: n.name ?? "",
-        printMode: "order_based",
+        printMode: "shopify_printing",
         salesSummaryEnabled: false,
         footfallReportingEnabled: false,
       })),

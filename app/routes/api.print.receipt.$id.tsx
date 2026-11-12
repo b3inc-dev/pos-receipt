@@ -19,9 +19,9 @@ import {
 import {
   getAppSetting,
   PRINT_SETTINGS_KEY,
-  DEFAULT_PRINT_SETTINGS,
   type PrintSettings,
 } from "../utils/appSettings.server";
+import { resolvePaperWidthMm } from "../services/printUnification.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -74,10 +74,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const printSettings =
       (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
-    const paper =
-      (printSettings.cloudprntPaperWidth ?? DEFAULT_PRINT_SETTINGS.cloudprntPaperWidth) === "58mm"
-        ? 58
-        : 80;
+    const paper = resolvePaperWidthMm(printSettings);
 
     const html = renderPrintReceiptHtml({
       kind: "receipt",

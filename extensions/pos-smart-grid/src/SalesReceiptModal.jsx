@@ -5,7 +5,7 @@
 import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
 import { getOrder } from "../../common/orderPickerApi.js";
-import { printSalesReceipt } from "../../common/printApi.js";
+import { printSalesReceipt, printResultMessage, PRINT_OUTCOME } from "../../common/printApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 
@@ -53,15 +53,15 @@ function SalesReceiptModal() {
     }
   }, []);
 
-  const handlePrint = useCallback(async () => {
-    if (!selectedOrder?.orderId) return;
+  const handlePrint = useCallback(async (allowDialog = false) => {
+    if (!selectedOrder?.orderId || loading) return;
     setLoading(true);
     setError("");
     try {
-      const res = await printSalesReceipt(selectedOrder.orderId);
+      const res = await printSalesReceipt(selectedOrder.orderId, { allowDialog });
       setPrintResult(res);
       if (!res.ok) {
-        setError(res.error || "印字に失敗しました");
+        setError(printResultMessage(res));
         return;
       }
       setStep("done");
@@ -70,7 +70,7 @@ function SalesReceiptModal() {
     } finally {
       setLoading(false);
     }
-  }, [selectedOrder]);
+  }, [selectedOrder, loading]);
 
   if (orderEntryLoading) {
     return (
@@ -100,15 +100,17 @@ function SalesReceiptModal() {
       <s-page heading="印字完了">
         <s-box padding="base">
           <s-stack gap="base">
-            <s-text fontWeight="bold">販売レシートを送信しました</s-text>
+            <s-text fontWeight="bold">
+              {printResult?.outcome === PRINT_OUTCOME.DIALOG_PRESENTED
+                ? "システム印刷ダイアログを開きました"
+                : "販売レシートをプリンタへ送信しました"}
+            </s-text>
             <s-text tone="subdued">
               {selectedOrder?.orderName || selectedOrder?.orderId}
             </s-text>
-            {printResult?.usedDialog ? (
-              <s-text tone="subdued" fontSize="small">
-                接続プリンタが見つからなかったため、印刷ダイアログを開きました。
-              </s-text>
-            ) : null}
+            <s-text tone="subdued" fontSize="small">
+              {printResultMessage(printResult)}
+            </s-text>
             <s-button
               variant="primary"
               onClick={() => {
@@ -135,9 +137,14 @@ function SalesReceiptModal() {
               注文・商品の属性（ON の場合）を末尾に含めて印刷します。設定は管理画面の「販売レシート」から変更できます。
             </s-text>
             {error ? <s-banner tone="critical" heading={error} /> : null}
-            <s-button variant="primary" onClick={handlePrint} disabled={loading}>
+            <s-button variant="primary" onClick={() => handlePrint(false)} disabled={loading}>
               {loading ? "印字中…" : "プリンタへ送信"}
             </s-button>
+            {printResult?.canUseDialog ? (
+              <s-button onClick={() => handlePrint(true)} disabled={loading}>
+                システム印刷ダイアログを開く
+              </s-button>
+            ) : null}
             <s-button
               onClick={() => {
                 setSelectedOrder(null);

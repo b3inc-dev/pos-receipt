@@ -1,6 +1,7 @@
 /**
  * GET /api/print/sales/:orderId
  * 販売レシート HTML（Shopify Printing API の src）
+ * 通常の Shopify 販売注文そのものは作らない。帳票 HTML のみ。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {

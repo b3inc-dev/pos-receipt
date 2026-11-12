@@ -415,9 +415,9 @@ export const DEFAULT_SETTLEMENT_SETTINGS: SettlementSettings = {
   allowRecalculateLatestSettlement: true,
   allowReprintSettlement: true,
   allowManualTargetDate: true,
-  orderBasedCreateSettlementOrderEnabled: true,
-  orderBasedAttachMetafieldsEnabled: true,
-  orderBasedAttachNoteEnabled: true,
+  orderBasedCreateSettlementOrderEnabled: false,
+  orderBasedAttachMetafieldsEnabled: false,
+  orderBasedAttachNoteEnabled: false,
   /** 検証用のためデフォルト ON（本番では管理画面で OFF にできる） */
   legacyGiftCardAggregationEnabled: true,
   refundAggregationLocationMode: "order_transaction",
@@ -429,9 +429,11 @@ export const DEFAULT_SETTLEMENT_SETTINGS: SettlementSettings = {
 export const PRINT_SETTINGS_KEY = "print_settings";
 
 export interface PrintSettings {
-  defaultPrintMode: "cloudprnt_direct" | "order_based";
+  /** 実行時は常に shopify_printing。旧値は互換読み取りのみ */
+  defaultPrintMode: "shopify_printing" | "cloudprnt_direct" | "order_based";
   locationPrintModeOverrideEnabled: boolean;
   cloudprntProfileName: string;
+  /** レシート用紙幅（キー名は互換のため残す。CloudPRNT 出力には使わない） */
   cloudprntPaperWidth: string;
   cloudprntEnabled: boolean;
   createSettlementOrderWhenPrinting: boolean;
@@ -439,26 +441,23 @@ export interface PrintSettings {
   attachSettlementMetafieldsToOrder: boolean;
   receiptPrintMode: string;
   receiptPreviewBeforePrintRequired: boolean;
-  /** Shopify Printing API を優先して試す（旧経路は残置） */
+  /** 旧フラグ。読み取りはするが出力ゲートには使わない */
   preferPrintingApi: boolean;
-  /** 精算完了後に shopify.printing を案内／実行 */
   settlementPrintingApiEnabled: boolean;
-  /** 領収書発行後に shopify.printing を案内／実行 */
   receiptPrintingApiEnabled: boolean;
 }
 
 export const DEFAULT_PRINT_SETTINGS: PrintSettings = {
-  defaultPrintMode: "order_based",
-  locationPrintModeOverrideEnabled: true,
+  defaultPrintMode: "shopify_printing",
+  locationPrintModeOverrideEnabled: false,
   cloudprntProfileName: "",
   cloudprntPaperWidth: "80mm",
   cloudprntEnabled: false,
-  createSettlementOrderWhenPrinting: true,
-  attachSettlementNoteToOrder: true,
-  attachSettlementMetafieldsToOrder: true,
-  receiptPrintMode: "order_based",
+  createSettlementOrderWhenPrinting: false,
+  attachSettlementNoteToOrder: false,
+  attachSettlementMetafieldsToOrder: false,
+  receiptPrintMode: "shopify_printing",
   receiptPreviewBeforePrintRequired: true,
-  /** Conditional-Go: Printing API を既定で試す（旧 order_based/cloudprnt は Location.printMode で残置） */
   preferPrintingApi: true,
   settlementPrintingApiEnabled: true,
   receiptPrintingApiEnabled: true,

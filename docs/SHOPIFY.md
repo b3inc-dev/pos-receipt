@@ -17,7 +17,7 @@
 |------|------------|
 | Admin SDK（`app/shopify.server.ts`） | `ApiVersion.October25` |
 | Webhooks（`shopify.app.toml`） | `api_version = "2026-04"` |
-| POS Extension | `api_version = "2026-01"` |
+| POS Extension | `api_version = "2026-07"` |
 
 意図的差分の公式根拠は **未確認**。実装時は各エントリポイントの宣言を正とする。
 
@@ -28,7 +28,7 @@ read_orders, read_locations, read_customers, read_gift_cards, read_products,
 write_customers, write_app_proxy, write_draft_orders, write_orders
 ```
 
-精算の order_based は draft orders + orders 更新（ノート・metafield）＋履行に依存。レガシー Gift Card 集計は `read_gift_cards`。
+印字一本化後、精算・点検で draft orders / 精算注文の更新・履行は呼ばない。`write_draft_orders` / `write_orders` は他機能や過去実装のために toml に残る可能性がある。レガシー Gift Card 集計は `read_gift_cards`。
 
 ## 4. 利用している Shopify データ（精算・レシート関連）
 
@@ -39,7 +39,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | Discount allocations / VIP- codes | 割引・VIP 集計 |
 | staffMember on lineItems | 注文詳細表示のみ |
 | customAttributes | 取得のみ（精算・領収書 UI では未使用） |
-| DraftOrder → Order（SETTLEMENT / INSPECTION） | order_based 印字用 |
+| DraftOrder → Order（SETTLEMENT / INSPECTION） | **印字経路では新規作成しない。** 既存履歴は削除しない |
 | Fulfillment create（V2→フォールバック） | 精算注文クローズ |
 | Gift Cards API（任意） | レガシー発行額加算 |
 | Location | 同期・表示・printMode |
@@ -72,41 +72,29 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 
 定義 ensure: OAuth / `POST /api/admin/settlement-metafields/ensure`
 
-## 7. Printing（現状と移行候補の分離）
+## 7. Printing（shopify.printing 一本化）
 
 ### 7.1 現状フロー
 
 ```
-注文作成（Shopify 標準）
-  │
-  ├─ 領収書: アプリ DB 発行のみ（Printing API 不使用）
-  │
-  └─ 精算:
-       order_based → SETTLEMENT 注文を作り、人間が POS 標準レシート印字
-       cloudprnt_direct → アプリがテキスト payload を提供。プリンタ側ポーリング想定
+通常の Shopify 販売注文 … 本アプリの印字対象外（POS 標準レシートは残る）
+
+アプリ独自帳票（精算 / 点検 / 領収書 / 販売レシート）
+  → GET /api/print/{settlement|receipt|sales}/:id
+  → shopify.printing.print(src, { printer })  ※ connected: true のみ
 ```
 
-**Shopify Printing API / printJob / device.print 等の呼び出しはリポジトリに存在しない。**
+旧 `order_based` / `cloudprnt_direct` / Printing API 切替フラグは保存されていても出力に使わない。
+`GET /api/settlements/:id/print-payload` は 410。
 
 ### 7.2 ギフトレシート
 
 - 要件・コードともに Shopify Gift Receipt 連携は **未実装**
-- 本アプリの「レシート」は精算レシートと領収書を指す
+- 本アプリの「レシート」は精算レシート・点検・領収書・販売レシート帳票を指す
 
-### 7.3 Printing API 等へ移行できそうな部分（調査のみ・実装しない）
+### 7.3 機種・未確認
 
-| 現状 | 移行検討候補（アイデアレベル） | 制約・未確認 |
-|------|--------------------------------|--------------|
-| order_based で SETTLEMENT 注文を作り POS 標準印字 | Printing API で精算レイアウトを直接印字できれば、精算注文作成を省略できる可能性 | Printing API の POS 対応範囲・店舗プリンタ要件は未確認 |
-| cloudprnt_direct のテキスト payload | 同じペイロード生成を維持したまま送信経路だけ Printing API / 他プロトコルに差し替える可能性 | 現行はポーリング URL 提供のみ。送信アダプタなし |
-| 領収書の画面表示のみ | Printing API または CloudPRNT への出力を追加する余地 | `receiptPrintMode` 設定はあるが issue 経路で未使用 |
-| 点検レシート | 精算と同レイアウト経路を共有しているため、印字経路変更の影響を精算と同時に受ける | DoneView 文言と order_based 同期の不一致あり（DECISIONS） |
-
-**移行しない／分離して残る可能性が高い部分**
-
-- 集計エンジン・特殊返金 DB・冪等キー・メタフィールドへの数値保存
-- PaymentMethodMaster と GAS 正規化ロジック
-- 返金計上ロケーション解決
+`docs/PRINT_DEVICE_COMPAT.md`。mPOP の紙面確認はこの環境では未実施（ユーザー報告）。
 
 ## 8. POS Extension ターゲット
 
@@ -127,6 +115,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 
 ## 10. 未確認
 
-- Printing API の店舗導入前提（ハードウェア・POS バージョン）
+- mPOP / mC-Print3 の紙面確認（この環境では未実施）
+- Shopify POS Lite vs Pro が Printing API に与える差（コードでは未検出）
 - 各ストアで有効なカスタム決済の gateway 実文字列の完全一覧（マスタで吸収する設計）
 - Webhook 再送時の売上サマリーキューの完全な idempotency 保証範囲

@@ -5,7 +5,7 @@
  * Steps:
  *   main     → 固定ヘッダー（ロケーション・年/月）+ 履歴一覧 + 固定フッター
  *   preview  → 精算（集計結果表示）。発行確認は s-modal で重ね表示
- *   done     → 完了（印字方式別メッセージ）
+ *   done     → 完了（Shopify Printing API）
  *   historyDetail → 精算履歴明細
  */
 import { render } from "preact";
@@ -18,12 +18,17 @@ import {
   getAvailableMonths,
   getMonthRows,
 } from "../../common/settlementApi.js";
-import { getAppUrl } from "../../common/appUrl.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { formatYmdSlash } from "../../common/dateDisplay.js";
-import { printSettlementReceipt, getPrintSettings } from "../../common/printApi.js";
+import {
+  printSettlementReceipt,
+  getPrintSettings,
+  printResultMessage,
+  PRINT_OUTCOME,
+} from "../../common/printApi.js";
+import { markSettlementPrinted } from "../../common/settlementApi.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 
 /**
@@ -250,8 +255,7 @@ function SettlementModal() {
         locationId: selectedLocation.locationId,
         locationName: selectedLocation.locationName,
         targetDate,
-        // サーバーは DB の Location.printMode を正とする。欠落時は order_based で送る（互換用）。
-        printMode: selectedLocation.printMode ?? "order_based",
+        printMode: "shopify_printing",
         isInspection,
       });
       setSettlementResult(res);
@@ -407,7 +411,6 @@ function SettlementModal() {
         />
         <SettlementIssueConfirmModals
           preview={preview}
-          printMode={selectedLocation?.printMode ?? "order_based"}
           loading={loading}
           error={error}
           onExecute={handleCreate}
@@ -1049,11 +1052,8 @@ function PreviewView({
 }
 
 /** 精算・点検それぞれ専用の s-modal（POS Stock: ボタン command + commandFor で開閉） */
-function SettlementIssueConfirmModals({ preview, printMode, loading, error, onExecute, onRequestClose }) {
-  const printModeLabel =
-    printMode === "cloudprnt_direct"
-      ? "CloudPRNT直印字"
-      : "注文経由印字（精算注文を作成します）";
+function SettlementIssueConfirmModals({ preview, loading, error, onExecute, onRequestClose }) {
+  const printModeLabel = "Shopify Printing API（精算注文は作成しません）";
 
   const rows = [
     { label: "ロケーション", value: preview?.locationName ?? "-" },
@@ -1125,169 +1125,72 @@ function SettlementIssueConfirmModals({ preview, printMode, loading, error, onEx
   );
 }
 
-// ── 完了画面 ──────────────────────────────────────────────────────────────────
-function DoneView({ result, isInspection, targetDateYmd, onBack }) {
-  const isOrderBased = result?.printMode === "order_based";
-  const doneTargetDate = result?.preview?.targetDate ?? result?.targetDate ?? targetDateYmd ?? "-";
-  const doneTotal = result?.preview?.total;
+function SettlementPrintControls({ settlementId, allowReprint = true }) {
   const [printBusy, setPrintBusy] = useState(false);
   const [printMsg, setPrintMsg] = useState("");
-  const [printFlags, setPrintFlags] = useState({
-    preferPrintingApi: false,
-    settlementPrintingApiEnabled: false,
-  });
-  const [flagsLoaded, setFlagsLoaded] = useState(false);
+  const [canDialog, setCanDialog] = useState(false);
+  const [outcome, setOutcome] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
-    getPrintSettings()
-      .then((s) => {
-        if (!cancelled) {
-          setPrintFlags({
-            preferPrintingApi: !!s.preferPrintingApi,
-            settlementPrintingApiEnabled: !!s.settlementPrintingApiEnabled,
-          });
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setFlagsLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const showPrintingApi =
-    flagsLoaded && !!printFlags.settlementPrintingApiEnabled && !!result?.settlementId;
-  const preferNew = showPrintingApi && !!printFlags.preferPrintingApi;
-
-  const handlePrintingApi = async () => {
-    if (!result?.settlementId) {
-      setPrintMsg("精算 ID が無いため Printing API を実行できません");
-      return;
-    }
+  const runPrint = async (allowDialog) => {
+    if (!settlementId || printBusy) return;
     setPrintBusy(true);
     setPrintMsg("");
     try {
-      const res = await printSettlementReceipt(result.settlementId);
+      const res = await printSettlementReceipt(settlementId, { allowDialog });
+      setOutcome(res.outcome || "");
+      setCanDialog(!!res.canUseDialog);
+      setPrintMsg(printResultMessage(res));
       if (res.ok) {
-        setPrintMsg(res.usedDialog ? "印刷ダイアログを開きました" : "プリンタへ送信しました");
-      } else {
-        setPrintMsg(res.error || "印字に失敗しました");
+        try {
+          await markSettlementPrinted(settlementId);
+        } catch (_) {
+          /* 紙面完了ではない。送信受付の記録失敗は印字結果を覆さない */
+        }
       }
     } catch (e) {
+      setOutcome(PRINT_OUTCOME.FAILED);
       setPrintMsg(toUserMessage(e?.message) || "印字に失敗しました");
     } finally {
       setPrintBusy(false);
     }
   };
 
-  const printingApiBox = showPrintingApi ? (
+  if (!settlementId) {
+    return <s-text tone="critical">精算 ID が無いため印字できません</s-text>;
+  }
+  if (!allowReprint) {
+    return <s-text tone="subdued">再印字は管理画面の精算設定で許可されていません。</s-text>;
+  }
+
+  return (
     <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
       <s-stack gap="small">
-        <s-text fontWeight="bold">
-          {preferNew ? "Shopify Printing API（推奨）" : "Shopify Printing API（代替）"}
+        <s-text fontWeight="bold">Shopify Printing API</s-text>
+        <s-text tone="subdued" fontSize="small">
+          接続中のプリンタへ、保存済み金額の帳票を送ります。送信成功は紙の排出完了ではありません。タイムアウト後は自動再送しません。
         </s-text>
-        {!preferNew ? (
-          <s-text tone="caution" fontSize="small">
-            ※ 旧経路で印字済みの場合は押さないでください（二重印字になります）。
+        <s-button variant="primary" onClick={() => runPrint(false)} disabled={printBusy}>
+          {printBusy ? "送信中…" : "プリンタへ送信"}
+        </s-button>
+        {canDialog ? (
+          <s-button onClick={() => runPrint(true)} disabled={printBusy}>
+            システム印刷ダイアログを開く
+          </s-button>
+        ) : null}
+        {printMsg ? (
+          <s-text tone={outcome === PRINT_OUTCOME.DIRECT_ACCEPTED ? "subdued" : "caution"}>
+            {printMsg}
           </s-text>
         ) : null}
-        <s-button
-          variant={preferNew ? "primary" : "secondary"}
-          onClick={handlePrintingApi}
-          disabled={printBusy}
-        >
-          {printBusy ? "送信中…" : "Printing API で印字"}
-        </s-button>
-        {printMsg ? <s-text tone="subdued">{printMsg}</s-text> : null}
       </s-stack>
     </s-box>
-  ) : null;
+  );
+}
 
-  const legacyBox = (() => {
-    if (isInspection) {
-      return (
-        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-          <s-stack gap="small">
-            <s-text fontWeight="bold">
-              {preferNew ? "点検レシート（従来）" : "点検レシート"}
-            </s-text>
-            <s-text tone="subdued">
-              点検では Shopify 上に精算用の注文は作りません。保存した内容をレシートテンプレートで印刷してください。
-            </s-text>
-            {preferNew ? (
-              <s-text tone="caution" fontSize="small">
-                ※ Printing API で印字した場合は、こちらでは再印字しないでください（二重印字）。
-              </s-text>
-            ) : null}
-          </s-stack>
-        </s-box>
-      );
-    }
-    if (isOrderBased && result?.sourceOrderName) {
-      return (
-        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-          <s-stack gap="small">
-            <s-text fontWeight="bold">
-              {preferNew ? "注文経由印字（従来・代替）" : "注文経由印字"}
-            </s-text>
-            <s-text tone="subdued">
-              精算注文 <s-text fontWeight="bold">{result.sourceOrderName}</s-text> を作成しました。
-            </s-text>
-            <s-text tone="subdued" fontSize="small">
-              POS の注文一覧からこの注文を開き、レシートを印刷してください。
-            </s-text>
-            {showPrintingApi ? (
-              <s-text tone="caution" fontSize="small">
-                ※ Printing API と両方で印字すると二重になります。どちらか一方だけ使ってください。
-              </s-text>
-            ) : null}
-          </s-stack>
-        </s-box>
-      );
-    }
-    if (isOrderBased && !result?.sourceOrderName) {
-      return (
-        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-          <s-stack gap="small">
-            <s-text fontWeight="bold" tone="critical">
-              注文番号を取得できませんでした
-            </s-text>
-            <s-text tone="subdued" fontSize="small">
-              印字方式は注文経由（order_based）ですが、精算注文の名前が返っていません。管理画面の Shopify 注文一覧で tag SETTLEMENT
-              を確認するか、アプリを再インストールして権限を更新してください。
-            </s-text>
-          </s-stack>
-        </s-box>
-      );
-    }
-    return (
-      <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-        <s-stack gap="small">
-          <s-text fontWeight="bold">
-            {preferNew ? "CloudPRNT 直印字（従来・代替）" : "CloudPRNT 直印字"}
-          </s-text>
-          <s-text tone="subdued">精算データを保存しました。プリンタから印刷されます。</s-text>
-          {showPrintingApi ? (
-            <s-text tone="caution" fontSize="small">
-              ※ Printing API と両方で印字すると二重になります。どちらか一方だけ使ってください。
-            </s-text>
-          ) : null}
-          {result?.settlementId ? (
-            <>
-              <s-text tone="subdued" fontSize="small">
-                印字用データは以下のURLで取得できます。実機確認時に CloudPRNT 対応プリンタのポーリング先に設定してください。
-              </s-text>
-              <s-text fontSize="small" fontWeight="bold">
-                {getAppUrl()}/api/settlements/{result.settlementId}/print-payload
-              </s-text>
-            </>
-          ) : null}
-        </s-stack>
-      </s-box>
-    );
-  })();
+// ── 完了画面 ──────────────────────────────────────────────────────────────────
+function DoneView({ result, isInspection, targetDateYmd, onBack }) {
+  const doneTargetDate = result?.preview?.targetDate ?? result?.targetDate ?? targetDateYmd ?? "-";
+  const doneTotal = result?.preview?.total;
 
   return (
     <s-page heading="発行完了">
@@ -1297,19 +1200,11 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
             <s-text fontWeight="bold">
               {isInspection ? "点検レシートを保存しました" : "精算レシートを保存しました"}
             </s-text>
+            <s-text tone="subdued" fontSize="small">
+              Shopify 上に精算・点検用の注文は作成していません。印字は Printing API のみです。
+            </s-text>
 
-            {/* preferPrintingApi ON → Printing API を primary、旧経路は secondary＋警告 */}
-            {preferNew ? (
-              <>
-                {printingApiBox}
-                {legacyBox}
-              </>
-            ) : (
-              <>
-                {legacyBox}
-                {printingApiBox}
-              </>
-            )}
+            <SettlementPrintControls settlementId={result?.settlementId} />
 
             <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
               <s-stack gap="none">
@@ -1351,6 +1246,20 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
 
 // ── 精算履歴画面 ──────────────────────────────────────────────────────────────
 function HistoryDetailView({ item, onBack }) {
+  const [allowReprint, setAllowReprint] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    getPrintSettings()
+      .then((s) => {
+        if (!cancelled) setAllowReprint(s.allowReprintSettlement !== false);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <s-page heading="精算履歴明細">
       <s-scroll-box>
@@ -1373,10 +1282,7 @@ function HistoryDetailView({ item, onBack }) {
                     { label: "ステータス", value: item.status ?? "-" },
                     {
                       label: "印字方式",
-                      value:
-                        item.printMode === "order_based"
-                          ? `注文経由（${item.sourceOrderName ?? "-"}）`
-                          : "CloudPRNT",
+                      value: "Shopify Printing API（保存済み帳票）",
                     },
                   ].map((row, i, arr) => (
                     <SummaryRow
@@ -1389,6 +1295,10 @@ function HistoryDetailView({ item, onBack }) {
                   ))}
                 </s-stack>
               </s-box>
+              <SettlementPrintControls
+                settlementId={item.id}
+                allowReprint={allowReprint}
+              />
             </s-stack>
           )}
         </s-box>

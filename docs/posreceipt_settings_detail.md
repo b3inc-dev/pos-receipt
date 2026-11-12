@@ -142,7 +142,7 @@ Shopify ロケーションごとの表示名や機能有効可否、運用差分
 - visible_in_summary_default
 
 #### 4.2.4 印字関連
-- print_mode (`cloudprnt_direct` / `order_based`)
+- print_mode（保存互換。実行時は shopify_printing）
 - printer_profile_id_nullable
 - cloudprnt_enabled
 
@@ -162,7 +162,7 @@ Shopify ロケーションごとの表示名や機能有効可否、運用差分
 - Shopify から取得した location を管理画面で一覧表示できる
 - 表示名や並び順を変更できる
 - ロケーション単位で機能 ON/OFF が反映される
-- print_mode がロケーション単位で制御される
+- 実行時印字方式はロケーションによらず Shopify Printing API
 
 ---
 
@@ -235,9 +235,7 @@ Shopify ロケーションごとの表示名や機能有効可否、運用差分
 - allow_manual_target_date
 
 #### 5.2.7 非対応プリンタ時ルール
-- order_based_create_settlement_order_enabled
-- order_based_attach_metafields_enabled
-- order_based_attach_note_enabled
+- order_based_* フラグは保存されていても精算注文を作らない
 
 ### 5.3 GAS 由来の置換対象
 以下のようなコード直書きは管理画面設定へ置換する。
@@ -251,7 +249,7 @@ Shopify ロケーションごとの表示名や機能有効可否、運用差分
 ### 5.4 受け入れ条件
 - 表示項目の ON/OFF がレシートプレビューへ反映される
 - 項目名変更が反映される
-- print_mode に応じて処理が切り替わる
+- 旧 print_mode でも Printing API に正規化される
 - `loyalty_usage` の表示有無とラベル変更が反映される
 
 ---
@@ -628,31 +626,27 @@ MVP では自由入力 JSON ではなく単純なテーブル実装でもよい�
 ### 12.2 設定項目
 
 #### 12.2.1 印字方式
-- default_print_mode (`cloudprnt_direct` / `order_based`)
-- location_print_mode_override_enabled
+- 実行時は常に `shopify_printing`
+- 保存済み `default_print_mode` / `Location.printMode` の旧値は読み取りのみ（出力に使わない）
 
-#### 12.2.2 CloudPRNT設定
-- cloudprnt_profile_name
-- cloudprnt_paper_width
-- cloudprnt_enabled
+#### 12.2.2 用紙幅
+- `cloudprnt_paper_width`（互換キー名。58mm / 80mm）。CloudPRNT 送信には使わない
 
-#### 12.2.3 order-based設定
-- create_settlement_order_when_printing
-- attach_settlement_note_to_order
-- attach_settlement_metafields_to_order
+#### 12.2.3 精算注文
+- 作成しない。`create_settlement_order_when_printing` が保存されていても無効
 
 #### 12.2.4 領収書印字設定
-- receipt_print_mode
+- 同一 Printing API
 - receipt_preview_before_print_required
 
 ### 12.3 GAS 由来の置換対象
-- ロケーション別印字切替
-- 非対応プリンタ時の精算注文生成有無
+- ロケーション別 CloudPRNT / 注文経由切替 → Printing API 固定
+- 非対応プリンタ時の精算注文生成 → 廃止
 
 ### 12.4 受け入れ条件
-- ロケーション別 print_mode を切り替えられる
-- cloudprnt_direct 設定時は精算注文を作成しない
-- order_based 設定時は精算注文を利用する
+- 旧 printMode 店舗でも Printing API で印字される
+- 精算・点検で Shopify 精算注文を作らない
+- 未接続を成功扱いにしない
 
 ---
 
@@ -799,7 +793,7 @@ GAS / テンプレ直書き:
 
 ### 14.7 印字方式分岐
 GAS:
-- CloudPRNT / 非対応の処理分岐
+- Shopify Printing API への正規化（旧分岐は出力しない）
 
 置換先:
 - 印字設定
@@ -861,7 +855,7 @@ GAS:
 - GAS で独自調整している部分は、販売用では可能な限り管理画面設定へ置換する
 - ロケーション名対応、支払方法正規化、商品券判定、印字分岐、領収書会社情報、ポイント利用額抽出ロジックは設定対象に含める
 - 入店数報告は売上サマリー内の機能とし、設定 ON 時のみ表示する
-- CloudPRNT direct / order-based はロケーション設定で切り替え可能にする
+- 印字は Shopify Printing API に統一し、ロケーションの旧 printMode は出力に使わない
 - 領収書テンプレートは1つ固定だが、管理画面でプレビューしながら編集可能とする
 - ポイント利用額は `vip_points_used` のような特定アプリ依存の固定項目ではなく、設定可能な `loyalty_usage` として扱う
 

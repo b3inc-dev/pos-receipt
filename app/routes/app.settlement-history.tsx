@@ -39,7 +39,11 @@ function statusBadge(status: string, isInspection: boolean) {
 }
 
 function printModeLabel(mode: string) {
-  return mode === "cloudprnt_direct" ? "CloudPRNT" : "注文経由";
+  if (mode === "shopify_printing") return "Shopify Printing API";
+  if (mode === "cloudprnt_direct" || mode === "order_based") {
+    return "Shopify Printing API（旧保存値）";
+  }
+  return "Shopify Printing API";
 }
 
 function fmtYen(n: string | number) {

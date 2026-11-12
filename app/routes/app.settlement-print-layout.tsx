@@ -153,8 +153,8 @@ export default function SettlementPrintLayoutPage() {
           <Layout.Section>
             <Banner tone="info">
               `/api/print/settlement/:id` と同じ `renderPrintReceiptHtml` /
-              `settlementPreviewToPrintModel` を使います。用紙幅は印字設定にも反映されます。旧
-              order_based / cloudprnt 経路は変更しません。
+              `settlementPreviewToPrintModel` を使います。用紙幅は印字設定のレシート用紙幅です。
+              印字出力は Shopify Printing API のみです。
             </Banner>
           </Layout.Section>
           <Layout.Section variant="oneHalf">
