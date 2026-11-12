@@ -145,3 +145,38 @@ target = "pos.order-details.action.menu-item.render"
 [[extensions.targeting]]
 module = "./src/SalesReceiptOrderAction.jsx"
 target = "pos.purchase.post.action.menu-item.render"
+
+# ============================================================
+# 販売担当（カート一括・明細別）
+# 担当は POS カートのスタッフ帰属だけを更新する。
+# uid は未 deploy のため省略し、デプロイ時に CLI が追加する。
+# ============================================================
+[[extensions]]
+type = "ui_extension"
+name = "販売担当 / カート明細"
+handle = "pos-cart-staff"
+description = "カート全体と明細の販売担当"
+
+[[extensions.targeting]]
+module = "./src/CartStaffTile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/CartStaffModal.jsx"
+target = "pos.home.modal.render"
+
+[[extensions.targeting]]
+module = "./src/CartStaffLineAction.jsx"
+target = "pos.cart.line-item-details.action.menu-item.render"
+
+[[extensions.targeting]]
+module = "./src/CartStaffLineModal.jsx"
+target = "pos.cart.line-item-details.action.render"
+
+[[extensions.targeting]]
+module = "./src/CartStaffOrderAction.jsx"
+target = "pos.order-details.action.menu-item.render"
+
+[[extensions.targeting]]
+module = "./src/CartStaffOrderModal.jsx"
+target = "pos.order-details.action.render"
