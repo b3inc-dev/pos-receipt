@@ -205,16 +205,67 @@ export function planOrderStaffCorrection(input) {
   };
 }
 
+function persistenceRank(row) {
+  const seq = Number.isInteger(row?.persistenceSeq) ? row.persistenceSeq : null;
+  const parsed = Date.parse(row?.persistedAt ?? "");
+  return {
+    seq,
+    time: Number.isFinite(parsed) ? parsed : null,
+    id: String(row?.id ?? ""),
+  };
+}
+
+function comparePersistence(left, right) {
+  if (left.seq != null && right.seq != null && left.seq !== right.seq) return left.seq - right.seq;
+  if (left.time != null && right.time != null && left.time !== right.time) return left.time - right.time;
+  if (left.time != null && right.time == null) return 1;
+  if (left.time == null && right.time != null) return -1;
+  if (left.id === right.id) return 0;
+  return left.id < right.id ? -1 : 1;
+}
+
+/**
+ * 現在の訂正はサーバーが保存した順で選ぶ。端末が送った recordedAt は比較に使わない。
+ * @param {Array<Record<string, unknown>>} rows
+ */
+export function selectLatestCorrection(rows) {
+  let latest = null;
+  let latestRank = null;
+  for (const row of rows ?? []) {
+    const rank = persistenceRank(row);
+    if (!latest || comparePersistence(rank, latestRank) > 0) {
+      latest = row;
+      latestRank = rank;
+    }
+  }
+  return latest;
+}
+
+/**
+ * @param {Array<Record<string, unknown>>} rows
+ */
+export function currentCorrectionsByLine(rows) {
+  const grouped = new Map();
+  for (const row of rows ?? []) {
+    const key = String(row?.lineId ?? "");
+    const list = grouped.get(key) ?? [];
+    list.push(row);
+    grouped.set(key, list);
+  }
+  return [...grouped.values()].map((list) => selectLatestCorrection(list)).filter(Boolean);
+}
+
 export function createMemoryAttributionStore() {
   const byKey = new Map();
   const byLine = [];
+  let persistenceSeq = 0;
   return {
     async findByKey(key) {
       return byKey.get(key) ?? null;
     },
     async findLatestByLine(orderId, lineId) {
       const rows = byLine.filter((row) => row.orderId === orderId && row.lineId === lineId);
-      return rows.length > 0 ? rows[rows.length - 1] : null;
+      return selectLatestCorrection(rows);
     },
     async insert(record) {
       if (byKey.has(record.idempotencyKey)) {
@@ -222,8 +273,12 @@ export function createMemoryAttributionStore() {
         error.code = "duplicate";
         throw error;
       }
+      persistenceSeq += 1;
       const stored = {
         ...record,
+        id: record.id ?? `mem-${persistenceSeq}`,
+        persistenceSeq,
+        persistedAt: new Date().toISOString(),
         before: structuredClone(record.before),
         after: structuredClone(record.after),
         effects: { ...record.effects },

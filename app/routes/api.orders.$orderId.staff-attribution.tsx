@@ -11,8 +11,10 @@ import {
   applyOrderStaffCorrection,
   attributionFromConfirmedLine,
   buildStaffAttributionPayload,
+  currentCorrectionsByLine,
   dispatchStaffAttributionPayload,
   planOrderStaffCorrection,
+  selectLatestCorrection,
 } from "../../extensions/common/orderStaffAttribution.js";
 
 type SavedRow = {
@@ -23,6 +25,7 @@ type SavedRow = {
   beforeJson: string;
   afterJson: string;
   recordedAt: Date;
+  createdAt: Date;
 };
 
 function shopDomainFromToken(dest: unknown) {
@@ -49,6 +52,7 @@ function toRecord(row: SavedRow) {
     lineId: row.lineId,
     idempotencyKey: row.idempotencyKey,
     recordedAt: row.recordedAt.toISOString(),
+    persistedAt: row.createdAt.toISOString(),
     before: parseJson(row.beforeJson),
     after: parseJson(row.afterJson),
     effects: {
@@ -142,18 +146,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (!orderId) return corsJson({ ok: false, error: "orderId required" }, { status: 400 });
     const rows = await prisma.orderStaffAttributionCorrection.findMany({
       where: { shopId: shop.id, orderId },
-      orderBy: { recordedAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
     const corrections = rows.map(toRecord);
-    const latestByLine = new Map<string, ReturnType<typeof toRecord>>();
-    for (const correction of corrections) {
-      latestByLine.set(correction.lineId, correction);
-    }
+    const current = currentCorrectionsByLine(corrections);
     return corsJson({
       ok: true,
       productionConnection: false,
       corrections,
-      lines: [...latestByLine.values()].map((correction) => correction.after),
+      lines: current.map((correction) => correction.after),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "apply_failed";
@@ -174,11 +175,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (!orderId) return corsJson({ ok: false, error: "orderId required" }, { status: 400 });
     const body = await request.json() as Record<string, unknown>;
     const lineId = String(body.lineId ?? "");
-    const previousRow = await prisma.orderStaffAttributionCorrection.findFirst({
+    const history = await prisma.orderStaffAttributionCorrection.findMany({
       where: { shopId: shop.id, orderId, lineId },
-      orderBy: { recordedAt: "desc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
-    const previous = previousRow ? parseJson(previousRow.afterJson) : null;
+    const previousRow = selectLatestCorrection(history.map(toRecord));
+    const previous = previousRow?.after ?? null;
     const plan = planOrderStaffCorrection({
       orderId,
       lineId,

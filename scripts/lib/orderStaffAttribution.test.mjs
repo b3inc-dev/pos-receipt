@@ -13,6 +13,7 @@ import {
   dispatchStaffAttributionPayload,
   mergeSavedLine,
   planOrderStaffCorrection,
+  selectLatestCorrection,
 } from "../../extensions/common/orderStaffAttribution.js";
 
 const ORDER_ID = "1001";
@@ -161,6 +162,41 @@ describe("公開アプリ内で完結する受入", () => {
   });
 });
 
+describe("訂正の現在値", () => {
+  it("端末時刻が遅くても、後から保存した訂正を再表示する", async () => {
+    const store = createMemoryAttributionStore();
+    const earlyClock = await applyOrderStaffCorrection(store, planOrderStaffCorrection({
+      orderId: ORDER_ID,
+      lineId: LINE_ID,
+      quantity: 2,
+      returnedQuantity: 0,
+      recordedAt: "2026-11-12T23:00:00.000Z",
+      idempotencyKey: "clock-fast",
+      previous: null,
+      slices: [{ staffId: 101, quantity: 2 }],
+    }));
+    const laterSave = await applyOrderStaffCorrection(store, planOrderStaffCorrection({
+      orderId: ORDER_ID,
+      lineId: LINE_ID,
+      quantity: 2,
+      returnedQuantity: 0,
+      recordedAt: "2026-11-12T01:00:00.000Z",
+      idempotencyKey: "clock-slow",
+      previous: earlyClock.record.after,
+      slices: [{ staffId: 202, quantity: 2 }],
+    }));
+    const current = await store.findLatestByLine(ORDER_ID, LINE_ID);
+    assert.equal(current.idempotencyKey, "clock-slow");
+    assert.equal(current.recordedAt, "2026-11-12T01:00:00.000Z");
+    assert.equal(selectLatestCorrection([laterSave.record, earlyClock.record]).idempotencyKey, "clock-slow");
+    const shown = attributionFromConfirmedLine(
+      { id: LINE_ID, quantity: 2, refundableQuantity: 2 },
+      current.after,
+    );
+    assert.equal(shown.slices[0].staffId, 202);
+  });
+});
+
 describe("連携形式", () => {
   it("合成データは形式を満たし、本番接続では送られない", () => {
     const view = attributionFromConfirmedLine(
@@ -190,8 +226,9 @@ describe("連携形式", () => {
       new URL("../../app/routes/api.orders.$orderId.staff-attribution.tsx", import.meta.url),
       "utf8",
     );
-    for (const forbidden of ["admin.graphql", "refundCreate", "inventoryAdjust", "orderCapture", "unauthenticated"]) {
+    for (const forbidden of ["admin.graphql", "refundCreate", "inventoryAdjust", "orderCapture", "unauthenticated", "recordedAt: \"asc\"", "recordedAt: \"desc\""]) {
       assert.equal(route.includes(forbidden), false, forbidden);
     }
+    assert.equal(route.includes("createdAt: \"asc\""), true);
   });
 });
