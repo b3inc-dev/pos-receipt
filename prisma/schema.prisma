@@ -59,6 +59,7 @@ model Shop {
   salesChannelCacheDaily   SalesChannelCacheDaily[]
   salesChannelBudgets      SalesChannelBudget[]
   salesChannelCachePeriod  SalesChannelCachePeriod[]
+  orderStaffAttributionCorrections OrderStaffAttributionCorrection[]
 }
 
 // ========== 20.2 ロケーション（印字方式・サマリー設定）要件 §4 ==========
@@ -426,4 +427,20 @@ model SalesChannelCacheDaily {
 
   @@unique([shopId, channelId, targetDate])
   @@index([shopId, targetDate])
+}
+
+// 確定済み取引の担当訂正。決済・返金・在庫は変更しない。
+model OrderStaffAttributionCorrection {
+  id             String   @id @default(cuid())
+  shopId         String
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  orderId        String
+  lineId         String
+  idempotencyKey String   @unique
+  beforeJson     String
+  afterJson      String
+  recordedAt     DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([shopId, orderId, lineId])
 }

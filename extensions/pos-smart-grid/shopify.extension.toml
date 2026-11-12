@@ -172,3 +172,11 @@ target = "pos.cart.line-item-details.action.menu-item.render"
 [[extensions.targeting]]
 module = "./src/CartStaffLineModal.jsx"
 target = "pos.cart.line-item-details.action.render"
+
+[[extensions.targeting]]
+module = "./src/CartStaffOrderAction.jsx"
+target = "pos.order-details.action.menu-item.render"
+
+[[extensions.targeting]]
+module = "./src/CartStaffOrderModal.jsx"
+target = "pos.order-details.action.render"

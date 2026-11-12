@@ -143,3 +143,21 @@ declare module './src/CartStaffLineModal.jsx' {
   const shopify: import('@shopify/ui-extensions/pos.cart.line-item-details.action.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
+
+//@ts-ignore
+declare module './src/CartStaffOrderAction.jsx' {
+  const shopify: import('@shopify/ui-extensions/pos.order-details.action.menu-item.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/CartStaffOrderModal.jsx' {
+  const shopify: import('@shopify/ui-extensions/pos.order-details.action.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/OrderStaffCorrection.jsx' {
+  const shopify: import('@shopify/ui-extensions/pos.order-details.action.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}

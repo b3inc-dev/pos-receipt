@@ -83,6 +83,28 @@ export async function getOrder(orderId) {
   return apiGet(`/api/orders/${id}`);
 }
 
+function orderPathId(orderId) {
+  return String(orderId).replace(/^gid:\/\/shopify\/Order\//, "");
+}
+
+/**
+ * 保存済みの担当訂正。Shopify の注文は変更しない。
+ * @param {string} orderId
+ */
+export async function getStaffAttribution(orderId) {
+  if (!orderId) throw new Error("orderId required");
+  return apiGet(`/api/orders/${orderPathId(orderId)}/staff-attribution`);
+}
+
+/**
+ * @param {string} orderId
+ * @param {Record<string, unknown>} body
+ */
+export async function saveStaffAttribution(orderId, body) {
+  if (!orderId) throw new Error("orderId required");
+  return apiPost(`/api/orders/${orderPathId(orderId)}/staff-attribution`, body);
+}
+
 /**
  * POST /api/orders/:orderId/redo-draft
  * 会計やり直し用の下書き注文を作成

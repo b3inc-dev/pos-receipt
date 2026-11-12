@@ -79,6 +79,7 @@ export function CartStaffPanel({
   error,
   scope = "cart",
   onAction,
+  onOpenHistory,
 }) {
   const [splitQty, setSplitQty] = useState({});
   const summary = summarizeCartStaff(lines);
@@ -106,6 +107,9 @@ export function CartStaffPanel({
             <s-text color="subdued">
               設定はこのレジのカートに残ります。決済を中止しても、残った明細の担当と数量は維持されます。
             </s-text>
+            {onOpenHistory ? (
+              <s-button onClick={onOpenHistory}>確定済み取引の担当</s-button>
+            ) : null}
             {!editable ? <s-text tone="critical">いまのカートは変更できません。</s-text> : null}
             {error ? <s-text tone="critical">{error}</s-text> : null}
             <s-text>
