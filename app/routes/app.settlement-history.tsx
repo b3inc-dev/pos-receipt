@@ -29,6 +29,7 @@ import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 import {
   buildSettlementHistoryWhere,
   dateRangeWarning,
+  findSettlementLocation,
   formatExecutedAt,
   formatYen,
   isInspectionPeriod,
@@ -79,8 +80,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       displayName: true,
     },
   });
-  const locationByGid = new Map(dbLocations.map((row) => [row.shopifyLocationGid, row]));
-
   const where = buildSettlementHistoryWhere({
     shopId: shop.id,
     dateFrom,
@@ -115,7 +114,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     items: items.map((row) => {
-      const place = settlementLocationLabel(locationByGid.get(row.locationId), row.locationId);
+      const place = settlementLocationLabel(
+        findSettlementLocation(dbLocations, row.locationId),
+        row.locationId,
+      );
       const inspection = isInspectionPeriod(row.periodLabel);
       return {
         id: row.id,
@@ -142,7 +144,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     pageSize: PAGE_SIZE,
     dateFrom,
     dateTo,
-    locationId,
+    locationId: findSettlementLocation(dbLocations, locationId)?.shopifyLocationGid ?? locationId,
     kind,
     timeZone,
     rangeWarning: dateRangeWarning(dateFrom, dateTo),

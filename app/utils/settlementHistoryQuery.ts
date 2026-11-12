@@ -26,6 +26,32 @@ export function isInspectionPeriod(periodLabel: string | null | undefined): bool
   return typeof periodLabel === "string" && periodLabel.startsWith(INSPECTION_PERIOD_PREFIX);
 }
 
+/**
+ * 精算の locationId は GID と数値のどちらでも保存される。
+ * 月次行 API と同じく、検索と表示名の解決では両方を対象にする。
+ */
+export function locationIdCandidates(locationId: string): string[] {
+  const trimmed = locationId.trim();
+  if (!trimmed) return [];
+  const gid = trimmed.startsWith("gid://")
+    ? trimmed
+    : `gid://shopify/Location/${trimmed}`;
+  const raw = gid.startsWith("gid://shopify/Location/")
+    ? gid.slice("gid://shopify/Location/".length)
+    : "";
+  return raw && raw !== gid ? [gid, raw] : [gid];
+}
+
+export function findSettlementLocation<T extends { shopifyLocationGid: string }>(
+  locations: readonly T[],
+  storedLocationId: string,
+): T | undefined {
+  const wanted = new Set(locationIdCandidates(storedLocationId));
+  return locations.find((row) =>
+    locationIdCandidates(row.shopifyLocationGid).some((id) => wanted.has(id)),
+  );
+}
+
 export function settlementLocationLabel(
   location: { name?: string | null; displayName?: string | null } | undefined,
   locationId: string,
@@ -108,7 +134,9 @@ export function buildSettlementHistoryWhere(filter: SettlementHistoryFilter) {
   return {
     shopId: filter.shopId,
     ...(targetDate ? { targetDate } : {}),
-    ...(filter.locationId ? { locationId: filter.locationId } : {}),
+    ...(filter.locationId
+      ? { locationId: { in: locationIdCandidates(filter.locationId) } }
+      : {}),
     ...kindWhere,
   };
 }

@@ -3,9 +3,11 @@ import test from "node:test";
 import {
   buildSettlementHistoryWhere,
   dateRangeWarning,
+  findSettlementLocation,
   formatExecutedAt,
   formatYen,
   isInspectionPeriod,
+  locationIdCandidates,
   normalizeHistoryDate,
   normalizeHistoryKind,
   normalizeHistoryPage,
@@ -67,7 +69,7 @@ test("絞り込みは店舗を必ず含み、点検と精算を分ける", () =>
   });
   assert.equal(inspection.shopId, "shop-1");
   assert.deepEqual(inspection.targetDate, { gte: "2026-10-01" });
-  assert.equal(inspection.locationId, "gid://shopify/Location/1");
+  assert.deepEqual(inspection.locationId, { in: ["gid://shopify/Location/1", "1"] });
   assert.deepEqual(inspection.periodLabel, { startsWith: "点検_" });
 
   const settlement = buildSettlementHistoryWhere({
@@ -80,4 +82,24 @@ test("絞り込みは店舗を必ず含み、点検と精算を分ける", () =>
   assert.equal(settlement.locationId, undefined);
   assert.ok(Array.isArray(settlement.OR));
   assert.equal(settlement.OR?.[0]?.periodLabel, null);
+});
+
+test("ロケーション絞り込みと表示名は数値 ID と GID の両方に一致する", () => {
+  const gid = "gid://shopify/Location/100";
+  assert.deepEqual(locationIdCandidates("100"), [gid, "100"]);
+  assert.deepEqual(locationIdCandidates(gid), [gid, "100"]);
+  const where = buildSettlementHistoryWhere({
+    shopId: "shop-1",
+    dateFrom: "",
+    dateTo: "",
+    locationId: gid,
+    kind: "all",
+  });
+  assert.equal(where.shopId, "shop-1");
+  assert.deepEqual(where.locationId, { in: [gid, "100"] });
+
+  const locations = [{ shopifyLocationGid: gid, name: "渋谷店", displayName: "渋谷" }];
+  const found = findSettlementLocation(locations, "100");
+  assert.equal(settlementLocationLabel(found, "100").label, "渋谷");
+  assert.equal(findSettlementLocation(locations, "gid://shopify/Location/999"), undefined);
 });
