@@ -137,7 +137,7 @@ function CartStaffModal() {
         }
         return next;
       });
-      const record = buildCartStaffRecord(nextLines);
+      const record = buildCartStaffRecord(nextLines, snapshot.lines);
       try {
         sessionStorage.setItem(DRAFT_LINES_STORAGE, JSON.stringify(record.lines));
       } catch {

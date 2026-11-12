@@ -272,6 +272,18 @@ export function reconcileStaffLine(cartLine, saved) {
   return lineFromSlices(cartLine, slices);
 }
 
+function peelSlices(slices, quantity) {
+  const rest = slices.map((slice) => ({ ...slice }));
+  let left = quantity;
+  for (let index = rest.length - 1; index >= 0 && left > 0; index -= 1) {
+    const take = Math.min(rest[index].quantity, left);
+    rest[index] = { ...rest[index], quantity: rest[index].quantity - take };
+    left -= take;
+  }
+  if (left > 0) return null;
+  return rest.filter((slice) => slice.quantity > 0);
+}
+
 function assignPartialSlices(line, quantity, staff) {
   const assigned = currentSlices(line).filter((slice) => slice.staffState === "assigned");
   const used = assigned.reduce((sum, slice) => sum + slice.quantity, 0);
@@ -407,23 +419,17 @@ export function reduceCartStaff(state, action, roster) {
 
     if (!canSplit(line)) return fail(current, "split_blocked");
 
-    const restStaffKey = line.staffKey ?? (line.staffId ? `shopify:${line.staffId}` : null);
-    const restState = line.staffState === "assigned" ? "assigned" : "unassigned";
+    const restSlices = peelSlices(currentSlices(line), quantity);
+    if (!restSlices) return fail(current, "quantity_invalid");
     const rest = {
-      ...line,
-      uuid: `${line.uuid}#rest`,
-      quantity: line.quantity - quantity,
-      staffId: line.staffId ?? null,
-      staffKey: restStaffKey,
-      shopifyStaffId: line.shopifyStaffId ?? line.staffId ?? null,
-      staffState: restState,
-      slices: [{
-        staffId: line.staffId ?? null,
-        staffKey: restStaffKey,
-        staffState: restState,
+      ...lineFromSlices({
+        ...line,
+        uuid: `${line.uuid}#rest`,
         quantity: line.quantity - quantity,
-      }],
+      }, restSlices),
+      shopifyStaffId: null,
     };
+    rest.shopifyStaffId = parseStableStaffId(rest.staffId);
     const slice = {
       ...line,
       uuid: `${line.uuid}#slice`,
@@ -450,7 +456,7 @@ export function reduceCartStaff(state, action, roster) {
         op: "split_variant",
         removeUuid: line.uuid,
         adds: [
-          { variantId: line.variantId, quantity: rest.quantity, staffId: line.staffId },
+          { variantId: line.variantId, quantity: rest.quantity, staffId: rest.staffId },
           { variantId: line.variantId, quantity: slice.quantity, staffId: slice.staffId },
         ],
       },
@@ -480,15 +486,26 @@ export function summarizeCartStaff(lines) {
   return summary;
 }
 
-export function buildCartStaffRecord(lines) {
+function baselineStaffIdFor(line, cartByUuid) {
+  if (cartByUuid?.has(line.uuid)) return parseStableStaffId(cartByUuid.get(line.uuid)?.staffId);
+  return parseStableStaffId(line.staffId);
+}
+
+export function buildCartStaffRecord(lines, cartLines) {
+  const cartByUuid = new Map();
+  for (const cartLine of cartLines ?? []) {
+    if (cartLine?.uuid) cartByUuid.set(cartLine.uuid, cartLine);
+  }
   return {
     lines: (lines ?? []).filter((line) => line.quantityValid).map((line) => {
+      const baselineStaffId = baselineStaffIdFor(line, cartByUuid);
       if (line.staffState === "unclassified") {
         return {
           uuid: line.uuid ?? null,
           variantId: line.variantId ?? null,
           quantity: line.quantity,
           placeholder: true,
+          baselineStaffId,
           slices: [],
         };
       }
@@ -497,6 +514,7 @@ export function buildCartStaffRecord(lines) {
         variantId: line.variantId ?? null,
         quantity: line.quantity,
         placeholder: false,
+        baselineStaffId,
         slices: currentSlices(line),
       };
     }),
@@ -538,8 +556,9 @@ export function draftLinesForOrder(draft, orderId) {
   return draft.lines;
 }
 
-function cartHasStandardStaff(cartLine) {
-  return parseStableStaffId(cartLine?.staffId) != null || parseStableStaffId(cartLine?.shopifyStaffId) != null;
+function savedBaseline(draft) {
+  if (!draft || !Object.prototype.hasOwnProperty.call(draft, "baselineStaffId")) return null;
+  return parseStableStaffId(draft.baselineStaffId);
 }
 
 function draftIsAppAssignment(draft) {
@@ -553,7 +572,7 @@ function draftIsAppAssignment(draft) {
 
 /**
  * 保存した担当順を、同じ明細IDの現在カートへ戻す。
- * 戻すのはアプリ内の担当だけで、標準担当が付いている明細は変えない。
+ * 戻すのはアプリ内の担当だけで、保存時の標準担当と今の標準担当が一致するときだけ戻す。
  * @param {Array<Record<string, unknown>>} cartLines
  * @param {Array<Record<string, unknown>>} draftLines
  */
@@ -561,7 +580,6 @@ export function overlayFromDraft(cartLines, draftLines) {
   const overlay = {};
   const used = new Set();
   for (const cartLine of cartLines ?? []) {
-    if (cartHasStandardStaff(cartLine)) continue;
     const index = (draftLines ?? []).findIndex((draft, draftIndex) => (
       !used.has(draftIndex) && draft?.uuid && draft.uuid === cartLine.uuid
     ));
@@ -569,6 +587,7 @@ export function overlayFromDraft(cartLines, draftLines) {
     const draft = draftLines[index];
     if (variantKey(draft.variantId) !== variantKey(cartLine.variantId)) continue;
     if (!draftIsAppAssignment(draft)) continue;
+    if (parseStableStaffId(cartLine?.staffId) !== savedBaseline(draft)) continue;
     used.add(index);
     overlay[cartLine.uuid] = reconcileStaffLine(cartLine, {
       ...cartLine,

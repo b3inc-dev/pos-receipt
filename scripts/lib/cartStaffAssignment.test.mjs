@@ -459,6 +459,87 @@ describe("標準担当の数量分割と再表示", () => {
       "keep",
     );
   });
+
+  it("標準担当へ分けるとき残りのアプリ担当順を残し、同じ標準担当のアプリ担当は開き直しても戻る", () => {
+    const roster = mergeStaffRoster([{ id: 101 }, { id: 202 }], [
+      { key: "app:staffaaaa", label: "A" },
+      { key: "app:staffbbbb", label: "B" },
+    ]);
+    const partial = reduceCartStaff(
+      createCartStaffState([{ uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5 }]),
+      { type: "assign_partial", lineUuid: "shirt", quantity: 2, staffId: "app:staffaaaa" },
+      roster,
+    );
+    const split = reduceCartStaff(
+      partial.state,
+      { type: "assign_partial", lineUuid: "shirt", quantity: 1, staffId: 202 },
+      roster,
+    );
+    assert.equal(split.ok, true);
+    const record = buildCartStaffRecord(split.state.lines);
+    assert.deepEqual(record.lines.map((line) => ({
+      quantity: line.quantity,
+      slices: line.slices.map((slice) => ({
+        staffKey: slice.staffKey ?? null,
+        staffId: slice.staffId ?? null,
+        quantity: slice.quantity,
+      })),
+    })), [
+      {
+        quantity: 4,
+        slices: [
+          { staffKey: "app:staffaaaa", staffId: null, quantity: 2 },
+          { staffKey: null, staffId: null, quantity: 2 },
+        ],
+      },
+      {
+        quantity: 1,
+        slices: [{ staffKey: "shopify:202", staffId: 202, quantity: 1 }],
+      },
+    ]);
+    const restored = restoreCartStaffRecord(
+      [
+        { id: "rest", variantId: 11, quantity: 4 },
+        { id: "cut", variantId: 11, quantity: 1 },
+      ],
+      record.lines,
+    );
+    const refund = attributionFromConfirmedLine(
+      { id: "rest", quantity: 4, refundableQuantity: 3 },
+      restored.restored[0],
+    );
+    assert.equal(refund.sequenceKnown, true);
+    assert.equal(refund.returnAllocations[0].staffKey, "app:staffaaaa");
+    assert.equal(refund.returnAllocations[0].quantity, 1);
+
+    const cart = createCartStaffState([
+      { uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5, attributedUserId: 101 },
+      { uuid: "hat", title: "帽子", variantId: 22, quantity: 1 },
+    ]);
+    const changed = reduceCartStaff(
+      cart,
+      { type: "assign_line", lineUuid: "shirt", staffId: "app:staffaaaa" },
+      roster,
+    );
+    const explicit = buildCartStaffRecord(changed.state.lines, cart.lines);
+    assert.equal(explicit.lines[0].baselineStaffId, 101);
+    const overlay = overlayFromDraft(cart.lines, explicit.lines);
+    assert.equal(overlay.shirt.slices[0].staffKey, "app:staffaaaa");
+    const moved = createCartStaffState([
+      { uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5, attributedUserId: 202 },
+      { uuid: "hat", title: "帽子", variantId: 22, quantity: 1 },
+    ]);
+    assert.equal(overlayFromDraft(moved.lines, explicit.lines).shirt, undefined);
+    const display = cart.lines.map((line) => overlay[line.uuid] ?? line);
+    const next = reduceCartStaff(
+      { checkout: "open", lines: display },
+      { type: "assign_line", lineUuid: "hat", staffId: "app:staffbbbb" },
+      roster,
+    );
+    const saved = buildCartStaffRecord(next.state.lines, cart.lines);
+    assert.equal(saved.lines.find((line) => line.uuid === "shirt").slices[0].staffKey, "app:staffaaaa");
+    assert.equal(saved.lines.find((line) => line.uuid === "shirt").baselineStaffId, 101);
+  });
 });
 
 describe("カートAPIへの反映", () => {
