@@ -236,6 +236,82 @@ describe("同時の訂正", () => {
   });
 });
 
+describe("訂正の鎖", () => {
+  it("同じ保存時刻でも、IDの文字順ではなく鎖の先端を現在の訂正にする", async () => {
+    const older = {
+      id: "z-cuid",
+      orderId: ORDER_ID,
+      lineId: LINE_ID,
+      previousCorrectionId: "",
+      persistedAt: "2026-11-12T00:00:00.000Z",
+      recordedAt: "2026-11-12T00:00:00.000Z",
+      after: {
+        lineId: LINE_ID,
+        quantity: 2,
+        returnedQuantity: 0,
+        sequenceKnown: true,
+        slices: [{ sequence: 1, staffId: 101, staffState: "assigned", quantity: 2 }],
+      },
+    };
+    const newer = {
+      id: "a-cuid",
+      orderId: ORDER_ID,
+      lineId: LINE_ID,
+      previousCorrectionId: older.id,
+      persistedAt: "2026-11-12T00:00:00.000Z",
+      recordedAt: "2026-11-12T00:00:00.000Z",
+      after: {
+        lineId: LINE_ID,
+        quantity: 2,
+        returnedQuantity: 0,
+        sequenceKnown: true,
+        slices: [{ sequence: 1, staffId: 202, staffState: "assigned", quantity: 2 }],
+      },
+    };
+    assert.equal(selectLatestCorrection([older, newer]).id, "a-cuid");
+    const store = createMemoryAttributionStore();
+    await store.insert(
+      {
+        idempotencyKey: "chain-old",
+        orderId: ORDER_ID,
+        lineId: LINE_ID,
+        recordedAt: older.recordedAt,
+        before: null,
+        after: older.after,
+      },
+      { expectedPreviousId: "" },
+    );
+    const savedOld = await store.findLatestByLine(ORDER_ID, LINE_ID);
+    await store.insert(
+      {
+        id: "a-cuid",
+        idempotencyKey: "chain-new",
+        orderId: ORDER_ID,
+        lineId: LINE_ID,
+        recordedAt: newer.recordedAt,
+        before: savedOld.after,
+        after: newer.after,
+        persistedAt: savedOld.persistedAt,
+      },
+      { expectedPreviousId: savedOld.id },
+    );
+    const current = await store.findLatestByLine(ORDER_ID, LINE_ID);
+    assert.equal(current.id, "a-cuid");
+    const third = await commitOrderStaffCorrection(store, {
+      orderId: ORDER_ID,
+      lineId: LINE_ID,
+      quantity: 2,
+      returnedQuantity: 0,
+      recordedAt: "2026-11-12T03:00:00.000Z",
+      idempotencyKey: "chain-third",
+      slices: [{ staffId: 101, quantity: 1 }, { staffId: 202, quantity: 1 }],
+    });
+    assert.equal(third.ok, true);
+    assert.equal(third.record.previousCorrectionId, "a-cuid");
+    assert.equal(third.record.before.slices[0].staffId, 202);
+  });
+});
+
 describe("連携形式", () => {
   it("合成データは形式を満たし、本番接続では送られない", () => {
     const view = attributionFromConfirmedLine(

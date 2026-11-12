@@ -220,18 +220,35 @@ function comparePersistence(left, right) {
   if (left.time != null && right.time != null && left.time !== right.time) return left.time - right.time;
   if (left.time != null && right.time == null) return 1;
   if (left.time == null && right.time != null) return -1;
-  if (left.id === right.id) return 0;
-  return left.id < right.id ? -1 : 1;
+  return 0;
 }
 
 /**
- * 現在の訂正はサーバーが保存した順で選ぶ。端末が送った recordedAt は比較に使わない。
+ * 訂正の鎖で、他の訂正から指されていない先端を返す。
+ * 同じ保存時刻でも ID の文字順では選ばない。
+ * @param {Array<Record<string, unknown>>} rows
+ */
+function selectChainTip(rows) {
+  if (!rows.every((row) => typeof row?.previousCorrectionId === "string" && row?.id)) return null;
+  const ids = new Set(rows.map((row) => row.id));
+  const referenced = new Set(
+    rows.map((row) => row.previousCorrectionId).filter((id) => ids.has(id)),
+  );
+  const tips = rows.filter((row) => !referenced.has(row.id));
+  return tips.length === 1 ? tips[0] : null;
+}
+
+/**
+ * 現在の訂正は保存の鎖の先端で選ぶ。端末時刻と ID の文字順は使わない。
  * @param {Array<Record<string, unknown>>} rows
  */
 export function selectLatestCorrection(rows) {
+  const list = (rows ?? []).filter(Boolean);
+  const tip = selectChainTip(list);
+  if (tip) return tip;
   let latest = null;
   let latestRank = null;
-  for (const row of rows ?? []) {
+  for (const row of list) {
     const rank = persistenceRank(row);
     if (!latest || comparePersistence(rank, latestRank) > 0) {
       latest = row;
@@ -274,11 +291,11 @@ export function createMemoryAttributionStore() {
         throw error;
       }
       if (options.expectedPreviousId !== undefined) {
-        const latest = selectLatestCorrection(
-          byLine.filter((row) => row.orderId === record.orderId && row.lineId === record.lineId),
-        );
+        const lineRows = byLine.filter((row) => row.orderId === record.orderId && row.lineId === record.lineId);
+        const latest = selectLatestCorrection(lineRows);
         const actual = latest?.id ?? "";
-        if (options.expectedPreviousId !== actual) {
+        const predecessorTaken = lineRows.some((row) => row.previousCorrectionId === options.expectedPreviousId);
+        if (options.expectedPreviousId !== actual || predecessorTaken) {
           const error = new Error("predecessor_changed");
           error.code = "predecessor_changed";
           throw error;
