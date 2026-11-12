@@ -5,7 +5,7 @@ import {
   attributionFromConfirmedLine,
   readLineQuantities,
 } from "../../common/orderStaffAttribution.js";
-import { draftLinesForOrder, parseStableStaffId, restoreCartStaffRecord } from "../../common/cartStaffAssignment.js";
+import { draftLinesForOrder, parseStableStaffId, restoreCartStaffRecord, slicesToRecord } from "../../common/cartStaffAssignment.js";
 
 const ERROR_TEXT = {
   staff_unverified: "担当IDを確認できないため、保存しませんでした。",
@@ -209,11 +209,8 @@ export function OrderStaffCorrection({ orderId, onBack }) {
       }
       const restored = restoreCartStaffRecord(currentOrder.lineItems ?? [], lines);
       const assignedLines = restored.restored
-        .map((line) => ({
-          ...line,
-          slices: (line.slices ?? []).filter((slice) => slice.staffState === "assigned"),
-        }))
-        .filter((line) => line.slices.length > 0);
+        .map((line) => ({ ...line, slices: slicesToRecord(line) }))
+        .filter((line) => line.slices);
       if (assignedLines.length === 0) {
         setError("この取引の明細と担当順が一致しないため、記録しません。");
         return;

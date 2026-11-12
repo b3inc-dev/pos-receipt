@@ -462,14 +462,33 @@ export function summarizeCartStaff(lines) {
 
 export function buildCartStaffRecord(lines) {
   return {
-    lines: (lines ?? [])
-      .filter((line) => line.quantityValid && line.staffState !== "unclassified")
-      .map((line) => ({
+    lines: (lines ?? []).filter((line) => line.quantityValid).map((line) => {
+      if (line.staffState === "unclassified") {
+        return {
+          variantId: line.variantId ?? null,
+          quantity: line.quantity,
+          placeholder: true,
+          slices: [],
+        };
+      }
+      return {
         variantId: line.variantId ?? null,
         quantity: line.quantity,
-        slices: currentSlices(line).filter((slice) => slice.staffState !== "unclassified"),
-      })),
+        placeholder: false,
+        slices: currentSlices(line),
+      };
+    }),
   };
+}
+
+/**
+ * 注文へ保存する担当順。未割当の数量は残し、担当が1つも無い明細は保存しない。
+ * @param {Record<string, unknown>} line
+ */
+export function slicesToRecord(line) {
+  const slices = Array.isArray(line?.slices) ? line.slices : [];
+  const hasAssigned = slices.some((slice) => slice.staffState === "assigned" || slice.staffKey || slice.staffId != null);
+  return hasAssigned ? slices : null;
 }
 
 /**
@@ -501,6 +520,7 @@ export function restoreCartStaffRecord(orderLines, draftLines) {
   const pending = (draftLines ?? []).map((line) => ({
     variantId: variantKey(line.variantId),
     quantity: line.quantity,
+    placeholder: line.placeholder === true || line.staffState === "unclassified",
     slices: Array.isArray(line.slices) ? line.slices.map((slice) => ({ ...slice })) : [],
   }));
   const restored = [];
@@ -513,6 +533,15 @@ export function restoreCartStaffRecord(orderLines, draftLines) {
       unmatched.push(lineId);
       continue;
     }
+    if (pending[0]?.placeholder && pending[0].variantId === variantId && pending[0].quantity === quantity) {
+      pending.shift();
+      unmatched.push(lineId);
+      continue;
+    }
+    if (pending[0]?.placeholder) {
+      unmatched.push(lineId);
+      continue;
+    }
     if (pending[0] && pending[0].variantId === variantId && pending[0].quantity === quantity) {
       restored.push({ lineId, quantity, sequenceKnown: true, slices: pending.shift().slices });
       continue;
@@ -520,7 +549,7 @@ export function restoreCartStaffRecord(orderLines, draftLines) {
     let sum = 0;
     let count = 0;
     for (const item of pending) {
-      if (item.variantId !== variantId) break;
+      if (item.placeholder || item.variantId !== variantId) break;
       sum += item.quantity;
       count += 1;
       if (sum >= quantity) break;

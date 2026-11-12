@@ -14,6 +14,7 @@ import {
   parseStableStaffId,
   buildCartStaffRecord,
   draftLinesForOrder,
+  slicesToRecord,
   mergeStaffRoster,
   reconcileStaffLine,
   reduceCartStaff,
@@ -328,11 +329,28 @@ describe("標準の担当設定が使えないカート", () => {
       ],
     );
 
+    const partialOnly = slicesToRecord({
+      slices: [
+        { staffKey: "app:staffaaaa", staffState: "assigned", quantity: 2 },
+        { staffId: null, staffState: "unassigned", quantity: 3 },
+      ],
+    });
+    assert.equal(partialOnly.reduce((sum, slice) => sum + slice.quantity, 0), 5);
     const mixed = buildCartStaffRecord([
+      { uuid: "open", variantId: 11, quantity: 5, quantityValid: true, staffState: "unclassified" },
       continued.state.lines[0],
-      { uuid: "cap", variantId: 33, quantity: 1, quantityValid: true, staffState: "unclassified" },
     ]);
-    assert.equal(mixed.lines.length, 1);
+    assert.equal(mixed.lines[0].placeholder, true);
+    const aligned = restoreCartStaffRecord(
+      [
+        { id: "open-line", variantId: 11, quantity: 5 },
+        { id: "assigned-line", variantId: 11, quantity: 5 },
+      ],
+      mixed.lines,
+    );
+    assert.deepEqual(aligned.unmatched, ["open-line"]);
+    assert.equal(aligned.restored[0].lineId, "assigned-line");
+    assert.equal(aligned.restored[0].slices.some((slice) => slice.staffKey === "app:staffaaaa"), true);
     const otherOrder = restoreCartStaffRecord(
       [{ id: "other", variantId: 11, quantity: 5 }],
       draftLinesForOrder({ boundOrderId: "1001", lines: mixed.lines }, "2002"),
