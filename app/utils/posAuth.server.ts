@@ -45,7 +45,7 @@ function addCorsToResponse(request: Request, response: Response): Response {
 /** CORS 付きの JSON エラーレスポンスを作る（catch 内で corsJson が使えない場合用） */
 export function corsErrorJson(
   request: Request,
-  data: { ok?: boolean; error?: string },
+  data: { ok?: boolean; error?: string; code?: string },
   status: number
 ): Response {
   return addCorsToResponse(
@@ -64,7 +64,7 @@ export async function authenticatePosRequest(request: Request) {
   const shop = await resolveShop(shopDomain, admin);
 
   /** CORS ヘッダー付きの JSON レスポンスを返すヘルパー */
-  const corsJson = (data: unknown, init?: ResponseInit): Promise<Response> =>
+  const corsJson = (data: unknown, init?: ResponseInit): Response =>
     cors(Response.json(data, init));
 
   return { admin, shop, corsJson };
@@ -76,7 +76,7 @@ export async function authenticatePosRequest(request: Request) {
  */
 export async function authenticatePosRequestOrCorsError(
   request: Request
-): Promise<{ admin: Awaited<ReturnType<typeof unauthenticated.admin>>["admin"]; shop: Awaited<ReturnType<typeof resolveShop>>; corsJson: (data: unknown, init?: ResponseInit) => Promise<Response> } | Response> {
+): Promise<{ admin: Awaited<ReturnType<typeof unauthenticated.admin>>["admin"]; shop: Awaited<ReturnType<typeof resolveShop>>; corsJson: (data: unknown, init?: ResponseInit) => Response } | Response> {
   try {
     return await authenticatePosRequest(request);
   } catch (err) {

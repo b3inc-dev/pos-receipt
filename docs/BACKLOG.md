@@ -4,7 +4,7 @@
 
 | ID | 項目 | 状態・根拠 | 完了条件 |
 |---|---|---|---|
-| Q1 | Backend型チェックbaseline | typecheck追加。TS2688: tsconfigの@shopify/polaris-types未導入で停止、以後の型エラーは未評価 | エラー原因を分類し既存挙動を保持して解消 |
+| Q1 | Backend型チェックbaseline | 解消。TS2688は未導入の@shopify/polaris-types。types許可リストが@types/nodeを外していた。型パッケージ追加と注釈でtscは成功。集計式と返金・精算の引数は維持 | npm run typecheckが成功し、精算・返金の実行経路を変えない |
 | Q2 | アプリ/POS lint・拡張build gate | docs lintのみ。Backend buildとPOS検証は別 | 対象API version/propsを含む再現可能なgate |
 | Q3 | 領収書/集計統合テスト | pure関数5ケースのみ | preview/issue、冪等性、返金帰属、VIP、設定の境界を非本番で検証 |
 | R1 | 本番レシート正本の保存 | Liquid/visual設定・実紙面未収録 | 店別/レシート種別の設定と匿名見本、QR/配送/ロゴ/スタッフの表示条件 |

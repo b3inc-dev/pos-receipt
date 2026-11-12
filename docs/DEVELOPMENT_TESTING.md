@@ -6,7 +6,7 @@ Codexの行動と承認境界の正本は [DEV_FIRST_THEN_DEPLOY.md](DEV_FIRST_T
 
 1. GitHubの最新main/PR/ownerを確認し、専用feature branch/worktreeで作業する。既存dirtyファイルは移動・破棄しない。
 2. Node 20（Render設定）を基準に `npm ci` を実行する。既存依存再利用の場合は再現条件を記録する。
-3. 開発専用Shopify app/storeとPostgreSQLを用意する。既存 `.env` や本番credentialsはworktreeへコピーしない。[ENV_SETUP.md](ENV_SETUP.md)は変数名の参照に使い、Render本番DBを開発に使わない。
+3. 開発専用Shopify app/storeとPostgreSQLを用意する。アプリ起動用は `.env.example` を `.env` にコピーし、プレースホルダを開発用の値へ置き換える。`.env.migrate.example` は本番マイグレーション用で、開発用 `.env` の元にしない。既存 `.env` や本番credentialsはworktreeへコピーしない。[ENV_SETUP.md](ENV_SETUP.md)は変数名の参照に使い、Render本番DBを開発に使わない。
 4. DATABASE_URLが開発用であることを確認後のみPrisma client生成・開発DBへの既存migration適用を行う。既存migrationを初期生成し直さない。`npm run setup` はmigrationを含む。
 5. 開発専用app configを選択してdevを起動する。本番tomlのautomatically_update_urls_on_devに注意。POSのBackend接続先も開発用と確認する。localhost URLは別端末からそのまま見えない。
 
@@ -22,7 +22,7 @@ npm run build
 ```
 
 - lint: 現在は `lint:docs` のみ。共通9文書のlocalリンク/競合markerを確認する。アプリJS/TSのESLintやPOS props検証は未整備。アプリlint成功と表現しない。
-- typecheck: 既存tsconfigの `tsc --noEmit`。Backend対象、POS拡張は含まれない。既存型エラーを隠さず記録し、修正は別workstreamで対応する。2026-10-04、Node24.11.1/既存依存ではTS2688（tsconfigのtypesに指定された@shopify/polaris-types未導入）で停止した。これより後の型エラーは未評価で、typecheck成功とは扱わない。
+- typecheck: 既存tsconfigの `tsc --noEmit`。Backend対象、POS拡張は含まれない。2026-10-04のTS2688は、`types` が未導入の `@shopify/polaris-types` を指定していたことが原因。devDependency にその型パッケージを追加し、同じ許可リストへ既存の `@types/node`（`node`）を加えた。その後に見えた型の不一致は注釈と既存値の維持で解消し、集計式や返金・精算の呼び出し引数は変えていない。
 - test: DB/Shopify接続なしのレシート回帰5ケース。精算本文全体、返金/商品券、ゼロ売上、スタッフ/割引名/合計/店名、東京暦日境界を確認する。
 - build: React Router Backend/Admin build。POS拡張build・実機検証とは別。Shopify CLIの開発専用configで拡張のbuild/targetsを検証する。本番configでdev/deployしない。
 

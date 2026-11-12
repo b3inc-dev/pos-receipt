@@ -458,7 +458,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           // 過去日のみ DB キャッシュを読む。当日は常に再計算（以前は「当日かつキャッシュあり」で再計算に到達せず数値が永遠に更新されない不具合があった）
           const useLocationDailyCache =
             Boolean(cached) && !forceRecomputeDaily && targetDate < today;
-          if (useLocationDailyCache) {
+          if (cached && useLocationDailyCache) {
             rowsRaw.push(toDailyRowFromCache(loc.shopifyLocationGid, loc.name, targetDate, cached));
             continue;
           }
@@ -565,7 +565,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             { debug: wantDebug },
           );
           if (wantDebug && (row as any)?.debug) recomputeDebugChannels.push(row);
-          channelRows.push({ channelId: ch.id, channelName: ch.displayName, ...row });
+          channelRows.push(Object.assign({ channelId: ch.id, channelName: ch.displayName }, row));
         } catch { /* チャネル1件の失敗で全体を落とさない */ }
       }
 
@@ -923,37 +923,38 @@ export default function SalesSummaryAdminPage() {
 
   const tableRows = useMemo(() => {
     if (!data.hasAccess) return [];
+    const cell = (r: object, key: string) => (r as Record<string, unknown>)[key];
     const locationBody =
       data.view === "daily"
         ? data.rows.map((r) => [
-            String(r.locationName ?? ""),
-            fmtYen((r.actual as number) ?? 0),
-            fmtYen((r.budget as number | null) ?? null),
-            fmtPct((r.budgetRatio as number | null) ?? null),
-            `${Number(r.orders ?? 0).toLocaleString("ja-JP")}件`,
-            r.visitors != null ? `${Number(r.visitors).toLocaleString("ja-JP")}人` : "-",
-            fmtPct((r.conv as number | null) ?? null),
-            fmtYen((r.atv as number | null) ?? null),
-            fmtDecimal((r.setRate as number | null) ?? null, 2),
-            `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
-            fmtYen((r.unit as number | null) ?? null),
+            String(cell(r, "locationName") ?? ""),
+            fmtYen((cell(r, "actual") as number) ?? 0),
+            fmtYen((cell(r, "budget") as number | null) ?? null),
+            fmtPct((cell(r, "budgetRatio") as number | null) ?? null),
+            `${Number(cell(r, "orders") ?? 0).toLocaleString("ja-JP")}件`,
+            cell(r, "visitors") != null ? `${Number(cell(r, "visitors")).toLocaleString("ja-JP")}人` : "-",
+            fmtPct((cell(r, "conv") as number | null) ?? null),
+            fmtYen((cell(r, "atv") as number | null) ?? null),
+            fmtDecimal((cell(r, "setRate") as number | null) ?? null, 2),
+            `${Number(cell(r, "items") ?? 0).toLocaleString("ja-JP")}点`,
+            fmtYen((cell(r, "unit") as number | null) ?? null),
           ])
         : data.rows.map((r) => [
-            String(r.locationName ?? ""),
-            fmtYen((r.actualTotal as number) ?? 0),
-            r.budgetTotal != null ? fmtYen(Number(r.budgetTotal)) : "-",
-            fmtPct((r.achievementRate as number | null) ?? null),
-            (r.progressBudgetToday as number) > 0 ? fmtYen(Number(r.progressBudgetToday)) : "-",
-            fmtPct((r.progressRateToday as number | null) ?? null),
-            (r.progressBudgetPrev as number) > 0 ? fmtYen(Number(r.progressBudgetPrev)) : "-",
-            fmtPct((r.progressRatePrev as number | null) ?? null),
-            `${Number(r.orders ?? 0).toLocaleString("ja-JP")}件`,
-            r.visitors != null ? `${Number(r.visitors).toLocaleString("ja-JP")}人` : "-",
-            fmtPct((r.conv as number | null) ?? null),
-            fmtYen((r.atv as number | null) ?? null),
-            fmtDecimal((r.setRate as number | null) ?? null, 2),
-            `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
-            fmtYen((r.unit as number | null) ?? null),
+            String(cell(r, "locationName") ?? ""),
+            fmtYen((cell(r, "actualTotal") as number) ?? 0),
+            cell(r, "budgetTotal") != null ? fmtYen(Number(cell(r, "budgetTotal"))) : "-",
+            fmtPct((cell(r, "achievementRate") as number | null) ?? null),
+            (cell(r, "progressBudgetToday") as number) > 0 ? fmtYen(Number(cell(r, "progressBudgetToday"))) : "-",
+            fmtPct((cell(r, "progressRateToday") as number | null) ?? null),
+            (cell(r, "progressBudgetPrev") as number) > 0 ? fmtYen(Number(cell(r, "progressBudgetPrev"))) : "-",
+            fmtPct((cell(r, "progressRatePrev") as number | null) ?? null),
+            `${Number(cell(r, "orders") ?? 0).toLocaleString("ja-JP")}件`,
+            cell(r, "visitors") != null ? `${Number(cell(r, "visitors")).toLocaleString("ja-JP")}人` : "-",
+            fmtPct((cell(r, "conv") as number | null) ?? null),
+            fmtYen((cell(r, "atv") as number | null) ?? null),
+            fmtDecimal((cell(r, "setRate") as number | null) ?? null, 2),
+            `${Number(cell(r, "items") ?? 0).toLocaleString("ja-JP")}点`,
+            fmtYen((cell(r, "unit") as number | null) ?? null),
           ]);
 
     const channelRows = data.channelRows ?? [];
@@ -962,32 +963,32 @@ export default function SalesSummaryAdminPage() {
     const channelBody =
       data.view === "daily"
         ? channelRows.map((r) => [
-            `[${String(r.channelName ?? "")}]`,
-            fmtYen((r.actual as number) ?? 0),
-            fmtYen((r.budget as number | null) ?? null),
-            fmtPct((r.budgetRatio as number | null) ?? null),
-            `${Number(r.orders ?? 0).toLocaleString("ja-JP")}件`,
+            `[${String(cell(r, "channelName") ?? "")}]`,
+            fmtYen((cell(r, "actual") as number) ?? 0),
+            fmtYen((cell(r, "budget") as number | null) ?? null),
+            fmtPct((cell(r, "budgetRatio") as number | null) ?? null),
+            `${Number(cell(r, "orders") ?? 0).toLocaleString("ja-JP")}件`,
             "-", "-",
-            fmtYen((r.atv as number | null) ?? null),
-            fmtDecimal((r.setRate as number | null) ?? null, 2),
-            `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
-            fmtYen((r.unit as number | null) ?? null),
+            fmtYen((cell(r, "atv") as number | null) ?? null),
+            fmtDecimal((cell(r, "setRate") as number | null) ?? null, 2),
+            `${Number(cell(r, "items") ?? 0).toLocaleString("ja-JP")}点`,
+            fmtYen((cell(r, "unit") as number | null) ?? null),
           ])
         : channelRows.map((r) => [
-            `[${String(r.channelName ?? "")}]`,
-            fmtYen((r.actualTotal as number) ?? 0),
-            r.budgetTotal != null ? fmtYen(Number(r.budgetTotal)) : "-",
-            fmtPct((r.achievementRate as number | null) ?? null),
-            (r.progressBudgetToday as number) > 0 ? fmtYen(Number(r.progressBudgetToday)) : "-",
-            fmtPct((r.progressRateToday as number | null) ?? null),
-            (r.progressBudgetPrev as number) > 0 ? fmtYen(Number(r.progressBudgetPrev)) : "-",
-            fmtPct((r.progressRatePrev as number | null) ?? null),
-            `${Number(r.orders ?? 0).toLocaleString("ja-JP")}件`,
+            `[${String(cell(r, "channelName") ?? "")}]`,
+            fmtYen((cell(r, "actualTotal") as number) ?? 0),
+            cell(r, "budgetTotal") != null ? fmtYen(Number(cell(r, "budgetTotal"))) : "-",
+            fmtPct((cell(r, "achievementRate") as number | null) ?? null),
+            (cell(r, "progressBudgetToday") as number) > 0 ? fmtYen(Number(cell(r, "progressBudgetToday"))) : "-",
+            fmtPct((cell(r, "progressRateToday") as number | null) ?? null),
+            (cell(r, "progressBudgetPrev") as number) > 0 ? fmtYen(Number(cell(r, "progressBudgetPrev"))) : "-",
+            fmtPct((cell(r, "progressRatePrev") as number | null) ?? null),
+            `${Number(cell(r, "orders") ?? 0).toLocaleString("ja-JP")}件`,
             "-", "-",
-            fmtYen((r.atv as number | null) ?? null),
-            fmtDecimal((r.setRate as number | null) ?? null, 2),
-            `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
-            fmtYen((r.unit as number | null) ?? null),
+            fmtYen((cell(r, "atv") as number | null) ?? null),
+            fmtDecimal((cell(r, "setRate") as number | null) ?? null, 2),
+            `${Number(cell(r, "items") ?? 0).toLocaleString("ja-JP")}点`,
+            fmtYen((cell(r, "unit") as number | null) ?? null),
           ]);
 
     // 各合計行

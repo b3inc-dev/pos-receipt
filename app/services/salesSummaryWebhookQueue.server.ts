@@ -40,13 +40,13 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
     retryLimit: 5,
     retryDelay: 45,
     retryBackoff: true,
-  }).catch(() => {
+  } as unknown as Parameters<PgBoss["createQueue"]>[1]).catch(() => {
     /* キューが既にある */
   });
 
   await boss.work(
     SALES_SUMMARY_WEBHOOK_QUEUE_NAME,
-    { teamSize: 2, pollingIntervalSeconds: 2 },
+    { teamSize: 2, pollingIntervalSeconds: 2 } as unknown as Parameters<PgBoss["work"]>[1],
     async (jobs) => {
       const { unauthenticated } = await import("../shopify.server");
       for (const job of jobs) {
