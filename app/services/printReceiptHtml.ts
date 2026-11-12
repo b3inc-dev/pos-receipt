@@ -299,11 +299,13 @@ export function settlementPreviewToPrintModel(
       refundCount?: number;
     }[];
   },
-  opts?: { isInspection?: boolean; paperWidthMm?: 58 | 80 },
+  opts?: { isInspection?: boolean; paperWidthMm?: 58 | 80; title?: string },
 ): SettlementReceiptPrintModel {
   return {
     kind: "settlement",
-    title: opts?.isInspection ? "【点検レシート】" : "【精算レシート】",
+    title:
+      opts?.title ||
+      (opts?.isInspection ? "【点検レシート】" : "【精算レシート】"),
     targetDate: preview.targetDate,
     locationName: preview.locationName,
     currency: preview.currency ?? "JPY",

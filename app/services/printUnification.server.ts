@@ -95,17 +95,30 @@ export function settlementRowToPreviewDTO(
   settlement: SettlementRowLike,
   locationName: string,
 ): SettlementPreviewDTO {
-  const rawSections = settlement.paymentSectionsJson
-    ? (JSON.parse(settlement.paymentSectionsJson) as Record<string, unknown>[])
-    : [];
-  const paymentSections = rawSections.map((s) => ({
-    gateway: String(s.gateway ?? s.label ?? ""),
-    label: String(s.label ?? s.gateway ?? ""),
-    net: Number(s.net ?? 0),
-    refund: Number(s.refund ?? 0),
-    txCount: Number(s.txCount ?? 0),
-    refundCount: Number(s.refundCount ?? 0),
-  }));
+  let parsedUnknown: unknown = [];
+  try {
+    parsedUnknown = settlement.paymentSectionsJson
+      ? JSON.parse(settlement.paymentSectionsJson)
+      : [];
+  } catch {
+    parsedUnknown = [];
+  }
+  const rawSections = Array.isArray(parsedUnknown)
+    ? parsedUnknown
+    : Array.isArray((parsedUnknown as { sections?: unknown })?.sections)
+      ? ((parsedUnknown as { sections: unknown[] }).sections)
+      : [];
+  const paymentSections = rawSections.map((s) => {
+    const row = (s ?? {}) as Record<string, unknown>;
+    return {
+      gateway: String(row.gateway ?? row.label ?? ""),
+      label: String(row.label ?? row.gateway ?? ""),
+      net: Number(row.net ?? 0),
+      refund: Number(row.refund ?? 0),
+      txCount: Number(row.txCount ?? 0),
+      refundCount: Number(row.refundCount ?? 0),
+    };
+  });
 
   return {
     locationId: settlement.locationId,

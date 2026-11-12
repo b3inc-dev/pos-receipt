@@ -26,7 +26,7 @@ PR #1 の docs 専用改訂を、ユーザー指示で上書きした実装正�
 - 実行時は常に `shopify_printing`
 - 新規 Settlement の `printMode` は `shopify_printing`
 - 冪等キーは `shopId:locationId:targetDate`。旧 `...:order_based` / `...:cloudprnt_direct` も検索し、再実行で精算行を増やさない
-- 既存の精算注文・メタフィールド・Settlement 履歴は削除しない。再印刷はアプリ DB の保存済み金額を使う
+- 既存の精算注文・メタフィールド・Settlement 履歴は削除しない。再印刷はアプリ DB の保存済み帳票スナップショットを使う
 
 ## プリンタ
 
@@ -41,6 +41,26 @@ PR #1 の docs 専用改訂を、ユーザー指示で上書きした実装正�
 ## 再印刷
 
 保存済み `Settlement` / `ReceiptIssue` から HTML を組む。ライブ再集計で金額を置き換えない。再印刷で注文・売上・返金・精算行は増えない。
+
+### 精算・点検の帳票スナップショット
+
+発行時に `paymentSectionsJson` へ envelope（`format: settlement_print_v1`）を保存する。Prisma 列追加や本番 ALTER はしない。
+
+| 保存する（帳票内容） | 保存しない（出力機器） |
+|----------------------|------------------------|
+| 店舗表示名、表題、帳票版 `settlement-receipt-v1`、金額列、支払内訳 | 用紙幅（再印刷時点の `PrintSettings` を CSS にだけ適用） |
+
+合成例: 初回印字後に店舗表示名を変えても HTML の店名は発行時のまま。用紙幅を 80→58 に変えると CSS 幅だけ変わり、店名・金額・表題は同じ。
+
+### 旧履歴で復元できない項目
+
+envelope 以前の `paymentSectionsJson`（配列のみ）は金額・支払内訳は読める。次は復元できない。
+
+- 発行時の店舗表示名（現在の Location 名にフォールバック）
+- 帳票版 `formVersion`
+- 発行時の表題（現行テンプレート。点検は `periodLabel` 先頭が「点検」なら推定）
+
+用紙幅は意図的にスナップショットへ入れない。実紙面の確認は `docs/PRINT_DEVICE_COMPAT.md`（本環境では未実施）。
 
 ## プランの区別
 

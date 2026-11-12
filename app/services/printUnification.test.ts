@@ -89,6 +89,41 @@ describe("print unification", () => {
     assert.equal(preview.paymentSections[0].refund, 50);
   });
 
+  it("rebuilds reprint preview from snapshot envelope sections", () => {
+    const preview = settlementRowToPreviewDTO(
+      {
+        locationId: "gid://shopify/Location/1",
+        targetDate: "2026-11-12",
+        currency: "JPY",
+        total: 1234,
+        netSales: 1122,
+        tax: 112,
+        discounts: 10,
+        vipPointsUsed: 0,
+        refundTotal: 50,
+        orderCount: 3,
+        refundCount: 1,
+        itemCount: 5,
+        voucherChangeAmount: 0,
+        paymentSectionsJson: JSON.stringify({
+          format: "settlement_print_v1",
+          snapshot: {
+            formVersion: "settlement-receipt-v1",
+            locationName: "発行時店名",
+            title: "【精算レシート】",
+            isInspection: false,
+          },
+          sections: [
+            { gateway: "cash", label: "現金", net: 1000, refund: 50, txCount: 2, refundCount: 1 },
+          ],
+        }),
+      },
+      "いまの店名",
+    );
+    assert.equal(preview.paymentSections[0].net, 1000);
+    assert.equal(preview.paymentSections[0].label, "現金");
+  });
+
   it("labels legacy stored printMode as unused for output", () => {
     assert.match(displayPrintModeLabel("order_based"), /未使用/);
     assert.equal(displayPrintModeLabel("shopify_printing"), "Shopify Printing API");
@@ -99,11 +134,13 @@ describe("print path source guards", () => {
   it("create/recalculate never import Shopify settlement order sync", () => {
     const createSrc = readFileSync(join(root, "app/routes/api.settlements.create.tsx"), "utf8");
     const recalcSrc = readFileSync(join(root, "app/routes/api.settlements.recalculate.tsx"), "utf8");
-    for (const src of [createSrc, recalcSrc]) {
+    const reprintSrc = readFileSync(join(root, "app/routes/api.print.settlement.$id.tsx"), "utf8");
+    for (const src of [createSrc, recalcSrc, reprintSrc]) {
       assert.doesNotMatch(src, /syncSettlementOrderLikeGas/);
       assert.doesNotMatch(src, /syncInspectionOrderLikeGas/);
       assert.doesNotMatch(src, /settlementOrderGas/);
     }
+    assert.doesNotMatch(reprintSrc, /prisma\.settlement\.create/);
   });
 
   it("POS print helper does not treat disconnected printers as direct success", () => {

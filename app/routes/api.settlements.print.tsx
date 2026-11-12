@@ -6,6 +6,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import { paymentSectionsForApi } from "../services/settlementPrintSnapshot.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -94,7 +95,7 @@ function serializeSettlement(s: NonNullable<SettlementRecord>) {
     refundCount: s.refundCount,
     itemCount: s.itemCount,
     voucherChangeAmount: s.voucherChangeAmount.toString(),
-    paymentSections: s.paymentSectionsJson ? JSON.parse(s.paymentSectionsJson) : [],
+    paymentSections: paymentSectionsForApi(s.paymentSectionsJson),
     printMode: s.printMode,
     status: s.status,
     printedAt: s.printedAt?.toISOString() ?? null,

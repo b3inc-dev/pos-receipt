@@ -631,6 +631,7 @@ MVP では自由入力 JSON ではなく単純なテーブル実装でもよい�
 
 #### 12.2.2 用紙幅
 - `cloudprnt_paper_width`（互換キー名。58mm / 80mm）。CloudPRNT 送信には使わない
+- 帳票スナップショットには含めない。再印刷時点の出力機器設定として CSS 幅にだけ使う
 
 #### 12.2.3 精算注文
 - 作成しない。`create_settlement_order_when_printing` が保存されていても無効

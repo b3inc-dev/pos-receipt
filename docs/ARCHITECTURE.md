@@ -61,7 +61,7 @@ D. POST /api/settlements/create
       │  Shopify SETTLEMENT / INSPECTION 注文は作らない
       ▼
 E. 印字
-      └─ shopify.printing → GET /api/print/settlement/:id（保存済み金額）
+      └─ shopify.printing → GET /api/print/settlement/:id（保存済み表示内容・帳票版。用紙幅は機器）
       ▼
 F. POST /api/settlements/print → status=printed（API 受付の記録。紙面完了ではない）
 ```
@@ -74,7 +74,7 @@ F. POST /api/settlements/print → status=printed（API 受付の記録。紙面
 | 返金計上先 | Order + refund TX location + 設定 | `resolveRefundAggregationLocationGid` | `pos.refund_aggregation_location_gid` | 精算集計時に参照 |
 | 精算プレビュー | Orders + SpecialRefundEvent +（任意）Gift Cards API | `aggregateGasStyleForOrders` 等 | なし／サマリーキャッシュ | POS 精算 UI |
 | 精算確定 | プレビュー DTO | 永続化のみ（Shopify 精算注文なし） | `Settlement` | Done 画面 |
-| 精算印字 | 保存済み Settlement | HTML + shopify.printing | `printedAt`（送信受付） | ペアリング済みプリンタ |
+| 精算印字 | 保存済み Settlement（発行時の店名・金額・帳票版） | HTML + shopify.printing | `printedAt`（送信受付） | ペアリング済みプリンタ（用紙幅は機器設定） |
 | 領収書 | Order totalPriceSet | テンプレ合成 + Printing API | `ReceiptIssue` | POS 完了画面 |
 
 ## 4. 領収書フロー（ギフトレシートではない）

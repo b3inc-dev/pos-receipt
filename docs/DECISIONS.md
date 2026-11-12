@@ -63,6 +63,7 @@
 
 - 精算・点検・領収書・販売レシートのアプリ独自印字は `shopify.printing` のみ
 - 旧経路切替・CloudPRNT 残置・監査注文任意は採用しない（PR #1 初期方針を上書き）
+- 精算・点検の再印刷は発行時の店舗表示名・帳票版を `paymentSectionsJson` envelope に保存する。用紙幅は機器都合でスナップショットに含めない
 - 詳細: `docs/SETTLEMENT_PRINT_UNIFICATION.md` / `docs/PRINT_DEVICE_COMPAT.md`
 
 ## 6. 未確認事項リスト（横断）

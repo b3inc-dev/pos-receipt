@@ -81,6 +81,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 
 アプリ独自帳票（精算 / 点検 / 領収書 / 販売レシート）
   → GET /api/print/{settlement|receipt|sales}/:id
+     （精算・点検は発行時の店舗表示名・帳票版・金額。用紙幅は再印刷時点の機器設定）
   → shopify.printing.print(src, { printer })  ※ connected: true のみ
 ```
 

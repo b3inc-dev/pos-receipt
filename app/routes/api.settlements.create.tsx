@@ -21,6 +21,11 @@ import {
   buildSettlementIdempotencyKey,
   settlementRowToPreviewDTO,
 } from "../services/printUnification.server";
+import {
+  buildSettlementPrintSnapshot,
+  encodePaymentSectionsJson,
+  parsePaymentSectionsJson,
+} from "../services/settlementPrintSnapshot.server";
 
 function normalizeLocationGid(locationId: string): string {
   const s = String(locationId).trim();
@@ -89,8 +94,11 @@ export async function action({ request }: ActionFunctionArgs) {
     );
 
     const respondExisting = async (existing: NonNullable<Awaited<ReturnType<typeof findExistingDailySettlement>>>) => {
-      const locName = await locationNameFor(shop.id, String(locationId), String(locationName ?? ""));
-      const preview = settlementRowToPreviewDTO(existing, locName);
+      const locNameNow = await locationNameFor(shop.id, String(locationId), String(locationName ?? ""));
+      const savedName =
+        parsePaymentSectionsJson(existing.paymentSectionsJson).snapshot?.locationName?.trim() ||
+        locNameNow;
+      const preview = settlementRowToPreviewDTO(existing, savedName);
       return corsJson(
         {
           ok: true,
@@ -152,6 +160,16 @@ export async function action({ request }: ActionFunctionArgs) {
         ? buildSettlementIdempotencyKey(shop.id, String(locationId), String(targetDate))
         : null;
 
+      const issuedLocationName = await locationNameFor(
+        shop.id,
+        String(locationId),
+        String(preview.locationName || locationName || ""),
+      );
+      const printSnapshot = buildSettlementPrintSnapshot({
+        locationName: issuedLocationName,
+        isInspection: inspection,
+      });
+
       const settlement = await prisma.settlement.create({
         data: {
           shopId: shop.id,
@@ -171,7 +189,10 @@ export async function action({ request }: ActionFunctionArgs) {
           refundCount: inspection ? 0 : preview.refundCount,
           itemCount: inspection ? 0 : preview.itemCount,
           voucherChangeAmount: inspection ? 0 : preview.voucherChangeAmount,
-          paymentSectionsJson: JSON.stringify(inspection ? [] : preview.paymentSections),
+          paymentSectionsJson: encodePaymentSectionsJson(
+            inspection ? [] : preview.paymentSections,
+            printSnapshot,
+          ),
           printMode: UNIFIED_PRINT_MODE,
           status: "completed",
           idempotencyKey: idemKey,
@@ -183,7 +204,7 @@ export async function action({ request }: ActionFunctionArgs) {
           ok: true,
           idempotent: false,
           settlementId: settlement.id,
-          preview,
+          preview: { ...preview, locationName: issuedLocationName },
           sourceOrderId: null,
           sourceOrderName: null,
           printMode: UNIFIED_PRINT_MODE,
