@@ -5,7 +5,7 @@
 
 特に、既存の GAS 実装でコード直書きされている独自調整値・独自ロジックを、販売用アプリでは管理画面から設定変更できるようにするため、その置換対象を明確化する。
 
-また、本書では `vip_points_used` のような特定ポイントアプリ依存の固定項目を廃止し、販売用として汎用化した `loyalty_usage` の考え方を採用する。
+精算はShopify注文の割引・支払・返金を基準にする。製品間の担当範囲と受け入れ例は [アプリ要件書 §0.2](posreceipt_requirements_spec.md#02-line会員証ポイントの担当範囲) を参照する。
 
 本書は以下を目的とする。
 
@@ -45,19 +45,8 @@ Shopify メタフィールドは以下の用途に限る。
 2. Shop 全体設定
 3. システムデフォルト
 
-### 1.4 ポイント / 会員施策に関する前提
-販売用アプリでは、`vip_points_used` のような特定アプリ依存の固定フィールドを標準項目としない。
-
-代わりに、以下の論理項目を採用する。
-- `loyalty_usage`
-
-`loyalty_usage` は以下のような値を包括する概念である。
-- VIPポイント利用額
-- 会員ポイント利用額
-- アプリポイント利用額
-- 独自ロイヤルティ値引き額
-
-どの値を `loyalty_usage` とみなすかは、管理画面設定で決定する。
+### 1.4 LINE・ポイントの担当範囲
+会員証とLINE連携はLINE CRM、ポイント業務はShop Pointが担当する。POS Receiptは注文に記録された割引・支払・返金の金額を扱う。公開版・自社版ともに独自会員・ポイント画面や専用集計設定を設けない。
 
 ---
 
@@ -72,10 +61,9 @@ Shopify メタフィールドは以下の用途に限る。
 5. 商品券設定
 6. 特殊返金設定
 7. 領収書設定
-8. ポイント / 会員施策設定
-9. 売上サマリー設定
-10. 予算設定
-11. 印字設定
+8. 売上サマリー設定
+9. 予算設定
+10. 印字設定
 
 ---
 
@@ -184,7 +172,6 @@ Shopify ロケーションごとの表示名や機能有効可否、運用差分
 - show_net_sales
 - show_tax
 - show_discounts
-- show_loyalty_usage
 - show_order_count
 - show_refund_count
 - show_item_count
@@ -194,25 +181,11 @@ Shopify ロケーションごとの表示名や機能有効可否、運用差分
 - show_period_label
 - show_location_label
 
-#### 5.2.2A ポイント / 会員施策利用額設定
-- loyalty_usage_feature_enabled
-- loyalty_usage_label
-- loyalty_usage_source_type (`discount_code_prefix` / `order_metafield` / `order_attribute` / `custom_app_event` / `manual_off`)
-- loyalty_usage_source_config_json
-- loyalty_usage_included_in_discount_breakdown
-- loyalty_usage_show_as_separate_field
-
-説明:
-- `vip_points_used` のような固定フィールド名に依存しない
-- 利用中のポイントアプリや会員施策アプリに応じて、どの値を「ポイント利用額」とみなすかを管理画面で設定する
-- MVP では `discount_code_prefix` と `manual_off` を優先実装対象とする
-
 #### 5.2.3 項目表示名
 - label_total
 - label_net_sales
 - label_tax
 - label_discounts
-- label_loyalty_usage
 - label_order_count
 - label_refund_count
 - label_item_count
@@ -221,9 +194,6 @@ Shopify ロケーションごとの表示名や機能有効可否、運用差分
 #### 5.2.4 項目順
 - settlement_field_order_json
 - payment_section_order_json
-
-注意:
-- `loyalty_usage` は固定の `vip_points_used` ではなく、設定に応じて表示する可変項目として扱う
 
 #### 5.2.5 税計算表示
 - tax_display_mode (`inclusive_only` / `inclusive_and_audit`)
@@ -246,13 +216,12 @@ Shopify ロケーションごとの表示名や機能有効可否、運用差分
 - 精算レシートの表示項目
 - payment sections の並び順
 - 点検レシートの表題
-- `vip_points_used` のような特定ポイントアプリ依存の名称・抽出ロジック
 
 ### 5.4 受け入れ条件
 - 表示項目の ON/OFF がレシートプレビューへ反映される
 - 項目名変更が反映される
 - print_mode に応じて処理が切り替わる
-- `loyalty_usage` の表示有無とラベル変更が反映される
+- 通常の割引額・決済内訳と注文が一致し、ポイント相当額を重複計上しない
 
 ---
 
@@ -319,11 +288,6 @@ MVP ではルールは以下で十分。
 
 ### 7.1 目的
 商品券釣有り・釣無し・額面読取・精算反映ルールを設定可能にする。
-
-### 7.1A ポイント / 会員施策との関係
-商品券機能とは別に、精算レシートや売上サマリーで表示する「ポイント利用額」「会員ポイント利用額」「アプリポイント利用額」等は、特定アプリ名に依存せず設定で吸収する。
-
-このため、内部集計項目は `vip_points_used` ではなく、論理名として `loyalty_usage` を標準とする。
 
 ### 7.2 設定項目
 
@@ -470,50 +434,9 @@ MVP では自由入力 JSON ではなく単純なテーブル実装でもよい�
 
 ---
 
-## 9A. ポイント / 会員施策設定
+## 9A. 会員・ポイント設定の廃止
 
-### 9A.1 目的
-ポイントアプリや会員施策アプリごとの差異を吸収し、精算・売上サマリー・領収書補助表示に使う「ポイント利用額」を設定可能にする。
-
-### 9A.2 設定項目
-- loyalty_usage_feature_enabled
-- loyalty_usage_display_label
-- loyalty_usage_source_type (`discount_code_prefix` / `order_metafield` / `order_attribute` / `custom_app_event` / `manual_off`)
-- loyalty_usage_source_config_json
-- loyalty_usage_discount_code_prefixes_json
-- loyalty_usage_order_metafield_namespace_nullable
-- loyalty_usage_order_metafield_key_nullable
-- loyalty_usage_order_attribute_key_nullable
-- loyalty_usage_include_in_summary
-- loyalty_usage_include_in_settlement
-
-### 9A.3 source_type の意味
-
-#### discount_code_prefix
-- 注文の discount code prefix を見て、該当値をポイント利用額として抽出する
-- 例: `VIP-`, `POINT-`, `APP-`
-
-#### order_metafield
-- 注文メタフィールドから利用額を取得する
-
-#### order_attribute
-- 注文属性 / note attributes 等から利用額を取得する
-
-#### custom_app_event
-- アプリDBに保存された独自イベントから集計する
-
-#### manual_off
-- ポイント利用額の抽出を行わない
-
-### 9A.4 GAS 由来の置換対象
-- `vip_points_used`
-- `VIP-` prefix 前提の割引判定
-- 特定アプリ依存のポイント名称
-
-### 9A.5 受け入れ条件
-- 管理画面でポイント利用額の表示名を変更できる
-- 管理画面で抽出元を切り替えできる
-- ポイントアプリ未導入ストアでは無効化できる
+公開版・自社版ともに、ポイント利用額の抽出元、表示名、施策の設定は設けない。旧設定が残る加盟店の移行はアプリ要件書 §0.2 に従う。
 
 ---
 
@@ -551,8 +474,6 @@ MVP では自由入力 JSON ではなく単純なテーブル実装でもよい�
 - show_month_achv_ratio
 - show_progress_today
 - show_progress_prev
-- show_loyalty_usage
-- loyalty_usage_summary_label
 
 #### 10.2.4 入店数報告
 - footfall_reporting_enabled
@@ -572,12 +493,11 @@ MVP では自由入力 JSON ではなく単純なテーブル実装でもよい�
 - サマリー表示対象ロケーション
 - KPI 表示項目の固定
 - 合計表示の有無
-- `vip_points_used` 固定表示
 
 ### 10.5 受け入れ条件
 - 設定で OFF にすると入店数報告UIが非表示になる
 - KPI ON/OFF が POS サマリー画面に反映される
-- `loyalty_usage` 表示設定が反映される
+- 会員情報やポイント設定を用意していない店舗でも、注文に基づく売上サマリーを表示できる
 
 ---
 
@@ -717,13 +637,6 @@ MVP では自由入力 JSON ではなく単純なテーブル実装でもよい�
 - created_at
 - updated_at
 
-### 13.6 loyalty_settings_view (logical)
-以下は app_settings / location_settings の組み合わせで表現してもよいが、実装上は論理的に以下の設定群を扱えること。
-- loyalty_usage_feature_enabled
-- loyalty_usage_display_label
-- loyalty_usage_source_type
-- loyalty_usage_source_config_json
-
 ---
 
 ## 14. GAS直書き項目 → 管理画面設定 置換表
@@ -767,17 +680,6 @@ GAS:
 - 商品券設定
   - voucher_note_parse_enabled
   - voucher_note_parse_regex
-
-### 14.4A ポイント利用額抽出
-GAS:
-- `vip_points_used`
-- `VIP-` prefix 前提の割引判定
-
-置換先:
-- ポイント / 会員施策設定
-  - loyalty_usage_source_type
-  - loyalty_usage_discount_code_prefixes_json
-  - loyalty_usage_display_label
 
 ### 14.5 サマリー対象店舗 / 入店数対象店舗
 GAS:
@@ -824,7 +726,6 @@ GAS:
 ### Phase 3
 - 領収書設定画面 + プレビュー
 - 売上サマリー設定画面
-- ポイント / 会員施策設定画面
 - 予算設定画面
 
 ### Phase 4
@@ -849,19 +750,18 @@ GAS:
 領収書設定画面を実装してください。テンプレートは1つ固定で、会社情報・ロゴ・文言・表示ON/OFF・簡易プレビューを編集できるようにしてください。
 
 ### Prompt 5
-売上サマリー設定画面、ポイント / 会員施策設定画面、予算設定画面を実装してください。入店数報告のON/OFF、ポイント利用額の抽出元設定、CSVテンプレート経由の予算アップロードを含めてください。
+売上サマリー設定画面、予算設定画面を実装してください。入店数報告のON/OFF、CSVテンプレート経由の予算アップロードを含めてください。
 
 ### Prompt 6
-既存の集計・特殊返金・商品券判定ロジックが、ハードコードではなく設定テーブルを参照するように置き換えてください。特に location mapping, payment label normalization, voucher parsing, loyalty usage extraction, print mode branching を対象にしてください。
+既存の集計・特殊返金・商品券判定ロジックが、ハードコードではなく設定テーブルを参照するように置き換えてください。特に location mapping, payment label normalization, voucher parsing, print mode branching を対象にしてください。
 
 ---
 
 ## 17. 最終決定事項
 
 - GAS で独自調整している部分は、販売用では可能な限り管理画面設定へ置換する
-- ロケーション名対応、支払方法正規化、商品券判定、印字分岐、領収書会社情報、ポイント利用額抽出ロジックは設定対象に含める
+- ロケーション名対応、支払方法正規化、商品券判定、印字分岐、領収書会社情報は設定対象に含める
 - 入店数報告は売上サマリー内の機能とし、設定 ON 時のみ表示する
 - CloudPRNT direct / order-based はロケーション設定で切り替え可能にする
 - 領収書テンプレートは1つ固定だが、管理画面でプレビューしながら編集可能とする
-- ポイント利用額は `vip_points_used` のような特定アプリ依存の固定項目ではなく、設定可能な `loyalty_usage` として扱う
 

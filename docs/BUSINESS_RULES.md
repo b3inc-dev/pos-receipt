@@ -67,7 +67,7 @@
 - いずれも `keepRatioToday = max(0, 実効売上 − 当日返金) / 実効売上` で按分し `Math.round`
 - GraphQL で取る `totalDiscountsSet` は、この VIP/割引合計には **未使用**（取得していても集計式は allocations 経路）
 
-ポイント系特殊返金の `originalPaymentMethod === "points"` 等の VIP 合成はコメント上「後続フェーズ」とあり、現行 `vipPointsUsed` は上記割引コード按分が正。
+現行版の `vipPointsUsed` は割引コードの按分結果である。旧コメントのポイント系特殊返金の追加は後続開発の対象から外す。次期要件は [アプリ要件書 §0.2](posreceipt_requirements_spec.md#02-line会員証ポイントの担当範囲) に従う。
 
 ---
 
