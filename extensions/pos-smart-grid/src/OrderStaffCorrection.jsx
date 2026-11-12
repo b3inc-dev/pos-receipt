@@ -156,12 +156,23 @@ export function OrderStaffCorrection({ orderId, onBack }) {
         return;
       }
       setNotice(result.duplicate ? "同じ訂正はすでに記録されています。" : "担当順を記録しました。決済、返金、在庫は変えていません。");
+      if (result.record?.after?.lineId) {
+        setSavedLines((prev) => {
+          const rest = (prev ?? []).filter((item) => item.lineId !== result.record.after.lineId);
+          return [...rest, result.record.after];
+        });
+      }
       setDrafts((prev) => {
         const next = { ...prev };
         delete next[line.id];
         return next;
       });
-      await load();
+      try {
+        const savedResult = await getStaffAttribution(orderId);
+        if (savedResult && Array.isArray(savedResult.lines)) setSavedLines(savedResult.lines);
+      } catch {
+        // 再取得できなくても、直前に保存した担当順は表示したままにする。
+      }
     } catch (saveError) {
       setError(errorFromUnknown(saveError));
     } finally {
@@ -176,7 +187,7 @@ export function OrderStaffCorrection({ orderId, onBack }) {
           <s-stack gap="base">
             {onBack ? <s-button onClick={onBack}>取引履歴へ戻る</s-button> : null}
             <s-text color="subdued">
-              訂正は記録だけです。決済、返金、在庫は変わりません。
+              担当の記録、返品の初期割当、訂正後の再表示はこのアプリ内で完結します。外部連携は不要です。決済、返金、在庫は変わりません。
             </s-text>
             {loading ? <s-text>取引を読み込んでいます。</s-text> : null}
             {error ? <s-text tone="critical">{error}</s-text> : null}
@@ -207,6 +218,11 @@ export function OrderStaffCorrection({ orderId, onBack }) {
                     ) : (
                       <s-text color="subdued">{`返品 ${view.returnedQuantity}点`}</s-text>
                     )}
+                    {view.sequenceKnown && view.returnAllocations.length > 0 ? (
+                      <s-text>
+                        {`返品の初期割当: ${view.returnAllocations.map((item) => `${item.sequence}番目 ${item.quantity}点`).join("、")}`}
+                      </s-text>
+                    ) : null}
                     {view.sequenceKnown ? (
                       view.slices.map((slice) => (
                         <s-text key={`${line.id}-saved-${slice.sequence}`}>

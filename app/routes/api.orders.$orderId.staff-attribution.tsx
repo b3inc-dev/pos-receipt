@@ -108,7 +108,20 @@ async function shopContext(request: Request) {
   if (!shopDomain) {
     return { error: await cors(Response.json({ ok: false, error: "shop_record_missing" }, { status: 409 })) };
   }
-  const shop = await prisma.shop.findFirst({ where: { shopDomain } });
+  let shop = await prisma.shop.findFirst({ where: { shopDomain } });
+  if (!shop) {
+    try {
+      shop = await prisma.shop.create({
+        data: {
+          shopDomain,
+          shopifyShopGid: `gid://shopify/Shop/${shopDomain}`,
+          planCode: "lite",
+        },
+      });
+    } catch {
+      shop = await prisma.shop.findFirst({ where: { shopDomain } });
+    }
+  }
   if (!shop) {
     return { error: await cors(Response.json({ ok: false, error: "shop_record_missing" }, { status: 409 })) };
   }
@@ -194,12 +207,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
       applied.record.after,
     );
     const payload = buildStaffAttributionPayload(orderId, view ? [view] : []);
-    const delivery = dispatchStaffAttributionPayload(payload);
+    let delivery = { sent: false, required: false, reason: "not_requested" };
+    try {
+      delivery = dispatchStaffAttributionPayload(payload);
+    } catch {
+      delivery = { sent: false, required: false, reason: "optional_unavailable" };
+    }
     return corsJson({
       ok: true,
       duplicate: applied.duplicate,
       record: applied.record,
       effects: applied.effects,
+      externalIntegrationRequired: false,
       delivery,
     });
   } catch (error) {

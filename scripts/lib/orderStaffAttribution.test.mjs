@@ -11,6 +11,7 @@ import {
   buildStaffAttributionPayload,
   createMemoryAttributionStore,
   dispatchStaffAttributionPayload,
+  mergeSavedLine,
   planOrderStaffCorrection,
 } from "../../extensions/common/orderStaffAttribution.js";
 
@@ -106,6 +107,57 @@ describe("確定済み明細の担当と返品", () => {
     });
     assert.equal(named.ok, false);
     assert.equal(named.code, "staff_unverified");
+  });
+});
+
+describe("公開アプリ内で完結する受入", () => {
+  it("外部送信がなくても記録、初期割当、訂正、再表示ができる", async () => {
+    const store = createMemoryAttributionStore();
+    const orderLine = { id: LINE_ID, quantity: 5, refundableQuantity: 2, staffMemberName: "田中" };
+    const recorded = planOrderStaffCorrection({
+      orderId: ORDER_ID,
+      lineId: LINE_ID,
+      quantity: 5,
+      returnedQuantity: 3,
+      recordedAt: "2026-11-12T01:00:00.000Z",
+      idempotencyKey: "accept-1",
+      previous: null,
+      slices: [
+        { staffId: 101, quantity: 2 },
+        { staffId: 202, quantity: 3 },
+      ],
+    });
+    const saved = await applyOrderStaffCorrection(store, recorded);
+    assert.equal(saved.ok, true);
+    const initial = attributionFromConfirmedLine(orderLine, saved.record.after);
+    assert.deepEqual(initial.returnAllocations, [
+      { sequence: 1, staffId: 101, quantity: 2 },
+      { sequence: 2, staffId: 202, quantity: 1 },
+    ]);
+
+    const corrected = planOrderStaffCorrection({
+      orderId: ORDER_ID,
+      lineId: LINE_ID,
+      quantity: 5,
+      returnedQuantity: 3,
+      recordedAt: "2026-11-12T02:00:00.000Z",
+      idempotencyKey: "accept-2",
+      previous: saved.record.after,
+      slices: [
+        { staffId: 202, quantity: 1 },
+        { staffId: 101, quantity: 4 },
+      ],
+    });
+    const correctedSaved = await applyOrderStaffCorrection(store, corrected);
+    const shown = mergeSavedLine([], correctedSaved.record.after);
+    const redisplayed = attributionFromConfirmedLine(orderLine, shown[0]);
+    assert.equal(redisplayed.sequenceKnown, true);
+    assert.deepEqual(redisplayed.returnAllocations, [
+      { sequence: 1, staffId: 202, quantity: 1 },
+      { sequence: 2, staffId: 101, quantity: 2 },
+    ]);
+    assert.equal(dispatchStaffAttributionPayload(buildStaffAttributionPayload(ORDER_ID, [redisplayed])).required, false);
+    assert.equal(await store.findByKey("accept-1") != null, true);
   });
 });
 

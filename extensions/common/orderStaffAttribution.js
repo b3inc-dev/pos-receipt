@@ -288,5 +288,16 @@ export function buildStaffAttributionPayload(orderId, lines) {
 }
 
 export function dispatchStaffAttributionPayload(_payload) {
-  return { sent: false, reason: "production_connection_disabled" };
+  return { sent: false, reason: "production_connection_disabled", required: false };
+}
+
+/**
+ * 保存済みの担当順を再表示用の一覧へ戻す。外部連携の成否は見ない。
+ * @param {Array<Record<string, unknown>>} lines
+ * @param {Record<string, unknown> | null | undefined} savedAfter
+ */
+export function mergeSavedLine(lines, savedAfter) {
+  if (!savedAfter?.lineId) return [...(lines ?? [])];
+  const rest = (lines ?? []).filter((line) => line.lineId !== savedAfter.lineId);
+  return [...rest, savedAfter];
 }
