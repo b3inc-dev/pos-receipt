@@ -470,6 +470,7 @@ model CartStaffDraft {
   shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
   draftKey  String   @unique
   linesJson String
+  boundOrderId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

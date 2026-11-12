@@ -28,6 +28,29 @@ function fail(code) {
   return { ok: false, code, effects: { ...EFFECTS } };
 }
 
+/**
+ * 訂正画面の1点追加。null は未割当として扱う。
+ * @param {Array<Record<string, unknown>>} slices
+ * @param {{ staffId?: number | null, staffKey?: string | null } | null} choice
+ */
+export function appendStaffChoice(slices, choice) {
+  const selected = choice && typeof choice === "object"
+    ? { staffId: choice.staffId ?? null, staffKey: choice.staffKey ?? null }
+    : { staffId: null, staffKey: null };
+  const next = (slices ?? []).map((slice) => ({ ...slice }));
+  const last = next[next.length - 1];
+  const same = last && (
+    (selected.staffKey && last.staffKey === selected.staffKey)
+    || (!selected.staffKey && !last.staffKey && last.staffId === selected.staffId)
+  );
+  if (same) {
+    next[next.length - 1] = { ...last, quantity: (last.quantity ?? 0) + 1 };
+  } else {
+    next.push({ ...selected, quantity: 1 });
+  }
+  return next;
+}
+
 export function isIsoDateTime(value) {
   if (typeof value !== "string" || !value.trim()) return false;
   const time = Date.parse(value);

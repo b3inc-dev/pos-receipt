@@ -13,7 +13,9 @@ import {
   externalStaffDispatch,
   parseStableStaffId,
   buildCartStaffRecord,
+  draftLinesForOrder,
   mergeStaffRoster,
+  reconcileStaffLine,
   reduceCartStaff,
   restoreCartStaffRecord,
   rosterFromSessionAndLines,
@@ -304,6 +306,38 @@ describe("標準の担当設定が使えないカート", () => {
     assert.equal(shown.returnAllocations[0].staffKey, "app:staffbbbb");
     assert.equal(shown.returnAllocations[0].quantity, 1);
     assert.equal(saved.record.after.slices[0].staffKey, "app:staffaaaa");
+
+    const raw = createCartStaffState([
+      { uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5 },
+    ]).lines[0];
+    const first = partial.state.lines[0];
+    const continued = reduceCartStaff(
+      { checkout: "open", lines: [reconcileStaffLine(raw, first)] },
+      { type: "assign_partial", lineUuid: "shirt", quantity: 3, staffId: "app:staffbbbb" },
+      roster,
+    );
+    assert.equal(continued.ok, true);
+    assert.deepEqual(
+      continued.state.lines[0].slices.filter((slice) => slice.staffState === "assigned").map((slice) => ({
+        staffKey: slice.staffKey,
+        quantity: slice.quantity,
+      })),
+      [
+        { staffKey: "app:staffaaaa", quantity: 2 },
+        { staffKey: "app:staffbbbb", quantity: 3 },
+      ],
+    );
+
+    const mixed = buildCartStaffRecord([
+      continued.state.lines[0],
+      { uuid: "cap", variantId: 33, quantity: 1, quantityValid: true, staffState: "unclassified" },
+    ]);
+    assert.equal(mixed.lines.length, 1);
+    const otherOrder = restoreCartStaffRecord(
+      [{ id: "other", variantId: 11, quantity: 5 }],
+      draftLinesForOrder({ boundOrderId: "1001", lines: mixed.lines }, "2002"),
+    );
+    assert.deepEqual(otherOrder.restored, []);
   });
 });
 

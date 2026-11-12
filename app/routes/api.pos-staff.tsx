@@ -57,7 +57,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
         where: { shopId: shop.id, draftKey },
       });
       if (!draft) return corsJson({ ok: false, error: "draft_missing" }, { status: 404 });
-      return corsJson({ ok: true, draftKey, lines: JSON.parse(draft.linesJson) });
+      const orderId = new URL(request.url).searchParams.get("orderId") ?? "";
+      if (draft.boundOrderId && draft.boundOrderId !== orderId) {
+        return corsJson({ ok: true, draftKey, boundOrderId: draft.boundOrderId, lines: [] });
+      }
+      return corsJson({
+        ok: true,
+        draftKey,
+        boundOrderId: draft.boundOrderId,
+        lines: JSON.parse(draft.linesJson),
+      });
     }
     const staff = await prisma.posStaff.findMany({
       where: { shopId: shop.id },
@@ -82,19 +91,30 @@ export async function action({ request }: ActionFunctionArgs) {
     const { shop, corsJson } = context as Exclude<typeof context, { error: Response }>;
     const body = await request.json() as Record<string, unknown>;
     if (typeof body.draftKey === "string" && body.draftKey.trim()) {
-      const lines = Array.isArray(body.lines) ? body.lines : [];
+      const lines = Array.isArray(body.lines) ? body.lines : null;
       const existing = await prisma.cartStaffDraft.findUnique({ where: { draftKey: body.draftKey.trim() } });
       if (existing && existing.shopId !== shop.id) {
         return corsJson({ ok: false, error: "draft_missing" }, { status: 404 });
+      }
+      if (typeof body.bindOrderId === "string" && body.bindOrderId.trim()) {
+        if (!existing) return corsJson({ ok: false, error: "draft_missing" }, { status: 404 });
+        if (existing.boundOrderId && existing.boundOrderId !== body.bindOrderId.trim()) {
+          return corsJson({ ok: false, error: "draft_bound_elsewhere", boundOrderId: existing.boundOrderId }, { status: 409 });
+        }
+        const bound = await prisma.cartStaffDraft.update({
+          where: { draftKey: body.draftKey.trim() },
+          data: { boundOrderId: body.bindOrderId.trim() },
+        });
+        return corsJson({ ok: true, draftKey: bound.draftKey, boundOrderId: bound.boundOrderId });
       }
       const draft = await prisma.cartStaffDraft.upsert({
         where: { draftKey: body.draftKey.trim() },
         create: {
           shopId: shop.id,
           draftKey: body.draftKey.trim(),
-          linesJson: JSON.stringify(lines),
+          linesJson: JSON.stringify(lines ?? []),
         },
-        update: { linesJson: JSON.stringify(lines) },
+        update: { linesJson: JSON.stringify(lines ?? []) },
       });
       return corsJson({ ok: true, draftKey: draft.draftKey });
     }

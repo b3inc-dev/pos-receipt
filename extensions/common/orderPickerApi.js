@@ -117,8 +117,12 @@ export async function saveCartStaffDraft(draftKey, lines) {
   return apiPost("/api/pos-staff", { draftKey, lines });
 }
 
-export async function getCartStaffDraft(draftKey) {
-  return apiGet("/api/pos-staff", { draftKey });
+export async function getCartStaffDraft(draftKey, orderId) {
+  return apiGet("/api/pos-staff", { draftKey, orderId: orderId ?? undefined });
+}
+
+export async function bindCartStaffDraft(draftKey, orderId) {
+  return apiPost("/api/pos-staff", { draftKey, bindOrderId: orderId });
 }
 
 /**

@@ -196,6 +196,14 @@ function applyStaff(line, staff) {
 }
 
 function currentSlices(line) {
+  if (line?.staffState === "unclassified") {
+    return [{
+      staffId: null,
+      staffKey: null,
+      staffState: "unclassified",
+      quantity: line.quantity,
+    }];
+  }
   if (Array.isArray(line.slices) && line.slices.length > 0) {
     return line.slices.map((slice) => ({ ...slice }));
   }
@@ -213,6 +221,55 @@ function currentSlices(line) {
     staffState: "unassigned",
     quantity: line.quantity,
   }];
+}
+
+function lineFromSlices(cartLine, slices) {
+  const assigned = slices.filter((slice) => slice.staffState === "assigned");
+  if (assigned.length === 1 && assigned[0].quantity === cartLine.quantity) {
+    return {
+      ...cartLine,
+      slices,
+      staffId: assigned[0].staffId ?? null,
+      staffKey: assigned[0].staffKey ?? null,
+      staffState: "assigned",
+    };
+  }
+  if (assigned.length === 0) {
+    return { ...cartLine, slices, staffId: null, staffKey: null, staffState: "unassigned" };
+  }
+  return { ...cartLine, slices, staffId: null, staffKey: null, staffState: "assigned" };
+}
+
+/**
+ * 画面に残している担当順を、いまのカート数量へ合わせる。
+ * 未分類の明細は未割当に変えない。
+ * @param {Record<string, unknown>} cartLine
+ * @param {Record<string, unknown> | null | undefined} saved
+ */
+export function reconcileStaffLine(cartLine, saved) {
+  if (!saved || cartLine?.staffState === "unclassified" || !cartLine?.quantityValid) return cartLine;
+  let slices = currentSlices(saved).filter((slice) => slice.staffState !== "unclassified");
+  if (slices.length === 0) return cartLine;
+  const quantity = cartLine.quantity;
+  let sum = slices.reduce((total, slice) => total + slice.quantity, 0);
+  if (sum < quantity) {
+    slices = [...slices, {
+      staffId: null,
+      staffKey: null,
+      staffState: "unassigned",
+      quantity: quantity - sum,
+    }];
+  } else if (sum > quantity) {
+    let over = sum - quantity;
+    slices = slices.map((slice) => ({ ...slice }));
+    for (let index = slices.length - 1; index >= 0 && over > 0; index -= 1) {
+      const take = Math.min(slices[index].quantity, over);
+      slices[index] = { ...slices[index], quantity: slices[index].quantity - take };
+      over -= take;
+    }
+    slices = slices.filter((slice) => slice.quantity > 0);
+  }
+  return lineFromSlices(cartLine, slices);
 }
 
 function assignPartialSlices(line, quantity, staff) {
@@ -405,11 +462,13 @@ export function summarizeCartStaff(lines) {
 
 export function buildCartStaffRecord(lines) {
   return {
-    lines: (lines ?? []).filter((line) => line.quantityValid).map((line) => ({
-      variantId: line.variantId ?? null,
-      quantity: line.quantity,
-      slices: currentSlices(line),
-    })),
+    lines: (lines ?? [])
+      .filter((line) => line.quantityValid && line.staffState !== "unclassified")
+      .map((line) => ({
+        variantId: line.variantId ?? null,
+        quantity: line.quantity,
+        slices: currentSlices(line).filter((slice) => slice.staffState !== "unclassified"),
+      })),
   };
 }
 
@@ -425,6 +484,17 @@ function variantKey(value) {
   const gid = /\/ProductVariant\/([1-9]\d*)$/.exec(value.trim());
   if (gid) return gid[1];
   return /^[1-9]\d*$/.test(value.trim()) ? value.trim() : null;
+}
+
+/**
+ * 下書きは紐づいた注文以外へ返さない。
+ * @param {{ boundOrderId?: string | null, lines?: Array<Record<string, unknown>> } | null | undefined} draft
+ * @param {string} orderId
+ */
+export function draftLinesForOrder(draft, orderId) {
+  if (!draft || !Array.isArray(draft.lines)) return [];
+  if (draft.boundOrderId && String(draft.boundOrderId) !== String(orderId ?? "")) return [];
+  return draft.lines;
 }
 
 export function restoreCartStaffRecord(orderLines, draftLines) {

@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   STAFF_ATTRIBUTION_PRODUCTION_CONNECTION_ENABLED,
+  appendStaffChoice,
   applyOrderStaffCorrection,
   attributionFromConfirmedLine,
   buildStaffAttributionPayload,
@@ -309,6 +310,28 @@ describe("訂正の鎖", () => {
     assert.equal(third.ok, true);
     assert.equal(third.record.previousCorrectionId, "a-cuid");
     assert.equal(third.record.before.slices[0].staffId, 202);
+  });
+});
+
+describe("訂正画面の初期値", () => {
+  it("未割当の追加はnullでも1点増え、アプリ担当キーは保存される", async () => {
+    const added = appendStaffChoice([], null);
+    assert.deepEqual(added, [{ staffId: null, staffKey: null, quantity: 1 }]);
+    const again = appendStaffChoice(added, null);
+    assert.equal(again[0].quantity, 2);
+    const store = createMemoryAttributionStore();
+    const saved = await commitOrderStaffCorrection(store, {
+      orderId: ORDER_ID,
+      lineId: LINE_ID,
+      quantity: 2,
+      returnedQuantity: 0,
+      recordedAt: "2026-11-12T06:00:00.000Z",
+      idempotencyKey: "keep-key",
+      slices: [{ staffKey: "app:staffaaaa", staffId: null, quantity: 2 }],
+    });
+    assert.equal(saved.ok, true);
+    assert.equal(saved.record.after.slices[0].staffKey, "app:staffaaaa");
+    assert.equal(saved.record.after.slices[0].staffState, "assigned");
   });
 });
 

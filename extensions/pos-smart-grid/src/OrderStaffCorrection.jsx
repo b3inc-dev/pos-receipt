@@ -1,10 +1,11 @@
 import { useEffect, useState } from "preact/hooks";
-import { getCartStaffDraft, getOrder, getPosStaff, getStaffAttribution, saveStaffAttribution } from "../../common/orderPickerApi.js";
+import { bindCartStaffDraft, getCartStaffDraft, getOrder, getPosStaff, getStaffAttribution, saveStaffAttribution } from "../../common/orderPickerApi.js";
 import {
+  appendStaffChoice,
   attributionFromConfirmedLine,
   readLineQuantities,
 } from "../../common/orderStaffAttribution.js";
-import { parseStableStaffId, restoreCartStaffRecord } from "../../common/cartStaffAssignment.js";
+import { draftLinesForOrder, parseStableStaffId, restoreCartStaffRecord } from "../../common/cartStaffAssignment.js";
 
 const ERROR_TEXT = {
   staff_unverified: "担当IDを確認できないため、保存しませんでした。",
@@ -57,20 +58,8 @@ function sliceSignature(slices) {
   return JSON.stringify(slices ?? []);
 }
 
-function sameChoice(slice, choice) {
-  if (choice.staffKey) return slice.staffKey === choice.staffKey;
-  return slice.staffId === choice.staffId && !slice.staffKey;
-}
-
 function appendPoint(slices, choice) {
-  const next = (slices ?? []).map((slice) => ({ ...slice }));
-  const last = next[next.length - 1];
-  if (last && sameChoice(last, choice)) {
-    next[next.length - 1] = { ...last, quantity: last.quantity + 1 };
-  } else {
-    next.push({ staffId: choice.staffId ?? null, staffKey: choice.staffKey ?? null, quantity: 1 });
-  }
-  return next;
+  return appendStaffChoice(slices, choice);
 }
 
 function removePoint(slices) {
@@ -109,31 +98,9 @@ export function OrderStaffCorrection({ orderId, onBack }) {
       } catch {
         savedResult = null;
       }
-      let draftLines = null;
-      try {
-        const raw = sessionStorage.getItem("pos_cart_staff_draft_lines");
-        if (raw) draftLines = JSON.parse(raw);
-      } catch {
-        draftLines = null;
-      }
-      try {
-        const key = sessionStorage.getItem("pos_cart_staff_draft_key");
-        if (key) {
-          const remote = await getCartStaffDraft(key);
-          if (Array.isArray(remote?.lines)) draftLines = remote.lines;
-        }
-      } catch {
-        // 下書きが取れなくても、保存済みの訂正は表示する。
-      }
       const saved = savedResult && Array.isArray(savedResult.lines) ? savedResult.lines : [];
-      const known = new Set(saved.map((line) => line.lineId));
-      const restored = draftLines ? restoreCartStaffRecord(orderResult?.lineItems ?? [], draftLines) : { restored: [] };
-      const merged = [
-        ...saved,
-        ...restored.restored.filter((line) => !known.has(line.lineId)),
-      ];
       setOrder(orderResult);
-      setSavedLines(merged);
+      setSavedLines(saved);
     } catch (loadError) {
       setError(errorFromUnknown(loadError));
     } finally {
@@ -220,6 +187,69 @@ export function OrderStaffCorrection({ orderId, onBack }) {
     }
   };
 
+  const bindPendingDraft = async (currentOrder) => {
+    let key = "";
+    try {
+      key = sessionStorage.getItem("pos_cart_staff_draft_key") ?? "";
+    } catch {
+      key = "";
+    }
+    if (!key) {
+      setError("会計前の担当順はありません。");
+      return;
+    }
+    setBusyLine("draft");
+    setError("");
+    try {
+      const remote = await getCartStaffDraft(key, currentOrder.orderId ?? orderId);
+      const lines = draftLinesForOrder(remote, orderId);
+      if (remote?.boundOrderId && lines.length === 0) {
+        setError("この担当順は別の取引に記録済みです。");
+        return;
+      }
+      const restored = restoreCartStaffRecord(currentOrder.lineItems ?? [], lines);
+      const assignedLines = restored.restored
+        .map((line) => ({
+          ...line,
+          slices: (line.slices ?? []).filter((slice) => slice.staffState === "assigned"),
+        }))
+        .filter((line) => line.slices.length > 0);
+      if (assignedLines.length === 0) {
+        setError("この取引の明細と担当順が一致しないため、記録しません。");
+        return;
+      }
+      for (const line of assignedLines) {
+        const source = (currentOrder.lineItems ?? []).find((item) => item.id === line.lineId) ?? {};
+        const quantities = readLineQuantities(source);
+        await saveStaffAttribution(orderId, {
+          idempotencyKey: `bind:${key}:${orderId}:${line.lineId}`,
+          lineId: line.lineId,
+          quantity: line.quantity,
+          returnedQuantity: quantities.returnedQuantity,
+          recordedAt: new Date().toISOString(),
+          slices: line.slices.map((slice) => ({
+            staffId: slice.staffId ?? null,
+            staffKey: slice.staffKey ?? null,
+            quantity: slice.quantity,
+          })),
+        });
+      }
+      await bindCartStaffDraft(key, orderId);
+      try {
+        sessionStorage.removeItem("pos_cart_staff_draft_key");
+        sessionStorage.removeItem("pos_cart_staff_draft_lines");
+      } catch {
+        // 注文への記録は残っている。
+      }
+      setNotice("この取引に担当順を記録しました。");
+      await load();
+    } catch (bindError) {
+      setError(errorFromUnknown(bindError));
+    } finally {
+      setBusyLine("");
+    }
+  };
+
   return (
     <s-page heading="確定済みの担当">
       <s-scroll-box>
@@ -233,12 +263,24 @@ export function OrderStaffCorrection({ orderId, onBack }) {
             {error ? <s-text tone="critical">{error}</s-text> : null}
             {notice ? <s-text>{notice}</s-text> : null}
             {order ? <s-text type="strong">{order.orderName ?? "取引"}</s-text> : null}
+            {order ? (
+              <s-button
+                disabled={busyLine === "draft"}
+                onClick={() => bindPendingDraft(order)}
+              >
+                この取引に会計前の担当順を記録
+              </s-button>
+            ) : null}
             {(order?.lineItems ?? []).map((line) => {
               const saved = savedByLine.get(line.id) ?? null;
               const view = attributionFromConfirmedLine(line, saved);
               if (!view) return null;
               const draft = drafts[line.id] ?? (view.sequenceKnown
-                ? view.slices.map((slice) => ({ staffId: slice.staffId, quantity: slice.quantity }))
+                ? view.slices.map((slice) => ({
+                  staffId: slice.staffId ?? null,
+                  staffKey: slice.staffKey ?? null,
+                  quantity: slice.quantity,
+                }))
                 : []);
               const assigned = sumQuantity(draft);
               const remaining = view.quantity - assigned;
