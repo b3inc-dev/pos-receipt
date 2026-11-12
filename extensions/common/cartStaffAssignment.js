@@ -456,14 +456,18 @@ export function reduceCartStaff(state, action, roster) {
         op: "split_variant",
         removeUuid: line.uuid,
         adds: [
-          { variantId: line.variantId, quantity: rest.quantity, staffId: rest.staffId },
-          { variantId: line.variantId, quantity: slice.quantity, staffId: slice.staffId },
+          { plannedUuid: rest.uuid, variantId: line.variantId, quantity: rest.quantity, staffId: rest.staffId },
+          { plannedUuid: slice.uuid, variantId: line.variantId, quantity: slice.quantity, staffId: slice.staffId },
         ],
       },
     ]);
   }
 
   return fail(current, "unsupported_action");
+}
+
+function sliceIsAssigned(slice) {
+  return slice?.staffState === "assigned" || isAppStaffKey(slice?.staffKey) || parseStableStaffId(slice?.staffId) != null;
 }
 
 export function summarizeCartStaff(lines) {
@@ -479,11 +483,46 @@ export function summarizeCartStaff(lines) {
       continue;
     }
     summary.totalQty += line.quantity;
-    if (line.staffState === "assigned") summary.assignedQty += line.quantity;
-    else if (line.staffState === "unassigned") summary.unassignedQty += line.quantity;
-    else summary.unclassifiedCount += 1;
+    const slices = Array.isArray(line.slices) && line.slices.length > 0 && line.staffState !== "unclassified"
+      ? line.slices
+      : null;
+    if (!slices) {
+      if (line.staffState === "assigned") summary.assignedQty += line.quantity;
+      else if (line.staffState === "unassigned") summary.unassignedQty += line.quantity;
+      else summary.unclassifiedCount += 1;
+      continue;
+    }
+    let counted = 0;
+    for (const slice of slices) {
+      if (typeof slice?.quantity !== "number" || slice.quantity <= 0) continue;
+      counted += slice.quantity;
+      if (slice.staffState === "unclassified") summary.unclassifiedCount += 1;
+      else if (sliceIsAssigned(slice)) summary.assignedQty += slice.quantity;
+      else summary.unassignedQty += slice.quantity;
+    }
+    if (counted < line.quantity) summary.unassignedQty += line.quantity - counted;
   }
   return summary;
+}
+
+/**
+ * 操作直後の担当順を残す。カート反映前の明細一覧に無い、追加された明細IDも残す。
+ * @param {Record<string, Record<string, unknown>>} previous
+ * @param {Array<Record<string, unknown>>} snapshotLines
+ * @param {Array<Record<string, unknown>>} nextLines
+ */
+export function overlayAfterAction(previous, snapshotLines, nextLines) {
+  const next = { ...(previous ?? {}) };
+  const kept = new Set((snapshotLines ?? []).map((line) => line?.uuid).filter(Boolean));
+  for (const line of nextLines ?? []) {
+    if (!line?.uuid) continue;
+    next[line.uuid] = line;
+    kept.add(line.uuid);
+  }
+  for (const uuid of Object.keys(next)) {
+    if (!kept.has(uuid)) delete next[uuid];
+  }
+  return next;
 }
 
 function baselineStaffIdFor(line, cartByUuid) {
@@ -700,6 +739,22 @@ export function externalStaffDispatch(_snapshot) {
  * @param {Array<{ id: number }>} roster
  * @param {Record<string, Function>} cart
  */
+function rewriteSplitUuids(state, created) {
+  const byPlanned = new Map(
+    (created ?? [])
+      .filter((item) => item?.plannedUuid && item?.uuid)
+      .map((item) => [item.plannedUuid, item.uuid]),
+  );
+  if (byPlanned.size === 0) return state;
+  return {
+    ...state,
+    lines: (state?.lines ?? []).map((line) => {
+      const uuid = byPlanned.get(line.uuid);
+      return uuid ? { ...line, uuid } : line;
+    }),
+  };
+}
+
 export async function runCartStaffAction(lines, action, roster, cart) {
   const planned = reduceCartStaff({ checkout: "open", lines }, action, roster);
   if (!planned.ok || planned.mutations.length === 0) return planned;
@@ -713,7 +768,10 @@ export async function runCartStaffAction(lines, action, roster, cart) {
       externalSent: false,
     };
   }
-  return planned;
+  return {
+    ...planned,
+    state: rewriteSplitUuids(planned.state, applied.created),
+  };
 }
 
 export async function applyCartStaffMutations(mutations, cart) {
@@ -740,6 +798,7 @@ export async function applyCartStaffMutations(mutations, cart) {
     }
   };
 
+  const created = [];
   try {
     for (const mutation of mutations ?? []) {
       if (mutation.op === "record_app_staff") {
@@ -756,7 +815,7 @@ export async function applyCartStaffMutations(mutations, cart) {
       } else if (mutation.op === "remove_line") {
         await call("removeLineItem", mutation.uuid);
       } else if (mutation.op === "split_variant") {
-        const created = [];
+        const added = [];
         try {
           for (const add of mutation.adds ?? []) {
             const uuid = await call("addLineItem", add.variantId, add.quantity);
@@ -765,9 +824,13 @@ export async function applyCartStaffMutations(mutations, cart) {
               error.code = "apply_failed";
               throw error;
             }
-            created.push({ uuid, staffId: add.staffId ?? null });
+            added.push({
+              plannedUuid: add.plannedUuid ?? null,
+              uuid,
+              staffId: add.staffId ?? null,
+            });
           }
-          for (const line of created) {
+          for (const line of added) {
             await call(
               "setAttributedStaffToLineItem",
               line.staffId === null ? undefined : line.staffId,
@@ -775,8 +838,9 @@ export async function applyCartStaffMutations(mutations, cart) {
             );
           }
           await call("removeLineItem", mutation.removeUuid);
+          created.push(...added);
         } catch (error) {
-          await rollbackAdded(created);
+          await rollbackAdded(added);
           throw error;
         }
       } else {
@@ -785,7 +849,7 @@ export async function applyCartStaffMutations(mutations, cart) {
         throw error;
       }
     }
-    return { ok: true, invoked };
+    return { ok: true, invoked, created };
   } catch (error) {
     return {
       ok: false,

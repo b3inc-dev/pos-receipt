@@ -1,6 +1,6 @@
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { buildCartStaffRecord, overlayFromDraft, planDraftRestore, reconcileStaffLine, runCartStaffAction } from "../../common/cartStaffAssignment.js";
+import { buildCartStaffRecord, overlayAfterAction, overlayFromDraft, planDraftRestore, reconcileStaffLine, runCartStaffAction } from "../../common/cartStaffAssignment.js";
 import { getCartStaffDraft, getPosStaff, saveCartStaffDraft, savePosStaff } from "../../common/orderPickerApi.js";
 import { CartStaffPanel, cartStaffErrorText, useCartStaffSnapshot } from "./CartStaffPanel.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
@@ -126,17 +126,7 @@ function CartStaffModal() {
         return;
       }
       const nextLines = result.state?.lines ?? displayLines;
-      setOverlay((prev) => {
-        const next = { ...prev };
-        const seen = new Set(snapshot.lines.map((line) => line.uuid));
-        for (const line of nextLines) {
-          if (line?.uuid) next[line.uuid] = line;
-        }
-        for (const uuid of Object.keys(next)) {
-          if (!seen.has(uuid)) delete next[uuid];
-        }
-        return next;
-      });
+      setOverlay((prev) => overlayAfterAction(prev, snapshot.lines, nextLines));
       const record = buildCartStaffRecord(nextLines, snapshot.lines);
       try {
         sessionStorage.setItem(DRAFT_LINES_STORAGE, JSON.stringify(record.lines));

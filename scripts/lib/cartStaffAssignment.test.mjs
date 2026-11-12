@@ -16,7 +16,9 @@ import {
   draftLinesForOrder,
   slicesToRecord,
   mergeStaffRoster,
+  overlayAfterAction,
   overlayFromDraft,
+  summarizeCartStaff,
   planDraftRestore,
   reconcileStaffLine,
   reduceCartStaff,
@@ -704,6 +706,66 @@ describe("カートAPIへの反映", () => {
     assert.equal(partial.state.lines.find((item) => item.quantity === 2).staffId, 101);
     assert.equal(partial.state.lines.find((item) => item.quantity === 2).staffState, "assigned");
     assert.equal(partial.state.lines.find((item) => item.quantity === 1).staffState, "unassigned");
+  });
+
+  it("分割でできた実明細IDへアプリ担当順を残し、部分割当はスライスで数える", async () => {
+    const roster = mergeStaffRoster([{ id: 202 }], [{ key: "app:staffaaaa", label: "A" }]);
+    const cart = fakeCart([
+      { uuid: "shirt", variantId: 11, quantity: 5, staffId: null },
+    ]);
+    const partial = await runCartStaffAction(
+      createCartStaffState([{ uuid: "shirt", title: "シャツ", variantId: 11, quantity: 5 }]).lines,
+      { type: "assign_partial", lineUuid: "shirt", quantity: 2, staffId: "app:staffaaaa" },
+      roster,
+      cart,
+    );
+    assert.equal(partial.ok, true);
+    assert.deepEqual(summarizeCartStaff(partial.state.lines), {
+      totalQty: 5,
+      unassignedQty: 3,
+      assignedQty: 2,
+      unclassifiedCount: 0,
+    });
+    const split = await runCartStaffAction(
+      partial.state.lines,
+      { type: "assign_partial", lineUuid: "shirt", quantity: 1, staffId: 202 },
+      roster,
+      cart,
+    );
+    assert.equal(split.ok, true);
+    const rest = split.state.lines.find((line) => line.quantity === 4);
+    const cut = split.state.lines.find((line) => line.quantity === 1);
+    assert.equal(rest.uuid, "new-1");
+    assert.equal(cut.uuid, "new-2");
+    assert.equal(rest.slices[0].staffKey, "app:staffaaaa");
+    assert.equal(rest.slices[0].quantity, 2);
+    const snapshotBeforeRefresh = [{ uuid: "shirt", variantId: 11, quantity: 5, staffId: null }];
+    const overlay = overlayAfterAction({}, snapshotBeforeRefresh, split.state.lines);
+    assert.equal(overlay["new-1"].slices[0].staffKey, "app:staffaaaa");
+    const refreshed = cart.lines.map((line) => createCartStaffState([{
+      uuid: line.uuid,
+      title: "シャツ",
+      variantId: line.variantId,
+      quantity: line.quantity,
+      staffId: line.staffId,
+    }]).lines[0]);
+    const kept = overlayAfterAction(overlay, refreshed, split.state.lines);
+    const record = buildCartStaffRecord(split.state.lines, refreshed);
+    const restored = overlayFromDraft(refreshed, record.lines);
+    assert.equal(restored[rest.uuid].slices[0].staffKey, "app:staffaaaa");
+    assert.equal(restored[rest.uuid].slices[0].quantity, 2);
+    assert.equal(kept[rest.uuid].slices[0].quantity, 2);
+    const next = await runCartStaffAction(
+      split.state.lines,
+      { type: "assign_line", lineUuid: cut.uuid, staffId: 202 },
+      roster,
+      cart,
+    );
+    assert.equal(next.ok, true);
+    assert.equal(
+      buildCartStaffRecord(next.state.lines, refreshed).lines.find((line) => line.uuid === rest.uuid).slices[0].staffKey,
+      "app:staffaaaa",
+    );
   });
 
   it("追加に失敗した分割は元明細を残し、増えた数量を戻す", async () => {
