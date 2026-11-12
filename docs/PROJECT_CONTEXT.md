@@ -12,7 +12,7 @@
 | 特殊返金・商品券調整 | 注文に紐づくイベントを DB に保存し、精算へ反映（設定により Shopify 返金実行もあり） |
 | 領収書 | 注文の合計金額ベースで領収書発行履歴を DB に保存（印字 API 呼び出しなし） |
 | 売上サマリー | 精算と同系の集計結果を日次／期間キャッシュし、予算・入店数と合わせて表示 |
-| LINE・会員証・ポイント | 現行のLIFF会員証は自社版限定。次期要件は公開版・自社版ともにLINE CRM（LINE・会員証）とShop Point（ポイント）が担当する。POS Receiptは汎用の注文・支払・返金額を扱う。詳細は [アプリ要件書 §0.2](posreceipt_requirements_spec.md#02-line会員証ポイントの担当範囲) を参照。 |
+| LINE・会員証・ポイント | LINE・会員証の担当はLINE CRM、ポイントの担当はShop Point。公開版はLINE機能を提供しない。自社カスタム版では既存のLIFF会員証と関連導線を当面維持する。POS Receiptは汎用の注文・支払・返金額を扱う。詳細は [アプリ要件書 §0.2](posreceipt_requirements_spec.md#02-line会員証ポイントの担当範囲) を参照。 |
 
 要件の詳細正本は `docs/posreceipt_requirements_spec.md`。実装進捗メモは `docs/PROGRESS_SUMMARY.md`（日付が古い箇所あり。現行挙動は本ファイル群を優先）。
 
