@@ -37,12 +37,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
       : planLabel(shop.planCode),
     isInhouse: fullAccess,
+    distribution: isInhouseMode() ? "inhouse" : "public",
     privacyPolicyUrl,
   };
 }
 
 export default function AppIndex() {
-  const { planCode, planLabel: label, isInhouse, privacyPolicyUrl } =
+  const { planCode, planLabel: label, isInhouse, distribution, privacyPolicyUrl } =
     useLoaderData<typeof loader>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -61,7 +62,9 @@ export default function AppIndex() {
                 <p className="AdminHome-title">現在のプラン</p>
                 <InlineStack align="space-between" blockAlign="center" gap="200">
                   <Text variant="headingLg" as="p">{label}</Text>
-                  <Badge tone={isPro ? "success" : "info"}>{isInhouse ? "自社用" : "公開用"}</Badge>
+                  <Badge tone={isPro ? "success" : "info"}>
+                    {distribution === "inhouse" ? "自社用" : "公開用"}
+                  </Badge>
                 </InlineStack>
                 <p className="AdminHome-copy">
                   精算・特殊返金・領収書などは POS アプリのタイルから利用できます。

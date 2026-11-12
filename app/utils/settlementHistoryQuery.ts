@@ -46,18 +46,26 @@ export function formatYen(value: string | number): string {
   return `¥${amount.toLocaleString("ja-JP")}`;
 }
 
+const EXECUTED_AT_OPTIONS: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+};
+
 export function formatExecutedAt(iso: string, timeZone: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-    timeZone,
-  }).format(date);
+  try {
+    return new Intl.DateTimeFormat("ja-JP", { ...EXECUTED_AT_OPTIONS, timeZone }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat("ja-JP", {
+      ...EXECUTED_AT_OPTIONS,
+      timeZone: "Asia/Tokyo",
+    }).format(date);
+  }
 }
 
 export function dateRangeWarning(dateFrom: string, dateTo: string): string | null {
