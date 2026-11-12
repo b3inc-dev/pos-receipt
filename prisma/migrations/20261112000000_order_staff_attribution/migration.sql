@@ -5,6 +5,7 @@ CREATE TABLE "OrderStaffAttributionCorrection" (
     "orderId" TEXT NOT NULL,
     "lineId" TEXT NOT NULL,
     "idempotencyKey" TEXT NOT NULL,
+    "previousCorrectionId" TEXT NOT NULL DEFAULT '',
     "beforeJson" TEXT NOT NULL,
     "afterJson" TEXT NOT NULL,
     "recordedAt" TIMESTAMP(3) NOT NULL,
@@ -15,6 +16,8 @@ CREATE TABLE "OrderStaffAttributionCorrection" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "OrderStaffAttributionCorrection_idempotencyKey_key" ON "OrderStaffAttributionCorrection"("idempotencyKey");
+
+CREATE UNIQUE INDEX "OrderStaffCorrection_predecessor_key" ON "OrderStaffAttributionCorrection"("shopId", "orderId", "lineId", "previousCorrectionId");
 
 -- CreateIndex
 CREATE INDEX "OrderStaffAttributionCorrection_shopId_orderId_lineId_idx" ON "OrderStaffAttributionCorrection"("shopId", "orderId", "lineId");

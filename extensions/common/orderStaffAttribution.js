@@ -267,17 +267,29 @@ export function createMemoryAttributionStore() {
       const rows = byLine.filter((row) => row.orderId === orderId && row.lineId === lineId);
       return selectLatestCorrection(rows);
     },
-    async insert(record) {
+    async insert(record, options = {}) {
       if (byKey.has(record.idempotencyKey)) {
         const error = new Error("duplicate");
         error.code = "duplicate";
         throw error;
+      }
+      if (options.expectedPreviousId !== undefined) {
+        const latest = selectLatestCorrection(
+          byLine.filter((row) => row.orderId === record.orderId && row.lineId === record.lineId),
+        );
+        const actual = latest?.id ?? "";
+        if (options.expectedPreviousId !== actual) {
+          const error = new Error("predecessor_changed");
+          error.code = "predecessor_changed";
+          throw error;
+        }
       }
       persistenceSeq += 1;
       const stored = {
         ...record,
         id: record.id ?? `mem-${persistenceSeq}`,
         persistenceSeq,
+        previousCorrectionId: options.expectedPreviousId ?? "",
         persistedAt: new Date().toISOString(),
         before: structuredClone(record.before),
         after: structuredClone(record.after),
@@ -295,6 +307,39 @@ export function createMemoryAttributionStore() {
  * @param {{ findByKey: Function, insert: Function }} store
  * @param {Record<string, unknown>} plan
  */
+/**
+ * 保存直前に直前の訂正を読み直し、同時保存で変更前がずれたら保存し直す。
+ * @param {{ findByKey: Function, findLatestByLine: Function, insert: Function }} store
+ * @param {Record<string, unknown>} input
+ */
+export async function commitOrderStaffCorrection(store, input) {
+  const idempotencyKey = typeof input?.idempotencyKey === "string" ? input.idempotencyKey.trim() : "";
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (idempotencyKey) {
+      const existing = await store.findByKey(idempotencyKey);
+      if (existing) return { ok: true, duplicate: true, record: existing, effects: { ...EFFECTS } };
+    }
+    const latest = await store.findLatestByLine(input?.orderId, input?.lineId);
+    const plan = planOrderStaffCorrection({
+      ...input,
+      previous: latest?.after ?? null,
+    });
+    if (!plan.ok) return plan;
+    try {
+      const saved = await store.insert(plan.record, { expectedPreviousId: latest?.id ?? "" });
+      return { ok: true, duplicate: false, record: saved, effects: { ...EFFECTS } };
+    } catch (error) {
+      if (error?.code === "duplicate") {
+        const raced = idempotencyKey ? await store.findByKey(idempotencyKey) : null;
+        if (raced) return { ok: true, duplicate: true, record: raced, effects: { ...EFFECTS } };
+      }
+      if (error?.code === "predecessor_changed") continue;
+      return fail("apply_failed");
+    }
+  }
+  return fail("predecessor_conflict");
+}
+
 export async function applyOrderStaffCorrection(store, plan) {
   if (!plan?.ok || !plan.record) return plan?.ok === false ? plan : fail("unsupported_action");
   const existing = await store.findByKey(plan.record.idempotencyKey);

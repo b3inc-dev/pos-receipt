@@ -9,6 +9,7 @@ import {
   applyOrderStaffCorrection,
   attributionFromConfirmedLine,
   buildStaffAttributionPayload,
+  commitOrderStaffCorrection,
   createMemoryAttributionStore,
   dispatchStaffAttributionPayload,
   mergeSavedLine,
@@ -197,6 +198,44 @@ describe("訂正の現在値", () => {
   });
 });
 
+describe("同時の訂正", () => {
+  it("後から保存する訂正の変更前は、先行して保存された変更後になる", async () => {
+    const store = createMemoryAttributionStore();
+    const first = await commitOrderStaffCorrection(store, {
+      orderId: ORDER_ID,
+      lineId: LINE_ID,
+      quantity: 2,
+      returnedQuantity: 0,
+      recordedAt: "2026-11-12T01:00:00.000Z",
+      idempotencyKey: "concurrent-first",
+      slices: [{ staffId: 101, quantity: 2 }],
+    });
+    let staleReads = 0;
+    const racing = {
+      findByKey: (key) => store.findByKey(key),
+      findLatestByLine: async (orderId, lineId) => {
+        staleReads += 1;
+        if (staleReads === 1) return null;
+        return store.findLatestByLine(orderId, lineId);
+      },
+      insert: (record, options) => store.insert(record, options),
+    };
+    const second = await commitOrderStaffCorrection(racing, {
+      orderId: ORDER_ID,
+      lineId: LINE_ID,
+      quantity: 2,
+      returnedQuantity: 0,
+      recordedAt: "2026-11-12T02:00:00.000Z",
+      idempotencyKey: "concurrent-second",
+      slices: [{ staffId: 202, quantity: 2 }],
+    });
+    assert.equal(second.ok, true);
+    assert.equal(second.record.previousCorrectionId, first.record.id);
+    assert.equal(second.record.before.slices[0].staffId, 101);
+    assert.equal(second.record.after.slices[0].staffId, 202);
+  });
+});
+
 describe("連携形式", () => {
   it("合成データは形式を満たし、本番接続では送られない", () => {
     const view = attributionFromConfirmedLine(
@@ -230,5 +269,7 @@ describe("連携形式", () => {
       assert.equal(route.includes(forbidden), false, forbidden);
     }
     assert.equal(route.includes("createdAt: \"asc\""), true);
+    assert.equal(route.includes("previousCorrectionId"), true);
+    assert.equal(route.includes("commitOrderStaffCorrection"), true);
   });
 });

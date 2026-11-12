@@ -437,10 +437,13 @@ model OrderStaffAttributionCorrection {
   orderId        String
   lineId         String
   idempotencyKey String   @unique
+  /// この訂正の直前にあった訂正ID。先頭の訂正は空文字。同時保存の直列化に使う。
+  previousCorrectionId String @default("")
   beforeJson     String
   afterJson      String
   recordedAt     DateTime
   createdAt      DateTime @default(now())
 
+  @@unique([shopId, orderId, lineId, previousCorrectionId], map: "OrderStaffCorrection_predecessor_key")
   @@index([shopId, orderId, lineId])
 }

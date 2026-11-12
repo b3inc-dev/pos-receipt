@@ -8,12 +8,11 @@ import { authenticate } from "../shopify.server";
 import { corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import {
-  applyOrderStaffCorrection,
   attributionFromConfirmedLine,
   buildStaffAttributionPayload,
+  commitOrderStaffCorrection,
   currentCorrectionsByLine,
   dispatchStaffAttributionPayload,
-  planOrderStaffCorrection,
   selectLatestCorrection,
 } from "../../extensions/common/orderStaffAttribution.js";
 
@@ -22,6 +21,7 @@ type SavedRow = {
   orderId: string;
   lineId: string;
   idempotencyKey: string;
+  previousCorrectionId: string;
   beforeJson: string;
   afterJson: string;
   recordedAt: Date;
@@ -53,6 +53,7 @@ function toRecord(row: SavedRow) {
     idempotencyKey: row.idempotencyKey,
     recordedAt: row.recordedAt.toISOString(),
     persistedAt: row.createdAt.toISOString(),
+    previousCorrectionId: row.previousCorrectionId,
     before: parseJson(row.beforeJson),
     after: parseJson(row.afterJson),
     effects: {
@@ -72,6 +73,13 @@ function storeFor(shopId: string) {
       if (!row || row.shopId !== shopId) return null;
       return toRecord(row);
     },
+    async findLatestByLine(orderId: string, lineId: string) {
+      const history = await prisma.orderStaffAttributionCorrection.findMany({
+        where: { shopId, orderId, lineId },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      });
+      return selectLatestCorrection(history.map(toRecord));
+    },
     async insert(record: {
       idempotencyKey: string;
       orderId: string;
@@ -79,7 +87,8 @@ function storeFor(shopId: string) {
       recordedAt: string;
       before: unknown;
       after: unknown;
-    }) {
+    }, options?: { expectedPreviousId?: string }) {
+      const expectedPreviousId = options?.expectedPreviousId ?? "";
       try {
         const row = await prisma.orderStaffAttributionCorrection.create({
           data: {
@@ -87,6 +96,7 @@ function storeFor(shopId: string) {
             orderId: record.orderId,
             lineId: record.lineId,
             idempotencyKey: record.idempotencyKey,
+            previousCorrectionId: expectedPreviousId,
             beforeJson: JSON.stringify(record.before),
             afterJson: JSON.stringify(record.after),
             recordedAt: new Date(record.recordedAt),
@@ -96,9 +106,17 @@ function storeFor(shopId: string) {
       } catch (error) {
         const code = (error as { code?: string })?.code;
         if (code === "P2002") {
-          const duplicate = new Error("duplicate");
-          (duplicate as { code?: string }).code = "duplicate";
-          throw duplicate;
+          const existing = await prisma.orderStaffAttributionCorrection.findUnique({
+            where: { idempotencyKey: record.idempotencyKey },
+          });
+          if (existing && existing.shopId === shopId) {
+            const duplicate = new Error("duplicate");
+            (duplicate as { code?: string }).code = "duplicate";
+            throw duplicate;
+          }
+          const changed = new Error("predecessor_changed");
+          (changed as { code?: string }).code = "predecessor_changed";
+          throw changed;
         }
         throw error;
       }
@@ -175,13 +193,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (!orderId) return corsJson({ ok: false, error: "orderId required" }, { status: 400 });
     const body = await request.json() as Record<string, unknown>;
     const lineId = String(body.lineId ?? "");
-    const history = await prisma.orderStaffAttributionCorrection.findMany({
-      where: { shopId: shop.id, orderId, lineId },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    });
-    const previousRow = selectLatestCorrection(history.map(toRecord));
-    const previous = previousRow?.after ?? null;
-    const plan = planOrderStaffCorrection({
+    const applied = await commitOrderStaffCorrection(storeFor(shop.id), {
       orderId,
       lineId,
       quantity: body.quantity,
@@ -189,14 +201,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
       recordedAt: body.recordedAt,
       idempotencyKey: body.idempotencyKey,
       slices: body.slices,
-      previous,
     });
-    if (!plan.ok) {
-      return corsJson({ ok: false, error: plan.code, effects: plan.effects }, { status: 400 });
-    }
-    const applied = await applyOrderStaffCorrection(storeFor(shop.id), plan);
     if (!applied.ok) {
-      return corsJson({ ok: false, error: applied.code, effects: applied.effects }, { status: 500 });
+      const status = applied.code === "apply_failed" || applied.code === "predecessor_conflict" ? 500 : 400;
+      return corsJson({ ok: false, error: applied.code, effects: applied.effects }, { status });
     }
     const view = attributionFromConfirmedLine(
       {
