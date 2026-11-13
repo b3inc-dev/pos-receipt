@@ -13,6 +13,7 @@ import prisma from "../db.server";
 import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
 import { getAppSetting, setAppSetting, SETTLEMENT_SETTINGS_KEY } from "../utils/appSettings.server";
 import { splitTaxInclusiveToNetAndTax } from "./settlementEngine.server";
+import { readOrdersPageOrThrow } from "./settlementUpstreamPage.server";
 
 // ── 既知の source_name → 表示名マッピング ────────────────────────────────────
 
@@ -341,10 +342,7 @@ async function fetchChannelOrders(
         };
       };
     };
-
-    if (json.errors?.length) {
-      throw new Error(`[salesChannelEngine] GraphQL error (query="${query}"): ${json.errors.map((e) => e.message).join(", ")}`);
-    }
+    readOrdersPageOrThrow(json, "channelOrders");
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
@@ -402,10 +400,7 @@ async function fetchChannelOrdersForRefundOverlay(
         };
       };
     };
-
-    if (json.errors?.length) {
-      throw new Error(`[salesChannelEngine] GraphQL error (refund overlay, query="${query}"): ${json.errors.map((e) => e.message).join(", ")}`);
-    }
+    readOrdersPageOrThrow(json, "channelRefunds");
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;

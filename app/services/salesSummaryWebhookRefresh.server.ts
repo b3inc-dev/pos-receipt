@@ -21,6 +21,7 @@ import {
   mergeAndNormalizeSalesSummarySettings,
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
+import { runBackgroundDailySlices } from "./salesSummaryBackgroundSlice.server";
 
 export type WebhookRefreshAdmin = {
   graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }>;
@@ -81,7 +82,8 @@ export function collectOrderRelatedCalendarDates(
 
 /**
  * 有効な売上サマリー設定の店舗について、各ロケーション・各チャネルの日次キャッシュを再計算。
- * 1 組み合わせの失敗で全体を落とさない。
+ * 1 組み合わせの失敗では、そのスライスの確定値を残して他を続行する。
+ * 失敗一覧は呼び出し側が再試行に使う。
  */
 export async function refreshSalesSummaryCachesForTargetDates(
   admin: WebhookRefreshAdmin,
@@ -105,39 +107,38 @@ export async function refreshSalesSummaryCachesForTargetDates(
   await autoDiscoverChannels(admin, shopId);
   const channels = await getEnabledSalesChannels(shopId);
 
+  const slices: Array<{ label: string; run: () => Promise<void> }> = [];
   for (const targetDate of unique) {
     for (const loc of locations) {
-      try {
-        await computeAndCacheDailySummary(
-          admin,
-          shopId,
-          loc.shopifyLocationGid,
-          loc.name,
-          targetDate,
-        );
-      } catch (e) {
-        errors.push(
-          `loc ${loc.shopifyLocationGid} ${targetDate}: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
+      slices.push({
+        label: `loc ${loc.shopifyLocationGid} ${targetDate}`,
+        run: () =>
+          computeAndCacheDailySummary(
+            admin,
+            shopId,
+            loc.shopifyLocationGid,
+            loc.name,
+            targetDate,
+          ).then(() => undefined),
+      });
     }
     for (const ch of channels) {
-      try {
-        await computeAndCacheChannelDailySummary(
-          admin,
-          shopId,
-          ch.id,
-          ch.displayName,
-          ch.sourceNames,
-          targetDate,
-        );
-      } catch (e) {
-        errors.push(`ch ${ch.id} ${targetDate}: ${e instanceof Error ? e.message : String(e)}`);
-      }
+      slices.push({
+        label: `ch ${ch.id} ${targetDate}`,
+        run: () =>
+          computeAndCacheChannelDailySummary(
+            admin,
+            shopId,
+            ch.id,
+            ch.displayName,
+            ch.sourceNames,
+            targetDate,
+          ).then(() => undefined),
+      });
     }
   }
 
-  return { errors };
+  return runBackgroundDailySlices(slices);
 }
 
 /**
