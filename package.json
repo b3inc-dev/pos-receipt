@@ -20,6 +20,7 @@
     "render:one-off-migrate": "node scripts/render-one-off-migrate.mjs",
     "render:full-deploy": "node scripts/render-full-deploy.mjs",
     "check:cors": "node scripts/check-options-cors.js",
+    "verify:toml-app-mode": "node scripts/verify-toml-app-mode.js",
     "setup": "prisma generate && prisma migrate deploy",
     "db:migrate:deploy": "bash scripts/migrate-deploy.sh",
     "shopify": "shopify",

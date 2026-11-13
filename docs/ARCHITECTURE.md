@@ -10,7 +10,7 @@
 | Admin UI | Polaris + embedded app (`app/routes/app.*`) | |
 | API | `app/routes/api.*` | POS はセッショントークン認証（`posAuth.server`） |
 | DB | PostgreSQL + Prisma | `prisma/schema.prisma` |
-| POS Extension | UI Extension `api_version = "2026-01"` | `extensions/pos-smart-grid` |
+| POS Extension | UI Extension `api_version = "2026-07"`（Printing API） | `extensions/pos-smart-grid` |
 | Shopify Admin API | `ApiVersion.October25`（`app/shopify.server.ts`） | Webhook TOML は `2026-04` |
 | ジョブ | pg-boss | `orders/updated` 経由の売上サマリー更新キュー |
 
@@ -62,9 +62,10 @@ D. POST /api/settlements/create
       │                 Settlement 行に sourceOrderId 等を保存
       └─ cloudprnt_direct → Settlement 保存 + printPayload テキスト（Shopify 精算注文なし）
       ▼
-E. 印字
-      ├─ order_based: スタッフが POS 上で精算注文のレシートを印字（アプリはプリンタ API 未使用）
-      └─ cloudprnt_direct: プリンタが GET .../print-payload をポーリング（想定）。アプリ内に CloudPRNT 送信アダプタなし
+E. 印字（Conditional-Go: Printing API 並存、旧経路残置）
+      ├─ Printing API: HTML `/api/print/settlement/:id` → `shopify.printing`（printApi.js）
+      ├─ order_based: スタッフが POS 上で精算注文のレシートを印字（旧）
+      └─ cloudprnt_direct: GET .../print-payload ポーリング想定（Advanced。送信アダプタなし）
       ▼
 F. POST /api/settlements/print → status=printed（DB マークのみ）
 ```
@@ -76,9 +77,9 @@ F. POST /api/settlements/print → status=printed（DB マークのみ）
 | 販売注文 | POS/Admin 操作 | Shopify 標準 | Shopify Order | POS / Admin |
 | 返金計上先 | Order + refund TX location + 設定 | `resolveRefundAggregationLocationGid` | `pos.refund_aggregation_location_gid` | 精算集計時に参照 |
 | 精算プレビュー | Orders + SpecialRefundEvent +（任意）Gift Cards API | `aggregateGasStyleForOrders` 等 | なし／サマリーキャッシュ | POS 精算 UI |
-| 精算確定 | プレビュー DTO | 永続化＋（任意）Shopify 同期 | `Settlement` / Shopify SETTLEMENT 注文 | Done 画面 |
-| 精算印字 | Settlement / 精算注文 | テキスト生成 or 人的 POS 印字 | `printedAt` | プリンタ／POS |
-| 領収書 | Order totalPriceSet | テンプレ合成 | `ReceiptIssue` | POS 完了画面（印字 API なし） |
+| 精算確定 | プレビュー DTO | 永続化＋（任意）Shopify 同期 | `Settlement` /（任意）Shopify SETTLEMENT 注文 | Done 画面 |
+| 精算印字 | Settlement / HTML | Printing API または旧経路 | `printedAt` | プリンタ／POS |
+| 領収書 | Order totalPriceSet | テンプレ合成 +（任意）HTML 印字 | `ReceiptIssue` | POS 完了画面／Printing |
 
 ## 4. 領収書フロー（ギフトレシートではない）
 
@@ -86,11 +87,12 @@ F. POST /api/settlements/print → status=printed（DB マークのみ）
 注文選択（検索 or 取引詳細）
   → preview（テンプレ + 宛名/但し書き + 金額）
   → issue（ReceiptIssue + idempotencyKey）
+  →（設定 ON 時）HTML `/api/print/receipt/:id` → shopify.printing
   → 履歴表示
 ```
 
-- Shopify Gift Receipt / Printing API への接続は **コード上なし**。
-- `receiptPrintMode` 設定キーは存在するが、issue/preview ルートでは未使用。
+- Shopify Gift Receipt 連携は未実装。アプリ側 HTML + Printing API は Conditional-Go で並存。
+- `receiptPrintMode` はレガシー表示用。Printing 案内は `receiptPrintingApiEnabled` / `preferPrintingApi`。
 
 ## 5. 特殊返金フロー（要約）
 
@@ -104,14 +106,19 @@ F. POST /api/settlements/print → status=printed（DB マークのみ）
 ## 6. モジュール配置
 
 ```
-app/services/settlementEngine.server.ts     … 集計の中核
+app/services/settlementEngine.server.ts     … 集計の中核（I/O）
+app/services/settlementAggregatePure.server.ts … 集計純関数
+app/services/settlementTaxPure.server.ts    … 税込逆算（印字・精算の主値）
 app/services/settlementOrderGas.server.ts   … SETTLEMENT/INSPECTION 注文
 app/services/settlementSyncSettings.server.ts … printMode × 設定で同期可否
 app/services/settlementLock.server.ts       … 同時作成ロック
 app/services/refundAggregation.server.ts   … 返金ロケーション解決
 app/services/salesSummaryEngine.server.ts  … buildSettlementPreview 再利用
 app/services/salesChannelEngine.server.ts  … 非 POS チャネル集計
+app/services/printReceiptHtml.ts           … Printing 用 HTML
+extensions/common/printApi.js              … shopify.printing ラッパ
 app/routes/api.settlements.*               … 精算 API
+app/routes/api.print.*                     … Printing HTML
 app/routes/api.receipts.*                  … 領収書 API
 app/routes/api.special-refunds.*           … 特殊返金 API
 app/routes/webhooks.orders.updated.tsx     … キャッシュ・metafield
@@ -124,7 +131,7 @@ app/routes/webhooks.orders.updated.tsx     … キャッシュ・metafield
 | Shopify 拡張・アプリ設定 | `npm run deploy:public` / `deploy:inhouse`（APP_MODE 切替 + `shopify app deploy`） |
 | Backend | Render Build: `npm install && prisma generate && npm run build` / Pre-Deploy: migrate / Start: `npm run start` |
 | DB | Prisma migrate（`scripts/render-migrate.mjs` 等） |
-| GitHub → Render | docs 上は Auto-Deploy 言及あり。リポジトリ内 workflow はなし |
+| GitHub → Render | docs 上は Auto-Deploy 言及あり。CI: `.github/workflows/ci.yml`（test/build + toml↔APP_MODE 対応） |
 
 詳細: `docs/DEPLOY_PUBLIC_AND_INHOUSE.md`, `docs/RENDER_SETUP.md`
 

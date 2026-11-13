@@ -579,21 +579,8 @@ function applySpecialRefundEventsToTotals(
   }
 }
 
-/**
- * 税込の合計金額から税抜純売上と内税相当額を算出する。
- * buildSettlementPreview の netSales / tax と同一の式（精算設定の税率％を税込ベースから逆算）。
- * チャネル別売上など、注文 totalPriceSet ベースの税込実績を POS と同じ税抜に揃えるときに利用する。
- */
-export function splitTaxInclusiveToNetAndTax(
-  inclusiveTotal: number,
-  taxRatePercent: number,
-): { netSales: number; tax: number } {
-  const roundInt = (n: number) => Math.round(n);
-  const total = Math.max(0, inclusiveTotal);
-  const tax = roundInt((total * taxRatePercent) / (100 + taxRatePercent));
-  const netSales = roundInt(total - tax);
-  return { netSales, tax };
-}
+/** @deprecated import from settlementTaxPure.server — 再エクスポート（後方互換） */
+export { splitTaxInclusiveToNetAndTax } from "./settlementTaxPure.server";
 
 /** GAS aggregate: 当日 inRange の全 transaction.createdAt から first/last の HH:mm（店舗TZ） */
 function computeGasSettlementTxTimeBounds(

@@ -143,7 +143,15 @@
 
 - ゲートウェイ正規化で商品券／釣有り／釣無しを分類
 - 注文ノートの「商品券 N円」から額面観測（キャンセル除外）
-- `legacyGiftCardAggregationEnabled` が true のとき Gift Cards API 発行分を加算（POS union に含まれる order は二重加算回避）。失敗時は加算せず続行
+- `legacyGiftCardAggregationEnabled` が **true のときのみ** Gift Cards API 発行分を加算（**既定 OFF**。POS union に含まれる order は二重加算回避）。失敗時は加算せず続行
+
+---
+
+## 11.1 税・純売上（正と診断）
+
+- **正（印字・精算プレビューの `tax` / `netSales`）**: 支払ネット合計を精算設定の `taxRatePercent`（既定 10）で税込逆算（`splitTaxInclusiveToNetAndTax`）
+- **診断（`taxShopify`）**: 注文税 × keepRatio。印字・精算の主値には使わない
+- 税・決済ラベルの全面再設計は別 workstream（本節は現行の正を固定するのみ）
 
 ---
 
