@@ -24,10 +24,12 @@ import {
   setAppSetting,
   PRINT_SETTINGS_KEY,
   DEFAULT_PRINT_SETTINGS,
-  resolvePrintPaperWidthMm,
-  syncPrintPaperWidthFields,
   type PrintSettings,
 } from "../utils/appSettings.server";
+import {
+  resolvePrintPaperWidthMm,
+  syncPrintPaperWidthFields,
+} from "../utils/printPaperWidth";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
 
