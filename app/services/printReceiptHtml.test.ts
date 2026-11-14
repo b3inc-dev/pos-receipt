@@ -43,7 +43,8 @@ describe("printReceiptHtml", () => {
     assert.match(at58, /class="paper-58" data-paper-width-mm="58"/);
     assert.match(at80, /font-size: 13px/);
     assert.match(at58, /font-size: 13px/);
-    assert.match(at58, /grid-template-columns: minmax\(0, 1fr\)/);
+    assert.match(at80, /grid-template-columns: minmax\(7em, 1fr\) minmax\(0, 68%\)/);
+    assert.match(at58, /grid-template-columns: minmax\(5em, 1fr\) minmax\(0, 55%\)/);
     assert.match(at58, /overflow-wrap: anywhere/);
     assert.doesNotMatch(at58, /transform\s*:\s*scale/i);
     assert.match(at58, /とても長い商品名/);

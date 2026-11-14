@@ -142,7 +142,7 @@ function shell(widthMm: 58 | 80, body: string, title: string): string {
   h1 { font-size: 16px; margin: 0 0 8px; text-align: center; }
   .row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(7em, 1fr) minmax(0, 68%);
     align-items: start;
     column-gap: 8px;
     margin: 2px 0;
@@ -163,7 +163,7 @@ function shell(widthMm: 58 | 80, body: string, title: string): string {
   .center { text-align: center; }
   .footer { margin-top: 12px; font-size: 11px; text-align: center; }
   body.paper-58 .row {
-    grid-template-columns: minmax(0, 1fr) minmax(min-content, 46%);
+    grid-template-columns: minmax(5em, 1fr) minmax(0, 55%);
     column-gap: 5px;
   }
   body.paper-58 .item-meta {
