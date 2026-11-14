@@ -118,7 +118,7 @@ function shell(widthMm: 58 | 80, body: string, title: string): string {
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${esc(title)}</title>
 <style>
-  @page { size: ${widthMm}mm auto; margin: 0; }
+  @page { size: auto; margin: 0; }
   * { box-sizing: border-box; }
   html {
     width: ${widthMm}mm;
@@ -173,7 +173,7 @@ function shell(widthMm: 58 | 80, body: string, title: string): string {
     white-space: normal;
   }
   @media print {
-    html, body { width: ${widthMm}mm; max-width: ${widthMm}mm; }
+    html, body { width: 100%; max-width: ${widthMm}mm; }
   }
 </style>
 </head>

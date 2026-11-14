@@ -37,8 +37,9 @@ describe("printReceiptHtml", () => {
     const at80 = renderPrintReceiptHtml({ ...common, paperWidthMm: 80 });
     const at58 = renderPrintReceiptHtml({ ...common, paperWidthMm: 58 });
 
-    assert.match(at80, /@page \{ size: 80mm auto/);
-    assert.match(at58, /@page \{ size: 58mm auto/);
+    assert.match(at80, /@page \{ size: auto;/);
+    assert.match(at80, /@media print \{\s*html, body \{ width: 100%; max-width: 80mm;/);
+    assert.match(at58, /@media print \{\s*html, body \{ width: 100%; max-width: 58mm;/);
     assert.match(at80, /class="paper-80" data-paper-width-mm="80"/);
     assert.match(at58, /class="paper-58" data-paper-width-mm="58"/);
     assert.match(at80, /font-size: 13px/);
@@ -86,7 +87,7 @@ describe("printReceiptHtml", () => {
     });
 
     for (const html of [settlement, receipt]) {
-      assert.match(html, /@page \{ size: 58mm auto/);
+      assert.match(html, /@media print \{\s*html, body \{ width: 100%; max-width: 58mm;/);
       assert.match(html, /class="paper-58" data-paper-width-mm="58"/);
       assert.doesNotMatch(html, /transform\s*:\s*scale/i);
       assert.match(html, /class="amount"/);
