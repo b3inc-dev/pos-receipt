@@ -163,7 +163,8 @@ export async function printHtml(relativeOrAbsoluteSrc, options = {}) {
 
 export async function printSalesReceipt(orderId, options = {}) {
   const id = String(orderId || "").replace("gid://shopify/Order/", "");
-  return printHtml(`/api/print/sales/${encodeURIComponent(id)}`, options);
+  const suffix = options.gift ? "?copy=gift" : "";
+  return printHtml(`/api/print/sales/${encodeURIComponent(id)}${suffix}`, options);
 }
 
 export async function printSettlementReceipt(settlementId, options = {}) {

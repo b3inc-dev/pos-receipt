@@ -79,7 +79,13 @@ export async function action({ request }: ActionFunctionArgs) {
   return Response.json({ ok: true });
 }
 
-function buildSampleHtml(settings: SalesReceiptSettings): string {
+function buildSampleHtml(settings: SalesReceiptSettings, gift: boolean): string {
+  if (gift) {
+    return renderPrintReceiptHtml({
+      kind: "gift", orderName: "#1042", paperWidthMm: settings.paperWidthMm,
+      items: [{ name: "サンプル商品 A（M / 黒）", quantity: 1 }, { name: "サンプル商品 B", quantity: 2 }],
+    });
+  }
   // 実印字（buildSalesReceiptPrintModel）と同じく layoutJson フラグで描画制御する
   return renderPrintReceiptHtml({
     kind: "sales",
@@ -145,7 +151,8 @@ export default function SalesReceiptLayoutPage() {
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState(initial);
 
-  const previewHtml = useMemo(() => buildSampleHtml(form), [form]);
+  const [gift, setGift] = useState(false);
+  const previewHtml = useMemo(() => buildSampleHtml(form, gift), [form, gift]);
 
   const handleSave = () => {
     const fd = new FormData();
@@ -272,6 +279,7 @@ export default function SalesReceiptLayoutPage() {
                 <Text as="h2" variant="headingMd">
                   印字プレビュー（同一 HTML）
                 </Text>
+                <Checkbox label="ギフトレシートをプレビュー（金額なし）" checked={gift} onChange={setGift} />
                 <Box
                   padding="300"
                   background="bg-surface-secondary"

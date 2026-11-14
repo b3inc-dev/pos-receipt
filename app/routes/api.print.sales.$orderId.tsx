@@ -22,6 +22,8 @@ import {
   SALES_RECEIPT_ORDER_QUERY,
   buildSalesReceiptHtml,
 } from "../services/salesReceiptPrint.server";
+import { GIFT_ORDER_QUERY, giftOrderHtml } from "../services/giftOrderReceipt";
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
@@ -62,6 +64,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     const gid = orderId.startsWith("gid://") ? orderId : `gid://shopify/Order/${orderId}`;
+    const copy = new URL(request.url).searchParams.get("copy");
+    if (copy === "gift") {
+      const html = await giftOrderHtml(async (after) => {
+        const response = await admin.graphql(GIFT_ORDER_QUERY, { variables: { id: gid, after } });
+        const result = await response.json();
+        if (!response.ok || result.errors?.length) throw new Error("ギフトレシートの明細を取得できませんでした。");
+        return result.data?.order ?? null;
+      }, settings.paperWidthMm === 58 ? 58 : 80);
+      if (html === null) return corsErrorJson(request, { ok: false, error: "注文が見つかりません。" }, 404);
+      return corsHtml(request, html);
+    }
+    if (copy !== null) return corsErrorJson(request, { ok: false, error: "帳票種別が無効です。" }, 400);
     const response = await admin.graphql(SALES_RECEIPT_ORDER_QUERY, { variables: { id: gid } });
     const json = (await response.json()) as {
       errors?: unknown[];

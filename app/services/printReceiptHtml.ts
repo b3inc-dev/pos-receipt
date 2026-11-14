@@ -78,6 +78,7 @@ export type GiftReceiptPrintModel = {
 };
 
 export type PrintReceiptModel =
+  | { kind: "gift"; orderName: string; items: { name: string; quantity: number }[]; paperWidthMm: 58 | 80 }
   | SalesReceiptPrintModel
   | SettlementReceiptPrintModel
   | GiftReceiptPrintModel;
@@ -300,6 +301,14 @@ ${m.locationName ? `<div class="row"><span>店舗</span><span>${esc(m.locationNa
 /** プレビュー・印字で同一 HTML を返す */
 export function renderPrintReceiptHtml(model: PrintReceiptModel): string {
   switch (model.kind) {
+    case "gift": {
+      const items = model.items.map(({ name, quantity }) =>
+        `<div class="item"><div class="item-title">${esc(name)}</div><div>数量 ${esc(quantity)}</div></div>`,
+      ).join("");
+      return shell(model.paperWidthMm,
+        `<h1>ギフトレシート</h1><div class="center">${esc(model.orderName)}</div><hr class="hr"/>${items}`,
+        "ギフトレシート");
+    }
     case "sales":
       return renderSales(model);
     case "settlement":
