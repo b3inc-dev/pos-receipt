@@ -18,7 +18,6 @@ import {
   Button,
   BlockStack,
   InlineStack,
-  Select,
   Checkbox,
   TextField,
   Banner,
@@ -414,15 +413,14 @@ export default function SettingsPage() {
                         </div>
                       </InlineStack>
 
-                      <Select
-                        label="印字方式"
-                        options={[
-                          { label: "注文経由（CloudPRNT非対応）", value: "order_based" },
-                          { label: "CloudPRNT直印字", value: "cloudprnt_direct" },
-                        ]}
-                        value={loc.printMode}
-                        onChange={(v) => handleLocationChange(loc.id, loc.name, "printMode", v)}
-                      />
+                      <Text variant="bodySm" as="p">
+                        印字方式: Shopify Printing API（統一）
+                      </Text>
+                      {loc.printMode && loc.printMode !== "shopify_printing" ? (
+                        <Text variant="bodySm" as="p" tone="subdued">
+                          保存値「{loc.printMode}」は出力に使いません。精算注文も CloudPRNT も起動しません。
+                        </Text>
+                      ) : null}
 
                       <Text variant="bodySm" as="p" tone="subdued">機能有効（§4.2.2）</Text>
                       <InlineStack gap="400" wrap>
@@ -517,13 +515,9 @@ export default function SettingsPage() {
                           placeholder="任意"
                           autoComplete="off"
                         />
-                        <Checkbox
-                          label="CloudPRNT有効"
-                          checked={loc.cloudprntEnabled}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "cloudprntEnabled", v)
-                          }
-                        />
+                        <Text variant="bodySm" as="p" tone="subdued">
+                          CloudPRNT 有効フラグは保存されていても印字出力には使いません。
+                        </Text>
                       </InlineStack>
 
                       <Text variant="bodySm" as="p" tone="subdued">売上サマリー関連（§4.2.5）</Text>

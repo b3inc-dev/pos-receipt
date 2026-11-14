@@ -63,8 +63,9 @@ const FIELD_LABELS: Record<keyof LocationProfileFields, string> = {
 
 function formatFieldValue(key: keyof LocationProfileFields, value: unknown): string {
   if (key === "printMode") {
-    if (value === "order_based") return "注文経由（order_based）";
-    if (value === "cloudprnt_direct") return "CloudPRNT 直印字";
+    if (value === "shopify_printing") return "Shopify Printing API";
+    if (value === "order_based") return "Shopify Printing API（保存値 order_based は未使用）";
+    if (value === "cloudprnt_direct") return "Shopify Printing API（保存値 cloudprnt_direct は未使用）";
   }
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "ON" : "OFF";

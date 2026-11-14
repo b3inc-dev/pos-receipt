@@ -26,10 +26,10 @@
 | **§2 メニュー 8** | ポイント/会員施策設定 | `/app/loyalty-settings`、精算・サマリーでラベル参照 |
 | **§2 メニュー 9** | 売上サマリー設定 | `/app/sales-summary-settings`、API で表示対象・displayOptions 参照 |
 | **§2 メニュー 10** | 予算設定 | `/app/budget-settings`、AppSetting `budget_settings`（§11 input_unit, apply_mode, CSV・一括編集フラグ） |
-| **§2 メニュー 11** | 印字設定 | `/app/print-settings`、AppSetting `print_settings`（§12 デフォルト印字方式・CloudPRNT・order-based・領収書印字） |
+| **§2 メニュー 11** | 印字設定 | `/app/print-settings`、AppSetting `print_settings`（Printing API 統一・用紙幅・領収書プレビュー） |
 | **§3 一般設定** | アプリ名・連絡先・タイムゾーン・通貨・プラン・言語・デバッグ | 画面・AppSetting |
 | **§4 ロケーション設定** | §4.2.1〜4.2.5 全項目 | 設定ページで Location の全フィールドを編集・保存 |
-| **§5 精算設定** | 表題・表示項目・項目名・順・税・再処理・order_based ルール | 画面・AppSetting |
+| **§5 精算設定** | 表題・表示項目・項目名・順・税・再処理（精算注文フラグは無効） | 画面・AppSetting |
 | **§6 支払方法マスタ** | 表示名・分類・判定・フラグ | テーブル・CRUD・精算 payment sections で表示名参照 |
 | **§7 商品券設定** | 機能ON/OFF・額面読取・精算反映 | 画面・AppSetting |
 | **§8 特殊返金設定** | イベント種別・入力要件・表示名 | 画面・AppSetting・API で有効種別・ラベル参照 |
@@ -37,7 +37,7 @@
 | **§9A ポイント/会員施策** | 表示名・抽出元・サマリー/精算含む | 画面・AppSetting・精算でラベル参照 |
 | **§10 売上サマリー設定** | 全体・表示対象・KPI・入店数報告 | 画面・AppSetting・daily/period API で参照 |
 | **§11 予算設定** | CSV・手動編集・一括編集・input_unit・apply_mode | 画面・AppSetting |
-| **§12 印字設定** | デフォルト印字方式・ロケーション上書き・CloudPRNT・order-based・領収書印字 | 画面・AppSetting |
+| **§12 印字設定** | Shopify Printing API 統一・用紙幅・領収書プレビュー | 画面・AppSetting |
 | **§13.1 app_settings** | shop 単位 key-value | `AppSetting` 利用、各種 key で保存 |
 | **§13.3 payment_method_master** | 支払方法マスタ | テーブル・画面・精算で参照 |
 | **§13.4 receipt_templates** | 領収書テンプレート | 既存テーブル・§9.2 項目で拡張 |
@@ -62,7 +62,7 @@
 - **§9.5 領収書**: プレビュー即反映・再発行文言切り替え → **対応済み**
 - **§9A.5 ポイント/会員施策**: 表示名変更・抽出元切り替え・無効化 → **対応済み**
 - **§10.5 売上サマリー**: 入店数報告OFF・KPI ON/OFF・loyalty 表示 → **設定保存・API で displayOptions 返却済み。POS 側で表示制御する前提**
-- **§12.4 印字**: ロケーション別 print_mode 切替・ショップ全体印字設定 → **対応済み**。cloudprnt_direct / order_based の挙動は既存実装に依存。
+- **§12.4 印字**: Shopify Printing API に統一。旧 print_mode は出力に使わない。詳細は `docs/SETTLEMENT_PRINT_UNIFICATION.md`。
 
 ---
 

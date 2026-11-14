@@ -161,7 +161,7 @@
 
 `buildSettlementReceiptText` は日本語固定ラベルで total / net / tax / 割引 / 返金 / 件数 / 点数 / 支払別を出力。精算設定の項目名カスタムは **このテキストビルダでは未使用**。
 
-order_based の Shopify 注文ノート／metafields は `settlementOrderGas` が別途構築。
+Shopify 精算注文ノート／metafields は印字経路では新規作成しない（`settlementOrderGas` は未使用）。
 
 ---
 
@@ -184,7 +184,7 @@ order_based の Shopify 注文ノート／metafields は `settlementOrderGas` �
 
 | 操作 | ルール |
 |------|--------|
-| 精算 create | `idempotencyKey = shopId:locationId:targetDate:printMode`。既存なら新規 Settlement を作らず返す。order_based 時は Shopify 再同期しうる |
+| 精算 create | `idempotencyKey = shopId:locationId:targetDate`（旧 printMode 付きキーも検索）。既存なら新規 Settlement を作らず返す。Shopify 精算注文は作らない |
 | 点検 | 冪等キー対象外 |
 | 同時実行 | `SettlementOperationLock` |
 | 領収書 | クライアント UUID `idempotencyKey` |

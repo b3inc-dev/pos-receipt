@@ -2,41 +2,31 @@
  * POST /api/settlements/create
  * 要件書 §21.3: 精算実行・保存
  *
- * - cloudprnt_direct: 集計してDB保存 → printable payload を返す
- * - order_based: 集計 → Shopify精算注文作成（GAS newSettlementFresh 相当）→ DB保存
- * - isInspection=true: 点検レシート（GAS uiCreateZeroInspection 相当）
- *
- * 印字方式 printMode はリクエスト body ではなく DB（Location.printMode）で決定（未登録は order_based）。
- * リトライ安全: locationId+targetDate+printMode のハッシュを idempotencyKey として使用。
- * 同一キーが既存の場合は重複精算を作成せず既存レコードを返す（点検レシートは除外）。
- * Shopify 同期は GAS Script Lock 相当の DB ロックで直列化。
+ * 印字は shopify.printing に統一。SETTLEMENT / INSPECTION 注文は作らない。
+ * 保存済み Location.printMode が order_based / cloudprnt_direct でも旧経路は復活しない。
+ * 冪等キーは shopId:locationId:targetDate（旧 printMode 付きキーも検索し、精算行を増やさない）。
  */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { buildSettlementPreview, buildSettlementReceiptText } from "../services/settlementEngine.server";
-import {
-  syncSettlementOrderLikeGas,
-  syncInspectionOrderLikeGas,
-} from "../services/settlementOrderGas.server";
+import { buildSettlementPreview } from "../services/settlementEngine.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import {
   buildSettlementLockKey,
   withSettlementOperationLock,
 } from "../services/settlementLock.server";
-import { resolveSettlementOrderSyncOptions } from "../services/settlementSyncSettings.server";
+import {
+  UNIFIED_PRINT_MODE,
+  allSettlementIdempotencyKeys,
+  buildSettlementIdempotencyKey,
+  settlementRowToPreviewDTO,
+} from "../services/printUnification.server";
+import {
+  buildSettlementPrintSnapshot,
+  encodePaymentSectionsJson,
+  parsePaymentSectionsJson,
+} from "../services/settlementPrintSnapshot.server";
 
-/** locationId + targetDate + printMode から冪等キーを生成 */
-function buildIdempotencyKey(
-  shopId: string,
-  locationId: string,
-  targetDate: string,
-  printMode: string,
-): string {
-  return `${shopId}:${locationId}:${targetDate}:${printMode}`;
-}
-
-/** Prisma / Shopify の GID を api.locations と同じ形に揃える */
 function normalizeLocationGid(locationId: string): string {
   const s = String(locationId).trim();
   if (s.startsWith("gid://shopify/Location/")) return s;
@@ -44,41 +34,35 @@ function normalizeLocationGid(locationId: string): string {
   return s;
 }
 
-async function resolveEffectivePrintMode(shopId: string, locationId: string): Promise<string> {
-  const gid = normalizeLocationGid(locationId);
-  const dbLoc = await prisma.location.findFirst({
-    where: { shopId, shopifyLocationGid: gid },
+async function findExistingDailySettlement(
+  shopId: string,
+  locationId: string,
+  targetDate: string,
+) {
+  const keys = allSettlementIdempotencyKeys(shopId, String(locationId), String(targetDate));
+  const byKey = await prisma.settlement.findFirst({
+    where: { shopId, idempotencyKey: { in: keys } },
+    orderBy: { createdAt: "desc" },
   });
-  return dbLoc?.printMode ?? "order_based";
+  if (byKey) return byKey;
+
+  return prisma.settlement.findFirst({
+    where: {
+      shopId,
+      locationId: String(locationId),
+      targetDate: String(targetDate),
+      NOT: { periodLabel: { startsWith: "点検_" } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
 }
 
-async function syncShopifySettlementOrder(
-  admin: Parameters<typeof syncSettlementOrderLikeGas>[0],
-  shopId: string,
-  preview: Awaited<ReturnType<typeof buildSettlementPreview>>,
-  printMode: string,
-  isInspection: boolean,
-  locationName: string,
-): Promise<{ sourceOrderId: string | null; sourceOrderName: string | null }> {
-  const syncOpts = await resolveSettlementOrderSyncOptions(shopId, printMode);
-  if (!syncOpts.createOrder) {
-    return { sourceOrderId: null, sourceOrderName: null };
-  }
-
-  if (isInspection) {
-    const result = await syncInspectionOrderLikeGas(admin, shopId, locationName, {
-      attachNote: syncOpts.attachNote,
-      attachMetafields: syncOpts.attachMetafields,
-      fulfillOnCreate: true,
-    });
-    return { sourceOrderId: result.orderId, sourceOrderName: result.orderName };
-  }
-
-  const result = await syncSettlementOrderLikeGas(admin, shopId, preview, {
-    attachNote: syncOpts.attachNote,
-    attachMetafields: syncOpts.attachMetafields,
+async function locationNameFor(shopId: string, locationId: string, fallback: string) {
+  const gid = normalizeLocationGid(locationId);
+  const loc = await prisma.location.findFirst({
+    where: { shopId, shopifyLocationGid: gid },
   });
-  return { sourceOrderId: result.orderId, sourceOrderName: result.orderName };
+  return loc?.displayName ?? loc?.name ?? fallback;
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -101,7 +85,6 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const effectivePrintMode = await resolveEffectivePrintMode(shop.id, String(locationId));
     const inspection = Boolean(isInspection);
     const lockKey = buildSettlementLockKey(
       shop.id,
@@ -110,129 +93,47 @@ export async function action({ request }: ActionFunctionArgs) {
       inspection ? "inspection" : "settlement",
     );
 
-    // ── 冪等性チェック（点検レシートは対象外） ──────────────────────────────
-    if (!inspection) {
-      const idemKey = buildIdempotencyKey(
-        shop.id, String(locationId), String(targetDate), effectivePrintMode,
+    const respondExisting = async (existing: NonNullable<Awaited<ReturnType<typeof findExistingDailySettlement>>>) => {
+      const locNameNow = await locationNameFor(shop.id, String(locationId), String(locationName ?? ""));
+      const savedName =
+        parsePaymentSectionsJson(existing.paymentSectionsJson).snapshot?.locationName?.trim() ||
+        locNameNow;
+      const preview = settlementRowToPreviewDTO(existing, savedName);
+      return corsJson(
+        {
+          ok: true,
+          idempotent: true,
+          settlementId: existing.id,
+          preview,
+          sourceOrderId: existing.sourceOrderId,
+          sourceOrderName: existing.sourceOrderName,
+          printMode: UNIFIED_PRINT_MODE,
+          targetDate: existing.targetDate,
+          isInspection: false,
+        },
+        { status: 200 },
       );
-      const existingSettlement = await prisma.settlement.findUnique({
-        where: { idempotencyKey: idemKey },
-      });
+    };
+
+    if (!inspection) {
+      const existingSettlement = await findExistingDailySettlement(
+        shop.id,
+        String(locationId),
+        String(targetDate),
+      );
       if (existingSettlement) {
-        return await withSettlementOperationLock(lockKey, async () => {
-          if (effectivePrintMode === "order_based") {
-            const preview = await buildSettlementPreview(
-              admin,
-              shop.id,
-              String(locationId),
-              String(locationName ?? ""),
-              String(targetDate),
-            );
-            let sourceOrderId = existingSettlement.sourceOrderId;
-            let sourceOrderName = existingSettlement.sourceOrderName;
-            try {
-              const sync = await syncShopifySettlementOrder(
-                admin,
-                shop.id,
-                preview,
-                effectivePrintMode,
-                false,
-                String(locationName ?? ""),
-              );
-              sourceOrderId = sync.sourceOrderId;
-              sourceOrderName = sync.sourceOrderName;
-            } catch (syncErr) {
-              const msg = syncErr instanceof Error ? syncErr.message : String(syncErr);
-              return corsJson({ ok: false, error: msg }, { status: 500 });
-            }
-            try {
-              await computeAndCacheDailySummary(
-                admin,
-                shop.id,
-                String(locationId),
-                String(locationName ?? ""),
-                String(targetDate),
-              );
-            } catch {
-              /* キャッシュ失敗は精算結果に影響させない */
-            }
-            return corsJson(
-              {
-                ok: true,
-                idempotent: true,
-                settlementId: existingSettlement.id,
-                preview,
-                sourceOrderId,
-                sourceOrderName,
-                printMode: effectivePrintMode,
-                targetDate: existingSettlement.targetDate,
-                isInspection: false,
-              },
-              { status: 200 },
-            );
-          }
-          return corsJson(
-            {
-              ok: true,
-              idempotent: true,
-              settlementId: existingSettlement.id,
-              preview: null,
-              sourceOrderId: existingSettlement.sourceOrderId,
-              sourceOrderName: existingSettlement.sourceOrderName,
-              printMode: effectivePrintMode,
-              targetDate: existingSettlement.targetDate,
-              isInspection: false,
-            },
-            { status: 200 },
-          );
-        });
+        return await withSettlementOperationLock(lockKey, async () => respondExisting(existingSettlement));
       }
     }
 
     return await withSettlementOperationLock(lockKey, async () => {
-      // ロック内で再チェック（レース対策）
       if (!inspection) {
-        const idemKey = buildIdempotencyKey(
-          shop.id, String(locationId), String(targetDate), effectivePrintMode,
+        const raced = await findExistingDailySettlement(
+          shop.id,
+          String(locationId),
+          String(targetDate),
         );
-        const raced = await prisma.settlement.findUnique({ where: { idempotencyKey: idemKey } });
-        if (raced) {
-          const preview = await buildSettlementPreview(
-            admin,
-            shop.id,
-            String(locationId),
-            String(locationName ?? ""),
-            String(targetDate),
-          );
-          let sourceOrderId = raced.sourceOrderId;
-          let sourceOrderName = raced.sourceOrderName;
-          if (effectivePrintMode === "order_based") {
-            const sync = await syncShopifySettlementOrder(
-              admin,
-              shop.id,
-              preview,
-              effectivePrintMode,
-              false,
-              String(locationName ?? ""),
-            );
-            sourceOrderId = sync.sourceOrderId;
-            sourceOrderName = sync.sourceOrderName;
-          }
-          return corsJson(
-            {
-              ok: true,
-              idempotent: true,
-              settlementId: raced.id,
-              preview,
-              sourceOrderId,
-              sourceOrderName,
-              printMode: effectivePrintMode,
-              targetDate: raced.targetDate,
-              isInspection: false,
-            },
-            { status: 200 },
-          );
-        }
+        if (raced) return respondExisting(raced);
       }
 
       const preview = await buildSettlementPreview(
@@ -255,32 +156,26 @@ export async function action({ request }: ActionFunctionArgs) {
         /* キャッシュ更新失敗は精算結果に影響させない */
       }
 
-      let sourceOrderId: string | null = null;
-      let sourceOrderName: string | null = null;
-
-      if (effectivePrintMode === "order_based") {
-        const sync = await syncShopifySettlementOrder(
-          admin,
-          shop.id,
-          preview,
-          effectivePrintMode,
-          inspection,
-          String(locationName ?? ""),
-        );
-        sourceOrderId = sync.sourceOrderId;
-        sourceOrderName = sync.sourceOrderName;
-      }
-
       const idemKey = !inspection
-        ? buildIdempotencyKey(shop.id, String(locationId), String(targetDate), effectivePrintMode)
+        ? buildSettlementIdempotencyKey(shop.id, String(locationId), String(targetDate))
         : null;
+
+      const issuedLocationName = await locationNameFor(
+        shop.id,
+        String(locationId),
+        String(preview.locationName || locationName || ""),
+      );
+      const printSnapshot = buildSettlementPrintSnapshot({
+        locationName: issuedLocationName,
+        isInspection: inspection,
+      });
 
       const settlement = await prisma.settlement.create({
         data: {
           shopId: shop.id,
           locationId: String(locationId),
-          sourceOrderId,
-          sourceOrderName,
+          sourceOrderId: null,
+          sourceOrderName: null,
           targetDate: String(targetDate),
           periodLabel: inspection ? `点検_${String(targetDate)}` : String(targetDate),
           currency: preview.currency,
@@ -294,30 +189,27 @@ export async function action({ request }: ActionFunctionArgs) {
           refundCount: inspection ? 0 : preview.refundCount,
           itemCount: inspection ? 0 : preview.itemCount,
           voucherChangeAmount: inspection ? 0 : preview.voucherChangeAmount,
-          paymentSectionsJson: JSON.stringify(inspection ? [] : preview.paymentSections),
-          printMode: effectivePrintMode,
+          paymentSectionsJson: encodePaymentSectionsJson(
+            inspection ? [] : preview.paymentSections,
+            printSnapshot,
+          ),
+          printMode: UNIFIED_PRINT_MODE,
           status: "completed",
           idempotencyKey: idemKey,
         },
       });
-
-      const printPayload =
-        effectivePrintMode === "cloudprnt_direct" && !inspection
-          ? buildSettlementReceiptText(preview)
-          : undefined;
 
       return corsJson(
         {
           ok: true,
           idempotent: false,
           settlementId: settlement.id,
-          preview,
-          sourceOrderId,
-          sourceOrderName,
-          printMode: effectivePrintMode,
+          preview: { ...preview, locationName: issuedLocationName },
+          sourceOrderId: null,
+          sourceOrderName: null,
+          printMode: UNIFIED_PRINT_MODE,
           targetDate: String(targetDate),
           isInspection: inspection,
-          ...(printPayload !== undefined && { printPayload }),
         },
         { status: 201 },
       );

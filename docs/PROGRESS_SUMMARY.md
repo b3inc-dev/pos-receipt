@@ -56,8 +56,8 @@
   - 商品券設定（`/app/voucher-settings`）、特殊返金設定（`/app/special-refund-settings`）画面を追加  
 - **全設定画面の網羅（§3・§5・§11・§12・§4.2.3〜4.2.5）**  
   - 一般設定（`/app/general-settings`）：アプリ表示名・連絡先・タイムゾーン・通貨・プラン・言語・デバッグ（AppSetting `general_settings`）  
-  - 精算設定（`/app/settlement-settings`）：表題・表示項目ON/OFF・項目名・項目順・税表示・再処理・order_based ルール（AppSetting `settlement_settings`）  
-  - 印字設定（`/app/print-settings`）：デフォルト印字方式・ロケーション上書き・CloudPRNT・order-based・領収書印字（AppSetting `print_settings`）  
+  - 精算設定（`/app/settlement-settings`）：表題・表示項目ON/OFF・項目名・項目順・税表示・再処理（精算注文フラグは無効）  
+  - 印字設定（`/app/print-settings`）：Shopify Printing API 統一・用紙幅・領収書プレビュー  
   - 予算設定（`/app/budget-settings`）：CSVマッピング・手動/一括編集・input_unit・apply_mode（AppSetting `budget_settings`）  
   - ロケーション設定：§4.2.3（店舗/全体合計・サマリー表示）、§4.2.4（printer_profile_id, cloudprnt_enabled）、§4.2.5（summary_target_group, budget_target_enabled, footfall_target_enabled）を Location に追加・設定ページで編集  
 - ギャップ一覧: `docs/SETTINGS_GAP_ANALYSIS.md`、網羅状況: `docs/SETTINGS_REQUIREMENTS_COVERAGE.md`
@@ -77,16 +77,16 @@
 - 新規アプリや拡張の作り直しをした場合は、`shopify app generate extension` で UID を取得し、同 toml の該当ブロックに `uid` を設定する。
 
 ### 実装済み（2026-03-12）
-- **CloudPRNT payload** … 精算 create 時に `printMode === "cloudprnt_direct"` のときレスポンスに `printPayload` を付与。`buildSettlementReceiptText` で印字用テキストを共通生成。`GET /api/settlements/:id/print-payload` で再印字・ポーリング用に payload 取得可能。
+- **Shopify Printing API 一本化** … 精算・点検・領収書・販売レシートは `shopify.printing`。CloudPRNT payload は 410。精算注文は作らない。
 - **税率の設定化** … 精算設定に「消費税率（%）」を追加。精算エンジンで `taxRatePercent` を参照（未設定時 10%）。
 
 ### 実装済み（続き）
 - **支払方法マスタ・商品券判定の拡張** … 一覧に「商品券」「釣銭あり」列を追加。分類ラベル「商品券・ギフトカード」、商品券の説明文、`formattedGatewayPattern` のマッチング修正、`getPaymentMethodVoucherInfo` API を追加。
-- **CloudPRNT POS 導線** … 精算完了画面（CloudPRNT 直印字時）に印字用データ取得URLを表示。実機確認時にプリンタのポーリング先に設定する案内を表示。
+- **POS 印字導線** … 完了画面と履歴から Printing API。未接続は成功扱いにしない。
 
 ### オプション（必要に応じて）
 - **location_settings の key-value テーブル** … 必要になったら LocationSetting 等を追加。
-- **CloudPRNT 実機** … 実機での印字確認（後ほど実施）。
+- **紙面確認** … mPOP / mC-Print3 はこの環境では未実施（`docs/PRINT_DEVICE_COMPAT.md`）。
 
 ---
 

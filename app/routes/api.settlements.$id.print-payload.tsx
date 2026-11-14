@@ -1,67 +1,24 @@
 /**
  * GET /api/settlements/:id/print-payload
- * CloudPRNT 用: 指定精算の印字用テキストを返す。
- * プリンタのポーリングや再印字時に利用。
+ * CloudPRNT 実行経路は廃止。帳票は GET /api/print/settlement/:id + shopify.printing。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
-import prisma from "../db.server";
-import { buildSettlementReceiptText } from "../services/settlementEngine.server";
-import type { SettlementPreviewDTO } from "../services/settlementEngine.server";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
-    const { shop, corsJson } = authResult;
-    const id = params.id;
-    if (!id) {
-      return corsJson({ ok: false, error: "id is required" }, { status: 400 });
-    }
-
-    const settlement = await prisma.settlement.findFirst({
-      where: { id, shopId: shop.id },
-    });
-    if (!settlement) {
-      return corsJson({ ok: false, error: "Settlement not found" }, { status: 404 });
-    }
-
-    const location = await prisma.location.findFirst({
-      where: { shopId: shop.id, shopifyLocationGid: settlement.locationId },
-    });
-    const locationName = location?.displayName ?? location?.name ?? settlement.locationId;
-
-    const paymentSections = settlement.paymentSectionsJson
-      ? (JSON.parse(settlement.paymentSectionsJson) as { label: string; net: number; refund: number }[])
-      : [];
-
-    const preview: SettlementPreviewDTO = {
-      locationId: settlement.locationId,
-      locationName,
-      targetDate: settlement.targetDate,
-      currency: settlement.currency ?? "JPY",
-      total: Number(settlement.total),
-      netSales: Number(settlement.netSales),
-      tax: Number(settlement.tax),
-      discounts: Number(settlement.discounts),
-      vipPointsUsed: Number(settlement.vipPointsUsed),
-      refundTotal: Number(settlement.refundTotal),
-      orderCount: settlement.orderCount,
-      refundCount: settlement.refundCount,
-      itemCount: settlement.itemCount,
-      voucherChangeAmount: Number(settlement.voucherChangeAmount),
-      paymentSections,
-      appliedSpecialRefundEvents: [],
-      appliedVoucherAdjustments: [],
-      loyaltyUsageDisplayLabel: "ポイント利用",
-      settlementTxFirstHm: null,
-      settlementTxLastHm: null,
-      taxShopify: 0,
-    };
-
-    const printPayload = buildSettlementReceiptText(preview);
-
-    return corsJson({ ok: true, printPayload });
+    const { corsJson } = authResult;
+    return corsJson(
+      {
+        ok: false,
+        retired: true,
+        error:
+          "CloudPRNT 直印字経路は廃止しました。精算・点検レシートは Shopify Printing API（/api/print/settlement/:id）を使ってください。",
+      },
+      { status: 410 },
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);

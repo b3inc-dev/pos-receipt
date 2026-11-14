@@ -81,7 +81,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         return {
           locationId: node.id,
           locationName: node.name,
-          printMode: db?.printMode ?? "order_based",
+          printMode: "shopify_printing",
+          storedPrintMode: db?.printMode ?? null,
           salesSummaryEnabled: db?.salesSummaryEnabled ?? false,
           footfallReportingEnabled: isFootfallReportingAllowedForLocation(merged, node.id),
         };
