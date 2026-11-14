@@ -76,9 +76,9 @@ function savedRow(opts: {
 }
 
 function contentFingerprint(html: string): string {
-  return html
-    .replace(/width:\s*\d+px/g, "width:DEVICE")
-    .replace(/max-width:\s*\d+px/g, "max-width:DEVICE");
+  // Paper width intentionally changes only the print shell/CSS. Compare the
+  // issued receipt body so 80 -> 58 -> 80 cannot alter saved values or labels.
+  return html.match(/<body[^>]*>([\s\S]*)<\/body>/)?.[1] ?? html;
 }
 
 describe("settlement print snapshot encode/parse", () => {

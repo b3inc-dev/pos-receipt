@@ -110,6 +110,7 @@ function attrsHtml(attrs: PrintAttr[] | undefined, indent = false): string {
 
 function shell(widthMm: 58 | 80, body: string, title: string): string {
   const maxW = widthMm === 58 ? 384 : 576;
+  const pagePadding = widthMm === 58 ? 4 : 8;
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -117,10 +118,16 @@ function shell(widthMm: 58 | 80, body: string, title: string): string {
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${esc(title)}</title>
 <style>
+  @page { size: ${widthMm}mm auto; margin: 0; }
   * { box-sizing: border-box; }
+  html {
+    width: ${widthMm}mm;
+    max-width: 100%;
+    background: #fff;
+  }
   body {
     margin: 0;
-    padding: 8px;
+    padding: ${pagePadding}px;
     font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
     font-size: 13px;
     line-height: 1.35;
@@ -128,19 +135,49 @@ function shell(widthMm: 58 | 80, body: string, title: string): string {
     background: #fff;
     width: ${maxW}px;
     max-width: 100%;
+    overflow-wrap: anywhere;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
   h1 { font-size: 16px; margin: 0 0 8px; text-align: center; }
-  .row { display: flex; justify-content: space-between; gap: 8px; margin: 2px 0; }
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    column-gap: 8px;
+    margin: 2px 0;
+  }
+  .row > :first-child { min-width: 0; overflow-wrap: anywhere; }
+  .row > :last-child { min-width: 0; text-align: right; }
+  .amount {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+    white-space: nowrap;
+  }
   .muted { color: #333; font-size: 12px; }
   .attr { font-size: 11px; color: #222; margin: 1px 0; }
   .hr { border: 0; border-top: 1px dashed #000; margin: 8px 0; }
-  .item-title { font-weight: 600; }
+  .item { break-inside: avoid; page-break-inside: avoid; }
+  .item-title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
   .total { font-size: 15px; font-weight: 700; margin-top: 4px; }
   .center { text-align: center; }
   .footer { margin-top: 12px; font-size: 11px; text-align: center; }
+  body.paper-58 .row {
+    grid-template-columns: minmax(0, 1fr) minmax(min-content, 46%);
+    column-gap: 5px;
+  }
+  body.paper-58 .item-meta {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  body.paper-58 .item-meta > :first-child {
+    white-space: normal;
+  }
+  @media print {
+    html, body { width: ${widthMm}mm; max-width: ${widthMm}mm; }
+  }
 </style>
 </head>
-<body>
+<body class="paper-${widthMm}" data-paper-width-mm="${widthMm}">
 ${body}
 </body>
 </html>`;
@@ -165,7 +202,7 @@ function renderSales(m: SalesReceiptPrintModel): string {
       return `<div class="item">
   <div class="item-title">${esc(name)}</div>
   ${skuLine}
-  <div class="row muted"><span>×${esc(li.quantity)} @ ${esc(yen(li.unitPrice, m.currency))}</span><span>${esc(yen(li.lineTotal, m.currency))}</span></div>
+  <div class="row muted item-meta"><span>×${esc(li.quantity)} @ <span class="amount">${esc(yen(li.unitPrice, m.currency))}</span></span><span class="amount">${esc(yen(li.lineTotal, m.currency))}</span></div>
   ${lineAttrs}
 </div>`;
     })
@@ -180,7 +217,7 @@ function renderSales(m: SalesReceiptPrintModel): string {
     ? (m.payments ?? [])
         .map(
           (p) =>
-            `<div class="row"><span>${esc(p.label)}</span><span>${esc(yen(p.amount, m.currency))}</span></div>`,
+            `<div class="row"><span>${esc(p.label)}</span><span class="amount">${esc(yen(p.amount, m.currency))}</span></div>`,
         )
         .join("")
     : "";
@@ -198,10 +235,10 @@ ${locationBlock}
 <div class="hr"></div>
 ${lines}
 <div class="hr"></div>
-<div class="row"><span>小計</span><span>${esc(yen(m.subtotal, m.currency))}</span></div>
-${m.discounts ? `<div class="row"><span>割引</span><span>-${esc(yen(m.discounts, m.currency))}</span></div>` : ""}
-<div class="row"><span>税</span><span>${esc(yen(m.tax, m.currency))}</span></div>
-<div class="row total"><span>合計</span><span>${esc(yen(m.total, m.currency))}</span></div>
+<div class="row"><span>小計</span><span class="amount">${esc(yen(m.subtotal, m.currency))}</span></div>
+${m.discounts ? `<div class="row"><span>割引</span><span class="amount">-${esc(yen(m.discounts, m.currency))}</span></div>` : ""}
+<div class="row"><span>税</span><span class="amount">${esc(yen(m.tax, m.currency))}</span></div>
+<div class="row total"><span>合計</span><span class="amount">${esc(yen(m.total, m.currency))}</span></div>
 ${payments ? `<div class="hr"></div>${payments}` : ""}
 ${orderAttrs}
 ${m.footerNote ? `<div class="footer">${esc(m.footerNote)}</div>` : ""}
@@ -216,7 +253,7 @@ function renderSettlement(m: SettlementReceiptPrintModel): string {
         s.refund && s.refund > 0
           ? ` 返金${s.refundCount ?? 0}件 ${yen(s.refund, m.currency)}`
           : "";
-      return `<div class="row"><span>${esc(s.label)}</span><span>${esc(yen(s.net, m.currency))} (${esc(s.txCount ?? 0)}件)${esc(extra)}</span></div>`;
+      return `<div class="row"><span>${esc(s.label)}</span><span><span class="amount">${esc(yen(s.net, m.currency))}</span> (${esc(s.txCount ?? 0)}件)${esc(extra)}</span></div>`;
     })
     .join("");
 
@@ -225,16 +262,16 @@ function renderSettlement(m: SettlementReceiptPrintModel): string {
 <div class="row"><span>日付</span><span>${esc(m.targetDate)}</span></div>
 <div class="row"><span>ロケーション</span><span>${esc(m.locationName)}</span></div>
 <div class="hr"></div>
-<div class="row"><span>総売上</span><span>${esc(yen(m.total, m.currency))}</span></div>
-<div class="row"><span>純売上</span><span>${esc(yen(m.netSales, m.currency))}</span></div>
-<div class="row"><span>消費税</span><span>${esc(yen(m.tax, m.currency))}</span></div>
-<div class="row"><span>割引</span><span>${esc(yen(m.discounts, m.currency))}</span></div>
-<div class="row"><span>返金</span><span>${esc(yen(m.refundTotal, m.currency))}</span></div>
+<div class="row"><span>総売上</span><span class="amount">${esc(yen(m.total, m.currency))}</span></div>
+<div class="row"><span>純売上</span><span class="amount">${esc(yen(m.netSales, m.currency))}</span></div>
+<div class="row"><span>消費税</span><span class="amount">${esc(yen(m.tax, m.currency))}</span></div>
+<div class="row"><span>割引</span><span class="amount">${esc(yen(m.discounts, m.currency))}</span></div>
+<div class="row"><span>返金</span><span class="amount">${esc(yen(m.refundTotal, m.currency))}</span></div>
 <div class="row"><span>件数</span><span>${esc(m.orderCount)}件 (返金${esc(m.refundCount)}件)</span></div>
 <div class="row"><span>点数</span><span>${esc(m.itemCount)}点</span></div>
 ${
   m.voucherChangeAmount > 0
-    ? `<div class="row"><span>商品券釣有り差額</span><span>${esc(yen(m.voucherChangeAmount, m.currency))}</span></div>`
+    ? `<div class="row"><span>商品券釣有り差額</span><span class="amount">${esc(yen(m.voucherChangeAmount, m.currency))}</span></div>`
     : ""
 }
 <div class="hr"></div>
@@ -251,7 +288,7 @@ ${m.address ? `<div class="center muted">${esc(m.address)}</div>` : ""}
 ${m.phone ? `<div class="center muted">${esc(m.phone)}</div>` : ""}
 <div class="hr"></div>
 <div class="row"><span>宛名</span><span>${esc(m.recipientName || "　")}</span></div>
-<div class="row total"><span>金額</span><span>${esc(yen(m.amount, m.currency))}</span></div>
+<div class="row total"><span>金額</span><span class="amount">${esc(yen(m.amount, m.currency))}</span></div>
 <div class="row"><span>但し</span><span>${esc(m.proviso)}</span></div>
 ${m.showDate !== false ? `<div class="row"><span>発行日</span><span>${esc(m.issueDate)}</span></div>` : ""}
 ${m.showOrderNumber !== false && m.orderName ? `<div class="row"><span>注文</span><span>${esc(m.orderName)}</span></div>` : ""}
