@@ -24,6 +24,19 @@ for (const width of [58, 80] as const) {
   });
 }
 
+for (const width of [58, 80] as const) {
+  test(`ギフト編集後の${width}mm印字は文面だけを反映し注文番号を隠せる`, async () => {
+    const html = await giftOrderHtml(async () => ({ name: "#hidden", lineItems: {
+      nodes: [{ name: "品名", quantity: 1 }], pageInfo: { hasNextPage: false, endCursor: null },
+    } }), width, { title: "<贈答>", footer: "末尾 & 本文", showOrderNumber: false });
+    assert.ok(html);
+    assert.match(html, /&lt;贈答&gt;/);
+    assert.match(html, /末尾 &amp; 本文/);
+    assert.match(html, /数量 1/);
+    assert.doesNotMatch(html, /#hidden|<贈答>|合計|支払|¥/);
+  });
+}
+
 test("ギフトの次ページ取得失敗で部分帳票を出さない", async () => {
   assert.equal(await giftOrderHtml(async () => null, 58), null);
   await assert.rejects(giftOrderHtml(async () => ({ name: "#123", lineItems: {

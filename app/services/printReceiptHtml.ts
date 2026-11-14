@@ -77,8 +77,10 @@ export type GiftReceiptPrintModel = {
   paperWidthMm: 58 | 80;
 };
 
+import { DEFAULT_GIFT_LAYOUT, type GiftLayout } from "../utils/salesReceiptSettings";
+
 export type PrintReceiptModel =
-  | { kind: "gift"; orderName: string; items: { name: string; quantity: number }[]; paperWidthMm: 58 | 80 }
+  | { kind: "gift"; layout?: GiftLayout; orderName: string; items: { name: string; quantity: number }[]; paperWidthMm: 58 | 80 }
   | SalesReceiptPrintModel
   | SettlementReceiptPrintModel
   | GiftReceiptPrintModel;
@@ -305,9 +307,12 @@ export function renderPrintReceiptHtml(model: PrintReceiptModel): string {
       const items = model.items.map(({ name, quantity }) =>
         `<div class="item"><div class="item-title">${esc(name)}</div><div>数量 ${esc(quantity)}</div></div>`,
       ).join("");
+      const layout = model.layout ?? DEFAULT_GIFT_LAYOUT;
+      const order = layout.showOrderNumber ? `<div class="center">${esc(model.orderName)}</div>` : "";
+      const footer = layout.footer ? `<div class="center" style="white-space:pre-wrap">${esc(layout.footer)}</div>` : "";
       return shell(model.paperWidthMm,
-        `<h1>ギフトレシート</h1><div class="center">${esc(model.orderName)}</div><hr class="hr"/>${items}`,
-        "ギフトレシート");
+        `<h1>${esc(layout.title)}</h1>${order}<hr class="hr"/>${items}${footer}`,
+        layout.title);
     }
     case "sales":
       return renderSales(model);
