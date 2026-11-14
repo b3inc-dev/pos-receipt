@@ -6,7 +6,7 @@
 
 Render のログで次のような行を探す。
 
-- `[member-card] LINE verify failed: 400 {"error":"invalid_request","error_description":"IdToken expired."}`
+- `[member-card] ID_TOKEN_EXPIRED`
   - **原因**: id_token の有効期限切れ。
   - **対処**: 会員証ページを**再読み込み**する。PCブラウザで開いている場合は、**LINEアプリから同じURLを開き直す**と新しいトークンが取得できる。
 
