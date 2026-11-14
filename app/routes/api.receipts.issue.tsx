@@ -10,6 +10,7 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
 import { encodeReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
+import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
 
 const ORDER_QUERY = `#graphql
   query ReceiptIssueOrder($id: ID!) {
@@ -103,30 +104,56 @@ export async function action({ request }: ActionFunctionArgs) {
     const effectiveProviso = String(proviso || templateData.defaultProviso || "お買上品代として");
     const locationId = order.retailLocation?.id ?? "";
     const locationName = order.retailLocation?.name ?? "";
-    const printSnapshotJson = encodeReceiptPrintSnapshot({
-      locationName,
-      templateData: templateData as unknown as Record<string, unknown>,
-    });
+    const issued = await prisma.$transaction(async (tx) => {
+      const created = await tx.receiptIssue.create({
+        data: {
+          shopId: shop.id,
+          orderId: rawOrderId,
+          orderName: order.name,
+          locationId,
+          recipientName: String(recipientName || ""),
+          proviso: effectiveProviso,
+          amount: Number(order.totalPriceSet.shopMoney.amount),
+          currency: order.totalPriceSet.shopMoney.currencyCode,
+          templateId: tmpl?.id ?? null,
+          templateVersion: tmpl?.version ?? 1,
+          isReissue: Boolean(isReissue),
+          createdBy: createdBy ? String(createdBy) : null,
+          idempotencyKey: idempotencyKey && typeof idempotencyKey === "string"
+            ? idempotencyKey
+            : null,
+        },
+      });
 
-    const issued = await prisma.receiptIssue.create({
-      data: {
-        shopId: shop.id,
-        orderId: rawOrderId,
-        orderName: order.name,
-        locationId,
-        recipientName: String(recipientName || ""),
-        proviso: effectiveProviso,
-        amount: Number(order.totalPriceSet.shopMoney.amount),
-        currency: order.totalPriceSet.shopMoney.currencyCode,
-        templateId: tmpl?.id ?? null,
-        templateVersion: tmpl?.version ?? 1,
-        printSnapshotJson,
-        isReissue: Boolean(isReissue),
-        createdBy: createdBy ? String(createdBy) : null,
-        idempotencyKey: idempotencyKey && typeof idempotencyKey === "string"
-          ? idempotencyKey
-          : null,
-      },
+      const model = {
+        kind: "receipt" as const,
+        title: "領　収　書",
+        recipientName: created.recipientName ?? "",
+        proviso: created.proviso ?? effectiveProviso,
+        amount: Number(created.amount),
+        currency: created.currency ?? "JPY",
+        issueDate: created.createdAt.toISOString().slice(0, 10),
+        orderName: created.orderName ?? undefined,
+        locationName,
+        companyName: templateData.companyName,
+        address: templateData.address,
+        phone: templateData.phone,
+        showOrderNumber: Boolean(templateData.showOrderNumber ?? templateData.showOrderName),
+        showDate: Boolean(templateData.showDate ?? templateData.showIssueDate),
+      };
+      const printSnapshotJson = encodeReceiptPrintSnapshot({
+        locationName,
+        templateData: templateData as unknown as Record<string, unknown>,
+        renderedHtmlByPaperWidth: {
+          58: renderPrintReceiptHtml({ ...model, paperWidthMm: 58 }),
+          80: renderPrintReceiptHtml({ ...model, paperWidthMm: 80 }),
+        },
+      });
+
+      return tx.receiptIssue.update({
+        where: { id: created.id },
+        data: { printSnapshotJson },
+      });
     });
 
     const issueDate = issued.createdAt.toISOString().slice(0, 10);

@@ -78,11 +78,30 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       locationName: currentLocationName,
       templateData: templateData as unknown as Record<string, unknown>,
     });
+    if (resolvedSnapshot.snapshotUnreadable) {
+      return corsHtml(
+        request,
+        `<!DOCTYPE html><html lang="ja"><body><p>発行時の領収書データを読み取れないため、現在設定での再生成は行いません。</p></body></html>`,
+        { status: 409 },
+      );
+    }
     templateData = normalizeTemplateData(resolvedSnapshot.templateData);
 
     const printSettings =
       (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
     const paper = resolvePaperWidthMm(printSettings);
+
+    const storedHtml = resolvedSnapshot.renderedHtmlByPaperWidth?.[paper];
+    if (resolvedSnapshot.snapshotPresent) {
+      if (!storedHtml) {
+        return corsHtml(
+          request,
+          `<!DOCTYPE html><html lang="ja"><body><p>発行時の領収書HTMLが不足しているため、現在設定での再生成は行いません。</p></body></html>`,
+          { status: 409 },
+        );
+      }
+      return corsHtml(request, storedHtml);
+    }
 
     const html = renderPrintReceiptHtml({
       kind: "receipt",
