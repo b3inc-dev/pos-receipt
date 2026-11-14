@@ -9,6 +9,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
+import { encodeReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
 
 const ORDER_QUERY = `#graphql
   query ReceiptIssueOrder($id: ID!) {
@@ -101,6 +102,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const effectiveProviso = String(proviso || templateData.defaultProviso || "お買上品代として");
     const locationId = order.retailLocation?.id ?? "";
+    const locationName = order.retailLocation?.name ?? "";
+    const printSnapshotJson = encodeReceiptPrintSnapshot({
+      locationName,
+      templateData: templateData as unknown as Record<string, unknown>,
+    });
 
     const issued = await prisma.receiptIssue.create({
       data: {
@@ -114,6 +120,7 @@ export async function action({ request }: ActionFunctionArgs) {
         currency: order.totalPriceSet.shopMoney.currencyCode,
         templateId: tmpl?.id ?? null,
         templateVersion: tmpl?.version ?? 1,
+        printSnapshotJson,
         isReissue: Boolean(isReissue),
         createdBy: createdBy ? String(createdBy) : null,
         idempotencyKey: idempotencyKey && typeof idempotencyKey === "string"
@@ -133,7 +140,7 @@ export async function action({ request }: ActionFunctionArgs) {
       amount: Number(order.totalPriceSet.shopMoney.amount),
       currency: order.totalPriceSet.shopMoney.currencyCode,
       issueDate,
-      locationName: order.retailLocation?.name ?? "",
+      locationName,
       companyName: templateData.companyName,
       address: templateData.address,
       phone: templateData.phone,

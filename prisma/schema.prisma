@@ -243,6 +243,7 @@ model ReceiptIssue {
   currency        String?
   templateId      String?
   templateVersion Int?
+  printSnapshotJson String? // 発行時の店舗表示名・帳票設定。再印字で現在設定を参照しない
   isReissue       Boolean  @default(false)
   createdBy       String?
   idempotencyKey  String?  @unique // クライアント生成UUID。同一キーは重複発行しない

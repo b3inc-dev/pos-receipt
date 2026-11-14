@@ -22,6 +22,7 @@ import {
   type PrintSettings,
 } from "../utils/appSettings.server";
 import { resolvePaperWidthMm } from "../services/printUnification.server";
+import { resolveReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -72,6 +73,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         })
       : null;
 
+    const currentLocationName = location?.displayName ?? location?.name ?? "";
+    const resolvedSnapshot = resolveReceiptPrintSnapshot(issued.printSnapshotJson, {
+      locationName: currentLocationName,
+      templateData: templateData as unknown as Record<string, unknown>,
+    });
+    templateData = normalizeTemplateData(resolvedSnapshot.templateData);
+
     const printSettings =
       (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
     const paper = resolvePaperWidthMm(printSettings);
@@ -85,7 +93,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       currency: issued.currency ?? "JPY",
       issueDate: issued.createdAt.toISOString().slice(0, 10),
       orderName: issued.orderName ?? undefined,
-      locationName: location?.displayName ?? location?.name ?? "",
+      locationName: resolvedSnapshot.locationName,
       companyName: templateData.companyName,
       address: templateData.address,
       phone: templateData.phone,
