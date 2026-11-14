@@ -71,3 +71,36 @@ describe("printApiCore outcomes", () => {
     assert.equal(resolved, true);
   });
 });
+
+describe("printer discovery timeout", () => {
+  it("releases the receipt and ignores a late printer list after a retry", async (t) => {
+    const { printHtml, PRINT_TIMEOUT_MS } = await import("../../extensions/common/printApi.js");
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const oldShopify = globalThis.shopify;
+    t.after(() => {
+      if (oldShopify === undefined) delete globalThis.shopify;
+      else globalThis.shopify = oldShopify;
+    });
+    const printer = { connected: true, id: "test" };
+    let finishDiscovery;
+    let discoveries = 0;
+    let sends = 0;
+    globalThis.shopify = { printing: {
+      getPrinters: () => ++discoveries === 1
+        ? new Promise((resolve) => { finishDiscovery = resolve; })
+        : Promise.resolve([printer]),
+      print: async () => { sends++; },
+    } };
+    const first = printHtml("/fixture");
+    assert.equal((await printHtml("/fixture")).outcome, PRINT_OUTCOME.IN_FLIGHT);
+    t.mock.timers.tick(PRINT_TIMEOUT_MS);
+    const result = await first;
+    assert.equal(result.outcome, PRINT_OUTCOME.FAILED);
+    assert.match(result.error, /送信されていません/);
+    assert.equal(sends, 0);
+    assert.equal((await printHtml("/fixture")).outcome, PRINT_OUTCOME.DIRECT_ACCEPTED);
+    finishDiscovery([printer]);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(sends, 1);
+  });
+});

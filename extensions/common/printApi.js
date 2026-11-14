@@ -103,8 +103,18 @@ export async function printHtml(relativeOrAbsoluteSrc, options = {}) {
       totalCount: 0,
     };
     if (typeof printing.getPrinters === "function") {
-      const printers = await printing.getPrinters();
-      classified = classifyPrinters(printers);
+      try {
+        const printers = await withTimeout(printing.getPrinters(), PRINT_TIMEOUT_MS);
+        classified = classifyPrinters(printers);
+      } catch (error) {
+        if (error?.code !== "PRINT_TIMEOUT" && error?.name !== "PrintTimeoutError") throw error;
+        return {
+          ok: false,
+          outcome: PRINT_OUTCOME.FAILED,
+          paperConfirmed: false,
+          error: "プリンタ一覧を取得できませんでした。印刷は送信されていません。接続を確認してもう一度お試しください。",
+        };
+      }
     }
 
     const printer = pickDirectPrinter({ printers: classified.connected });
