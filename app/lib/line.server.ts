@@ -40,19 +40,29 @@ export async function verifyLineIdToken(idToken: string): Promise<LineVerifyResp
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      console.error("[member-card] LINE verify failed:", res.status, text);
-      const isExpired =
-        /expired|IdToken expired/i.test(text) ||
-        (() => {
-          try {
-            const body = JSON.parse(text) as { error_description?: string };
-            return /expired/i.test(String(body.error_description ?? ""));
-          } catch {
-            return false;
-          }
-        })();
-      return { ok: false, error: isExpired ? "ID_TOKEN_EXPIRED" : "LINE_AUTH_FAILED" };
+      const responseText = await res.text();
+      let description: unknown;
+      let kind: unknown;
+      try {
+        const failure = JSON.parse(responseText);
+        kind = failure?.error;
+        description = failure?.error_description;
+      } catch {
+        // Verification responses can also be plain text.
+      }
+      if (
+        res.status === 400 &&
+        kind === "invalid_request" &&
+        typeof description === "string" &&
+        /\bid[ _-]?token (?:has )?expired\b/i.test(description)
+      ) {
+        console.warn("[member-card] ID_TOKEN_EXPIRED");
+        return { ok: false, error: "ID_TOKEN_EXPIRED" };
+      }
+      console.error("[member-card] LINE verify failed:", res.status);
+      const expired = /expired/i.test(responseText) ||
+        (typeof description === "string" && /expired/i.test(description));
+      return { ok: false, error: expired ? "ID_TOKEN_EXPIRED" : "LINE_AUTH_FAILED" };
     }
 
     const data = (await res.json()) as { sub?: string };
@@ -63,8 +73,8 @@ export async function verifyLineIdToken(idToken: string): Promise<LineVerifyResp
     }
 
     return { ok: true, sub };
-  } catch (err) {
-    console.error("LINE verify request error:", err);
+  } catch {
+    console.error("LINE verify request error");
     return { ok: false, error: "LINE_AUTH_FAILED" };
   }
 }
