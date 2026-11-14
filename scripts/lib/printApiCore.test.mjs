@@ -104,3 +104,23 @@ describe("printer discovery timeout", () => {
     assert.equal(sends, 1);
   });
 });
+
+it("a native discovery error is reported as unsent even if the system dialog was allowed", async (t) => {
+  const { printHtml } = await import("../../extensions/common/printApi.js");
+  const previous = globalThis.shopify;
+  t.after(() => {
+    if (previous === undefined) delete globalThis.shopify;
+    else globalThis.shopify = previous;
+  });
+  let sends = 0;
+  for (const reason of ["request timed out", "printer disconnected", "unknown"]) {
+    globalThis.shopify = { printing: {
+      getPrinters: async () => { throw new Error(reason); },
+      print: async () => { sends++; },
+    } };
+    const result = await printHtml("/fixture", { allowDialog: true });
+    assert.equal(result.outcome, PRINT_OUTCOME.FAILED);
+    assert.match(printResultMessage(result), /印刷は送信されていません/);
+  }
+  assert.equal(sends, 0);
+});

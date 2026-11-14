@@ -106,8 +106,7 @@ export async function printHtml(relativeOrAbsoluteSrc, options = {}) {
       try {
         const printers = await withTimeout(printing.getPrinters(), PRINT_TIMEOUT_MS);
         classified = classifyPrinters(printers);
-      } catch (error) {
-        if (error?.code !== "PRINT_TIMEOUT" && error?.name !== "PrintTimeoutError") throw error;
+      } catch {
         return {
           ok: false,
           outcome: PRINT_OUTCOME.FAILED,
