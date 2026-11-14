@@ -60,9 +60,7 @@ export async function verifyLineIdToken(idToken: string): Promise<LineVerifyResp
         return { ok: false, error: "ID_TOKEN_EXPIRED" };
       }
       console.error("[member-card] LINE verify failed:", res.status);
-      const expired = /expired/i.test(responseText) ||
-        (typeof description === "string" && /expired/i.test(description));
-      return { ok: false, error: expired ? "ID_TOKEN_EXPIRED" : "LINE_AUTH_FAILED" };
+      return { ok: false, error: "LINE_AUTH_FAILED" };
     }
 
     const data = (await res.json()) as { sub?: string };
