@@ -1,11 +1,11 @@
 /**
  * /app — 管理画面トップ
  */
+import type { ReactNode } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useLocation, useNavigate } from "react-router";
 import {
   Page,
-  Layout,
   Card,
   Text,
   Badge,
@@ -37,12 +37,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
       : planLabel(shop.planCode),
     isInhouse: fullAccess,
+    distribution: isInhouseMode() ? "inhouse" : "public",
     privacyPolicyUrl,
   };
 }
 
 export default function AppIndex() {
-  const { planCode, planLabel: label, isInhouse, privacyPolicyUrl } =
+  const { planCode, planLabel: label, isInhouse, distribution, privacyPolicyUrl } =
     useLoaderData<typeof loader>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -53,141 +54,128 @@ export default function AppIndex() {
 
   return (
     <PolarisPageWrapper>
-    <Page title="POS Receipt">
-      <Layout>
-        {/* ── 現在のプラン ── */}
-        <Layout.AnnotatedSection
-          title="現在のプラン"
-          description="ご契約中のプランと利用可能な機能を確認できます。"
-        >
-          <Card>
-            <BlockStack gap="300">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text variant="headingMd" as="h2">プラン</Text>
-                <Badge tone={isPro ? "success" : "info"}>{label}</Badge>
-              </InlineStack>
-              <Text tone="subdued" as="p">
-                精算・特殊返金・領収書などは POS アプリのタイルから利用できます。
-              </Text>
-              {!isInhouse && !isPro && (
-                <Banner tone="info">
-                  <BlockStack gap="200">
-                    <Text as="p">
-                      プロプランにアップグレードすると売上サマリー・予算管理・入店数報告が利用できます。
-                    </Text>
-                    <Button onClick={to("/app/plan")} variant="primary">
-                      プロプランにアップグレード
-                    </Button>
-                  </BlockStack>
-                </Banner>
-              )}
-              {(isInhouse || isPro) && (
-                <Text tone="subdued" as="p">全機能が利用可能です。</Text>
-              )}
-            </BlockStack>
-          </Card>
-        </Layout.AnnotatedSection>
-
-        {/* ── 領収書テンプレート ── */}
-        <Layout.AnnotatedSection
-          title="領収書テンプレート"
-          description="発行者情報（会社名・住所・電話番号）や但し書きのデフォルト値を設定します。"
-        >
-          <Card>
-            <BlockStack gap="200">
-              <Text tone="subdued" as="p">
-                発行者情報・但し書き・印字設定を編集します。
-              </Text>
-              <Button onClick={to("/app/receipt-template")}>テンプレート設定を開く</Button>
-            </BlockStack>
-          </Card>
-        </Layout.AnnotatedSection>
-
-        {/* ── ロケーション・プラン設定 ── */}
-        <Layout.AnnotatedSection
-          title="ロケーション設定"
-          description="各店舗の印字方式や売上サマリー・入店数報告の有効化を設定します。"
-        >
-          <Card>
-            <BlockStack gap="200">
-              <Text tone="subdued" as="p">
-                印字方式・売上サマリー有効化を店舗ごとに設定します。
-              </Text>
-              <InlineStack gap="200">
-                <Button onClick={to("/app/settings")}>設定を開く</Button>
-                {!isInhouse && (
-                  <Button onClick={to("/app/plan")} variant={isPro ? "plain" : "primary"}>
-                    {isPro ? "プラン詳細" : "プロプランへ"}
-                  </Button>
+      <Page title="ホーム">
+        <div className="AdminHome">
+          <div className="AdminHome-summary">
+            <Card>
+              <BlockStack gap="300">
+                <p className="AdminHome-title">現在のプラン</p>
+                <InlineStack align="space-between" blockAlign="center" gap="200">
+                  <Text variant="headingLg" as="p">{label}</Text>
+                  <Badge tone={isPro ? "success" : "info"}>
+                    {distribution === "inhouse" ? "自社用" : "公開用"}
+                  </Badge>
+                </InlineStack>
+                <p className="AdminHome-copy">
+                  精算・特殊返金・領収書などは POS アプリのタイルから利用できます。
+                </p>
+                {!isInhouse && !isPro && (
+                  <Banner tone="info">
+                    <BlockStack gap="200">
+                      <Text as="p">
+                        プロプランにアップグレードすると売上サマリー・予算管理・入店数報告が利用できます。
+                      </Text>
+                      <Button onClick={to("/app/plan")} variant="primary">
+                        プロプランにアップグレード
+                      </Button>
+                    </BlockStack>
+                  </Banner>
                 )}
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.AnnotatedSection>
-
-        {/* ── 履歴・管理 ── */}
-        <Layout.AnnotatedSection
-          title="履歴・管理"
-          description="精算・特殊返金・領収書の実行履歴と予算管理を確認できます。"
-        >
-          <Card>
-            <BlockStack gap="200">
-              <InlineStack gap="200" wrap>
-                <Button onClick={to("/app/settlement-history")} variant="plain">精算履歴</Button>
-                <Button onClick={to("/app/special-refund-history")} variant="plain">特殊返金履歴</Button>
-                <Button onClick={to("/app/receipt-history")} variant="plain">領収書履歴</Button>
                 {(isInhouse || isPro) && (
-                  <Button onClick={to("/app/budget-management")} variant="plain">予算管理</Button>
+                  <p className="AdminHome-copy">全機能が利用可能です。</p>
                 )}
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.AnnotatedSection>
+              </BlockStack>
+            </Card>
+          </div>
 
-        {/* ── システム診断 ── */}
-        <Layout.AnnotatedSection
-          title="システム診断"
-          description="DB接続・テーブル件数・環境変数の設定状態を確認できます。障害調査や設定確認にご利用ください。"
-        >
-          <Card>
-            <BlockStack gap="200">
-              <Text tone="subdued" as="p">
-                接続中のショップ情報・直近アクティビティ・必須環境変数の設定状態を一覧で確認できます。
-              </Text>
-              <Button onClick={to("/app/diagnostics")}>診断ページを開く</Button>
-            </BlockStack>
-          </Card>
-        </Layout.AnnotatedSection>
-
-        {/* ── プライバシー ── */}
-        <Layout.AnnotatedSection
-          title="プライバシー"
-          description="顧客データの取り扱いに関する方針です。"
-        >
-          <Card>
-            <BlockStack gap="200">
-              {privacyPolicyUrl ? (
-                <>
-                  <Text tone="subdued" as="p">
-                    プライバシーポリシーを確認できます。
-                  </Text>
-                  <Button url={privacyPolicyUrl} external>
-                    プライバシーポリシーを開く
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Text tone="subdued" as="p">
-                    プライバシーポリシー URL が未設定です。一般設定または環境変数 PRIVACY_POLICY_URL で設定してください。
-                  </Text>
-                  <Button onClick={to("/app/general-settings")}>一般設定を開く</Button>
-                </>
+          <div className="AdminHome-main">
+            <HomeCard
+              title="精算・点検"
+              description="日付、ロケーション、金額を履歴で比較します。"
+            >
+              <Button onClick={to("/app/settlement-history")} variant="primary">精算履歴を開く</Button>
+              <Button onClick={to("/app/special-refund-history")}>特殊返金履歴</Button>
+              {(isInhouse || isPro) && (
+                <Button onClick={to("/app/budget-management")}>予算管理</Button>
               )}
-            </BlockStack>
-          </Card>
-        </Layout.AnnotatedSection>
-      </Layout>
-    </Page>
+            </HomeCard>
+
+            <HomeCard
+              title="用紙と印字"
+              description="用紙幅が精算・点検・領収書・販売レシートのどれに対応するかを印字設定で確認します。"
+            >
+              <Button onClick={to("/app/print-settings")} variant="primary">印字設定を開く</Button>
+              <Button onClick={to("/app/settlement-print-layout")}>精算印字プレビュー</Button>
+            </HomeCard>
+
+            <HomeCard
+              title="領収書"
+              description="発行者情報（会社名・住所・電話番号）や但し書きのデフォルト値を設定します。"
+            >
+              <Button onClick={to("/app/receipt-template")} variant="primary">テンプレート設定を開く</Button>
+              <Button onClick={to("/app/receipt-history")}>領収書履歴</Button>
+            </HomeCard>
+
+            <HomeCard
+              title="ロケーション"
+              description="印字方式と売上サマリーの有効化を、店舗ごとに設定します。"
+            >
+              <Button onClick={to("/app/settings")} variant="primary">設定を開く</Button>
+              {!isInhouse && (
+                <Button onClick={to("/app/plan")} variant={isPro ? "plain" : "primary"}>
+                  {isPro ? "プラン詳細" : "プロプランへ"}
+                </Button>
+              )}
+            </HomeCard>
+
+            <HomeCard
+              title="システム診断"
+              description="接続中のショップ情報、直近のアクティビティ、必須環境変数の設定状態を確認します。"
+            >
+              <Button onClick={to("/app/diagnostics")} variant="primary">診断ページを開く</Button>
+            </HomeCard>
+
+            <HomeCard
+              title="プライバシー"
+              description={
+                privacyPolicyUrl
+                  ? "プライバシーポリシーを確認できます。"
+                  : "プライバシーポリシー URL が未設定です。一般設定で設定してください。"
+              }
+            >
+              {privacyPolicyUrl ? (
+                <Button url={privacyPolicyUrl} external variant="primary">
+                  プライバシーポリシーを開く
+                </Button>
+              ) : (
+                <Button onClick={to("/app/general-settings")} variant="primary">一般設定を開く</Button>
+              )}
+            </HomeCard>
+          </div>
+        </div>
+      </Page>
     </PolarisPageWrapper>
+  );
+}
+
+function HomeCard({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card>
+      <BlockStack gap="200">
+        <p className="AdminHome-title">{title}</p>
+        <p className="AdminHome-copy">{description}</p>
+        <InlineStack gap="200" wrap>
+          {children}
+        </InlineStack>
+      </BlockStack>
+    </Card>
   );
 }

@@ -1,0 +1,265 @@
+/*
+ * 管理画面の文字。Polaris の本文は 13px（0.8125rem）なので、POS Stock と同様に 14px 相当へ揃える。
+ * Inter に日本語の字形は無い。ラテン文字は Inter、日本語はシステムフォントへフォールバックする。
+ */
+:root {
+  --p-font-family-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+    "Yu Gothic UI", YuGothic, Meiryo, sans-serif;
+  --p-text-body-md-font-size: var(--p-font-size-350);
+}
+
+body {
+  font-family: var(--p-font-family-sans);
+  color: #202223;
+}
+
+[data-app-nav="pos-receipt"] {
+  font-family: var(--p-font-family-sans);
+  font-size: 14px;
+}
+
+[data-app-nav="pos-receipt"] a:focus-visible,
+.AdminPaper a:focus-visible,
+.AdminHome a:focus-visible,
+.AdminHistory a:focus-visible {
+  outline: 2px solid #2c6ecb;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.AdminMoney {
+  display: block;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  text-align: right;
+  white-space: nowrap;
+}
+
+.AdminHistory-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.AdminHistory-filters > * {
+  flex: 1 1 160px;
+  min-width: 140px;
+  max-width: 280px;
+}
+
+.AdminHistory-location {
+  display: block;
+  max-width: 16rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-size: 14px;
+}
+
+.AdminHistory-cards {
+  display: none;
+}
+
+.AdminHistory-card {
+  padding: 16px;
+  border-top: 1px solid #e1e3e5;
+}
+
+.AdminHistory-card:first-child {
+  border-top: 0;
+}
+
+.AdminHistory-card-head,
+.AdminHistory-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.AdminHistory-amounts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 12px 0;
+}
+
+.AdminHistory-amounts dt {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6d7175;
+}
+
+.AdminHistory-amounts dd {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .AdminHistory-filters > * {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .AdminHistory-table {
+    display: none;
+  }
+
+  .AdminHistory-cards {
+    display: block;
+  }
+}
+
+@media (max-width: 360px) {
+  .AdminHistory-amounts {
+    grid-template-columns: 1fr;
+  }
+}
+
+.AdminPaper-note,
+.AdminPaper-caption {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #6d7175;
+}
+
+.AdminPaper-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.AdminPaper-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.AdminPaper-strip {
+  height: 28px;
+  border: 1px solid #e1e3e5;
+  border-radius: 6px;
+  background: #f6f6f7;
+  box-sizing: border-box;
+}
+
+.AdminPaper-bar.is-selected .AdminPaper-strip {
+  border: 2px solid #2c6ecb;
+  background: #f2f7fe;
+}
+
+.AdminPaper-bar span {
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.AdminPaper-map {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.AdminPaper-map th {
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6d7175;
+  padding: 8px 8px 8px 0;
+}
+
+.AdminPaper-map td {
+  padding: 10px 8px 10px 0;
+  border-top: 1px solid #e1e3e5;
+  vertical-align: top;
+  line-height: 1.4;
+}
+
+.AdminPaper-map td:last-child,
+.AdminPaper-map th:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.AdminPaper-map tr.is-shared td:first-child {
+  font-weight: 600;
+}
+
+.AdminPaper-map a {
+  color: #2c6ecb;
+  font-size: 14px;
+}
+
+.AdminHome {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  max-width: 1200px;
+}
+
+.AdminHome-summary {
+  flex: 0 1 320px;
+  min-width: 260px;
+}
+
+.AdminHome-main {
+  flex: 1 1 60%;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.AdminHome-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #6d7175;
+}
+
+.AdminHome-copy {
+  font-size: 14px;
+  line-height: 1.4;
+  color: #6d7175;
+}
+
+@media (max-width: 767px) {
+  .AdminHome {
+    flex-direction: column;
+  }
+
+  .AdminHome-summary,
+  .AdminHome-main {
+    order: 0;
+    flex: 1 1 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .AdminHome-summary {
+    order: 1;
+  }
+
+  .AdminHome-main {
+    order: 2;
+  }
+}
+
+@media (min-width: 768px) {
+  .AdminHome-main {
+    order: 1;
+  }
+
+  .AdminHome-summary {
+    order: 2;
+  }
+}
