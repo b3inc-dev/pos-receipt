@@ -610,6 +610,7 @@ async function buildSettlementPreviewImpl(
   // ショップタイムゾーンで「その日」の UTC 範囲を算出
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
+  const attributionCtx = await loadRefundAggregationContext(shopId);
 
   // 精算の注文境界（D1 / BUSINESS_RULES §1）:
   // - 絞り込みは location_id（数値）+ 日付レンジ + tag_not:settlement のみ
@@ -628,8 +629,15 @@ async function buildSettlementPreviewImpl(
   await sleep(GRAPHQL_PAGE_DELAY_MS);
   const cancelledRaw = await fetchAllOrders(admin, qCancelled, "UPDATED_AT");
   await sleep(GRAPHQL_PAGE_DELAY_MS);
-  const refundUpdatedRaw = await fetchAllOrders(admin, qRefundUpdated, "UPDATED_AT");
-  await sleep(GRAPHQL_PAGE_DELAY_MS);
+  const includeCrossLocationRefunds =
+    attributionCtx.mode === "refund_transaction_pos_location";
+  const refundUpdatedRaw =
+    includeCrossLocationRefunds
+      ? await fetchAllOrders(admin, qRefundUpdated, "UPDATED_AT")
+      : [];
+  if (includeCrossLocationRefunds) {
+    await sleep(GRAPHQL_PAGE_DELAY_MS);
+  }
 
   const inDay = (iso?: string) => {
     if (!iso) return false;
@@ -654,6 +662,7 @@ async function buildSettlementPreviewImpl(
       inDay,
       locationId,
       locIdRaw,
+      attributionCtx.mode,
     );
     return refundOnly ? [refundOnly as ShopifyOrder] : [];
   });
@@ -671,7 +680,6 @@ async function buildSettlementPreviewImpl(
     });
   }
 
-  const attributionCtx = await loadRefundAggregationContext(shopId);
   const attributionOpts: GasAggregateAttributionOpts = {
     attributionCtx,
     settlementLocationId: locationId,

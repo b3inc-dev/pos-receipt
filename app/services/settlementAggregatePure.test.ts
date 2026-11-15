@@ -208,6 +208,7 @@ describe("aggregateGasStyleForOrders — 返金帰属", () => {
       alwaysInRange,
       locB,
       "200",
+      "refund_transaction_pos_location",
     );
     assert.ok(refundOnly);
     assert.deepEqual(refundOnly.transactions?.map((tx) => tx.id), ["o-cross-refund"]);
@@ -222,6 +223,48 @@ describe("aggregateGasStyleForOrders — 返金帰属", () => {
     assert.equal(gas.saleOrderSet.size, 0);
     assert.equal(gas.refundOrderSet.size, 1);
     assert.equal(gas.itemCount, -1);
+  });
+
+  it("注文基準モードでは別店舗の返金専用入力を生成しない", () => {
+    const order = saleOrder({
+      id: "o-order-mode-cross-refund",
+      retailLocation: { id: locA },
+      transactions: [
+        {
+          id: "o-order-mode-cross-refund-tx",
+          createdAt: "2026-10-08T03:00:00Z",
+          kind: "REFUND",
+          amountSet: money(300),
+          gateway: "cash",
+          location: { id: locB },
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T03:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-order-mode-cross-refund-tx",
+              kind: "REFUND",
+              amountSet: money(300),
+              gateway: "cash",
+              location: { id: locB },
+            },
+          ],
+        },
+      ],
+    });
+
+    const refundOnly = buildCrossLocationRefundOnlyOrder(
+      order,
+      alwaysInRange,
+      locB,
+      "200",
+      "order_transaction",
+    );
+
+    assert.equal(refundOnly, null);
   });
 
   const locA = "gid://shopify/Location/100";

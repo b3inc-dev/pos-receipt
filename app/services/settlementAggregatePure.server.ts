@@ -7,6 +7,7 @@ import {
   locationGidMatches,
   normalizeLocationGid,
   resolveRefundAggregationLocationGid,
+  type RefundAggregationLocationMode,
   type RefundAggregationContext,
 } from "./refundAggregationPure.server";
 
@@ -79,7 +80,13 @@ export function buildCrossLocationRefundOnlyOrder(
   inRange: (iso?: string) => boolean,
   settlementLocationId: string,
   locIdRaw: string,
+  attributionMode: RefundAggregationLocationMode,
 ): GasStyleOrder | null {
+  // 注文基準では、別店舗で処理した返金も販売店舗へ帰属させる。
+  // 返金店舗向けの入力を追加すると同じ返金が両店舗へ二重計上されるため、
+  // この補助入力は返金トランザクション基準のときだけ生成する。
+  if (attributionMode !== "refund_transaction_pos_location") return null;
+
   const matchingTopLevelRefundTxIds = new Set(
     (order.transactions ?? [])
       .filter(
