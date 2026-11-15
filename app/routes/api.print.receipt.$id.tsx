@@ -22,7 +22,7 @@ import {
   type PrintSettings,
 } from "../utils/appSettings.server";
 import { resolvePaperWidthMm } from "../services/printUnification.server";
-import { resolveReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
+import { parseReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -43,6 +43,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         `<!DOCTYPE html><html><body><p>領収書が見つかりません。</p></body></html>`,
         { status: 404 },
       );
+    }
+
+    const snapshot = parseReceiptPrintSnapshot(issued.printSnapshotJson);
+    if (issued.printSnapshotJson != null && !snapshot) {
+      return corsHtml(
+        request,
+        `<!DOCTYPE html><html lang="ja"><body><p>発行時の領収書データを読み取れないため、現在設定での再生成は行いません。</p></body></html>`,
+        { status: 409 },
+      );
+    }
+
+    const printSettings =
+      (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
+    const paper = resolvePaperWidthMm(printSettings);
+    if (snapshot) {
+      return corsHtml(request, snapshot.renderedHtmlByPaperWidth[paper]);
     }
 
     let templateData: ReceiptTemplateData = normalizeTemplateData({ ...DEFAULT_TEMPLATE });
@@ -74,35 +90,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       : null;
 
     const currentLocationName = location?.displayName ?? location?.name ?? "";
-    const resolvedSnapshot = resolveReceiptPrintSnapshot(issued.printSnapshotJson, {
-      locationName: currentLocationName,
-      templateData: templateData as unknown as Record<string, unknown>,
-    });
-    if (resolvedSnapshot.snapshotUnreadable) {
-      return corsHtml(
-        request,
-        `<!DOCTYPE html><html lang="ja"><body><p>発行時の領収書データを読み取れないため、現在設定での再生成は行いません。</p></body></html>`,
-        { status: 409 },
-      );
-    }
-    templateData = normalizeTemplateData(resolvedSnapshot.templateData);
-
-    const printSettings =
-      (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
-    const paper = resolvePaperWidthMm(printSettings);
-
-    const storedHtml = resolvedSnapshot.renderedHtmlByPaperWidth?.[paper];
-    if (resolvedSnapshot.snapshotPresent) {
-      if (!storedHtml) {
-        return corsHtml(
-          request,
-          `<!DOCTYPE html><html lang="ja"><body><p>発行時の領収書HTMLが不足しているため、現在設定での再生成は行いません。</p></body></html>`,
-          { status: 409 },
-        );
-      }
-      return corsHtml(request, storedHtml);
-    }
-
     const html = renderPrintReceiptHtml({
       kind: "receipt",
       title: "領　収　書",
@@ -112,7 +99,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       currency: issued.currency ?? "JPY",
       issueDate: issued.createdAt.toISOString().slice(0, 10),
       orderName: issued.orderName ?? undefined,
-      locationName: resolvedSnapshot.locationName,
+      locationName: currentLocationName,
       companyName: templateData.companyName,
       address: templateData.address,
       phone: templateData.phone,
