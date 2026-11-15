@@ -56,9 +56,18 @@ describe("applySpecialRefundEventsToTotals — cash_refund", () => {
     assert.equal(secs[0].refund, 300);
   });
 
-  it("shopifyRefundStatus===success では overlay 金額加算をスキップ（二重計上防止）", () => {
-    // Shopify TX 側で既に 300 返金済み想定
-    const secs = sections([{ gateway: "現金", label: "現金", net: 1000, refund: 300 }]);
+  it("success は Shopify 元手段から実際の現金へ振り替え、返金総額を増やさない", () => {
+    // Shopify は credit_card の親取引へ返金済み、店頭では現金で払い出した想定
+    const secs = sections([
+      {
+        gateway: "クレジットカード",
+        label: "クレジットカード",
+        net: 1000,
+        refund: 300,
+        refundCount: 1,
+      },
+      { gateway: "現金", label: "現金", net: 0, refund: 0, refundCount: 0 },
+    ]);
     const totals = { total: 1000, refundTotal: 300 };
     applySpecialRefundEventsToTotals(
       secs,
@@ -66,8 +75,8 @@ describe("applySpecialRefundEventsToTotals — cash_refund", () => {
         {
           eventType: "cash_refund",
           amount: 300,
-          originalPaymentMethod: "現金",
-          actualRefundMethod: "現金",
+          originalPaymentMethod: "credit_card",
+          actualRefundMethod: "cash",
           adjustKind: null,
           shopifyRefundStatus: "success",
         },
@@ -75,7 +84,10 @@ describe("applySpecialRefundEventsToTotals — cash_refund", () => {
       totals,
     );
     assert.equal(totals.refundTotal, 300);
-    assert.equal(secs[0].refund, 300);
+    assert.equal(secs[0].refund, 0);
+    assert.equal(secs[0].refundCount, 0);
+    assert.equal(secs[1].refund, 300);
+    assert.equal(secs[1].refundCount, 1);
   });
 });
 
@@ -93,8 +105,9 @@ describe("applySpecialRefundEventsToTotals — payment_method_override", () => {
         {
           eventType: "payment_method_override",
           amount: 1000,
-          originalPaymentMethod: "クレジットカード",
-          actualRefundMethod: "現金",
+          // API が保存する rawGatewayPattern と集計済み日本語バケットの組合せ
+          originalPaymentMethod: "credit_card",
+          actualRefundMethod: "cash",
           adjustKind: null,
           shopifyRefundStatus: "success",
         },
@@ -104,6 +117,31 @@ describe("applySpecialRefundEventsToTotals — payment_method_override", () => {
     assert.equal(totals.refundTotal, 1000);
     assert.equal(secs[0].refund, 0);
     assert.equal(secs[1].refund, 1000);
+  });
+
+  it("元手段を特定できない success は実手段へ追加せず二重控除を防ぐ", () => {
+    const secs = sections([
+      { gateway: "クレジットカード", label: "クレジットカード", net: 5000, refund: 1000 },
+      { gateway: "現金", label: "現金", net: 2000, refund: 0 },
+    ]);
+    const totals = { total: 6000, refundTotal: 1000 };
+    applySpecialRefundEventsToTotals(
+      secs,
+      [
+        {
+          eventType: "payment_method_override",
+          amount: 1000,
+          originalPaymentMethod: "unknown_gateway",
+          actualRefundMethod: "cash",
+          adjustKind: null,
+          shopifyRefundStatus: "success",
+        },
+      ],
+      totals,
+    );
+    assert.equal(totals.refundTotal, 1000);
+    assert.equal(secs[0].refund, 1000);
+    assert.equal(secs[1].refund, 0);
   });
 
   it("record_only は実手段へ純 overlay（refundTotal 加算）", () => {

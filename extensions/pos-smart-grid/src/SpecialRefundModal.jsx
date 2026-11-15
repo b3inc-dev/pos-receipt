@@ -24,6 +24,10 @@ import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
+import {
+  paymentMethodsWithOrderGateway,
+  primarySaleTransaction,
+} from "../../common/paymentMethodFallback.js";
 
 const STORAGE_KEY_REFUND = "pos_special_refund_order_id";
 const STORAGE_KEY_VOUCHER = "pos_voucher_adjustment_order_id";
@@ -610,30 +614,55 @@ function SpecialRefundForm({
   onBack,
   onSuccess,
 }) {
+  const orderGateway = String(primarySaleTransaction(order)?.gateway ?? "").trim();
+  const fallbackPaymentMethods = paymentMethodsWithOrderGateway(
+    FALLBACK_PAYMENT_METHODS,
+    order,
+  );
   const [eventType, setEventType] = useState("cash_refund");
   const [amount, setAmount] = useState("");
-  const [paymentMethods, setPaymentMethods] = useState(FALLBACK_PAYMENT_METHODS);
-  const [originalPaymentMethod, setOriginalPaymentMethod] = useState("cash");
+  const [paymentMethods, setPaymentMethods] = useState(fallbackPaymentMethods);
+  const [originalPaymentMethod, setOriginalPaymentMethod] = useState(orderGateway || "cash");
   const [actualRefundMethod, setActualRefundMethod] = useState("cash");
+  const [idempotencyKey, setIdempotencyKey] = useState(null);
   const [adjustKind, setAdjustKind] = useState("undo");
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
+    // 内容を変えた操作は別intent。同じキーを再利用するとpayload mismatchになる。
+    setIdempotencyKey(null);
+  }, [eventType, amount, originalPaymentMethod, actualRefundMethod, adjustKind, note]);
+
+  useEffect(() => {
     listSelectablePaymentMethods({ sync: true })
       .then((res) => {
-        const items = res.items ?? [];
+        const items = paymentMethodsWithOrderGateway(res.items ?? [], order);
         if (items.length > 0) {
           setPaymentMethods(items);
-          setOriginalPaymentMethod(items[0].value);
+          const normalizedOrderGateway = orderGateway.toLowerCase();
+          const orderMethod = items.find((m) => {
+            const value = String(m.value ?? "").toLowerCase();
+            return (
+              value === normalizedOrderGateway ||
+              (normalizedOrderGateway && normalizedOrderGateway.includes(value)) ||
+              (normalizedOrderGateway && value.includes(normalizedOrderGateway))
+            );
+          });
+          setOriginalPaymentMethod(orderMethod?.value || orderGateway || items[0].value);
           const cash = items.find((m) => m.category === "cash" || m.value === "cash");
           setActualRefundMethod(cash?.value ?? items[0].value);
         }
       })
       .catch(() => {
-        setPaymentMethods(FALLBACK_PAYMENT_METHODS);
+        setPaymentMethods(fallbackPaymentMethods);
+        setOriginalPaymentMethod(orderGateway || fallbackPaymentMethods[0].value);
+        const cash = fallbackPaymentMethods.find(
+          (method) => method.category === "cash" || method.value === "cash",
+        );
+        setActualRefundMethod(cash?.value ?? fallbackPaymentMethods[0].value);
       });
-  }, []);
+  }, [order?.orderId]);
 
   const showPaymentFields =
     eventType === "cash_refund" || eventType === "payment_method_override";
@@ -645,6 +674,11 @@ function SpecialRefundForm({
       setError("金額を正しく入力してください");
       return;
     }
+    if (!idempotencyKey) {
+      const generated = globalThis?.crypto?.randomUUID?.() ??
+        `pos-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+      setIdempotencyKey(generated);
+    }
     setConfirming(true);
   };
 
@@ -653,6 +687,7 @@ function SpecialRefundForm({
     setError("");
     try {
       const res = await createSpecialRefund({
+        idempotencyKey,
         sourceOrderId: order.orderId,
         sourceOrderName: order.orderName,
         locationId: order.location?.id ?? "",
@@ -664,6 +699,7 @@ function SpecialRefundForm({
         adjustKind: showAdjustKind ? adjustKind : null,
         note: note.trim() || null,
       });
+      setIdempotencyKey(null);
       setConfirming(false);
       await onSuccess(formatShopifyRefundNotice(res));
     } catch (e) {

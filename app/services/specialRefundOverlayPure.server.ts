@@ -3,6 +3,7 @@
  * shopify_execute 成功後は Shopify TX が正本のため金額加算をスキップし、
  * payment_method_override は親 gateway → 実手段への振替のみ行う。
  */
+import { gasNormalizeGatewayLabel } from "./settlementAggregatePure.server";
 
 export interface OverlayPaymentSection {
   gateway: string;
@@ -29,17 +30,20 @@ export function findPaymentSectionIndex(
   gatewayOrLabel: string | null,
 ): number {
   if (!gatewayOrLabel) return -1;
-  const s = String(gatewayOrLabel).trim().toLowerCase();
-  const i = sections.findIndex(
-    (sec) => sec.gateway.toLowerCase() === s || sec.label.toLowerCase() === s,
-  );
-  if (i >= 0) return i;
-  if (["現金", "cash"].some((k) => s.includes(k) || k.includes(s))) {
-    return sections.findIndex(
-      (sec) => sec.gateway.toLowerCase() === "cash" || sec.label === "現金",
-    );
-  }
-  return -1;
+  const raw = String(gatewayOrLabel).trim();
+  const aliases = new Set([
+    raw.toLowerCase(),
+    gasNormalizeGatewayLabel(raw).trim().toLowerCase(),
+  ]);
+  return sections.findIndex((sec) => {
+    const sectionAliases = [
+      sec.gateway,
+      sec.label,
+      gasNormalizeGatewayLabel(sec.gateway),
+      gasNormalizeGatewayLabel(sec.label),
+    ].map((value) => String(value).trim().toLowerCase());
+    return sectionAliases.some((value) => aliases.has(value));
+  });
 }
 
 function ensureSection(
@@ -60,6 +64,35 @@ function ensureSection(
   return sections.length - 1;
 }
 
+/**
+ * Shopify が計上した元手段から、店頭で実際に払い出した手段へ返金額を移す。
+ * 元手段を特定できない場合は二重控除を避けるため何も追加しない。
+ */
+function transferExecutedRefund(
+  sections: OverlayPaymentSection[],
+  originalPaymentMethod: string | null,
+  actualRefundMethod: string | null,
+  amount: number,
+): void {
+  const originalKey = originalPaymentMethod ?? "cash";
+  const actualKey = actualRefundMethod ?? "cash";
+  const originalIdx = findPaymentSectionIndex(sections, originalKey);
+  if (originalIdx < 0) return;
+
+  const actualIdx = ensureSection(sections, actualKey);
+  if (originalIdx === actualIdx) return;
+
+  const moved = Math.min(amount, Math.max(0, sections[originalIdx].refund));
+  if (moved <= 0) return;
+  sections[originalIdx].refund -= moved;
+  sections[actualIdx].refund += moved;
+
+  if (moved === amount && sections[originalIdx].refundCount > 0) {
+    sections[originalIdx].refundCount -= 1;
+    sections[actualIdx].refundCount += 1;
+  }
+}
+
 /** Shopify 実返金が成功済み（または同等）なら overlay 金額加算を避ける */
 export function isShopifyRefundSucceeded(
   status: string | null | undefined,
@@ -70,8 +103,8 @@ export function isShopifyRefundSucceeded(
 
 /**
  * 特殊返金イベントを total / refundTotal / paymentSections に反映。
- * - shopifyRefundStatus===success: cash_refund / receipt_cash_adjustment はスキップ
- * - payment_method_override + success: 親手段→実手段の振替（refundTotal は不変）
+ * - cash_refund / payment_method_override + success: 親手段→実手段の振替（refundTotal は不変）
+ * - receipt_cash_adjustment + success: Shopify TX が正本のためスキップ
  * - それ以外: 従来どおり純 overlay
  */
 export function applySpecialRefundEventsToTotals(
@@ -86,11 +119,18 @@ export function applySpecialRefundEventsToTotals(
 
     switch (e.eventType) {
       case "cash_refund": {
-        if (executed) break;
+        if (executed) {
+          transferExecutedRefund(
+            sections,
+            e.originalPaymentMethod,
+            e.actualRefundMethod,
+            amount,
+          );
+          break;
+        }
         totals.refundTotal += amount;
-        const idx = findPaymentSectionIndex(sections, e.actualRefundMethod ?? "cash");
-        if (idx >= 0) sections[idx].refund += amount;
-        else if (sections.length > 0) sections[0].refund += amount;
+        const idx = ensureSection(sections, e.actualRefundMethod ?? "cash");
+        sections[idx].refund += amount;
         break;
       }
       case "receipt_cash_adjustment": {
@@ -109,20 +149,17 @@ export function applySpecialRefundEventsToTotals(
       }
       case "payment_method_override": {
         if (executed) {
-          // Shopify TX は親 gateway に返金済み → 実手段へ振替（合計は変えない）
-          const origKey = e.originalPaymentMethod ?? "cash";
-          const actualKey = e.actualRefundMethod ?? "cash";
-          const origIdx = findPaymentSectionIndex(sections, origKey);
-          const actualIdx = ensureSection(sections, actualKey);
-          if (origIdx >= 0) {
-            sections[origIdx].refund = Math.max(0, sections[origIdx].refund - amount);
-          }
-          sections[actualIdx].refund += amount;
+          transferExecutedRefund(
+            sections,
+            e.originalPaymentMethod,
+            e.actualRefundMethod,
+            amount,
+          );
           break;
         }
         totals.refundTotal += amount;
-        const idx = findPaymentSectionIndex(sections, e.actualRefundMethod ?? "cash");
-        if (idx >= 0) sections[idx].refund += amount;
+        const idx = ensureSection(sections, e.actualRefundMethod ?? "cash");
+        sections[idx].refund += amount;
         break;
       }
       default:

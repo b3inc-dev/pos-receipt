@@ -3,6 +3,7 @@
  * Phase 1 ユニットテスト用に settlementEngine から切り出し。挙動は元実装と同一。
  */
 import {
+  getPosLocationFromRefundTransactions,
   locationGidMatches,
   normalizeLocationGid,
   resolveRefundAggregationLocationGid,
@@ -50,6 +51,7 @@ export interface GasStyleOrder {
     amountSet?: { shopMoney: { amount: string; currencyCode?: string } };
     gateway?: string;
     formattedGateway?: string | null;
+    location?: { id: string } | null;
   }>;
   refunds?: Array<{
     createdAt?: string;
@@ -66,6 +68,60 @@ export interface GasStyleOrder {
   retailLocation?: { id: string } | null;
   /** pos.refund_aggregation_location_gid（集計時優先。無ければ resolve） */
   refundAggregationLocationGid?: string | null;
+}
+
+/**
+ * 注文の販売店舗とは別の店舗で当日返金された注文を、返金だけの集計入力へ変換する。
+ * 売上 TX を除外することで、元店舗の当日売上を返金店舗へ移さない。
+ */
+export function buildCrossLocationRefundOnlyOrder(
+  order: GasStyleOrder,
+  inRange: (iso?: string) => boolean,
+  settlementLocationId: string,
+  locIdRaw: string,
+): GasStyleOrder | null {
+  const matchingTopLevelRefundTxIds = new Set(
+    (order.transactions ?? [])
+      .filter(
+        (tx) =>
+          String(tx.kind ?? "").toUpperCase() === "REFUND" &&
+          inRange(tx.createdAt) &&
+          locationGidMatches(tx.location?.id, settlementLocationId, locIdRaw),
+      )
+      .map((tx) => tx.id),
+  );
+  const matchingRefundTxIds = new Set<string>(matchingTopLevelRefundTxIds);
+  const refunds = (order.refunds ?? []).flatMap((refund) => {
+    if (!inRange(refund.createdAt)) return [];
+    const matchingTransactions = (refund.transactions ?? []).filter(
+      (tx) =>
+        matchingTopLevelRefundTxIds.has(tx.id) ||
+        locationGidMatches(tx.location?.id, settlementLocationId, locIdRaw),
+    );
+    for (const tx of matchingTransactions) {
+      if (tx.id) matchingRefundTxIds.add(tx.id);
+    }
+    if (matchingTransactions.length === 0) return [];
+    return [{ ...refund, transactions: matchingTransactions }];
+  });
+
+  const transactions = (order.transactions ?? []).filter((tx) => {
+    if (String(tx.kind ?? "").toUpperCase() !== "REFUND") return false;
+    if (matchingRefundTxIds.has(tx.id)) return true;
+    return (
+      inRange(tx.createdAt) &&
+      locationGidMatches(tx.location?.id, settlementLocationId, locIdRaw)
+    );
+  });
+
+  if (refunds.length === 0 && transactions.length === 0) return null;
+  return {
+    ...order,
+    transactions,
+    refunds,
+    // 注文単位の最新値ではなく、上で残した返金 TX の店舗を正本にする。
+    refundAggregationLocationGid: settlementLocationId,
+  };
 }
 
 export const GAS_UNKNOWN_GATEWAY = "未分類";
@@ -203,15 +259,17 @@ export type RefundAttributionDecision = {
   counts: boolean;
   /** metafield と resolve が両方あり不一致 */
   mismatch: boolean;
-  /** 実際に使った計上 GID（metafield 優先） */
+  /** 実際に使った計上 GID（当日返金 TX → metafield → resolve） */
   usedGid: string | null;
   resolvedGid: string | null;
   metafieldGid: string | null;
 };
 
 /**
- * 返金計上ロケ: metafield 優先、無ければ resolve。
- * 不一致でも金額ロジックは metafield 側を使い、mismatch フラグのみ立てる。
+ * 返金計上ロケ:
+ * - refund_transaction_pos_location では当日範囲の返金 TX を最優先
+ * - 当日 TX で解決できない管理画面・外部返金は metafield、最後に resolve
+ * 後日の別店舗部分返品で、過去日の確定帰属を単一 metafield が上書きしない。
  */
 export function decideRefundAttributionForSettlement(
   order: GasStyleOrder,
@@ -233,8 +291,12 @@ export function decideRefundAttributionForSettlement(
     opts.attributionCtx,
     inRange,
   );
+  const inRangeRefundPosGid =
+    opts.attributionCtx.mode === "refund_transaction_pos_location"
+      ? getPosLocationFromRefundTransactions(order, inRange)
+      : null;
   const mismatch = !!(metafieldGid && resolvedGid && metafieldGid !== resolvedGid);
-  const usedGid = metafieldGid ?? resolvedGid;
+  const usedGid = inRangeRefundPosGid ?? metafieldGid ?? resolvedGid;
   return {
     counts: locationGidMatches(usedGid, opts.settlementLocationId, opts.locIdRaw),
     mismatch,
@@ -291,10 +353,39 @@ export function aggregateGasStyleForOrders(
     const countRefundsForThisLocation = attribution.counts;
 
     const refundTxIdsInDay = new Set<string>();
+    const refundTxCountsById = new Map<string, boolean>();
+    const countedRefunds = new Set<NonNullable<GasStyleOrder["refunds"]>[number]>();
     for (const r of o.refunds ?? []) {
       if (!inRange(r.createdAt)) continue;
-      for (const e of r.transactions ?? []) {
-        if (e?.id) refundTxIdsInDay.add(e.id);
+      const refundTransactions = r.transactions ?? [];
+      const locatedTransactions = refundTransactions.filter((tx) => tx.location?.id);
+      const splitByRefundTransaction =
+        attributionOpts?.attributionCtx.mode === "refund_transaction_pos_location" &&
+        locatedTransactions.length > 0;
+      let refundCountsForLocation = countRefundsForThisLocation;
+      if (splitByRefundTransaction) {
+        refundCountsForLocation = locatedTransactions.some((tx) =>
+          locationGidMatches(
+            tx.location?.id,
+            attributionOpts!.settlementLocationId,
+            attributionOpts!.locIdRaw,
+          ),
+        );
+      }
+      if (refundCountsForLocation) countedRefunds.add(r);
+
+      for (const e of refundTransactions) {
+        if (!e?.id) continue;
+        refundTxIdsInDay.add(e.id);
+        const txCountsForLocation =
+          splitByRefundTransaction && e.location?.id
+            ? locationGidMatches(
+                e.location.id,
+                attributionOpts!.settlementLocationId,
+                attributionOpts!.locIdRaw,
+              )
+            : refundCountsForLocation;
+        refundTxCountsById.set(e.id, txCountsForLocation);
       }
     }
 
@@ -318,7 +409,9 @@ export function aggregateGasStyleForOrders(
         gwSaleMapToday[gw] = (gwSaleMapToday[gw] || 0) + amt;
         pay[gw].saleTx += 1;
       } else if (kind === "REFUND") {
-        if (!countRefundsForThisLocation) continue;
+        const txCountsForLocation =
+          refundTxCountsById.get(tx.id) ?? countRefundsForThisLocation;
+        if (!txCountsForLocation) continue;
         const r = Math.abs(amt);
         orderRefundToday += r;
         pay[gw].refund += r;
@@ -351,11 +444,12 @@ export function aggregateGasStyleForOrders(
 
     const hasRefundObjToday = refundTxIdsInDay.size > 0;
     const hasRefundTxToday = todaysTx.some((tx) => String(tx.kind) === "REFUND");
-    if (countRefundsForThisLocation && hasRefundObjToday && !hasRefundTxToday) {
+    if (hasRefundObjToday && !hasRefundTxToday) {
       let amt = 0;
       let cnt = 0;
       for (const r of o.refunds ?? []) {
         if (!inRange(r.createdAt)) continue;
+        if (!countedRefunds.has(r)) continue;
         for (const e of r.transactions ?? []) {
           const v = Math.abs(Number(e?.amountSet?.shopMoney?.amount ?? 0));
           if (v > 0) {
@@ -396,11 +490,9 @@ export function aggregateGasStyleForOrders(
       voucherChangeObserved += Math.max(orderVoucherCashChange, orderVoucherFaceChange);
     }
 
-    if (countRefundsForThisLocation) {
-      refundsGross += orderRefundToday;
-    }
+    refundsGross += orderRefundToday;
 
-    if (effectiveOrderSaleToday - (countRefundsForThisLocation ? orderRefundToday : 0) > 0) {
+    if (effectiveOrderSaleToday - orderRefundToday > 0) {
       saleOrderSet.add(o.id);
     }
 
@@ -408,9 +500,10 @@ export function aggregateGasStyleForOrders(
       const nodes = o.lineItems?.nodes ?? [];
       itemCount += nodes.reduce((s, n) => s + Number(n.quantity ?? 0), 0);
     }
-    if (countRefundsForThisLocation && orderRefundToday > 0) {
+    if (orderRefundToday > 0) {
       for (const r of o.refunds ?? []) {
         if (!inRange(r.createdAt)) continue;
+        if (!countedRefunds.has(r)) continue;
         for (const ri of r.refundLineItems ?? []) {
           itemCount -= Number(ri.quantity ?? 0);
         }

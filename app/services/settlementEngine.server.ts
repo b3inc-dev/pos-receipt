@@ -33,12 +33,16 @@ import {
 } from "./refundAggregation.server";
 import {
   aggregateGasStyleForOrders,
+  buildCrossLocationRefundOnlyOrder,
   ensurePayBucket,
   gasNormalizeGatewayLabel,
   totalFromPayBuckets,
   type GasAggregateAttributionOpts,
 } from "./settlementAggregatePure.server";
-import { extractLocationNumericId } from "./refundAggregationPure.server";
+import {
+  extractLocationNumericId,
+  locationGidMatches,
+} from "./refundAggregationPure.server";
 import { applySpecialRefundEventsToTotals } from "./specialRefundOverlayPure.server";
 
 export type { GasAggregateAttributionOpts } from "./settlementAggregatePure.server";
@@ -614,6 +618,9 @@ async function buildSettlementPreviewImpl(
   const qCreated   = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const qUpdated   = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const qCancelled = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement status:cancelled`;
+  // 販売店舗とは別の店舗で処理した返金も拾う。後段で対象店舗の返金 TX のみに
+  // 縮約してから union するため、他店舗の売上は混入しない。
+  const qRefundUpdated = `updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement`;
 
   const createdRaw   = await fetchAllOrders(admin, qCreated, "CREATED_AT");
   await sleep(GRAPHQL_PAGE_DELAY_MS);
@@ -621,11 +628,36 @@ async function buildSettlementPreviewImpl(
   await sleep(GRAPHQL_PAGE_DELAY_MS);
   const cancelledRaw = await fetchAllOrders(admin, qCancelled, "UPDATED_AT");
   await sleep(GRAPHQL_PAGE_DELAY_MS);
+  const refundUpdatedRaw = await fetchAllOrders(admin, qRefundUpdated, "UPDATED_AT");
+  await sleep(GRAPHQL_PAGE_DELAY_MS);
+
+  const inDay = (iso?: string) => {
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
+    return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
+  };
 
   let ordersUnion = unionSettlementOrdersById(
     unionSettlementOrdersById(createdRaw, updatedRaw),
     cancelledRaw,
   );
+  const existingOrderIds = new Set(ordersUnion.map((order) => order.id));
+  const crossLocationRefundOrders = refundUpdatedRaw.flatMap((order) => {
+    const orderBelongsToSettlementLocation = locationGidMatches(
+      order.retailLocation?.id,
+      locationId,
+      locIdRaw,
+    );
+    if (existingOrderIds.has(order.id) && orderBelongsToSettlementLocation) return [];
+    const refundOnly = buildCrossLocationRefundOnlyOrder(
+      order,
+      inDay,
+      locationId,
+      locIdRaw,
+    );
+    return refundOnly ? [refundOnly as ShopifyOrder] : [];
+  });
+  ordersUnion = unionSettlementOrdersById(ordersUnion, crossLocationRefundOrders);
 
   // GAS fetchAllOrdersSmart ③: 0件のとき processed_at（店舗TZの暦日）でフォールバック
   if (ordersUnion.length === 0) {
@@ -654,12 +686,6 @@ async function buildSettlementPreviewImpl(
   const ordersUpdatedPosSourceMatchedCount = updatedRaw.length;
   const ordersUpdatedAtLocationCount = updatedRaw.length;
   const overlayRefundCount = 0;
-
-  const inDay = (iso?: string) => {
-    if (!iso) return false;
-    const t = new Date(iso).getTime();
-    return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
-  };
 
   const gas = aggregateGasStyleForOrders(ordersUnion, inDay, attributionOpts);
 
