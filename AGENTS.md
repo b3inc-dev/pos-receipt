@@ -60,3 +60,10 @@ Shopify POS 店舗向けに、日次精算・特殊返金／商品券調整・�
 共通ルールの正本は本書と既存docsです。Cursor・Codex・Claude Codeは開始前に [docs/DEV_FIRST_THEN_DEPLOY.md](docs/DEV_FIRST_THEN_DEPLOY.md) の共通開発運用・引き継ぎ・リリース境界を確認してください。1 workstreamにつきowner toolは1つ。main直push・force push、本番操作の無承認実行、Backlogへの勝手な着手は禁止です。
 
 作業分離は毎回の指示を待たず自動で行う。編集前にGitHubのowner・進行中PRとローカル変更を確認し、同じworkstreamの自分の専用branch/worktreeがあれば再利用、なければGitHubの適切なbaseから作成する。main/stagingの共有checkoutや他toolのworktreeへ直接編集しない。詳細手順は上記の共通運用docsを参照する。
+
+## 管理画面・POSの共通ルール
+
+- POS本文の左右端はPOS Stockのロス画面に合わせ、本文・見出し・エラー・操作を標準の `base` 余白に揃える。固定ヘッダー・フッターを持つ画面は領域ごとに一度だけ余白を取る。
+- 管理画面の分類タブは本文の先頭に置き、選択中を表示する。タブを往復したとき、同じ店舗の編集途中の設定を復元する。
+- 主保存は対象設定と対応させて下端に固定する。固定バーの実際の高さと端末のセーフエリアを確保し、最終項目とエラーまでスクロールできるようにする。履歴・照会専用画面に保存を出さない。
+- 公開版・自社版で共通。iPhone幅とPC幅でタブの往復、保存対象、最終欄、エラーを確認し、POSは実機でキーボードと画面回転を確認する。

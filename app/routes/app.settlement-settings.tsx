@@ -10,13 +10,11 @@ import {
   Text,
   TextField,
   Checkbox,
-  Button,
   BlockStack,
   Banner,
   InlineStack,
   Select,
 } from "@shopify/polaris";
-import { useState } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
@@ -27,6 +25,8 @@ import {
   DEFAULT_SETTLEMENT_SETTINGS,
   type SettlementSettings,
 } from "../utils/appSettings.server";
+import { SettingsSave, useSavedFeedback } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 
@@ -190,9 +190,9 @@ export default function SettlementSettingsPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
-  const [form, setForm] = useState<SettlementSettings>({ ...initial });
-  const [nonPosTargetGid, setNonPosTargetGid] = useState(initialTarget);
+  const saved = useSavedFeedback();
+  const [form, setForm] = useSettingsDraft<SettlementSettings>("form", { ...initial });
+  const [nonPosTargetGid, setNonPosTargetGid] = useSettingsDraft("nonPosTargetGid", initialTarget);
 
   const nonPosLocationOptions = [
     { label: "未設定（フォールバック設定に従う）", value: "" },
@@ -208,8 +208,6 @@ export default function SettlementSettingsPage() {
     const targetLoc = locations.find((l) => l.id === nonPosTargetGid);
     fd.set("nonPosRefundTargetLocationName", targetLoc?.name ?? "");
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = <K extends keyof SettlementSettings>(key: K, value: SettlementSettings[K]) => {
@@ -221,7 +219,6 @@ export default function SettlementSettingsPage() {
       <Page
         title="精算設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
           <TabGroupBar tabs={SETTLEMENT_TABS} />
@@ -347,11 +344,8 @@ export default function SettlementSettingsPage() {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end"><Button variant="primary" onClick={handleSave}>保存</Button></InlineStack>
-          </Layout.Section>
         </Layout>
+        <SettingsSave onSave={handleSave} />
       </Page>
     </PolarisPageWrapper>
   );

@@ -10,14 +10,12 @@ import {
   Card,
   Text,
   Checkbox,
-  Button,
   BlockStack,
   Banner,
-  InlineStack,
   Select,
   Box,
 } from "@shopify/polaris";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
@@ -33,6 +31,8 @@ import {
   renderPrintReceiptHtml,
   settlementPreviewToPrintModel,
 } from "../services/printReceiptHtml";
+import { SettingsSave, useSavedFeedback } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 import { PaperWidthCorrespondence } from "../components/PaperWidthCorrespondence";
@@ -128,8 +128,8 @@ export default function SettlementPrintLayoutPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
-  const [form, setForm] = useState(initial);
+  const saved = useSavedFeedback();
+  const [form, setForm] = useSettingsDraft("form", initial);
   const previewHtml = useMemo(() => buildPreviewHtml(form), [form]);
 
   const handleSave = () => {
@@ -138,8 +138,6 @@ export default function SettlementPrintLayoutPage() {
     fd.set("showVoucherChange", form.showVoucherChange ? "true" : "false");
     fd.set("paperWidthMm", String(form.paperWidthMm));
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   return (
@@ -147,7 +145,6 @@ export default function SettlementPrintLayoutPage() {
       <Page
         title="精算印字プレビュー"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
           <TabGroupBar tabs={SETTLEMENT_TABS} />
@@ -199,11 +196,7 @@ export default function SettlementPrintLayoutPage() {
                   search={q}
                   saveNote="この画面の保存は、印字設定の用紙幅を同じ値に更新します。"
                 />
-                <InlineStack align="end">
-                  <Button variant="primary" onClick={handleSave}>
-                    保存
-                  </Button>
-                </InlineStack>
+
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -230,6 +223,7 @@ export default function SettlementPrintLayoutPage() {
             </Card>
           </Layout.Section>
         </Layout>
+        <SettingsSave onSave={handleSave} />
       </Page>
     </PolarisPageWrapper>
   );

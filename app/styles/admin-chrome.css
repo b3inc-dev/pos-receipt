@@ -263,3 +263,54 @@ body {
     order: 2;
   }
 }
+
+.ReceiptDock {
+  box-sizing: border-box;
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 100;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border-top: 1px solid #e1e3e5;
+  padding: 12px max(16px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+
+.ReceiptDock [role="status"] {
+  flex: 1 1 10rem;
+}
+
+.ReceiptDock-space {
+  height: calc(72px + env(safe-area-inset-bottom));
+}
+
+.ReceiptSectionTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+}
+
+.ReceiptSectionTabs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding-inline: 12px;
+  border-radius: 8px;
+  color: #303030;
+  text-decoration: none;
+}
+
+.ReceiptSectionTabs a[aria-current="page"] {
+  background: #e3e3e3;
+  font-weight: 600;
+}
+
+.ReceiptSectionTabs a:focus-visible {
+  outline: 2px solid #2c6ecb;
+  outline-offset: 1px;
+}

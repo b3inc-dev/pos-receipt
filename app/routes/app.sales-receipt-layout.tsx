@@ -14,11 +14,10 @@ import {
   Button,
   BlockStack,
   Banner,
-  InlineStack,
   Select,
   Box,
 } from "@shopify/polaris";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
@@ -30,6 +29,8 @@ import {
 } from "../utils/appSettings.server";
 import { DEFAULT_GIFT_LAYOUT, GIFT_LAYOUT_KEY, type GiftLayout } from "../utils/salesReceiptSettings";
 import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
+import { SettingsSave, useSavedFeedback } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
 
@@ -159,11 +160,11 @@ export default function SalesReceiptLayoutPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
-  const [form, setForm] = useState(initial);
+  const saved = useSavedFeedback();
+  const [form, setForm] = useSettingsDraft("form", initial);
 
-  const [gift, setGift] = useState(false);
-  const [giftLayout, setGiftLayout] = useState(initialGift);
+  const [gift, setGift] = useSettingsDraft("gift", false);
+  const [giftLayout, setGiftLayout] = useSettingsDraft("giftLayout", initialGift);
   const giftSave = useFetcher<{ ok?: boolean; error?: string }>();
   const previewHtml = useMemo(() => buildSampleHtml(form, gift, giftLayout), [form, gift, giftLayout]);
 
@@ -179,8 +180,6 @@ export default function SalesReceiptLayoutPage() {
     fd.set("showPayments", form.layoutJson.showPayments ? "true" : "false");
     fd.set("showLocation", form.layoutJson.showLocation ? "true" : "false");
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   return (
@@ -188,7 +187,6 @@ export default function SalesReceiptLayoutPage() {
       <Page
         title="販売レイアウト編集"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
           <TabGroupBar tabs={RECEIPT_TABS} />
@@ -278,11 +276,7 @@ export default function SalesReceiptLayoutPage() {
                     }))
                   }
                 />
-                <InlineStack align="end">
-                  <Button variant="primary" onClick={handleSave}>
-                    保存
-                  </Button>
-                </InlineStack>
+
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -301,9 +295,6 @@ export default function SalesReceiptLayoutPage() {
                       onChange={(footer) => setGiftLayout((prev) => ({ ...prev, footer }))} />
                     <Checkbox label="ギフトに注文番号を表示" checked={giftLayout.showOrderNumber}
                       onChange={(showOrderNumber) => setGiftLayout((prev) => ({ ...prev, showOrderNumber }))} />
-                    <Button loading={giftSave.state !== "idle"} disabled={!giftLayout.title.trim()}
-                      onClick={() => giftSave.submit({ intent: "gift", title: giftLayout.title, footer: giftLayout.footer,
-                        showOrderNumber: String(giftLayout.showOrderNumber) }, { method: "post" })}>ギフト設定を保存</Button>
                     {giftSave.state === "idle" && giftSave.data?.error && <Banner tone="critical">{giftSave.data.error}</Banner>}
                     {giftSave.state === "idle" && giftSave.data?.ok && giftLayout.title === initialGift.title &&
                       giftLayout.footer === initialGift.footer && giftLayout.showOrderNumber === initialGift.showOrderNumber &&
@@ -332,6 +323,13 @@ export default function SalesReceiptLayoutPage() {
             </Card>
           </Layout.Section>
         </Layout>
+        <SettingsSave onSave={handleSave} label="販売レシート設定を保存">
+          {gift && (
+            <Button loading={giftSave.state !== "idle"} disabled={!giftLayout.title.trim()}
+              onClick={() => giftSave.submit({ intent: "gift", title: giftLayout.title, footer: giftLayout.footer,
+                showOrderNumber: String(giftLayout.showOrderNumber) }, { method: "post" })}>ギフト設定を保存</Button>
+          )}
+        </SettingsSave>
       </Page>
     </PolarisPageWrapper>
   );

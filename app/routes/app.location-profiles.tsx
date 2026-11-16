@@ -33,6 +33,8 @@ import {
   type LocationSettingProfile,
   type LocationProfileFields,
 } from "../utils/locationProfiles";
+import { SettingsSaveDock } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
 
@@ -231,11 +233,11 @@ export default function LocationProfilesPage() {
   const navigate = useNavigate();
   const q = location.search || "";
 
-  const [profileName, setProfileName] = useState("標準店舗");
-  const [sourceLocId, setSourceLocId] = useState(locations[0]?.id ?? "");
-  const [selectedProfileId, setSelectedProfileId] = useState(profiles[0]?.id ?? "");
-  const [targetIds, setTargetIds] = useState<string[]>([]);
-  const [mode, setMode] = useState<"profile" | "copy">("copy");
+  const [profileName, setProfileName] = useSettingsDraft("profileName", "標準店舗");
+  const [sourceLocId, setSourceLocId] = useSettingsDraft("sourceLocId", locations[0]?.id ?? "");
+  const [selectedProfileId, setSelectedProfileId] = useSettingsDraft("selectedProfileId", profiles[0]?.id ?? "");
+  const [targetIds, setTargetIds] = useSettingsDraft<string[]>("targetIds", []);
+  const [mode, setMode] = useSettingsDraft<"profile" | "copy">("mode", "copy");
   const [message, setMessage] = useState("");
 
   const sourceFields = useMemo(() => {
@@ -383,7 +385,6 @@ export default function LocationProfilesPage() {
                       autoComplete="off"
                     />
                     <InlineStack gap="200">
-                      <Button onClick={saveProfileFromSource}>現在のソース内容で保存</Button>
                       {selectedProfileId ? (
                         <Button
                           tone="critical"
@@ -473,6 +474,11 @@ export default function LocationProfilesPage() {
             </Card>
           </Layout.Section>
         </Layout>
+        {mode === "profile" && (
+          <SettingsSaveDock>
+            <Button variant="primary" onClick={saveProfileFromSource} loading={fetcher.state !== "idle"}>プロファイルを保存</Button>
+          </SettingsSaveDock>
+        )}
       </Page>
     </PolarisPageWrapper>
   );

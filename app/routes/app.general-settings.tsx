@@ -10,10 +10,8 @@ import {
   Text,
   TextField,
   Checkbox,
-  Button,
   BlockStack,
   Banner,
-  InlineStack,
   Select,
 } from "@shopify/polaris";
 import { useState } from "react";
@@ -30,6 +28,8 @@ import {
   isAllowedPrivacyPolicyUrl,
   resolvePrivacyPolicyUrl,
 } from "../utils/privacyPolicyUrl";
+import { SettingsSave, useSavedFeedback } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SystemPageNav } from "../components/SystemPageNav";
 
@@ -93,9 +93,9 @@ export default function GeneralSettingsPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
+  const saved = useSavedFeedback();
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [form, setForm] = useState<GeneralSettings>({ ...initial });
+  const [form, setForm] = useSettingsDraft<GeneralSettings>("form", { ...initial });
 
   const handleSave = () => {
     setSaveError(null);
@@ -108,8 +108,6 @@ export default function GeneralSettingsPage() {
       fd.set(k, typeof v === "boolean" ? (v ? "true" : "false") : String(v));
     });
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = <K extends keyof GeneralSettings>(key: K, value: GeneralSettings[K]) => {
@@ -121,7 +119,6 @@ export default function GeneralSettingsPage() {
       <Page
         title="一般設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <SystemPageNav memberCardEnabled={false} />
         <Layout>
@@ -179,11 +176,8 @@ export default function GeneralSettingsPage() {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end"><Button variant="primary" onClick={handleSave}>保存</Button></InlineStack>
-          </Layout.Section>
         </Layout>
+        <SettingsSave onSave={handleSave} />
       </Page>
     </PolarisPageWrapper>
   );

@@ -5,13 +5,14 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import "@shopify/polaris/build/esm/styles.css";
 import "../styles/admin-chrome.css";
 import { authenticate } from "../shopify.server";
+import { SettingsDrafts } from "../components/SettingsDrafts";
 import { AppNavBar } from "../components/AppNavBar";
 import { isInhouseMode } from "../utils/planFeatures.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   return {
-    shop: new URL(request.url).searchParams.get("shop") ?? "",
+    shop: session.shop,
     apiKey: process.env.SHOPIFY_API_KEY ?? "",
     memberCardEnabled: isInhouseMode(),
   };
@@ -31,7 +32,7 @@ export function ErrorBoundary() {
  * - meta[shopify-api-key] は使わない（他アプリ同様。AppProvider が data-api-key で script に渡す）
  */
 export default function AppLayout() {
-  const { apiKey, memberCardEnabled } = useLoaderData<typeof loader>();
+  const { shop, apiKey, memberCardEnabled } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isLoading = navigation.state === "loading";
 
@@ -69,7 +70,7 @@ export default function AppLayout() {
       </s-app-nav>
       {/* 上部メニュー（s-app-nav が表示されない環境用・常に表示） */}
       <AppNavBar />
-      <Outlet />
+      <SettingsDrafts key={shop}><Outlet /></SettingsDrafts>
     </AppProvider>
   );
 }
