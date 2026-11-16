@@ -3,7 +3,7 @@
  * Shopify の source_name ベースでチャネルを設定し、売上サマリーに表示する
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useNavigate, useFetcher } from "react-router";
+import { useLoaderData, useSubmit, useNavigate, useFetcher, useFetchers } from "react-router";
 import {
   Page,
   Layout,
@@ -206,6 +206,8 @@ function serializeSourceNames(input: string): string {
   return JSON.stringify([...new Set(names)].sort());
 }
 
+const CHANNEL_SAVE_KEY = "sales-channel-save";
+
 function ChannelForm({
   channel,
   saveDockHost,
@@ -234,7 +236,8 @@ function ChannelForm({
   const set = (key: string, val: string | boolean) =>
     setForm((prev) => ({ ...prev, [key]: val }));
 
-  const save = useFetcher<{ ok: boolean; error?: string }>();
+  const save = useFetcher<{ ok: boolean; error?: string }>({ key: CHANNEL_SAVE_KEY });
+  const saving = save.state !== "idle";
   const processed = useRef<typeof save.data>();
   useEffect(() => {
     if (save.state !== "idle" || !save.data?.ok || processed.current === save.data) return;
@@ -263,6 +266,7 @@ function ChannelForm({
         <Box minWidth="200px">
           <TextField
             label="チャネル名（管理用）"
+            disabled={saving}
             value={form.name}
             onChange={(v) => set("name", v)}
             autoComplete="off"
@@ -271,6 +275,7 @@ function ChannelForm({
         <Box minWidth="200px">
           <TextField
             label="表示名"
+            disabled={saving}
             value={form.displayName}
             onChange={(v) => set("displayName", v)}
             placeholder="未入力時はチャネル名を使用"
@@ -280,6 +285,7 @@ function ChannelForm({
         <Box minWidth="100px">
           <TextField
             label="短縮名"
+            disabled={saving}
             value={form.shortName}
             onChange={(v) => set("shortName", v)}
             autoComplete="off"
@@ -288,6 +294,7 @@ function ChannelForm({
         <Box minWidth="80px">
           <TextField
             label="並び順"
+            disabled={saving}
             value={form.sortOrder}
             onChange={(v) => set("sortOrder", v)}
             type="number"
@@ -298,6 +305,7 @@ function ChannelForm({
 
       <TextField
         label="source_name（カンマ区切り・複数可）"
+        disabled={saving}
         value={form.sourceNamesInput}
         onChange={(v) => set("sourceNamesInput", v)}
         placeholder="例: web  /  amazon, amazon_marketplace  /  tiktok"
@@ -309,11 +317,13 @@ function ChannelForm({
       <InlineStack gap="400">
         <Checkbox
           label="売上サマリーで集計する"
+          disabled={saving}
           checked={form.salesSummaryEnabled}
           onChange={(v) => set("salesSummaryEnabled", v)}
         />
         <Checkbox
           label="全体合計に含める"
+          disabled={saving}
           checked={form.includeInOverallTotals}
           onChange={(v) => set("includeInOverallTotals", v)}
         />
@@ -322,14 +332,14 @@ function ChannelForm({
       {save.data?.error && <Banner tone="critical">{save.data.error}</Banner>}
       {saveDockHost && createPortal(
         <SettingsSaveDock>
-          <Button disabled={save.state !== "idle"} onClick={() => { setForm(initial); onCancel(); }}>キャンセル</Button>
-          <Button variant="primary" onClick={handleSave} loading={save.state !== "idle"}>チャネルを保存</Button>
+          <Button disabled={saving} onClick={() => { setForm(initial); onCancel(); }}>キャンセル</Button>
+          <Button variant="primary" onClick={handleSave} disabled={saving} loading={saving}>チャネルを保存</Button>
         </SettingsSaveDock>,
         saveDockHost,
       )}
       <InlineStack gap="300">
         {onDelete && (
-          <Button tone="critical" onClick={onDelete}>
+          <Button tone="critical" disabled={saving} onClick={onDelete}>
             削除
           </Button>
         )}
@@ -342,6 +352,8 @@ export default function SalesChannelsPage() {
   const { channels }: { channels: ChannelRow[] } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const navigate = useNavigate();
+
+  const savingChannel = useFetchers().some((fetcher) => fetcher.key === CHANNEL_SAVE_KEY);
 
   const [editingId, setEditingId] = useSettingsDraft<string | null>("editingId", null);
   const [addingNew, setAddingNew] = useSettingsDraft("addingNew", false);
@@ -460,7 +472,7 @@ export default function SalesChannelsPage() {
                               source_name: {parseSourceNames(ch.sourceNamesJson) || "（未設定）"}
                             </Text>
                           </BlockStack>
-                          <Button onClick={() => { setAddingNew(false); setEditingId(ch.id); }}>編集</Button>
+                          <Button disabled={savingChannel} onClick={() => { setAddingNew(false); setEditingId(ch.id); }}>編集</Button>
                         </InlineStack>
                       )}
                     </Box>
@@ -482,7 +494,7 @@ export default function SalesChannelsPage() {
 
                 {!addingNew && channels.length > 0 && (
                   <Box>
-                    <Button onClick={() => { setAddingNew(true); setEditingId(null); }}>
+                    <Button disabled={savingChannel} onClick={() => { setAddingNew(true); setEditingId(null); }}>
                       チャネルを追加
                     </Button>
                   </Box>
