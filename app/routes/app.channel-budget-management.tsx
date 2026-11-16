@@ -25,7 +25,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
-import { SettingsSaveDock } from "../components/SettingsSaveDock";
+import { BudgetSaveDock } from "../components/BudgetSaveDock";
 import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
@@ -387,18 +387,6 @@ export default function ChannelBudgetManagementPage() {
     setSearchParams(params);
   };
 
-  const handleAdd = () => {
-    if (!newChId || !newDate || !newAmount) return;
-    const fd = new FormData();
-    fd.set("intent", "upsert");
-    fd.set("channelId", newChId);
-    fd.set("targetDate", newDate);
-    fd.set("amount", newAmount);
-    fetcher.submit(fd, { method: "post" });
-    setNewDate("");
-    setNewAmount("");
-  };
-
   const handleDelete = (id: string) => {
     if (!confirm("このチャネル予算を削除しますか？")) return;
     const fd = new FormData();
@@ -685,13 +673,15 @@ export default function ChannelBudgetManagementPage() {
             ) : null}
           </Layout.Section>
         </Layout>
-        {hasAccess && (newDate || newAmount) ? (
-          <SettingsSaveDock>
-            <Button variant="primary" onClick={handleAdd} disabled={!hasAccess || channels.length === 0}>
-              予算を保存
-            </Button>
-          </SettingsSaveDock>
-        ) : null}
+        {hasAccess && (
+          <BudgetSaveDock
+            field="channelId"
+            targetId={newChId}
+            date={newDate}
+            amount={newAmount}
+            onSaved={() => { setNewDate(""); setNewAmount(""); }}
+          />
+        )}
       </Page>
     </PolarisPageWrapper>
   );

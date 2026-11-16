@@ -28,7 +28,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
-import { SettingsSaveDock } from "../components/SettingsSaveDock";
+import { BudgetSaveDock } from "../components/BudgetSaveDock";
 import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
@@ -454,18 +454,6 @@ export default function BudgetManagementPage() {
     setSearchParams(params);
   };
 
-  const handleAddBudget = () => {
-    if (!newLocId || !newDate || !newAmount) return;
-    const fd = new FormData();
-    fd.set("intent", "upsert");
-    fd.set("locationId", newLocId);
-    fd.set("targetDate", newDate);
-    fd.set("amount", newAmount);
-    fetcher.submit(fd, { method: "post" });
-    setNewDate("");
-    setNewAmount("");
-  };
-
   const handleDelete = (id: string) => {
     if (!confirm("この予算レコードを削除しますか？")) return;
     const fd = new FormData();
@@ -793,18 +781,15 @@ export default function BudgetManagementPage() {
             </Layout.Section>
           )}
         </Layout>
-        {hasAccess && (newDate || newAmount) ? (
-          <SettingsSaveDock>
-            <Button
-              variant="primary"
-              onClick={handleAddBudget}
-              disabled={!newLocId || !newDate || !newAmount}
-              loading={fetcher.state === "submitting"}
-            >
-              予算を保存
-            </Button>
-          </SettingsSaveDock>
-        ) : null}
+        {hasAccess && (
+          <BudgetSaveDock
+            field="locationId"
+            targetId={newLocId}
+            date={newDate}
+            amount={newAmount}
+            onSaved={() => { setNewDate(""); setNewAmount(""); }}
+          />
+        )}
       </Page>
     </PolarisPageWrapper>
   );

@@ -21,6 +21,7 @@ import {
   EmptyState,
 } from "@shopify/polaris";
 import { useState, useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import prisma from "../db.server";
@@ -207,11 +208,13 @@ function serializeSourceNames(input: string): string {
 
 function ChannelForm({
   channel,
+  saveDockHost,
   onSaved,
   onCancel,
   onDelete,
 }: {
   channel: ChannelRow | Omit<ChannelRow, "id">;
+  saveDockHost: HTMLElement | null;
   onSaved: () => void;
   onCancel: () => void;
   onDelete?: () => void;
@@ -317,10 +320,13 @@ function ChannelForm({
       </InlineStack>
 
       {save.data?.error && <Banner tone="critical">{save.data.error}</Banner>}
-      <SettingsSaveDock>
-        <Button disabled={save.state !== "idle"} onClick={() => { setForm(initial); onCancel(); }}>キャンセル</Button>
-        <Button variant="primary" onClick={handleSave} loading={save.state !== "idle"}>チャネルを保存</Button>
-      </SettingsSaveDock>
+      {saveDockHost && createPortal(
+        <SettingsSaveDock>
+          <Button disabled={save.state !== "idle"} onClick={() => { setForm(initial); onCancel(); }}>キャンセル</Button>
+          <Button variant="primary" onClick={handleSave} loading={save.state !== "idle"}>チャネルを保存</Button>
+        </SettingsSaveDock>,
+        saveDockHost,
+      )}
       <InlineStack gap="300">
         {onDelete && (
           <Button tone="critical" onClick={onDelete}>
@@ -339,6 +345,7 @@ export default function SalesChannelsPage() {
 
   const [editingId, setEditingId] = useSettingsDraft<string | null>("editingId", null);
   const [addingNew, setAddingNew] = useSettingsDraft("addingNew", false);
+  const [saveDockHost, setSaveDockHost] = useState<HTMLDivElement | null>(null);
   const [savedBanner, setSavedBanner] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
@@ -428,6 +435,7 @@ export default function SalesChannelsPage() {
                       {editingId === ch.id ? (
                         <ChannelForm
                           channel={ch}
+                          saveDockHost={saveDockHost}
                           onSaved={closeAfterSave}
                           onCancel={() => setEditingId(null)}
                           onDelete={() => handleDelete(ch.id)}
@@ -465,6 +473,7 @@ export default function SalesChannelsPage() {
                     <Text as="h3" variant="headingSm">新規チャネル追加</Text>
                     <ChannelForm
                       channel={EMPTY_CHANNEL}
+                      saveDockHost={saveDockHost}
                       onSaved={closeAfterSave}
                       onCancel={() => setAddingNew(false)}
                     />
@@ -482,6 +491,7 @@ export default function SalesChannelsPage() {
             </Card>
           </Layout.Section>
         </Layout>
+        <div ref={setSaveDockHost} />
       </Page>
     </PolarisPageWrapper>
   );
