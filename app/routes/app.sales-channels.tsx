@@ -3,7 +3,7 @@
  * Shopify の source_name ベースでチャネルを設定し、売上サマリーに表示する
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useNavigate } from "react-router";
+import { useLoaderData, useSubmit, useNavigate, useFetcher, useFetchers } from "react-router";
 import {
   Page,
   Layout,
@@ -20,11 +20,14 @@ import {
   Badge,
   EmptyState,
 } from "@shopify/polaris";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import prisma from "../db.server";
 import { autoDiscoverChannels } from "../services/salesChannelEngine.server";
+import { SettingsSaveDock } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
@@ -203,20 +206,22 @@ function serializeSourceNames(input: string): string {
   return JSON.stringify([...new Set(names)].sort());
 }
 
+const CHANNEL_SAVE_KEY = "sales-channel-save";
+
 function ChannelForm({
   channel,
-  onSave,
+  saveDockHost,
+  onSaved,
   onCancel,
   onDelete,
-  isSaving,
 }: {
   channel: ChannelRow | Omit<ChannelRow, "id">;
-  onSave: (data: Omit<ChannelRow, "id"> & { id?: string }) => void;
+  saveDockHost: HTMLElement | null;
+  onSaved: () => void;
   onCancel: () => void;
   onDelete?: () => void;
-  isSaving: boolean;
 }) {
-  const [form, setForm] = useState({
+  const initial = {
     name: channel.name,
     displayName: channel.displayName,
     shortName: channel.shortName,
@@ -224,23 +229,36 @@ function ChannelForm({
     salesSummaryEnabled: channel.salesSummaryEnabled,
     includeInOverallTotals: channel.includeInOverallTotals,
     sourceNamesInput: parseSourceNames(channel.sourceNamesJson),
-  });
+  };
+  const draftKey = "channel-" + ("id" in channel ? channel.id : "new");
+  const [form, setForm] = useSettingsDraft(draftKey, initial);
 
   const set = (key: string, val: string | boolean) =>
     setForm((prev) => ({ ...prev, [key]: val }));
 
-  const handleSave = useCallback(() => {
-    onSave({
-      ...("id" in channel ? { id: channel.id } : {}),
+  const save = useFetcher<{ ok: boolean; error?: string }>({ key: CHANNEL_SAVE_KEY });
+  const saving = save.state !== "idle";
+  const processed = useRef<typeof save.data>();
+  useEffect(() => {
+    if (save.state !== "idle" || !save.data?.ok || processed.current === save.data) return;
+    processed.current = save.data;
+    setForm(initial);
+    onSaved();
+  }, [save.state, save.data, onSaved, initial, setForm]);
+
+  const handleSave = () => {
+    save.submit({
+      intent: "upsert",
+      ...("id" in channel ? { id: String(channel.id) } : {}),
       name: form.name,
       displayName: form.displayName,
       shortName: form.shortName,
-      sortOrder: parseInt(form.sortOrder, 10) || 0,
-      salesSummaryEnabled: form.salesSummaryEnabled,
-      includeInOverallTotals: form.includeInOverallTotals,
+      sortOrder: String(parseInt(form.sortOrder, 10) || 0),
+      salesSummaryEnabled: String(form.salesSummaryEnabled),
+      includeInOverallTotals: String(form.includeInOverallTotals),
       sourceNamesJson: serializeSourceNames(form.sourceNamesInput),
-    });
-  }, [form, channel, onSave]);
+    }, { method: "post" });
+  };
 
   return (
     <BlockStack gap="400">
@@ -248,6 +266,7 @@ function ChannelForm({
         <Box minWidth="200px">
           <TextField
             label="チャネル名（管理用）"
+            disabled={saving}
             value={form.name}
             onChange={(v) => set("name", v)}
             autoComplete="off"
@@ -256,6 +275,7 @@ function ChannelForm({
         <Box minWidth="200px">
           <TextField
             label="表示名"
+            disabled={saving}
             value={form.displayName}
             onChange={(v) => set("displayName", v)}
             placeholder="未入力時はチャネル名を使用"
@@ -265,6 +285,7 @@ function ChannelForm({
         <Box minWidth="100px">
           <TextField
             label="短縮名"
+            disabled={saving}
             value={form.shortName}
             onChange={(v) => set("shortName", v)}
             autoComplete="off"
@@ -273,6 +294,7 @@ function ChannelForm({
         <Box minWidth="80px">
           <TextField
             label="並び順"
+            disabled={saving}
             value={form.sortOrder}
             onChange={(v) => set("sortOrder", v)}
             type="number"
@@ -283,6 +305,7 @@ function ChannelForm({
 
       <TextField
         label="source_name（カンマ区切り・複数可）"
+        disabled={saving}
         value={form.sourceNamesInput}
         onChange={(v) => set("sourceNamesInput", v)}
         placeholder="例: web  /  amazon, amazon_marketplace  /  tiktok"
@@ -294,23 +317,29 @@ function ChannelForm({
       <InlineStack gap="400">
         <Checkbox
           label="売上サマリーで集計する"
+          disabled={saving}
           checked={form.salesSummaryEnabled}
           onChange={(v) => set("salesSummaryEnabled", v)}
         />
         <Checkbox
           label="全体合計に含める"
+          disabled={saving}
           checked={form.includeInOverallTotals}
           onChange={(v) => set("includeInOverallTotals", v)}
         />
       </InlineStack>
 
+      {save.data?.error && <Banner tone="critical">{save.data.error}</Banner>}
+      {saveDockHost && createPortal(
+        <SettingsSaveDock>
+          <Button disabled={saving} onClick={() => { setForm(initial); onCancel(); }}>キャンセル</Button>
+          <Button variant="primary" onClick={handleSave} disabled={saving} loading={saving}>チャネルを保存</Button>
+        </SettingsSaveDock>,
+        saveDockHost,
+      )}
       <InlineStack gap="300">
-        <Button variant="primary" onClick={handleSave} loading={isSaving}>
-          保存
-        </Button>
-        <Button onClick={onCancel}>キャンセル</Button>
         {onDelete && (
-          <Button tone="critical" onClick={onDelete}>
+          <Button tone="critical" disabled={saving} onClick={onDelete}>
             削除
           </Button>
         )}
@@ -320,50 +349,24 @@ function ChannelForm({
 }
 
 export default function SalesChannelsPage() {
-  const { channels: initial } = useLoaderData<typeof loader>();
+  const { channels }: { channels: ChannelRow[] } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const navigate = useNavigate();
 
-  const [channels, setChannels] = useState<ChannelRow[]>(initial);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [addingNew, setAddingNew] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const savingChannel = useFetchers().some((fetcher) => fetcher.key === CHANNEL_SAVE_KEY);
+
+  const [editingId, setEditingId] = useSettingsDraft<string | null>("editingId", null);
+  const [addingNew, setAddingNew] = useSettingsDraft("addingNew", false);
+  const [saveDockHost, setSaveDockHost] = useState<HTMLDivElement | null>(null);
   const [savedBanner, setSavedBanner] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
 
-  const handleSave = useCallback(
-    (data: Omit<ChannelRow, "id"> & { id?: string }) => {
-      setIsSaving(true);
-      const formData = new FormData();
-      formData.set("intent", "upsert");
-      if (data.id) formData.set("id", data.id);
-      formData.set("name", data.name);
-      formData.set("displayName", data.displayName);
-      formData.set("shortName", data.shortName);
-      formData.set("sortOrder", String(data.sortOrder));
-      formData.set("salesSummaryEnabled", String(data.salesSummaryEnabled));
-      formData.set("includeInOverallTotals", String(data.includeInOverallTotals));
-      formData.set("sourceNamesJson", data.sourceNamesJson);
-
-      submit(formData, { method: "POST", replace: true });
-
-      // 楽観的更新
-      setChannels((prev) => {
-        if (data.id) {
-          return prev.map((c) => (c.id === data.id ? { ...c, ...data, id: c.id } : c));
-        }
-        // 新規は暫定 ID で追加（ページリロードで正式 ID になる）
-        return [...prev, { ...data, id: `temp-${Date.now()}` }];
-      });
-      setEditingId(null);
-      setAddingNew(false);
-      setIsSaving(false);
-      setSavedBanner(true);
-      setTimeout(() => setSavedBanner(false), 3000);
-    },
-    [submit]
-  );
+  const closeAfterSave = () => {
+    setEditingId(null);
+    setAddingNew(false);
+    setSavedBanner(true);
+  };
 
   const handleAutoDiscover = useCallback(async () => {
     setIsScanning(true);
@@ -388,7 +391,6 @@ export default function SalesChannelsPage() {
       formData.set("intent", "delete");
       formData.set("id", id);
       submit(formData, { method: "POST", replace: true });
-      setChannels((prev) => prev.filter((c) => c.id !== id));
       setEditingId(null);
     },
     [submit]
@@ -445,10 +447,10 @@ export default function SalesChannelsPage() {
                       {editingId === ch.id ? (
                         <ChannelForm
                           channel={ch}
-                          onSave={handleSave}
+                          saveDockHost={saveDockHost}
+                          onSaved={closeAfterSave}
                           onCancel={() => setEditingId(null)}
                           onDelete={() => handleDelete(ch.id)}
-                          isSaving={isSaving}
                         />
                       ) : (
                         <InlineStack align="space-between" blockAlign="center">
@@ -470,7 +472,7 @@ export default function SalesChannelsPage() {
                               source_name: {parseSourceNames(ch.sourceNamesJson) || "（未設定）"}
                             </Text>
                           </BlockStack>
-                          <Button onClick={() => setEditingId(ch.id)}>編集</Button>
+                          <Button disabled={savingChannel} onClick={() => { setAddingNew(false); setEditingId(ch.id); }}>編集</Button>
                         </InlineStack>
                       )}
                     </Box>
@@ -483,16 +485,16 @@ export default function SalesChannelsPage() {
                     <Text as="h3" variant="headingSm">新規チャネル追加</Text>
                     <ChannelForm
                       channel={EMPTY_CHANNEL}
-                      onSave={handleSave}
+                      saveDockHost={saveDockHost}
+                      onSaved={closeAfterSave}
                       onCancel={() => setAddingNew(false)}
-                      isSaving={isSaving}
                     />
                   </>
                 )}
 
                 {!addingNew && channels.length > 0 && (
                   <Box>
-                    <Button onClick={() => { setAddingNew(true); setEditingId(null); }}>
+                    <Button disabled={savingChannel} onClick={() => { setAddingNew(true); setEditingId(null); }}>
                       チャネルを追加
                     </Button>
                   </Box>
@@ -501,6 +503,7 @@ export default function SalesChannelsPage() {
             </Card>
           </Layout.Section>
         </Layout>
+        <div ref={setSaveDockHost} />
       </Page>
     </PolarisPageWrapper>
   );

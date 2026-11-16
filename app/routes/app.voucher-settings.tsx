@@ -11,13 +11,10 @@ import {
   Text,
   TextField,
   Checkbox,
-  Button,
   BlockStack,
   Banner,
-  InlineStack,
   Select,
 } from "@shopify/polaris";
-import { useState } from "react";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
@@ -27,6 +24,8 @@ import {
   DEFAULT_VOUCHER_SETTINGS,
   type VoucherSettings,
 } from "../utils/appSettings.server";
+import { SettingsSave, useSavedFeedback } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 
@@ -72,8 +71,8 @@ export default function VoucherSettingsPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
-  const [form, setForm] = useState<VoucherSettings>({ ...initial });
+  const saved = useSavedFeedback();
+  const [form, setForm] = useSettingsDraft<VoucherSettings>("form", { ...initial });
 
   const handleSave = () => {
     const fd = new FormData();
@@ -88,8 +87,6 @@ export default function VoucherSettingsPage() {
     fd.set("reflectVoucherChangeInReceiptDisplay", form.reflectVoucherChangeInReceiptDisplay ? "true" : "false");
     fd.set("voucherChangeDisplayLabel", form.voucherChangeDisplayLabel);
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = <K extends keyof VoucherSettings>(key: K, value: VoucherSettings[K]) => {
@@ -101,7 +98,6 @@ export default function VoucherSettingsPage() {
       <Page
         title="商品券設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
           <TabGroupBar tabs={SETTLEMENT_TABS} />
@@ -144,11 +140,8 @@ export default function VoucherSettingsPage() {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end"><Button variant="primary" onClick={handleSave}>保存</Button></InlineStack>
-          </Layout.Section>
         </Layout>
+        <SettingsSave onSave={handleSave} />
       </Page>
     </PolarisPageWrapper>
   );

@@ -25,6 +25,8 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
+import { BudgetSaveDock } from "../components/BudgetSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
@@ -337,9 +339,9 @@ export default function ChannelBudgetManagementPage() {
   const q = location.search || "";
   const to = (path: string) => () => navigate(path + q);
 
-  const [newChId, setNewChId] = useState(channels[0]?.id ?? "");
-  const [newDate, setNewDate] = useState("");
-  const [newAmount, setNewAmount] = useState("");
+  const [newChId, setNewChId] = useSettingsDraft("newChId", channels[0]?.id ?? "");
+  const [newDate, setNewDate] = useSettingsDraft("newDate", "");
+  const [newAmount, setNewAmount] = useSettingsDraft("newAmount", "");
   const [templateMonth, setTemplateMonth] = useState(month || monthOptions()[4]?.value || "");
   const [templateChannelIds, setTemplateChannelIds] = useState<string[]>(
     channelId ? [channelId] : channels.map((c) => c.id),
@@ -383,18 +385,6 @@ export default function ChannelBudgetManagementPage() {
     const params = new URLSearchParams(location.search);
     params.set("page", String(p));
     setSearchParams(params);
-  };
-
-  const handleAdd = () => {
-    if (!newChId || !newDate || !newAmount) return;
-    const fd = new FormData();
-    fd.set("intent", "upsert");
-    fd.set("channelId", newChId);
-    fd.set("targetDate", newDate);
-    fd.set("amount", newAmount);
-    fetcher.submit(fd, { method: "post" });
-    setNewDate("");
-    setNewAmount("");
   };
 
   const handleDelete = (id: string) => {
@@ -459,6 +449,9 @@ export default function ChannelBudgetManagementPage() {
   return (
     <PolarisPageWrapper>
       <Page title="チャネル予算" backAction={{ content: "戻る", onAction: to("/app") }}>
+        <Card padding="0">
+          <TabGroupBar tabs={REPORTS_TABS} />
+        </Card>
         {!hasAccess && (
           <Box paddingBlockEnd="400">
             <Banner tone="warning">
@@ -467,9 +460,6 @@ export default function ChannelBudgetManagementPage() {
           </Box>
         )}
 
-        <Card padding="0">
-          <TabGroupBar tabs={REPORTS_TABS} />
-        </Card>
 
         <Layout>
           <Layout.Section>
@@ -548,11 +538,6 @@ export default function ChannelBudgetManagementPage() {
                       type="number"
                       autoComplete="off"
                     />
-                  </Box>
-                  <Box paddingBlockStart="400">
-                    <Button variant="primary" onClick={handleAdd} disabled={!hasAccess || channels.length === 0}>
-                      保存
-                    </Button>
                   </Box>
                 </InlineStack>
               </BlockStack>
@@ -688,6 +673,15 @@ export default function ChannelBudgetManagementPage() {
             ) : null}
           </Layout.Section>
         </Layout>
+        {hasAccess && (
+          <BudgetSaveDock
+            field="channelId"
+            targetId={newChId}
+            date={newDate}
+            amount={newAmount}
+            onSaved={() => { setNewDate(""); setNewAmount(""); }}
+          />
+        )}
       </Page>
     </PolarisPageWrapper>
   );

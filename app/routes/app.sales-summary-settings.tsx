@@ -35,6 +35,8 @@ import {
   DEFAULT_SALES_SUMMARY_SETTINGS,
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
+import { SettingsSave, useSavedFeedback } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
@@ -204,8 +206,8 @@ export default function SalesSummarySettingsPage() {
   const linkFetcher = useFetcher<PublicLinkActionJson>();
   const revalidator = useRevalidator();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
-  const [form, setForm] = useState<SalesSummarySettings>({ ...initial });
+  const saved = useSavedFeedback();
+  const [form, setForm] = useSettingsDraft<SalesSummarySettings>("form", { ...initial });
   const [publicPwd, setPublicPwd] = useState("");
   const [publicPwdConfirm, setPublicPwdConfirm] = useState("");
 
@@ -272,8 +274,6 @@ export default function SalesSummarySettingsPage() {
       else if (Array.isArray(v)) fd.set(k, JSON.stringify(v));
     });
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = <K extends keyof SalesSummarySettings>(key: K, value: SalesSummarySettings[K]) => {
@@ -318,7 +318,6 @@ export default function SalesSummarySettingsPage() {
       <Page
         title="売上サマリー設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
           <TabGroupBar tabs={REPORTS_TABS} />
@@ -615,13 +614,8 @@ export default function SalesSummarySettingsPage() {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end">
-              <Button variant="primary" onClick={handleSave}>保存</Button>
-            </InlineStack>
-          </Layout.Section>
         </Layout>
+        <SettingsSave onSave={handleSave} />
       </Page>
     </PolarisPageWrapper>
   );

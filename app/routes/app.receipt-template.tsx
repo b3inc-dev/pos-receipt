@@ -11,7 +11,6 @@ import {
   Text,
   TextField,
   Checkbox,
-  Button,
   BlockStack,
   Banner,
   Box,
@@ -27,9 +26,10 @@ import {
   normalizeTemplateData,
   type ReceiptTemplateData,
 } from "./api.settings.receipt-template";
+import { SettingsSave, useSavedFeedback } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
-import { useState } from "react";
 
 function formDataToTemplate(formData: FormData): ReceiptTemplateData {
   const get = (k: string) => formData.get(k);
@@ -177,13 +177,11 @@ export default function ReceiptTemplatePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
-  const [form, setForm] = useState<ReceiptTemplateData>({ ...template });
+  const saved = useSavedFeedback();
+  const [form, setForm] = useSettingsDraft<ReceiptTemplateData>("form", { ...template });
 
   const handleSave = () => {
     submit(templateToFormData(form), { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = (key: keyof ReceiptTemplateData, value: string | boolean | null) => {
@@ -196,7 +194,6 @@ export default function ReceiptTemplatePage() {
         title="領収書テンプレート設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         subtitle={`バージョン: ${version}`}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
           <TabGroupBar tabs={RECEIPT_TABS} />
@@ -410,15 +407,8 @@ export default function ReceiptTemplatePage() {
               <ReceiptPreview template={form} />
             </Card>
           </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end">
-              <Button variant="primary" onClick={handleSave}>
-                保存
-              </Button>
-            </InlineStack>
-          </Layout.Section>
         </Layout>
+        <SettingsSave onSave={handleSave} />
       </Page>
     </PolarisPageWrapper>
   );

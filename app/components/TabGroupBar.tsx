@@ -3,9 +3,7 @@
  * ロードマップ: レシート / 精算 / 店舗 / レポート / システム（高度はラベルで区別）
  * 設定項目は削らず再配置のみ。
  */
-import { Tabs } from "@shopify/polaris";
-import { useNavigate, useLocation } from "react-router";
-import { useMemo } from "react";
+import { Link, useLocation } from "react-router";
 
 export interface TabItem {
   path: string;
@@ -17,21 +15,15 @@ interface TabGroupBarProps {
 }
 
 export function TabGroupBar({ tabs }: TabGroupBarProps) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const search = location.search || "";
-
-  const selected = useMemo(() => {
-    const idx = tabs.findIndex((t) => t.path === location.pathname);
-    return idx >= 0 ? idx : 0;
-  }, [tabs, location.pathname]);
-
+  const { pathname, search } = useLocation();
   return (
-    <Tabs
-      tabs={tabs.map((t, i) => ({ id: `tab-${i}`, content: t.label }))}
-      selected={selected}
-      onSelect={(index) => navigate(tabs[index].path + search)}
-    />
+    <nav className="ReceiptSectionTabs" aria-label="メニュー内の分類">
+      {tabs.map(({ path, label }) => (
+        <Link key={path} to={path + search} aria-current={pathname === path ? "page" : undefined}>
+          {label}
+        </Link>
+      ))}
+    </nav>
   );
 }
 

@@ -28,6 +28,8 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
+import { BudgetSaveDock } from "../components/BudgetSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
@@ -370,9 +372,9 @@ export default function BudgetManagementPage() {
   const q = location.search || "";
   const to = (path: string) => () => navigate(path + q);
 
-  const [newLocId, setNewLocId]   = useState(shopifyLocations[0]?.id ?? "");
-  const [newDate, setNewDate]     = useState("");
-  const [newAmount, setNewAmount] = useState("");
+  const [newLocId, setNewLocId]   = useSettingsDraft("newLocId", shopifyLocations[0]?.id ?? "");
+  const [newDate, setNewDate]     = useSettingsDraft("newDate", "");
+  const [newAmount, setNewAmount] = useSettingsDraft("newAmount", "");
   const [templateMonth, setTemplateMonth] = useState(month || monthOptions()[4]?.value || "");
   const [templateLocationIds, setTemplateLocationIds] = useState<string[]>(
     locationId ? [locationId] : shopifyLocations.map((l) => l.id)
@@ -452,18 +454,6 @@ export default function BudgetManagementPage() {
     setSearchParams(params);
   };
 
-  const handleAddBudget = () => {
-    if (!newLocId || !newDate || !newAmount) return;
-    const fd = new FormData();
-    fd.set("intent", "upsert");
-    fd.set("locationId", newLocId);
-    fd.set("targetDate", newDate);
-    fd.set("amount", newAmount);
-    fetcher.submit(fd, { method: "post" });
-    setNewDate("");
-    setNewAmount("");
-  };
-
   const handleDelete = (id: string) => {
     if (!confirm("この予算レコードを削除しますか？")) return;
     const fd = new FormData();
@@ -541,6 +531,9 @@ export default function BudgetManagementPage() {
         title="予算管理"
         backAction={{ content: "戻る", onAction: to("/app") }}
       >
+        <Card padding="0">
+          <TabGroupBar tabs={REPORTS_TABS} />
+        </Card>
         {!hasAccess && (
           <Box paddingBlockEnd="400">
             <Banner tone="warning">
@@ -549,9 +542,6 @@ export default function BudgetManagementPage() {
           </Box>
         )}
 
-        <Card padding="0">
-          <TabGroupBar tabs={REPORTS_TABS} />
-        </Card>
         <Layout>
           {/* フィルター */}
           <Layout.Section>
@@ -609,14 +599,7 @@ export default function BudgetManagementPage() {
                       autoComplete="off"
                     />
                   </InlineGrid>
-                  <Button
-                    variant="primary"
-                    onClick={handleAddBudget}
-                    disabled={!newLocId || !newDate || !newAmount}
-                    loading={fetcher.state === "submitting"}
-                  >
-                    保存
-                  </Button>
+
                 </BlockStack>
               </Card>
             </Layout.Section>
@@ -798,6 +781,15 @@ export default function BudgetManagementPage() {
             </Layout.Section>
           )}
         </Layout>
+        {hasAccess && (
+          <BudgetSaveDock
+            field="locationId"
+            targetId={newLocId}
+            date={newDate}
+            amount={newAmount}
+            onSaved={() => { setNewDate(""); setNewAmount(""); }}
+          />
+        )}
       </Page>
     </PolarisPageWrapper>
   );

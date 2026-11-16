@@ -3,7 +3,7 @@
  * 第一弾: Location の機能フラグ・集計・印字関連・summaryTargetGroup 等
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useFetcher, useLocation, useNavigate, useRevalidator } from "react-router";
+import { useLoaderData, useFetcher, useLocation, useNavigate } from "react-router";
 import {
   Page,
   Layout,
@@ -20,7 +20,7 @@ import {
   Box,
   DataTable,
 } from "@shopify/polaris";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
@@ -33,6 +33,8 @@ import {
   type LocationSettingProfile,
   type LocationProfileFields,
 } from "../utils/locationProfiles";
+import { SettingsSaveDock } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
 
@@ -181,7 +183,7 @@ export async function action({ request }: ActionFunctionArgs) {
     await setAppSetting(shop.id, LOCATION_PROFILES_KEY, {
       profiles: state.profiles.filter((p) => p.id !== id),
     });
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, deleted: id });
   }
 
   if (intent === "apply") {
@@ -225,25 +227,49 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function LocationProfilesPage() {
   const { locations, profiles } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher();
-  const revalidator = useRevalidator();
+  const fetcher = useFetcher<{ ok: boolean; error?: string; profile?: LocationSettingProfile; deleted?: string; applied?: number }>();
+  const pending = useRef(false);
+  const newProfileId = useRef<string>();
+  const consumed = useRef<typeof fetcher.data>();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
 
-  const [profileName, setProfileName] = useState("標準店舗");
-  const [sourceLocId, setSourceLocId] = useState(locations[0]?.id ?? "");
-  const [selectedProfileId, setSelectedProfileId] = useState(profiles[0]?.id ?? "");
-  const [targetIds, setTargetIds] = useState<string[]>([]);
-  const [mode, setMode] = useState<"profile" | "copy">("copy");
-  const [message, setMessage] = useState("");
+  const [sourceLocId, setSourceLocId] = useSettingsDraft("sourceLocId", locations[0]?.id ?? "");
+  const [selection, setSelectedProfileId] = useSettingsDraft<string | null>("selectedProfileId", null);
+  const selectedProfile = profiles.find((profile) => profile.id === (selection ?? profiles[0]?.id));
+  const selectedProfileId = selectedProfile?.id ?? "";
+  const [profileName, setProfileName] = useSettingsDraft("profileName:" + (selectedProfileId || "new"), selectedProfile?.name ?? "標準店舗");
+  const [targetIds, setTargetIds] = useSettingsDraft<string[]>("targetIds", []);
+  const [mode, setMode] = useSettingsDraft<"profile" | "copy">("mode", "copy");
+  const result = fetcher.state === "idle" ? fetcher.data : undefined;
+  const busy = fetcher.state !== "idle";
+  const submit = (form: FormData) => {
+    if (pending.current || busy) return;
+    pending.current = true;
+    fetcher.submit(form, { method: "post" });
+  };
+  useEffect(() => {
+    if (!result || consumed.current === result) return;
+    consumed.current = result;
+    pending.current = false;
+    if (result.profile) {
+      if (result.profile.id === newProfileId.current) {
+        newProfileId.current = undefined;
+        if (!selectedProfileId) setProfileName("標準店舗");
+      }
+      setSelectedProfileId(result.profile.id);
+    } else if (result.deleted) {
+      setSelectedProfileId("");
+    }
+  }, [result, selectedProfileId, setSelectedProfileId, setProfileName]);
 
   const sourceFields = useMemo(() => {
     if (mode === "profile") {
-      return profiles.find((p) => p.id === selectedProfileId)?.fields ?? {};
+      return selectedProfile?.fields ?? {};
     }
     return locations.find((l) => l.id === sourceLocId)?.fields ?? {};
-  }, [mode, profiles, selectedProfileId, locations, sourceLocId]);
+  }, [mode, selectedProfile, locations, sourceLocId]);
 
   const previewRows = useMemo(() => {
     const rows: string[][] = [];
@@ -280,19 +306,16 @@ export default function LocationProfilesPage() {
   const saveProfileFromSource = () => {
     const fd = new FormData();
     fd.set("intent", "save_profile");
-    fd.set("profileId", selectedProfileId || crypto.randomUUID());
+    if (!selectedProfileId) setSelectedProfileId("");
+    const profileId = selectedProfileId || (newProfileId.current ??= crypto.randomUUID());
+    fd.set("profileId", profileId);
     fd.set("name", profileName);
     fd.set("fieldsJson", JSON.stringify(sourceFields));
-    fetcher.submit(fd, { method: "post" });
-    setMessage("プロファイルを保存しました");
-    setTimeout(() => revalidator.revalidate(), 400);
+    submit(fd);
   };
 
   const apply = () => {
-    if (targetIds.length === 0) {
-      setMessage("対象ロケーションを選んでください");
-      return;
-    }
+    if (targetIds.length === 0 || busy) return;
     const fieldList =
       changingFieldSummary.length > 0
         ? changingFieldSummary.map((k) => FIELD_LABELS[k] || k).join("、")
@@ -315,9 +338,7 @@ export default function LocationProfilesPage() {
     for (const loc of locations) {
       fd.set(`name_${loc.id}`, loc.name);
     }
-    fetcher.submit(fd, { method: "post" });
-    setMessage("一括反映を実行しました");
-    setTimeout(() => revalidator.revalidate(), 500);
+    submit(fd);
   };
 
   return (
@@ -335,19 +356,21 @@ export default function LocationProfilesPage() {
               設定軸（プロファイル）または「このロケをコピー」で複数ロケーションへ反映できます。適用前に差分プレビューを確認してください。印字方式（printMode）を含む全フィールドが一括上書き対象です。個別ロケ編集は「ロケーション」タブに残しています。
             </Banner>
           </Layout.Section>
-          {message ? (
+          {result && (
             <Layout.Section>
-              <Banner tone="success" onDismiss={() => setMessage("")}>
-                {message}
+              <Banner tone={result.ok ? "success" : "critical"}>
+                {result.error ?? (result.profile ? `「${result.profile.name}」を保存しました`
+                  : result.deleted ? "プロファイルを削除しました" : `${result.applied}件に反映しました`)}
               </Banner>
             </Layout.Section>
-          ) : null}
+          )}
 
           <Layout.AnnotatedSection title="ソース" description="適用元">
             <Card>
               <BlockStack gap="400">
                 <Select
                   label="モード"
+                  disabled={busy}
                   options={[
                     { label: "このロケをコピー", value: "copy" },
                     { label: "設定軸（プロファイル）", value: "profile" },
@@ -369,6 +392,7 @@ export default function LocationProfilesPage() {
                   <BlockStack gap="300">
                     <Select
                       label="プロファイル"
+                      disabled={busy}
                       options={[
                         { label: "（新規）", value: "" },
                         ...profiles.map((p) => ({ label: p.name, value: p.id })),
@@ -378,22 +402,21 @@ export default function LocationProfilesPage() {
                     />
                     <TextField
                       label="プロファイル名"
+                      disabled={busy}
                       value={profileName}
                       onChange={setProfileName}
                       autoComplete="off"
                     />
                     <InlineStack gap="200">
-                      <Button onClick={saveProfileFromSource}>現在のソース内容で保存</Button>
                       {selectedProfileId ? (
                         <Button
                           tone="critical"
+                          disabled={busy}
                           onClick={() => {
                             const fd = new FormData();
                             fd.set("intent", "delete_profile");
                             fd.set("profileId", selectedProfileId);
-                            fetcher.submit(fd, { method: "post" });
-                            setSelectedProfileId("");
-                            setTimeout(() => revalidator.revalidate(), 400);
+                            submit(fd);
                           }}
                         >
                           削除
@@ -464,7 +487,7 @@ export default function LocationProfilesPage() {
                     variant="primary"
                     onClick={apply}
                     loading={fetcher.state !== "idle"}
-                    disabled={targetIds.length === 0}
+                    disabled={busy || targetIds.length === 0}
                   >
                     一括反映（上書き）
                   </Button>
@@ -473,6 +496,11 @@ export default function LocationProfilesPage() {
             </Card>
           </Layout.Section>
         </Layout>
+        {mode === "profile" && (
+          <SettingsSaveDock>
+            <Button variant="primary" onClick={saveProfileFromSource} disabled={busy || !profileName.trim()} loading={busy}>プロファイルを保存</Button>
+          </SettingsSaveDock>
+        )}
       </Page>
     </PolarisPageWrapper>
   );

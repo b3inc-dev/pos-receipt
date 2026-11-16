@@ -29,6 +29,8 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { validateNonPosRefundAttributionLocations } from "../services/refundAggregation.server";
 import { planLabel, getFullAccess, isInhouseMode, PLAN_FEATURES } from "../utils/planFeatures.server";
+import { SettingsSaveDock } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
 
@@ -223,7 +225,7 @@ const SETTING_CARD_STYLE: React.CSSProperties = {
 export default function SettingsPage() {
   const loaderData = useLoaderData<typeof loader>();
   const { shop, isInhouse, locations: initialLocations } = loaderData;
-  const [locations, setLocations] = useState(initialLocations);
+  const [locations, setLocations] = useSettingsDraft("locations", initialLocations);
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const revalidator = useRevalidator();
   const location = useLocation();
@@ -240,9 +242,6 @@ export default function SettingsPage() {
   const saveOk = fetcher.data?.ok === true;
   const saveErr = fetcher.data?.ok === false ? fetcher.data.error : null;
 
-  useEffect(() => {
-    setLocations(loaderData.locations);
-  }, [loaderData.locations]);
 
   const lastAppliedSaveRef = useRef<unknown>(null);
   useEffect(() => {
@@ -565,23 +564,8 @@ export default function SettingsPage() {
 
       {/* 固定フッター（POS Stock 同様：変更時のみ表示・破棄・保存） */}
       {showFooter && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            background: "#fff",
-            borderTop: "1px solid #e1e3e5",
-            padding: "12px 24px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            boxShadow: "0 -2px 6px rgba(0,0,0,0.06)",
-            zIndex: 100,
-          }}
-        >
-          <span style={{ fontSize: 14, color: "#6d7175" }}>
+        <SettingsSaveDock>
+          <span role="status" style={{ fontSize: 14, color: "#6d7175" }}>
             {showSavedFeedback && !isDirty ? "保存しました" : saveErr ? `保存エラー: ${saveErr}` : footerStatusText}
           </span>
           <div style={{ display: "flex", gap: "8px" }}>
@@ -620,7 +604,7 @@ export default function SettingsPage() {
               {saving ? "保存中..." : "保存"}
             </button>
           </div>
-        </div>
+        </SettingsSaveDock>
       )}
     </Page>
     </PolarisPageWrapper>

@@ -11,14 +11,12 @@ import {
   Text,
   TextField,
   Checkbox,
-  Button,
   BlockStack,
   Banner,
-  InlineStack,
   Select,
   Box,
 } from "@shopify/polaris";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
@@ -35,6 +33,8 @@ import {
   type PrintSettings,
 } from "../utils/appSettings.server";
 import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
+import { SettingsSave, useSavedFeedback } from "../components/SettingsSaveDock";
+import { useSettingsDraft } from "../components/SettingsDrafts";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
 
@@ -147,9 +147,9 @@ export default function ReceiptPrintLayoutPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
-  const [form, setForm] = useState(initial);
-  const [paperWidthMm, setPaperWidthMm] = useState<58 | 80>(
+  const saved = useSavedFeedback();
+  const [form, setForm] = useSettingsDraft("form", initial);
+  const [paperWidthMm, setPaperWidthMm] = useSettingsDraft<58 | 80>("paperWidthMm",
     initialPaper === 58 ? 58 : 80,
   );
   const previewHtml = useMemo(
@@ -169,8 +169,6 @@ export default function ReceiptPrintLayoutPage() {
     fd.set("showLocationName", form.showLocationName ? "true" : "false");
     fd.set("paperWidthMm", String(paperWidthMm));
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   return (
@@ -178,7 +176,6 @@ export default function ReceiptPrintLayoutPage() {
       <Page
         title="領収書印字プレビュー"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
           <TabGroupBar tabs={RECEIPT_TABS} />
@@ -257,11 +254,7 @@ export default function ReceiptPrintLayoutPage() {
                   value={String(paperWidthMm)}
                   onChange={(v) => setPaperWidthMm(v === "58" ? 58 : 80)}
                 />
-                <InlineStack align="end">
-                  <Button variant="primary" onClick={handleSave}>
-                    保存
-                  </Button>
-                </InlineStack>
+
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -288,6 +281,7 @@ export default function ReceiptPrintLayoutPage() {
             </Card>
           </Layout.Section>
         </Layout>
+        <SettingsSave onSave={handleSave} />
       </Page>
     </PolarisPageWrapper>
   );
