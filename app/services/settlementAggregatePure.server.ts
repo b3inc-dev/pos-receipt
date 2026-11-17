@@ -378,7 +378,12 @@ export function aggregateGasStyleForOrders(
         const typ = da.discountApplication?.__typename ?? "";
         const code =
           typ === "DiscountCodeApplication" ? String(da.discountApplication?.code ?? "") : "";
-        if (code && code.toUpperCase().startsWith("VIP-")) {
+        // POS の Shop Point は手動割引（タイトル "Shop Point"）として入る。自動割引は同名でも数えない。
+        const title =
+          typ === "ManualDiscountApplication" || typ === "ScriptDiscountApplication"
+            ? String(da.discountApplication?.title ?? "")
+            : "";
+        if (isPointRedemption(code, title)) {
           orderVip += alloc;
         } else {
           orderDiscount += alloc;
@@ -418,4 +423,18 @@ export function totalFromPayBuckets(pay: Record<string, GasPayBucket>): number {
     sum += Math.round((p.sale || 0) - (p.refund || 0));
   }
   return Math.round(sum);
+}
+
+/** Shop Point がオンラインで発行する1会員用の割引コード（SP + 16桁の16進）。 */
+const SHOP_POINT_CODE = /^SP[0-9a-f]{16}$/i;
+/** Shop Point が POS カートに入れる割引の名前。 */
+const SHOP_POINT_TITLE = "Shop Point";
+
+/**
+ * ポイント利用として集計する割引か。
+ * 旧VIPの割引コード（VIP-）に加え、Shop Point の割引（オンラインのコード、POS の「Shop Point」）を数える。
+ */
+export function isPointRedemption(code: string, title: string): boolean {
+  if (code) return code.toUpperCase().startsWith("VIP-") || SHOP_POINT_CODE.test(code);
+  return title.trim() === SHOP_POINT_TITLE;
 }
