@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import {
   aggregateGasStyleForOrders,
   gasNormalizeGatewayLabel,
+  isPointRedemption,
   totalFromPayBuckets,
   type GasAggregateAttributionOpts,
   type GasStyleOrder,
@@ -334,5 +335,47 @@ describe("aggregateGasStyleForOrders — 支払バケット", () => {
     assert.equal(gas.pay["クレジットカード"]?.sale, 2000);
     assert.equal(gas.pay["クレジットカード"]?.refund, 500);
     assert.equal(totalFromPayBuckets(gas.pay), 2500);
+  });
+});
+
+describe("aggregateGasStyleForOrders — ポイント利用", () => {
+  function discount(amount: number, app: { __typename: string; code?: string; title?: string }) {
+    return { allocatedAmountSet: { shopMoney: { amount: String(amount) } }, discountApplication: app };
+  }
+
+  it("旧VIPコード・Shop Point のオンラインコード・POS の Shop Point 手動割引をポイント利用に数える", () => {
+    const order = saleOrder({
+      id: "p1",
+      lineItems: {
+        nodes: [
+          {
+            quantity: 1,
+            discountAllocations: [
+              discount(100, { __typename: "DiscountCodeApplication", code: "VIP-ABC" }),
+              discount(200, { __typename: "DiscountCodeApplication", code: "SP0123456789abcdef" }),
+              discount(300, { __typename: "ManualDiscountApplication", title: "Shop Point" }),
+              discount(50, { __typename: "DiscountCodeApplication", code: "SPRING10" }),
+              discount(70, { __typename: "AutomaticDiscountApplication", title: "Shop Point" }),
+              discount(30, { __typename: "ManualDiscountApplication", title: "スタッフ割引" }),
+            ],
+          },
+        ],
+      },
+    });
+    const gas = aggregateGasStyleForOrders([order], alwaysInRange);
+    assert.equal(gas.vipPointsUsed, 600);
+    assert.equal(gas.discountsTotal, 150);
+  });
+});
+
+describe("isPointRedemption", () => {
+  it("コードは VIP- と SP+16桁16進、コードなしは Shop Point の名前だけ", () => {
+    assert.equal(isPointRedemption("vip-1", ""), true);
+    assert.equal(isPointRedemption("SPABCDEF0123456789", ""), true);
+    assert.equal(isPointRedemption("SP0123", ""), false);
+    assert.equal(isPointRedemption("SP0123456789abcdeg", ""), false);
+    assert.equal(isPointRedemption("", " Shop Point "), true);
+    assert.equal(isPointRedemption("", "Shop Points"), false);
+    assert.equal(isPointRedemption("SPRING", "Shop Point"), false);
   });
 });

@@ -4,6 +4,7 @@
  */
 
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
+import { memberMetafieldValues, type MemberMetafieldNode } from "../utils/memberMetafields";
 
 const CUSTOMERS_QUERY = `#graphql
   query findCustomerByLineId($query: String!, $first: Int!, $after: String) {
@@ -14,6 +15,18 @@ const CUSTOMERS_QUERY = `#graphql
           value
         }
         lineMetafield: metafield(namespace: "socialplus", key: "line") {
+          value
+        }
+        spRankName: metafield(namespace: "shop_point", key: "rank_name") {
+          value
+        }
+        spPointsApproved: metafield(namespace: "shop_point", key: "points_approved") {
+          value
+        }
+        spRankDecisionPurchasePrice: metafield(namespace: "shop_point", key: "rank_decision_purchase_price") {
+          value
+        }
+        spUpcomingExpirations: metafield(namespace: "shop_point", key: "upcoming_expirations") {
           value
         }
         vipRankName: metafield(namespace: "vip", key: "rank_name") {
@@ -59,9 +72,9 @@ export interface GetMemberIdResult {
   pointsApproved?: string;
   /** ランク判定用累計購入額（円）。未設定時は undefined */
   rankDecisionPurchasePrice?: number;
-  /** ポイント失効予定日（vip.expiry_date）。未設定時は undefined */
+  /** ポイント失効予定日（shop_point.upcoming_expirations の最も早い日、無ければ vip.expiry_date）。未設定時は undefined */
   expiryDate?: string;
-  /** 失効予定ポイント数（vip.expiring_points）。未設定時は undefined */
+  /** 失効予定ポイント数（同じ日の点数、無ければ vip.expiring_points）。未設定時は undefined */
   expiringPoints?: string;
 }
 
@@ -129,12 +142,7 @@ type CustomersJson = {
         id: string;
         metafield?: { value?: string } | null;
         lineMetafield?: { value?: string } | null;
-        vipRankName?: { value?: string } | null;
-        vipPointsApproved?: { value?: string } | null;
-        vipRankDecisionPurchasePrice?: { value?: string } | null;
-        vipExpiryDate?: { value?: string } | null;
-        vipExpiringPoints?: { value?: string } | null;
-      }>;
+      } & MemberMetafieldNode>;
       pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
     };
   };
@@ -145,12 +153,7 @@ type CustomerNode = {
   id: string;
   metafield?: { value?: string } | null;
   lineMetafield?: { value?: string } | null;
-  vipRankName?: { value?: string } | null;
-  vipPointsApproved?: { value?: string } | null;
-  vipRankDecisionPurchasePrice?: { value?: string } | null;
-  vipExpiryDate?: { value?: string } | null;
-  vipExpiringPoints?: { value?: string } | null;
-};
+} & MemberMetafieldNode;
 
 /** ノードからメンバー情報を組み立てる共通処理 */
 function buildMemberResult(node: CustomerNode): GetMemberIdResult | GetMemberIdError {
@@ -158,20 +161,7 @@ function buildMemberResult(node: CustomerNode): GetMemberIdResult | GetMemberIdE
   const memberId = typeof memberIdRaw === "string" ? memberIdRaw.trim() : undefined;
   if (!memberId) return { ok: false, error: "MEMBER_ID_NOT_SET" };
 
-  const rankNameRaw = node?.vipRankName?.value;
-  const rankName = typeof rankNameRaw === "string" ? rankNameRaw.trim() || undefined : undefined;
-  const pointsRaw = node?.vipPointsApproved?.value;
-  const pointsApproved = typeof pointsRaw === "string" ? pointsRaw.trim() || undefined : undefined;
-  const priceRaw = node?.vipRankDecisionPurchasePrice?.value;
-  let rankDecisionPurchasePrice: number | undefined;
-  if (priceRaw != null && priceRaw !== "") {
-    const n = Number(priceRaw);
-    if (!Number.isNaN(n) && n >= 0) rankDecisionPurchasePrice = n;
-  }
-  const expiryDateRaw = node?.vipExpiryDate?.value;
-  const expiryDate = typeof expiryDateRaw === "string" ? expiryDateRaw.trim() || undefined : undefined;
-  const expiringPointsRaw = node?.vipExpiringPoints?.value;
-  const expiringPoints = typeof expiringPointsRaw === "string" ? expiringPointsRaw.trim() || undefined : undefined;
+  const { rankName, pointsApproved, rankDecisionPurchasePrice, expiryDate, expiringPoints } = memberMetafieldValues(node);
   return { ok: true, memberId, rankName, pointsApproved, rankDecisionPurchasePrice, expiryDate, expiringPoints };
 }
 
