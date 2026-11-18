@@ -20,6 +20,10 @@ import {
   voidSpecialRefund,
 } from "../../common/specialRefundApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
+import {
+  buildShopifyRefundRecheckRequest,
+  canRecheckShopifyRefund,
+} from "../../common/specialRefundRecheck.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
@@ -73,6 +77,17 @@ const EVENT_TYPE_LABELS = {
 function buildVoidConfirmMessage(event) {
   let msg =
     "このイベントを無効化しますか？\n\n精算・アプリの記録からは外れます。";
+  if (event?.shopifyRefundStatus === "pending") {
+    msg +=
+      "\n\n【重要】この登録は Shopify 返金の結果が分かっていません。";
+    msg += "無効化する前に、Shopify の管理画面でこの注文に返金があるかを確かめ、";
+    msg += "まずこの登録の「Shopify 返金を確かめる」を使ってください。";
+    msg +=
+      "\n\nShopify に返金があるのに無効化して登録し直すと、記録のみの登録になり、Shopify の返金と二重に数えられます。";
+    msg +=
+      "\nShopify に返金が無いのに無効化だけすると、店で渡したお金が精算から消えます。";
+    return msg;
+  }
   if (event?.shopifyRefundStatus === "success") {
     msg +=
       "\n\n【重要】この登録では Shopify 上に返金が作成済みです。";
@@ -144,7 +159,14 @@ function formatShopifyRefundNotice(res) {
 }
 
 function ShopifyRefundStatusLine({ status, error }) {
-  if (!status || status === "none" || status === "pending") return null;
+  if (!status || status === "none") return null;
+  if (status === "pending") {
+    return (
+      <s-text tone="critical" fontSize="small">
+        Shopify 返金の結果が分かっていません（この日の精算が止まります）{error ? `: ${error}` : ""}
+      </s-text>
+    );
+  }
   if (status === "success") {
     return <s-text tone="success" fontSize="small">Shopify 返金済</s-text>;
   }
@@ -257,6 +279,38 @@ function SpecialRefundModal() {
     [events, refreshEvents],
   );
 
+  // pending の登録を同じキーのまま確かめ直す（返金は 2 回にならない。specialRefundRecheck.js）
+  const handleRecheck = useCallback(
+    async (id) => {
+      const ev = events.find((e) => e.id === id);
+      const req = buildShopifyRefundRecheckRequest(ev);
+      if (!req) return;
+      if (
+        !confirm(
+          "この登録の Shopify 返金を確かめます。\n\nShopify に返金ができていれば、その結果を記録します。" +
+            "まだできていなければ、この登録の返金を今実行します（同じ登録なので 2 回にはなりません）。\n\n続けますか？",
+        )
+      ) {
+        return;
+      }
+      setLoading(true);
+      setError("");
+      try {
+        const res = await createSpecialRefund(req);
+        await refreshEvents();
+        setSubmitNotice(formatShopifyRefundNotice(res));
+      } catch (e) {
+        await refreshEvents();
+        setError(
+          `${toUserMessage(e?.message) || "確かめられませんでした"}。時間をおいて、もう一度「Shopify 返金を確かめる」を押してください。`,
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [events, refreshEvents],
+  );
+
   const handleRedoDraft = useCallback(async () => {
     if (!selectedOrder?.canRedoAsDraft) return;
     if (!confirm(buildRedoDraftConfirmMessage(selectedOrder))) return;
@@ -349,6 +403,7 @@ function SpecialRefundModal() {
         onRefund={() => setStep("form_refund")}
         onVoucher={() => setStep("form_voucher")}
         onVoid={handleVoid}
+        onRecheck={handleRecheck}
         onRedoDraft={handleRedoDraft}
         submitNotice={submitNotice}
         onDismissNotice={() => setSubmitNotice(null)}
@@ -422,6 +477,7 @@ function OrderDetailView({
   onRefund,
   onVoucher,
   onVoid,
+  onRecheck,
   onRedoDraft,
   submitNotice,
   onDismissNotice,
@@ -512,7 +568,7 @@ function OrderDetailView({
               {activeEvents.length > 0 ? (
                 <s-stack gap="small">
                   {activeEvents.map((ev) => (
-                    <EventCard key={ev.id} event={ev} onVoid={onVoid} loading={loading} />
+                    <EventCard key={ev.id} event={ev} onVoid={onVoid} onRecheck={onRecheck} loading={loading} />
                   ))}
                 </s-stack>
               ) : (
@@ -549,7 +605,7 @@ function OrderDetailView({
   );
 }
 
-function EventCard({ event, onVoid, loading }) {
+function EventCard({ event, onVoid, onRecheck, loading }) {
   const label = EVENT_TYPE_LABELS[event.eventType] ?? event.eventType;
   return (
     <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
@@ -582,6 +638,17 @@ function EventCard({ event, onVoid, loading }) {
           status={event.shopifyRefundStatus}
           error={event.shopifyRefundError}
         />
+
+        {canRecheckShopifyRefund(event) && onRecheck ? (
+          <s-stack gap="extraSmall">
+            <s-text tone="subdued" fontSize="small">
+              先に Shopify の管理画面でこの注文に返金があるかを確かめてから押してください。登録し直さないでください。
+            </s-text>
+            <s-button kind="secondary" onClick={() => onRecheck(event.id)} disabled={loading}>
+              Shopify 返金を確かめる
+            </s-button>
+          </s-stack>
+        ) : null}
 
         <s-stack direction="horizontal" align="space-between">
           <s-text tone="subdued" fontSize="small">

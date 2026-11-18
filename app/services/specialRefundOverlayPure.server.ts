@@ -116,8 +116,10 @@ export class SpecialRefundPendingError extends Error {
     const shown = orderLabels.slice(0, 5).join("、");
     const more = orderLabels.length > 5 ? ` ほか ${orderLabels.length - 5} 件` : "";
     super(
-      `特殊返金の Shopify 返金がまだ終わっていないため、集計は確定していません（注文: ${shown}${more}）。` +
-        "特殊返金の画面で同じ内容をもう一度実行して完了させるか、その特殊返金を無効化してから、もう一度精算してください。",
+      `特殊返金の Shopify 返金の結果が分かっていないため、集計は確定していません（注文: ${shown}${more}）。` +
+        "まず Shopify の管理画面で、この注文に返金があるかを確かめてください。" +
+        "そのあと POS の特殊返金でこの注文を開き、「Shopify 返金の結果が分かっていません」と出ている登録の「Shopify 返金を確かめる」を押してから、もう一度精算してください（同じ登録のまま確かめるので、返金は 2 回になりません）。" +
+        "この登録を無効化したり、登録し直したりはしないでください（返金や計上が 2 回になることがあります）。",
     );
     this.name = "SpecialRefundPendingError";
     this.orderLabels = orderLabels;
