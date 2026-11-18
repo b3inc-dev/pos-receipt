@@ -3,7 +3,7 @@
  * 要件 §9A: loyalty_usage の表示名・抽出元（discount_code_prefix / manual_off 等）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
 import {
   Page,
   Layout,
@@ -17,7 +17,7 @@ import {
   InlineStack,
   Select,
 } from "@shopify/polaris";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
@@ -28,6 +28,7 @@ import {
   type LoyaltySettings,
   type LoyaltyUsageSourceType,
 } from "../utils/appSettings.server";
+import { resolvePointRedemptionRules, validatePointRedemptionRules } from "../utils/pointRedemptionRules";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SystemPageNav } from "../components/SystemPageNav";
 
@@ -51,11 +52,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? saved.loyaltyUsageDiscountCodePrefixes
       : DEFAULT_LOYALTY_SETTINGS.loyaltyUsageDiscountCodePrefixes,
   };
+  // 精算で今使っている見分け方（保存値が壊れていれば初めの値）をそのまま見せる
+  const rules = resolvePointRedemptionRules(saved);
+  settings.pointRedemptionCodePrefixes = rules.codePrefixes;
+  settings.pointRedemptionManualTitles = rules.manualTitles;
+  settings.pointRedemptionLegacyShopPointHexCode = rules.legacyShopPointHexCode;
 
   return { settings };
 }
 
-function formDataToSettings(formData: FormData): LoyaltySettings {
+function formDataToSettings(
+  formData: FormData,
+): { ok: true; settings: LoyaltySettings } | { ok: false; error: string } {
   const get = (k: string) => formData.get(k);
   const bool = (k: string, def: boolean) => get(k) === "true" || (def && get(k) !== "false");
   const prefixesRaw = get("loyaltyUsageDiscountCodePrefixes");
@@ -67,7 +75,13 @@ function formDataToSettings(formData: FormData): LoyaltySettings {
       prefixes = prefixesRaw.split(",").map((s) => s.trim()).filter(Boolean);
     }
   }
-  return {
+  const rules = validatePointRedemptionRules({
+    codePrefixes: String(get("pointRedemptionCodePrefixes") ?? ""),
+    manualTitles: String(get("pointRedemptionManualTitles") ?? ""),
+    legacyShopPointHexCode: get("pointRedemptionLegacyShopPointHexCode") !== "false",
+  });
+  if (!rules.ok) return rules;
+  const settings: LoyaltySettings = {
     ...DEFAULT_LOYALTY_SETTINGS,
     loyaltyUsageFeatureEnabled: bool("loyaltyUsageFeatureEnabled", false),
     loyaltyUsageDisplayLabel: String(get("loyaltyUsageDisplayLabel") ?? "ポイント利用額").trim(),
@@ -79,7 +93,11 @@ function formDataToSettings(formData: FormData): LoyaltySettings {
     loyaltyUsageOrderAttributeKey: (get("loyaltyUsageOrderAttributeKey") as string) || null,
     loyaltyUsageIncludeInSummary: bool("loyaltyUsageIncludeInSummary", true),
     loyaltyUsageIncludeInSettlement: bool("loyaltyUsageIncludeInSettlement", true),
+    pointRedemptionCodePrefixes: rules.rules.codePrefixes,
+    pointRedemptionManualTitles: rules.rules.manualTitles,
+    pointRedemptionLegacyShopPointHexCode: rules.rules.legacyShopPointHexCode,
   };
+  return { ok: true, settings };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -87,9 +105,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const shop = await resolveShop(session.shop, admin);
 
   const formData = await request.formData();
-  const settings = formDataToSettings(formData);
-  await setAppSetting(shop.id, LOYALTY_SETTINGS_KEY, settings);
-  return Response.json({ ok: true });
+  const parsed = formDataToSettings(formData);
+  if (!parsed.ok) {
+    return Response.json({ ok: false, error: parsed.error }, { status: 400 });
+  }
+  await setAppSetting(shop.id, LOYALTY_SETTINGS_KEY, parsed.settings);
+  return Response.json({ ok: true, at: Date.now() });
 }
 
 export default function LoyaltySettingsPage() {
@@ -98,8 +119,19 @@ export default function LoyaltySettingsPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
+  const actionData = useActionData<{ ok: boolean; error?: string; at?: number }>();
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<LoyaltySettings>({ ...initial });
+  const [pointPrefixText, setPointPrefixText] = useState(initial.pointRedemptionCodePrefixes.join("\n"));
+  const [pointTitleText, setPointTitleText] = useState(initial.pointRedemptionManualTitles.join("\n"));
+
+  // 保存できたときだけ「保存しました」を出す（入力の誤りで保存しなかったときは出さない）
+  useEffect(() => {
+    if (actionData?.ok !== true) return;
+    setSaved(true);
+    const t = setTimeout(() => setSaved(false), 3000);
+    return () => clearTimeout(t);
+  }, [actionData]);
 
   const handleSave = () => {
     const fd = new FormData();
@@ -113,9 +145,13 @@ export default function LoyaltySettingsPage() {
     fd.set("loyaltyUsageOrderAttributeKey", form.loyaltyUsageOrderAttributeKey ?? "");
     fd.set("loyaltyUsageIncludeInSummary", form.loyaltyUsageIncludeInSummary ? "true" : "false");
     fd.set("loyaltyUsageIncludeInSettlement", form.loyaltyUsageIncludeInSettlement ? "true" : "false");
+    fd.set("pointRedemptionCodePrefixes", pointPrefixText);
+    fd.set("pointRedemptionManualTitles", pointTitleText);
+    fd.set(
+      "pointRedemptionLegacyShopPointHexCode",
+      form.pointRedemptionLegacyShopPointHexCode ? "true" : "false",
+    );
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = <K extends keyof LoyaltySettings>(key: K, value: LoyaltySettings[K]) => {
@@ -140,6 +176,11 @@ export default function LoyaltySettingsPage() {
           {saved && (
             <Layout.Section>
               <Banner tone="success">保存しました。</Banner>
+            </Layout.Section>
+          )}
+          {actionData?.ok === false && actionData.error && (
+            <Layout.Section>
+              <Banner tone="critical">保存していません。{actionData.error}</Banner>
             </Layout.Section>
           )}
 
@@ -188,7 +229,7 @@ export default function LoyaltySettingsPage() {
                     label="割引コードのプレフィックス（カンマ区切り）"
                     value={prefixText}
                     onChange={setPrefixText}
-                    helpText="例: VIP-, POINT-, APP- のいずれかで始まる割引をポイント利用額として集計"
+                    helpText="この欄は今は精算に使われていません。精算で数える割引は下の「精算のポイント利用額に数える割引」で決めます。"
                     autoComplete="off"
                   />
                 )}
@@ -223,6 +264,37 @@ export default function LoyaltySettingsPage() {
                     autoComplete="off"
                   />
                 )}
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection
+            title="精算のポイント利用額に数える割引"
+            description="ここに当てはまる割引は、精算・売上サマリーで「割引」ではなく「ポイント利用額」に入ります。上の「ポイント利用額を有効にする」に関係なく使います。前の注文の VIP- も数えるので消さないでください。Shop Point の設定でコードの頭を変えたら、ここと ciara-system の「会員ポイントの設定」も合わせてください。"
+          >
+            <Card>
+              <BlockStack gap="400">
+                <TextField
+                  label="割引コードの頭（1 行に 1 つ）"
+                  value={pointPrefixText}
+                  onChange={setPointPrefixText}
+                  multiline={3}
+                  helpText="この文字で始まる割引コードを数えます。最後はハイフンにします（例: VIP-、SP-POINT-）。大文字と小文字は区別しません。"
+                  autoComplete="off"
+                />
+                <Checkbox
+                  label="Shop Point の前の形のコード（SP ＋ 16 桁の英数字、ハイフンなし）も数える"
+                  checked={form.pointRedemptionLegacyShopPointHexCode}
+                  onChange={(v) => set("pointRedemptionLegacyShopPointHexCode", v)}
+                />
+                <TextField
+                  label="コードの無い割引の名前（1 行に 1 つ）"
+                  value={pointTitleText}
+                  onChange={setPointTitleText}
+                  multiline={2}
+                  helpText="POS で Shop Point を使うと、この名前の割引がカートに入ります（例: Shop Point）。自動割引は同じ名前でも数えません。"
+                  autoComplete="off"
+                />
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
