@@ -6,11 +6,15 @@
 export const UPSTREAM_AGGREGATION_FAILURE_MESSAGE =
   "売上データの取得が完了しなかったため、集計は確定していません。しばらくしてから再試行してください。";
 
+/** 旧ギフトカード（商品券）発行の取得が終わらなかったとき。設定で集計を止められることも伝える。 */
+export const LEGACY_GIFT_CARD_FAILURE_MESSAGE =
+  "商品券（旧ギフトカード）の発行データの取得が完了しなかったため、集計は確定していません。しばらくしてから再試行してください。続く場合は、管理画面の精算設定にある「旧ギフトカード API 集計（検証用・ON で有効）」を確かめてください（商品券の発行をこの方法で数えない店は OFF にできます）。";
+
 export class UpstreamAggregationError extends Error {
   readonly code = "UPSTREAM_INCOMPLETE";
 
-  constructor() {
-    super(UPSTREAM_AGGREGATION_FAILURE_MESSAGE);
+  constructor(message: string = UPSTREAM_AGGREGATION_FAILURE_MESSAGE) {
+    super(message);
     this.name = "UpstreamAggregationError";
   }
 }
