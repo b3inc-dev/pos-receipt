@@ -43,6 +43,18 @@ function errorPage(code: string) {
   return { errors: [{ message: "Internal error", extensions: { code } }], data: null };
 }
 
+/** @shopify/shopify-app-react-router の admin.graphql が errors のときに投げる例外に似せたもの */
+class FakeGraphqlQueryError extends Error {
+  body = { errors: [{ message: "Access denied for giftCards field.", extensions: { code: "ACCESS_DENIED" } }] };
+  constructor() {
+    super("GraphQL Client: An error occurred while fetching from the API. Review 'graphQLErrors' for details.");
+    this.name = "GraphqlQueryError";
+  }
+}
+function graphqlQueryError(): never {
+  throw new FakeGraphqlQueryError();
+}
+
 /** 呼ばれた順に応答を返す偽の admin。応答が関数なら呼び出して投げさせる。 */
 function fakeAdmin(responses: unknown[]) {
   const calls: { query: string; after: unknown }[] = [];
@@ -68,6 +80,8 @@ async function assertFailClosed(p: Promise<unknown>) {
     assert.ok(err instanceof UpstreamAggregationError);
     assert.equal((err as UpstreamAggregationError).code, "UPSTREAM_INCOMPLETE");
     assert.equal((err as Error).message, LEGACY_GIFT_CARD_FAILURE_MESSAGE);
+    assert.ok(!(err as Error).message.includes("GraphQL Client"));
+    assert.ok((err as Error).message.includes("旧ギフトカード API 集計（検証用・ON で有効）"));
     return true;
   });
 }
@@ -112,13 +126,29 @@ describe("fetchLegacyGiftCardIssuanceForDay", () => {
     await assertFailClosed(run(admin));
   });
 
-  it("2ページ目で通信の例外が出たら、そのまま止める", async () => {
-    const { admin } = fakeAdmin([
+  it("2ページ目で例外が出て、代わりのクエリも例外なら、日本語の案内で止める", async () => {
+    const { admin, calls } = fakeAdmin([
       okPage([card("1", 1000)], true, "c-1"),
-      () => {
-        throw new UpstreamAggregationError(LEGACY_GIFT_CARD_FAILURE_MESSAGE);
-      },
+      graphqlQueryError,
+      graphqlQueryError,
     ]);
+    await assertFailClosed(run(admin));
+    assert.equal(calls.length, 3);
+  });
+
+  it("本物のクライアントのように errors を例外（GraphqlQueryError）で投げても、代わりのクエリへ回る", async () => {
+    const { admin, calls } = fakeAdmin([
+      graphqlQueryError,
+      okPage([card("1", 1000), card("2", 3000)], false, null),
+    ]);
+    assert.deepEqual(await run(admin), { amount: 4000, count: 2 });
+    assert.equal(calls.length, 2);
+    assert.ok(!calls[0].query.includes("LegacyGiftCardsFb"));
+    assert.ok(calls[1].query.includes("LegacyGiftCardsFb"));
+  });
+
+  it("権限が無い店（両方のクエリが ACCESS_DENIED の例外）は、英語の生のエラーではなく日本語の案内で止める", async () => {
+    const { admin } = fakeAdmin([graphqlQueryError, graphqlQueryError]);
     await assertFailClosed(run(admin));
   });
 
@@ -156,5 +186,19 @@ describe("settlementEngine の旧ギフトカード集計", () => {
     const block = src.slice(start, src.indexOf("computeGasSettlementTxTimeBounds", start));
     assert.ok(block.includes("fetchLegacyGiftCardIssuanceForDay"));
     assert.ok(!block.includes("catch"), "旧ギフトカード集計の失敗を catch で捨てている");
+  });
+});
+
+describe("案内の文と設定画面の表示名", () => {
+  it("案内に出す設定名は、精算設定の画面の表示名と同じ", () => {
+    const page = readFileSync(new URL("../routes/app.settlement-settings.tsx", import.meta.url), "utf8");
+    const m = LEGACY_GIFT_CARD_FAILURE_MESSAGE.match(/「([^」]+)」/);
+    assert.ok(m);
+    assert.ok(page.includes(`label="${m![1]}"`), `画面に「${m![1]}」が無い`);
+  });
+
+  it("Throttled の使い切りは案内に変えずそのまま上げる（混雑しています を出すため）", () => {
+    const src = readFileSync(new URL("./settlementLegacyGiftCards.server.ts", import.meta.url), "utf8");
+    assert.ok(src.includes("if (err instanceof ThrottledExhaustedError || isThrottledError(err)) throw err;"));
   });
 });

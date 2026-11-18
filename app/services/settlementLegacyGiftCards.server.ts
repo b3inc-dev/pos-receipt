@@ -6,7 +6,13 @@
  * - 取得が途中で失敗したら途中までの額を返さず止める（精算を確定しない）
  */
 import type { DayRangeUtc } from "../utils/shopTimezone.server";
-import { adminGraphqlWithRetry, GRAPHQL_PAGE_DELAY_MS, sleep } from "../lib/shopifyGraphqlThrottle.server";
+import {
+  adminGraphqlWithRetry,
+  GRAPHQL_PAGE_DELAY_MS,
+  isThrottledError,
+  sleep,
+  ThrottledExhaustedError,
+} from "../lib/shopifyGraphqlThrottle.server";
 import {
   LEGACY_GIFT_CARD_FAILURE_MESSAGE,
   UpstreamAggregationError,
@@ -165,7 +171,7 @@ type GiftCardsPage = {
 
 /**
  * giftCards の 1 ページを読む。
- * - `"graphql-error"`: 応答に errors がある（主クエリなら代わりのクエリへ回す）
+ * - `"graphql-error"`: 応答に errors がある（主クエリなら代わりのクエリへ回す）。例外のときも fetchGiftCardsPage がこれにそろえる
  * - `"invalid"`: giftCards・pageInfo・cursor が欠けている（途中までで確定しない）
  * 注文ページの `readOrdersPageOrThrow` と同じ考え方。
  */
@@ -192,6 +198,30 @@ export function classifyGiftCardsPage(json: unknown): GiftCardsPage | "graphql-e
   };
 }
 
+/**
+ * giftCards を 1 ページ取る。
+ * 本物の Shopify クライアント（admin.graphql）は、応答に errors があると JSON で返さず GraphqlQueryError を投げる
+ * （`app/lib/customer.server.ts` の注記と同じ）。通信の失敗も例外になる。
+ * Throttled の使い切りは「混雑しています」を出すためにそのまま上げ、それ以外の例外は errors と同じ `"graphql-error"` にそろえる。
+ */
+async function fetchGiftCardsPage(
+  admin: AdminLike,
+  query: string,
+  variables: Record<string, unknown>,
+  context: string,
+): Promise<GiftCardsPage | "graphql-error" | "invalid"> {
+  let json: unknown;
+  try {
+    json = await adminGraphqlWithRetry<unknown>(admin, query, { variables }, context);
+  } catch (err) {
+    if (err instanceof ThrottledExhaustedError || isThrottledError(err)) throw err;
+    const name = err instanceof Error ? err.name : typeof err;
+    console.warn("[settlement-upstream]", context, "exception", name);
+    return "graphql-error";
+  }
+  return classifyGiftCardsPage(json);
+}
+
 function failLegacyGiftCards(context: string, reason: string): never {
   console.warn("[settlement-upstream]", context, "reject", reason);
   throw new UpstreamAggregationError(LEGACY_GIFT_CARD_FAILURE_MESSAGE);
@@ -201,8 +231,9 @@ function failLegacyGiftCards(context: string, reason: string): never {
  * 指定ロケーション・日次範囲で、POS 集計に未包含のギフトカード発行額を合算する。
  *
  * 取得が途中で終わったとき（errors・ページ情報の欠け・例外）は 0 円や途中までの額を返さず、
- * `UpstreamAggregationError` を投げる。精算・売上サマリーは不完全な集計を確定しない（#16 と同じ）。
- * 主クエリ（created_at の絞り込み）が errors を返したときだけ、従来どおり新しい順の全件走査に切り替える。
+ * `UpstreamAggregationError`（日本語の案内）を投げる。精算・売上サマリーは不完全な集計を確定しない（#16 と同じ）。
+ * 主クエリ（created_at の絞り込み）が errors か例外（GraphqlQueryError 等）のときは、従来どおり新しい順の全件走査に切り替える。
+ * Throttled の使い切り（ThrottledExhaustedError）だけはそのまま上げる（精算 API が「混雑しています」を出す）。
  */
 export async function fetchLegacyGiftCardIssuanceForDay(
   admin: AdminLike,
@@ -223,11 +254,12 @@ export async function fetchLegacyGiftCardIssuanceForDay(
   let usedFallback = false;
 
   while (hasNext) {
-    const json = await adminGraphqlWithRetry<unknown>(admin, LEGACY_GIFT_CARDS_QUERY, {
-      variables: { first: 100, after: cursor, query: q },
-    }, "legacyGiftCards");
-
-    const page = classifyGiftCardsPage(json);
+    const page = await fetchGiftCardsPage(
+      admin,
+      LEGACY_GIFT_CARDS_QUERY,
+      { first: 100, after: cursor, query: q },
+      "legacyGiftCards",
+    );
     if (page === "graphql-error") {
       usedFallback = true;
       break;
@@ -251,11 +283,12 @@ export async function fetchLegacyGiftCardIssuanceForDay(
   result.count = 0;
 
   while (hasNext) {
-    const json = await adminGraphqlWithRetry<unknown>(admin, LEGACY_GIFT_CARDS_FALLBACK_QUERY, {
-      variables: { first: 100, after: cursor },
-    }, "legacyGiftCardsFallback");
-
-    const page = classifyGiftCardsPage(json);
+    const page = await fetchGiftCardsPage(
+      admin,
+      LEGACY_GIFT_CARDS_FALLBACK_QUERY,
+      { first: 100, after: cursor },
+      "legacyGiftCardsFallback",
+    );
     if (page === "graphql-error") failLegacyGiftCards("legacyGiftCardsFallback", "graphql-error");
     if (page === "invalid") failLegacyGiftCards("legacyGiftCardsFallback", "invalid-page");
 
