@@ -43,7 +43,10 @@ import {
   extractLocationNumericId,
   locationGidMatches,
 } from "./refundAggregationPure.server";
-import { applySpecialRefundEventsToTotals } from "./specialRefundOverlayPure.server";
+import {
+  applySpecialRefundEventsToTotals,
+  assertNoPendingSpecialRefunds,
+} from "./specialRefundOverlayPure.server";
 
 export type { GasAggregateAttributionOpts } from "./settlementAggregatePure.server";
 import {
@@ -782,6 +785,11 @@ async function buildSettlementPreviewImpl(
     }
     return true;
   });
+
+  // 精算に入る特殊返金で Shopify 返金の成否が分からないもの（pending）があれば確定しない。
+  // 数えると Shopify の返金と上乗せの二重、数えないと返金の抜けになりうるため（監査 P1-1）。
+  // 反映の設定がオフの種別は上乗せしないので止めない。
+  assertNoPendingSpecialRefunds(otherEvents);
 
   /** DB の手入力調整 + ノート観測（GAS _voucher_change_total と同系） */
   const voucherChangeAmount =
