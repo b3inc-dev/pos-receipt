@@ -2,6 +2,7 @@
  * 特殊返金イベントの精算 overlay（純関数）。
  * shopify_execute 成功後は Shopify TX が正本のため金額加算をスキップし、
  * payment_method_override は親 gateway → 実手段への振替のみ行う。
+ * pending（Shopify 返金の成否が分からない）は数えない。精算は assertNoPendingSpecialRefunds で確定を止める。
  */
 import { gasNormalizeGatewayLabel } from "./settlementAggregatePure.server";
 
@@ -93,6 +94,56 @@ function transferExecutedRefund(
   }
 }
 
+/**
+ * Shopify 返金を実行したが、成否がまだ分からない状態か（タイムアウト・一時的な失敗で再試行待ち）。
+ * Shopify 側では返金ができている場合もあるし、できていない場合もある。
+ */
+export function isShopifyRefundPending(status: string | null | undefined): boolean {
+  return String(status ?? "").trim().toLowerCase() === "pending";
+}
+
+export const SPECIAL_REFUND_PENDING_CODE = "SPECIAL_REFUND_PENDING";
+
+/**
+ * その日の精算に入る特殊返金に、Shopify 返金の成否が分からないもの（pending）があるとき。
+ * 数えると Shopify の返金とアプリの上乗せが二重になり、数えないと返金が抜けうるので、確定しない。
+ */
+export class SpecialRefundPendingError extends Error {
+  readonly code = SPECIAL_REFUND_PENDING_CODE;
+  readonly orderLabels: string[];
+
+  constructor(orderLabels: string[]) {
+    const shown = orderLabels.slice(0, 5).join("、");
+    const more = orderLabels.length > 5 ? ` ほか ${orderLabels.length - 5} 件` : "";
+    super(
+      `特殊返金の Shopify 返金がまだ終わっていないため、集計は確定していません（注文: ${shown}${more}）。` +
+        "特殊返金の画面で同じ内容をもう一度実行して完了させるか、その特殊返金を無効化してから、もう一度精算してください。",
+    );
+    this.name = "SpecialRefundPendingError";
+    this.orderLabels = orderLabels;
+  }
+}
+
+/** 精算に入る特殊返金に pending があれば SpecialRefundPendingError を投げる */
+export function assertNoPendingSpecialRefunds(
+  events: {
+    shopifyRefundStatus?: string | null;
+    sourceOrderName?: string | null;
+    sourceOrderId?: string | null;
+  }[],
+): void {
+  const labels: string[] = [];
+  for (const e of events) {
+    if (!isShopifyRefundPending(e.shopifyRefundStatus)) continue;
+    const label =
+      String(e.sourceOrderName ?? "").trim() ||
+      String(e.sourceOrderId ?? "").replace(/^gid:\/\/shopify\/Order\//, "").trim() ||
+      "不明";
+    if (!labels.includes(label)) labels.push(label);
+  }
+  if (labels.length > 0) throw new SpecialRefundPendingError(labels);
+}
+
 /** Shopify 実返金が成功済み（または同等）なら overlay 金額加算を避ける */
 export function isShopifyRefundSucceeded(
   status: string | null | undefined,
@@ -105,6 +156,7 @@ export function isShopifyRefundSucceeded(
  * 特殊返金イベントを total / refundTotal / paymentSections に反映。
  * - cash_refund / payment_method_override + success: 親手段→実手段の振替（refundTotal は不変）
  * - receipt_cash_adjustment + success: Shopify TX が正本のためスキップ
+ * - pending: 何もしない（Shopify 側の返金があればそれだけが数えられる。二重にしない）
  * - それ以外: 従来どおり純 overlay
  */
 export function applySpecialRefundEventsToTotals(
@@ -115,6 +167,8 @@ export function applySpecialRefundEventsToTotals(
   for (const e of otherEvents) {
     const amount = Number(e.amount);
     if (!Number.isFinite(amount) || amount <= 0) continue;
+    // 成否不明。上乗せも振替もしない（呼び出し側は assertNoPendingSpecialRefunds で確定を止める）
+    if (isShopifyRefundPending(e.shopifyRefundStatus)) continue;
     const executed = isShopifyRefundSucceeded(e.shopifyRefundStatus);
 
     switch (e.eventType) {

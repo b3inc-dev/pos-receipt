@@ -266,7 +266,7 @@ export type RefundAttributionDecision = {
   counts: boolean;
   /** metafield と resolve が両方あり不一致 */
   mismatch: boolean;
-  /** 実際に使った計上 GID（当日返金 TX → metafield → resolve） */
+  /** 実際に使った計上 GID（返金基準: 当日返金 TX → metafield → resolve／注文基準: resolve） */
   usedGid: string | null;
   resolvedGid: string | null;
   metafieldGid: string | null;
@@ -274,9 +274,12 @@ export type RefundAttributionDecision = {
 
 /**
  * 返金計上ロケ:
- * - refund_transaction_pos_location では当日範囲の返金 TX を最優先
- * - 当日 TX で解決できない管理画面・外部返金は metafield、最後に resolve
- * 後日の別店舗部分返品で、過去日の確定帰属を単一 metafield が上書きしない。
+ * - refund_transaction_pos_location（返金基準）では当日範囲の返金 TX を最優先
+ *   当日 TX で解決できない管理画面・外部返金は metafield、最後に resolve
+ *   後日の別店舗部分返品で、過去日の確定帰属を単一 metafield が上書きしない。
+ * - order_transaction（注文基準・既定）では resolve（注文の店）だけを使う。metafield は不一致のログだけに使う。
+ *   別の店で登録した特殊返金が metafield を書き換えても、通常の返品の計上先は変わらない（監査 P1-2）。
+ *   精算は注文の店の注文しか取りに行かないので、metafield の店へ移すとどの店にも載らなくなる。
  */
 export function decideRefundAttributionForSettlement(
   order: GasStyleOrder,
@@ -303,7 +306,10 @@ export function decideRefundAttributionForSettlement(
       ? getPosLocationFromRefundTransactions(order, inRange)
       : null;
   const mismatch = !!(metafieldGid && resolvedGid && metafieldGid !== resolvedGid);
-  const usedGid = inRangeRefundPosGid ?? metafieldGid ?? resolvedGid;
+  const usedGid =
+    opts.attributionCtx.mode === "refund_transaction_pos_location"
+      ? inRangeRefundPosGid ?? metafieldGid ?? resolvedGid
+      : resolvedGid;
   return {
     counts: locationGidMatches(usedGid, opts.settlementLocationId, opts.locIdRaw),
     mismatch,

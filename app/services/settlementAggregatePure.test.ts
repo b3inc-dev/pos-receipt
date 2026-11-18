@@ -668,6 +668,68 @@ describe("aggregateGasStyleForOrders — 返金帰属", () => {
   });
 });
 
+describe("aggregateGasStyleForOrders — 注文基準モードの返金帰属", () => {
+  const locA = "gid://shopify/Location/100";
+  const locB = "gid://shopify/Location/200";
+  function orderModeOpts(settlementGid: string, locIdRaw: string): GasAggregateAttributionOpts {
+    return {
+      attributionCtx: {
+        mode: "order_transaction",
+        nonPosRefundFallbackMode: "order_retail_location",
+        nonPosRefundTargetLocationGid: null,
+      },
+      settlementLocationId: settlementGid,
+      locIdRaw,
+    };
+  }
+  // 店 A で売った注文。店 B で特殊返金を登録したので metafield は B。そのあと店 A でふつうの POS 返品をした
+  function returnedAtA(): GasStyleOrder {
+    return saleOrder({
+      id: "o-order-mode",
+      lineItems: { nodes: [{ quantity: 2 }] },
+      retailLocation: { id: locA },
+      refundAggregationLocationGid: locB,
+      transactions: [
+        { id: "om-sale", createdAt: "2026-10-08T01:00:00Z", kind: "SALE", amountSet: money(1000), gateway: "cash" },
+        { id: "om-refund", createdAt: "2026-10-08T05:00:00Z", kind: "REFUND", amountSet: money(500), gateway: "cash" },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T05:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            { id: "om-refund", kind: "REFUND", amountSet: money(500), gateway: "cash", location: { id: locA } },
+          ],
+        },
+      ],
+    });
+  }
+
+  it("特殊返金が metafield を別の店に書き換えても、通常の返品は注文の店 A に載る", () => {
+    const gas = aggregateGasStyleForOrders([returnedAtA()], alwaysInRange, orderModeOpts(locA, "100"));
+    assert.equal(gas.refundsGross, 500);
+    assert.equal(gas.pay["現金"]?.refund, 500);
+    assert.equal(gas.refundOrderSet.size, 1);
+    assert.equal(gas.itemCount, 1);
+    assert.equal(gas.refundAttributionMismatchCount, 1);
+  });
+
+  it("metafield の店 B には載らない（二重にならない）", () => {
+    const gas = aggregateGasStyleForOrders([returnedAtA()], alwaysInRange, orderModeOpts(locB, "200"));
+    assert.equal(gas.refundsGross, 0);
+    assert.equal(gas.pay["現金"]?.refund ?? 0, 0);
+  });
+
+  it("decideRefundAttributionForSettlement は注文基準で resolve を使う", () => {
+    const d = decideRefundAttributionForSettlement(returnedAtA(), alwaysInRange, orderModeOpts(locA, "100"));
+    assert.equal(d.metafieldGid, locB);
+    assert.equal(d.resolvedGid, locA);
+    assert.equal(d.usedGid, locA);
+    assert.equal(d.mismatch, true);
+    assert.equal(d.counts, true);
+  });
+});
+
 describe("aggregateGasStyleForOrders — 支払バケット", () => {
   it("現金キャップ: お釣り分は現金 sale に載せない", () => {
     const order = saleOrder({

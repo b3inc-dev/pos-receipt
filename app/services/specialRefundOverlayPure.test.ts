@@ -3,9 +3,14 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
 import {
   applySpecialRefundEventsToTotals,
+  assertNoPendingSpecialRefunds,
+  isShopifyRefundPending,
   isShopifyRefundSucceeded,
+  SPECIAL_REFUND_PENDING_CODE,
+  SpecialRefundPendingError,
   type OverlayPaymentSection,
 } from "./specialRefundOverlayPure.server";
 
@@ -190,5 +195,90 @@ describe("applySpecialRefundEventsToTotals — receipt_cash_adjustment", () => {
     );
     assert.equal(totals.refundTotal, 200);
     assert.equal(secs[0].refund, 200);
+  });
+});
+
+describe("pending（Shopify 返金の成否が分からない）— 監査 P1-1", () => {
+  // 監査の場面: クレジットで払った 1,000 円の注文を、特殊返金で現金で返した。
+  // Shopify 返金の応答がタイムアウトしたが、Shopify 側では返金ができている（クレジット 1,000 円の REFUND がある）。
+  function shopifyAlreadyRefunded() {
+    return sections([
+      { gateway: "現金", label: "現金", net: 0, refund: 0 },
+      { gateway: "クレジット", label: "クレジット", net: 1000, refund: 1000, refundCount: 1 },
+    ]);
+  }
+  const pendingCash = {
+    eventType: "cash_refund",
+    amount: 1000,
+    originalPaymentMethod: "クレジット",
+    actualRefundMethod: "現金",
+    adjustKind: null,
+    shopifyRefundStatus: "pending",
+    sourceOrderName: "#1001",
+    sourceOrderId: "gid://shopify/Order/1001",
+  };
+
+  it("isShopifyRefundPending は pending だけ true", () => {
+    assert.equal(isShopifyRefundPending("pending"), true);
+    assert.equal(isShopifyRefundPending(" PENDING "), true);
+    assert.equal(isShopifyRefundPending("success"), false);
+    assert.equal(isShopifyRefundPending("failed"), false);
+    assert.equal(isShopifyRefundPending(null), false);
+  });
+
+  it("pending は上乗せしない。返金合計は Shopify の 1,000 円のまま（以前は 2,000 円）", () => {
+    const secs = shopifyAlreadyRefunded();
+    const totals = { total: 0, refundTotal: 1000 };
+    applySpecialRefundEventsToTotals(secs, [pendingCash], totals);
+    assert.equal(totals.refundTotal, 1000);
+    const refundSum = secs.reduce((sum, sec) => sum + sec.refund, 0);
+    assert.equal(refundSum, 1000);
+    assert.equal(secs.find((x) => x.gateway === "現金")?.refund, 0);
+  });
+
+  it("pending の payment_method_override・receipt_cash_adjustment も数えない", () => {
+    const secs = shopifyAlreadyRefunded();
+    const totals = { total: 0, refundTotal: 1000 };
+    applySpecialRefundEventsToTotals(
+      secs,
+      [
+        { ...pendingCash, eventType: "payment_method_override" },
+        { ...pendingCash, eventType: "receipt_cash_adjustment", adjustKind: "extra" },
+      ],
+      totals,
+    );
+    assert.deepEqual(totals, { total: 0, refundTotal: 1000 });
+    assert.equal(secs.reduce((sum, sec) => sum + sec.refund + sec.net, 0), 2000);
+  });
+
+  it("精算に入る特殊返金に pending があれば確定しない（注文名を出す）", () => {
+    assert.throws(
+      () => assertNoPendingSpecialRefunds([pendingCash, { ...pendingCash, sourceOrderName: null, sourceOrderId: "gid://shopify/Order/2002" }]),
+      (err: unknown) => {
+        assert.ok(err instanceof SpecialRefundPendingError);
+        assert.equal((err as SpecialRefundPendingError).code, SPECIAL_REFUND_PENDING_CODE);
+        assert.deepEqual((err as SpecialRefundPendingError).orderLabels, ["#1001", "2002"]);
+        assert.match((err as Error).message, /#1001/);
+        return true;
+      },
+    );
+  });
+
+  it("pending が無ければ止めない（success・failed・skipped・none）", () => {
+    for (const status of ["success", "failed", "skipped", "none", null]) {
+      assertNoPendingSpecialRefunds([{ ...pendingCash, shopifyRefundStatus: status }]);
+    }
+    assertNoPendingSpecialRefunds([]);
+  });
+
+  it("settlementEngine は上乗せの前に pending を確かめ、精算 API は 409 で返す", () => {
+    const engine = readFileSync(new URL("./settlementEngine.server.ts", import.meta.url), "utf8");
+    const guard = engine.indexOf("assertNoPendingSpecialRefunds(otherEvents)");
+    const apply = engine.indexOf("applySpecialRefundEventsToTotals(");
+    assert.ok(guard > 0 && apply > guard);
+    const apiErr = readFileSync(new URL("../utils/settlementApiError.server.ts", import.meta.url), "utf8");
+    assert.ok(apiErr.includes("SpecialRefundPendingError"));
+    const create = readFileSync(new URL("../routes/api.settlements.create.tsx", import.meta.url), "utf8");
+    assert.ok(create.includes("instanceof SpecialRefundPendingError"));
   });
 });
