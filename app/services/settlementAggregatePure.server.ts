@@ -7,6 +7,11 @@ import {
   resolveRefundAggregationLocationGid,
   type RefundAggregationContext,
 } from "./refundAggregationPure.server";
+import {
+  DEFAULT_POINT_REDEMPTION_RULES,
+  isPointRedemption,
+  type PointRedemptionRules,
+} from "../utils/pointRedemptionRules";
 
 export type GasAggregateAttributionOpts = {
   attributionCtx: RefundAggregationContext;
@@ -213,6 +218,8 @@ export function aggregateGasStyleForOrders(
   orders: GasStyleOrder[],
   inRange: (iso?: string) => boolean,
   attributionOpts?: GasAggregateAttributionOpts,
+  /** ポイント利用額に数える割引（保存した「ポイント/会員施策設定」。無ければ初めの値） */
+  pointRules: PointRedemptionRules = DEFAULT_POINT_REDEMPTION_RULES,
 ): {
   pay: Record<string, GasPayBucket>;
   refundsGross: number;
@@ -383,7 +390,7 @@ export function aggregateGasStyleForOrders(
           typ === "ManualDiscountApplication" || typ === "ScriptDiscountApplication"
             ? String(da.discountApplication?.title ?? "")
             : "";
-        if (isPointRedemption(code, title)) {
+        if (isPointRedemption(code, title, pointRules)) {
           orderVip += alloc;
         } else {
           orderDiscount += alloc;
@@ -425,16 +432,8 @@ export function totalFromPayBuckets(pay: Record<string, GasPayBucket>): number {
   return Math.round(sum);
 }
 
-/** Shop Point がオンラインで発行する1会員用の割引コード（SP + 16桁の16進）。 */
-const SHOP_POINT_CODE = /^SP[0-9a-f]{16}$/i;
-/** Shop Point が POS カートに入れる割引の名前。 */
-const SHOP_POINT_TITLE = "Shop Point";
-
 /**
- * ポイント利用として集計する割引か。
- * 旧VIPの割引コード（VIP-）に加え、Shop Point の割引（オンラインのコード、POS の「Shop Point」）を数える。
+ * ポイント利用として集計する割引か。見分け方の正本は `app/utils/pointRedemptionRules.ts`（設定で変えられる）。
+ * 既存の呼び出しとテストのためにここからも export する。
  */
-export function isPointRedemption(code: string, title: string): boolean {
-  if (code) return code.toUpperCase().startsWith("VIP-") || SHOP_POINT_CODE.test(code);
-  return title.trim() === SHOP_POINT_TITLE;
-}
+export { isPointRedemption };
