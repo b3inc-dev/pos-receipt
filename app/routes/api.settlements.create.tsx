@@ -60,10 +60,15 @@ async function syncShopifySettlementOrder(
   printMode: string,
   isInspection: boolean,
   locationName: string,
-): Promise<{ sourceOrderId: string | null; sourceOrderName: string | null }> {
+): Promise<{
+  sourceOrderId: string | null;
+  sourceOrderName: string | null;
+  /** 設定で精算注文を作らない（失敗ではない）。POS はこのとき「再インストール」の案内を出さない */
+  settlementOrderSkipped: boolean;
+}> {
   const syncOpts = await resolveSettlementOrderSyncOptions(shopId, printMode);
   if (!syncOpts.createOrder) {
-    return { sourceOrderId: null, sourceOrderName: null };
+    return { sourceOrderId: null, sourceOrderName: null, settlementOrderSkipped: true };
   }
 
   if (isInspection) {
@@ -72,14 +77,22 @@ async function syncShopifySettlementOrder(
       attachMetafields: syncOpts.attachMetafields,
       fulfillOnCreate: true,
     });
-    return { sourceOrderId: result.orderId, sourceOrderName: result.orderName };
+    return {
+      sourceOrderId: result.orderId,
+      sourceOrderName: result.orderName,
+      settlementOrderSkipped: false,
+    };
   }
 
   const result = await syncSettlementOrderLikeGas(admin, shopId, preview, {
     attachNote: syncOpts.attachNote,
     attachMetafields: syncOpts.attachMetafields,
   });
-  return { sourceOrderId: result.orderId, sourceOrderName: result.orderName };
+  return {
+    sourceOrderId: result.orderId,
+    sourceOrderName: result.orderName,
+    settlementOrderSkipped: false,
+  };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -131,6 +144,7 @@ export async function action({ request }: ActionFunctionArgs) {
             );
             let sourceOrderId = existingSettlement.sourceOrderId;
             let sourceOrderName = existingSettlement.sourceOrderName;
+            let settlementOrderSkipped = false;
             try {
               const sync = await syncShopifySettlementOrder(
                 admin,
@@ -142,6 +156,7 @@ export async function action({ request }: ActionFunctionArgs) {
               );
               sourceOrderId = sync.sourceOrderId;
               sourceOrderName = sync.sourceOrderName;
+              settlementOrderSkipped = sync.settlementOrderSkipped;
             } catch (syncErr) {
               const msg = syncErr instanceof Error ? syncErr.message : String(syncErr);
               return corsJson({ ok: false, error: msg }, { status: 500 });
@@ -165,6 +180,7 @@ export async function action({ request }: ActionFunctionArgs) {
                 preview,
                 sourceOrderId,
                 sourceOrderName,
+                settlementOrderSkipped,
                 printMode: effectivePrintMode,
                 targetDate: existingSettlement.targetDate,
                 isInspection: false,
@@ -207,6 +223,7 @@ export async function action({ request }: ActionFunctionArgs) {
           );
           let sourceOrderId = raced.sourceOrderId;
           let sourceOrderName = raced.sourceOrderName;
+          let settlementOrderSkipped = false;
           if (effectivePrintMode === "order_based") {
             const sync = await syncShopifySettlementOrder(
               admin,
@@ -218,6 +235,7 @@ export async function action({ request }: ActionFunctionArgs) {
             );
             sourceOrderId = sync.sourceOrderId;
             sourceOrderName = sync.sourceOrderName;
+            settlementOrderSkipped = sync.settlementOrderSkipped;
           }
           return corsJson(
             {
@@ -227,6 +245,7 @@ export async function action({ request }: ActionFunctionArgs) {
               preview,
               sourceOrderId,
               sourceOrderName,
+              settlementOrderSkipped,
               printMode: effectivePrintMode,
               targetDate: raced.targetDate,
               isInspection: false,
@@ -258,6 +277,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
       let sourceOrderId: string | null = null;
       let sourceOrderName: string | null = null;
+      let settlementOrderSkipped = false;
 
       if (effectivePrintMode === "order_based") {
         const sync = await syncShopifySettlementOrder(
@@ -270,6 +290,7 @@ export async function action({ request }: ActionFunctionArgs) {
         );
         sourceOrderId = sync.sourceOrderId;
         sourceOrderName = sync.sourceOrderName;
+        settlementOrderSkipped = sync.settlementOrderSkipped;
       }
 
       const idemKey = !inspection
@@ -315,6 +336,7 @@ export async function action({ request }: ActionFunctionArgs) {
           preview,
           sourceOrderId,
           sourceOrderName,
+          settlementOrderSkipped,
           printMode: effectivePrintMode,
           targetDate: String(targetDate),
           isInspection: inspection,

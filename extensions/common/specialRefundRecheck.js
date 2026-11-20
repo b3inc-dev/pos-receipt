@@ -19,6 +19,18 @@ export function canRecheckShopifyRefund(event) {
     id.length > POS_SPECIAL_REFUND_EVENT_ID_PREFIX.length;
 }
 
+/**
+ * 前からある登録（ID が `pos_sr_` で始まらない）が pending のまま残っているか。
+ * この登録は同じキーで送り直せないので、POST /api/special-refunds/:id/recheck で
+ * Shopify の返金を読み直して決める（サーバーは返金を実行しない。読むだけ）。
+ */
+export function canRecheckLegacyShopifyRefund(event) {
+  if (!event || event.status === "voided") return false;
+  if (String(event.shopifyRefundStatus ?? "").trim().toLowerCase() !== "pending") return false;
+  const id = String(event.id ?? "");
+  return id.length > 0 && !id.startsWith(POS_SPECIAL_REFUND_EVENT_ID_PREFIX);
+}
+
 function numOrNull(v) {
   if (v == null || String(v).trim() === "") return null;
   return Number(v);

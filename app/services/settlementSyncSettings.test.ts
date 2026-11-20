@@ -1,5 +1,5 @@
 /**
- * P0 D-02 — Printing API 優先時の SETTLEMENT 注文作成スキップ／アーカイブオプトイン
+ * P0 D-02 — 精算注文（SETTLEMENT）を作るかどうか。保存が無いときは管理画面と同じく ON
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -37,18 +37,23 @@ describe("isSettlementPrintingApiPrimary", () => {
 });
 
 describe("shouldCreateSettlementOrder", () => {
-  it("Printing 主経路かつ createSettlementOrderWhenPrinting 未保存 → スキップ", () => {
-    assert.equal(shouldCreateSettlementOrder(settlementOn, undefined), false);
+  it("印字設定の保存が無い店は作る（管理画面の見た目 = 初めの値 ON と同じ。今の本番の動き）", () => {
+    assert.equal(shouldCreateSettlementOrder(settlementOn, undefined), true);
+    assert.equal(shouldCreateSettlementOrder(settlementOn, null), true);
+    assert.equal(shouldCreateSettlementOrder(settlementOn, {}), true);
+  });
+
+  it("Printing 主経路でも createSettlementOrderWhenPrinting が入っていなければ作る", () => {
     assert.equal(
       shouldCreateSettlementOrder(settlementOn, {
         preferPrintingApi: true,
         settlementPrintingApiEnabled: true,
       }),
-      false,
+      true,
     );
   });
 
-  it("Printing 主経路かつ明示 true → アーカイブオプトインで作成", () => {
+  it("明示 true → 作る", () => {
     const saved: Partial<PrintSettings> = {
       preferPrintingApi: true,
       settlementPrintingApiEnabled: true,
@@ -57,26 +62,25 @@ describe("shouldCreateSettlementOrder", () => {
     assert.equal(shouldCreateSettlementOrder(settlementOn, saved), true);
   });
 
-  it("Printing 主経路かつ明示 false → スキップ", () => {
-    const saved: Partial<PrintSettings> = {
-      preferPrintingApi: true,
-      settlementPrintingApiEnabled: true,
-      createSettlementOrderWhenPrinting: false,
-    };
-    assert.equal(shouldCreateSettlementOrder(settlementOn, saved), false);
-  });
-
-  it("Printing 非主経路では未保存でも従来どおり作成（!== false）", () => {
+  it("明示 false（チェックを外して保存）→ 作らない", () => {
+    assert.equal(
+      shouldCreateSettlementOrder(settlementOn, {
+        preferPrintingApi: true,
+        settlementPrintingApiEnabled: true,
+        createSettlementOrderWhenPrinting: false,
+      }),
+      false,
+    );
     assert.equal(
       shouldCreateSettlementOrder(settlementOn, {
         preferPrintingApi: false,
-        settlementPrintingApiEnabled: true,
+        createSettlementOrderWhenPrinting: false,
       }),
-      true,
+      false,
     );
   });
 
-  it("orderBasedCreateSettlementOrderEnabled=false は常にスキップ", () => {
+  it("orderBasedCreateSettlementOrderEnabled=false は常に作らない", () => {
     const off = {
       ...settlementOn,
       orderBasedCreateSettlementOrderEnabled: false,
@@ -89,5 +93,6 @@ describe("shouldCreateSettlementOrder", () => {
       }),
       false,
     );
+    assert.equal(shouldCreateSettlementOrder(off, undefined), false);
   });
 });

@@ -1,9 +1,11 @@
 /**
  * 精算注文の Shopify 同期可否（管理画面設定 × printMode × Printing API）
  *
- * Printing API 優先（preferPrintingApi && settlementPrintingApiEnabled）のときは
- * 印字用途の SETTLEMENT 注文作成をスキップする。
- * 監査アーカイブ用オプトイン（createSettlementOrderWhenPrinting が保存済みで true）のみ尊重。
+ * 「精算注文を作成」（createSettlementOrderWhenPrinting）は、保存が無ければ ON。
+ * 管理画面の印字設定は保存が無いと DEFAULT_PRINT_SETTINGS（true）でチェックが入って見えるので、
+ * サーバーも同じ初めの値にそろえる（今の本番の動き = 作る、を続ける）。
+ * 作りたくない店は、チェックを外して保存する（明示 false）。
+ * Printing API が主の経路かどうかでは変えない。
  */
 import {
   getAppSetting,
@@ -38,8 +40,9 @@ export function isSettlementPrintingApiPrimary(
 
 /**
  * SETTLEMENT 注文を作るか。
- * - Printing 主経路: createSettlementOrderWhenPrinting が**保存済みで true** のときだけ（アーカイブオプトイン）
- * - それ以外（旧 order_based 印字）: 従来どおり未保存は ON（!== false）
+ * - 精算設定 orderBasedCreateSettlementOrderEnabled が false → 作らない
+ * - 印字設定 createSettlementOrderWhenPrinting が保存済みで false → 作らない
+ * - それ以外（保存が無い・true）→ 作る（管理画面の見た目＝初めの値 ON と同じ）
  */
 export function shouldCreateSettlementOrder(
   settlement: SettlementSettings,
@@ -48,11 +51,10 @@ export function shouldCreateSettlementOrder(
   if (settlement.orderBasedCreateSettlementOrderEnabled === false) {
     return false;
   }
-  if (isSettlementPrintingApiPrimary(printSaved)) {
-    // 未保存（undefined）→ スキップ。明示 true のみアーカイブ作成。
-    return printSaved?.createSettlementOrderWhenPrinting === true;
-  }
-  return printSaved?.createSettlementOrderWhenPrinting !== false;
+  const createWhenPrinting =
+    printSaved?.createSettlementOrderWhenPrinting ??
+    DEFAULT_PRINT_SETTINGS.createSettlementOrderWhenPrinting;
+  return createWhenPrinting !== false;
 }
 
 export async function resolveSettlementOrderSyncOptions(
