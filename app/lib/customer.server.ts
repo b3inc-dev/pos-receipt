@@ -237,35 +237,40 @@ export async function getMemberIdByLineId(
     }
 
     // ── スローパス: 項目ごとに全件スキャン（件数制限なし）──
-    // socialplus.line（前からの項目）は main と同じ動き: 定義を確かめずに全件を見て、エラーなら API_ERROR。
+    // socialplus.line（前からの項目）は main と同じく、定義を確かめずに全件を見る。
     // ほかの項目は、定義で絞り込みが効く（adminFilterable が FILTERABLE）と確かめられたときだけ見る。
     // 効かない項目で全件を見ない（2026-07 までは条件が無視されて全顧客が返り、2026-10 からはエラーになるため）。
-    // 問い合わせのエラーは次の項目へ進む。値の空の人が返ってきたら絞り込みが効いていないと見て、その項目は打ち切る。
+    // 値の空の人が返ってきたら絞り込みが効いていないと見て、その項目は打ち切る。
+    // その項目を見られなかったとき（定義を読めない・検索のエラー）は次の項目へ進む。
+    // 本物の client（@shopify/shopify-api）は GraphQL の errors・5xx・通信の切断を「投げる」ので、投げられても次へ進む。
+    // Throttled を使い切ったときだけは、ほかの項目も同じになるので進まずに THROTTLED を返す。
     console.info("[member-card] Tag miss. Falling back to full scan (last4):", lineIdNorm.slice(-4));
     let gatedFieldFailed = false;
-    for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
-      const field = fields[fieldIndex];
+
+    /** 1 項目を全件スキャンする。見つけた人・"none"（いない）・"failed"（見られなかった）を返す。 */
+    const scanField = async (
+      field: LineIdField,
+      fieldIndex: number
+    ): Promise<CustomerNode | "none" | "failed"> => {
       const legacy = isLegacyLineIdField(field);
       if (!legacy) {
         const state = await lineFieldFilterState(admin, options.shop, field);
         if (state !== "usable") {
           console.warn("[member-card] Skip full scan: filter not usable for", fieldLabel(field), state);
-          if (state === "unknown") gatedFieldFailed = true;
-          continue;
+          return state === "unknown" ? "failed" : "none";
         }
       }
       const search = fullScanQuery(field);
       let cursor: string | null = null;
       let pageCount = 0;
 
-      scan: while (true) {
+      while (true) {
         const json = await runQueryWithRetry(search, cursor);
 
         if (json.errors?.length) {
+          // 本文で errors を返す client のとき（@shopify/shopify-api は投げるので下の catch に来る）。
           console.error("Customer query errors:", search, json.errors);
-          if (legacy) return { ok: false, error: "API_ERROR" };
-          gatedFieldFailed = true;
-          break;
+          return "failed";
         }
 
         const nodes = json.data?.customers?.nodes ?? [];
@@ -274,7 +279,7 @@ export async function getMemberIdByLineId(
         if (pageCount === 0) {
           if (nodes.length === 0) {
             console.warn("[member-card]", search, "returned 0 customers.");
-            break;
+            return "none";
           }
           console.info("[member-card] Full scan first page:", search, nodes.length, "customers");
         }
@@ -285,28 +290,46 @@ export async function getMemberIdByLineId(
             // 絞り込みが効いていれば値のある人だけが返る。値の空の人がいれば全顧客を見ている。
             console.warn("[member-card] Filter ignored (customer without value returned). Stop full scan:", search);
             markFieldNotFilterable(options.shop, field);
-            break scan;
+            return "none";
           }
-          if (!matches(node)) continue;
-
-          // タグを追加して次回からファストパスが効くようにする（fire-and-forget）
-          admin.graphql(TAGS_ADD_MUTATION, { variables: { id: node.id, tags: [lineTag] } })
-            .then(async (res) => {
-              const j = await res.json() as { data?: { tagsAdd?: { userErrors?: Array<{ message?: string }> } } };
-              const errs = j.data?.tagsAdd?.userErrors;
-              if (errs?.length) console.warn("[member-card] tagsAdd userErrors:", errs);
-              else console.info("[member-card] Tag added for future fast lookup (last4):", lineIdNorm.slice(-4));
-            })
-            .catch((e) => console.warn("[member-card] tagsAdd failed:", e));
-
-          return buildMemberResult(node);
+          if (matches(node)) return node;
         }
 
-        if (!pageInfo?.hasNextPage || !pageInfo?.endCursor) break;
+        if (!pageInfo?.hasNextPage || !pageInfo?.endCursor) return "none";
 
         cursor = pageInfo.endCursor;
         pageCount++;
       }
+    };
+
+    for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
+      const field = fields[fieldIndex];
+      let found: CustomerNode | "none" | "failed";
+      try {
+        found = await scanField(field, fieldIndex);
+      } catch (err) {
+        if (err instanceof ThrottledExhaustedError) throw err;
+        console.error("[member-card] Full scan failed for", fieldLabel(field), err instanceof Error ? err.message : err);
+        found = "failed";
+      }
+      if (found === "failed") {
+        gatedFieldFailed = true;
+        continue;
+      }
+      if (found === "none") continue;
+
+      const node = found;
+      // タグを追加して次回からファストパスが効くようにする（fire-and-forget）
+      admin.graphql(TAGS_ADD_MUTATION, { variables: { id: node.id, tags: [lineTag] } })
+        .then(async (res) => {
+          const j = await res.json() as { data?: { tagsAdd?: { userErrors?: Array<{ message?: string }> } } };
+          const errs = j.data?.tagsAdd?.userErrors;
+          if (errs?.length) console.warn("[member-card] tagsAdd userErrors:", errs);
+          else console.info("[member-card] Tag added for future fast lookup (last4):", lineIdNorm.slice(-4));
+        })
+        .catch((e) => console.warn("[member-card] tagsAdd failed:", e));
+
+      return buildMemberResult(node);
     }
     if (gatedFieldFailed) {
       // 見られなかった項目にいる人かもしれないので「見つからない」とは言わない。

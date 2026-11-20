@@ -22,13 +22,30 @@ type FakeOptions = {
   definitions?: Record<string, Definition>;
   /** この検索は絞り込みを無視して全顧客を返す（2026-07 までの Shopify の動き）。 */
   ignoredFilters?: string[];
-  /** この検索はエラーを返す（2026-10 からの Shopify の動き）。 */
+  /**
+   * この検索はエラーになる（2026-10 からの Shopify の動き）。本物の client（@shopify/shopify-api の
+   * GraphqlClient.request → throwFailedRequest）と同じく GraphqlQueryError を投げる。
+   */
   erroringSearches?: string[];
+  /** erroringSearches を投げずに本文の errors で返す（本文で返す client のとき）。 */
+  errorsInBody?: boolean;
+  /** この検索は 5xx・通信の切断で投げる（HttpResponseError など）。 */
+  failingSearches?: string[];
+  /** この検索はいつも Throttled で投げる。 */
+  throttledSearches?: string[];
   /** 定義の問い合わせが例外になる。 */
   definitionThrows?: boolean;
 };
 
 const FILTERABLE: Definition = { enabled: true, status: "FILTERABLE" };
+
+/** @shopify/shopify-api の GraphqlQueryError の形（name と message）をまねる。 */
+class FakeGraphqlQueryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GraphqlQueryError";
+  }
+}
 
 /** customers の検索（tag: と metafields.<ns>.<key>:*）と metafieldDefinitions をまねる。呼んだ検索を残す。 */
 function fakeAdmin(customers: Customer[], opts: FakeOptions = {}) {
@@ -54,8 +71,12 @@ function fakeAdmin(customers: Customer[], opts: FakeOptions = {}) {
       const search = String(v.query);
       searches.push(search);
       if (opts.erroringSearches?.includes(search)) {
-        return new Response(JSON.stringify({ errors: [{ message: "Metafield definition does not allow filtering" }] }));
+        const message = "Metafield definition does not allow filtering";
+        if (opts.errorsInBody) return new Response(JSON.stringify({ errors: [{ message }] }));
+        throw new FakeGraphqlQueryError(message);
       }
+      if (opts.failingSearches?.includes(search)) throw new Error("Received an error response (502 Bad Gateway) from Shopify");
+      if (opts.throttledSearches?.includes(search)) throw new FakeGraphqlQueryError("Throttled");
       const tag = /^tag:"(.+)"$/.exec(search)?.[1];
       const meta = /^metafields\.([^.]+)\.([^:]+):\*$/.exec(search);
       const ignored = opts.ignoredFilters?.includes(search);
@@ -170,7 +191,7 @@ describe("全件スキャンは絞り込みが効く項目だけ（レビュー 
     assert.equal(shop.definitionReads.length, 3, "5 分を過ぎたら読み直す");
   });
 
-  it("2026-10 の API で検索がエラーになっても、次の項目（socialplus.line）へ進む", async () => {
+  it("2026-10 の API で検索がエラーになっても（client は GraphqlQueryError を投げる）、次の項目（socialplus.line）へ進む", async () => {
     const shop = fakeAdmin(people(), { erroringSearches: ["metafields.line_crm.line_user_id:*"] });
     const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP });
     assert.ok(b.ok && b.memberId === "M2");
@@ -180,9 +201,40 @@ describe("全件スキャンは絞り込みが効く項目だけ（レビュー 
     assert.deepEqual(none, { ok: false, error: "API_ERROR" });
   });
 
-  it("socialplus.line の検索がエラーなら、main と同じく API_ERROR", async () => {
-    const shop = fakeAdmin(people(), { erroringSearches: ["metafields.socialplus.line:*"] });
-    assert.deepEqual(await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP }), { ok: false, error: "API_ERROR" });
+  it("本文で errors を返す client でも同じく次の項目へ進む", async () => {
+    const shop = fakeAdmin(people(), { erroringSearches: ["metafields.line_crm.line_user_id:*"], errorsInBody: true });
+    const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP });
+    assert.ok(b.ok && b.memberId === "M2");
+    assert.deepEqual(shop.searches.slice(1), ["metafields.line_crm.line_user_id:*", "metafields.socialplus.line:*"]);
+  });
+
+  it("5xx・通信の切断で投げても次の項目へ進み、どこにもいなければ API_ERROR", async () => {
+    const shop = fakeAdmin(people(), { failingSearches: ["metafields.line_crm.line_user_id:*"] });
+    const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP });
+    assert.ok(b.ok && b.memberId === "M2");
+    const a = await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: SHOP });
+    assert.deepEqual(a, { ok: false, error: "API_ERROR" }, "line_crm にいる人を「連携していない」と言わない");
+  });
+
+  it("Throttled を使い切ったら次へ進まず THROTTLED（前と同じ）", async () => {
+    const shop = fakeAdmin(people(), { throttledSearches: ["metafields.line_crm.line_user_id:*"] });
+    const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP });
+    assert.deepEqual(b, { ok: false, error: "THROTTLED" });
+    assert.ok(!shop.searches.includes("metafields.socialplus.line:*"));
+  });
+
+  it("socialplus.line の検索が投げても本文で errors を返しても、ほかで見つからなければ main と同じく API_ERROR", async () => {
+    for (const errorsInBody of [false, true]) {
+      const shop = fakeAdmin(people(), { erroringSearches: ["metafields.socialplus.line:*"], errorsInBody });
+      assert.deepEqual(await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP }), { ok: false, error: "API_ERROR" });
+      const a = await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: SHOP });
+      assert.ok(a.ok && a.memberId === "M1", "先の項目で見つかればそのまま返す");
+    }
+    const legacyOnly = fakeAdmin(people(), { failingSearches: ["metafields.socialplus.line:*"] });
+    assert.deepEqual(
+      await getMemberIdByLineId(legacyOnly.admin, LINE_B, { sleep: noop, shop: SHOP, fields: parseLineIdFields("socialplus.line") }),
+      { ok: false, error: "API_ERROR" }
+    );
   });
 
   it("定義はオンでも絞り込みが無視されて値の空の人が返ったら、その項目の全件は打ち切り、しばらく見ない", async () => {
