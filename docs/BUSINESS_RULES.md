@@ -90,6 +90,7 @@
 
 - 注文基準（`order_transaction`・既定）: 上の解決順の結果だけを使う。注文の metafield `pos.refund_aggregation_location_gid` は不一致のログ（`refundAttributionMismatchCount`）にだけ使う。別の店で登録した特殊返金が metafield を書き換えても、通常の返品の計上先は変わらない
 - 返金基準（`refund_transaction_pos_location`）: 当日の返金 TX の POS ロケーション → metafield → 上の解決順
+  - 別の店で売った注文の、この店での返金も拾う（`mergeCrossLocationRefundOrders`）。ただし **この店の注文取得（`location_id`）にすでに入っている注文は足さない**。足すと、売上を持った元の注文が返金だけの入力で上書きされ、その日の売上が消える（#11 の見直し P1-1。合成データで 9,000 円が −1,000 円）。元の注文は返金 TX ごとに店を見て数えるので、それで足りる
 
 精算集計では、計上先が精算対象ロケーションと一致しない返金は **件数・金額とも加算しない**。  
 照合は `locationGidMatches` で **数値ロケーション ID 同士**（GID / 数値 / 末尾パスの表記ゆれを吸収）。
@@ -147,7 +148,7 @@ Shopify 返金の状態（`shopifyRefundStatus`）による扱い:
 | 状態 | 精算での扱い |
 |------|--------------|
 | `success` | Shopify の REFUND TX が正本。金額は足さず、元の手段から実際の手段へ振り替えるだけ |
-| `pending` | Shopify 返金を実行したが成否が分からない（タイムアウト等で再試行待ち）。**上乗せも振替もせず、精算・点検・売上サマリーの日次を確定しない**（`SpecialRefundPendingError`、API は 409）。店の人は Shopify 管理画面で返金の有無を確かめてから、POS の特殊返金の登録の「Shopify 返金を確かめる」を押す（同じ冪等キーで API を呼び直す。サーバーは返金ノートの印を探し、無ければ同じキーの `refundCreate` を呼ぶので 2 回にならない）。POS の日別一覧には「返金未確認」のバッジが出る。無効化や登録し直しは、二重返金・二重計上になりうるので案内しない。反映の設定がオフの種別は止めない |
+| `pending` | Shopify 返金を実行したが成否が分からない（タイムアウト等で再試行待ち）。**上乗せも振替もせず、精算・点検・売上サマリーの日次を確定しない**（`SpecialRefundPendingError`、API は 409）。店の人は Shopify 管理画面で返金の有無を確かめてから、POS の特殊返金の登録の「Shopify 返金を確かめる」を押す（同じ冪等キーで API を呼び直す。サーバーは返金ノートの印を探し、無ければ同じキーの `refundCreate` を呼ぶので 2 回にならない）。POS の日別一覧には「返金未確認」のバッジが出る。**前からある登録（ID が `pos_sr_` で始まらない）** も同じボタンが出るが、こちらは `POST /api/special-refunds/:id/recheck` で Shopify の注文の返金を読み直すだけで、**返金は実行しない**（main のときの返金には冪等キーも印も無く、もう一度実行すると 2 回返金になりうるため）。印・「特殊返金」のノート・種別・金額が合う返金が 1 件だけなら `success`、無いか迷うときは店の人が候補から選ぶか「Shopify に返金はありません」（`failed`。この登録らしい返金があるときは受けない）を選ぶ。どちらも決める直前に Shopify を読み直す。無効化や登録し直しは、二重返金・二重計上になりうるので案内しない。反映の設定がオフの種別は止めない |
 | `failed` / `skipped` / `none` | Shopify 返金は無い前提で、上の表どおりアプリの金額を足す |
 
 `pending` を止める理由: 数えると Shopify 側で返金ができていたとき二重（監査の合成データで 1,000 円が 2,000 円）、数えないとできていなかったとき抜ける。Shopify 側の返金ノートには `[POS_RECEIPT_EVENT:<イベントID>]` が入るが、精算の注文取得は返金ノートを読んでいないため、精算の中では成否を確かめていない。
@@ -203,6 +204,7 @@ order_based の Shopify 注文ノート／metafields は `settlementOrderGas` �
 | 点検 | 冪等キー対象外 |
 | 同時実行 | `SettlementOperationLock` |
 | 領収書 | クライアント UUID `idempotencyKey` |
+| 特殊返金 | POS が `idempotencyKey` を送る → 登録の ID は `pos_sr_<キー>`、Shopify の `refundCreate @idempotent` にも同じ ID。**移行期間はキー無しも受ける**（古い POS の拡張。`console.warn` を残し、main と同じく登録ごとに新しい ID を作り、その ID を Shopify の冪等キーに使う）。不正な形のキーは 400。出す順番は `DEPLOY_PUBLIC_AND_INHOUSE.md` §4.1 |
 | 精算 recalculate | プレビュー再計算＋任意の Shopify 同期。履歴行の金額を常に書き換えるわけではない（API 実装参照） |
 
 ---

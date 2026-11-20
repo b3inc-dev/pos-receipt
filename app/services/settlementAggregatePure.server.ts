@@ -131,6 +131,39 @@ export function buildCrossLocationRefundOnlyOrder(
   };
 }
 
+/**
+ * 店舗の注文取得（location_id:X）の結果に、返金基準のときだけ「別店舗で売った注文の、X での返金」を足す。
+ *
+ * すでに店舗の取得に入っている注文は、retailLocation がどこであっても足さない。
+ * 後から足した返金だけの入力が同じ id の元の注文（売上を持つ）を上書きすると、
+ * その日の売上が消えるため（例: オンライン注文を X から出荷し、同じ日に X で返金）。
+ * 元の注文は返金基準のとき返金 TX ごとに店舗を判定して数えるので、それで足りる。
+ */
+export function mergeCrossLocationRefundOrders<T extends GasStyleOrder>(
+  storeOrders: T[],
+  refundCandidates: T[],
+  inRange: (iso?: string) => boolean,
+  settlementLocationId: string,
+  locIdRaw: string,
+  attributionMode: RefundAggregationLocationMode,
+): T[] {
+  const existingOrderIds = new Set(storeOrders.map((order) => order.id));
+  const byId = new Map<string, T>();
+  for (const order of storeOrders) byId.set(order.id, order);
+  for (const order of refundCandidates) {
+    if (existingOrderIds.has(order.id) || byId.has(order.id)) continue;
+    const refundOnly = buildCrossLocationRefundOnlyOrder(
+      order,
+      inRange,
+      settlementLocationId,
+      locIdRaw,
+      attributionMode,
+    );
+    if (refundOnly) byId.set(order.id, refundOnly as T);
+  }
+  return [...byId.values()];
+}
+
 export const GAS_UNKNOWN_GATEWAY = "未分類";
 export const GAS_GATEWAY_CASH = "現金";
 

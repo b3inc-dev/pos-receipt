@@ -19,7 +19,7 @@ import {
 } from "../services/shopifyRefundExecute.server";
 import {
   matchesSpecialRefundIdempotencyPayload,
-  specialRefundEventIdFromIdempotencyKey,
+  resolveSpecialRefundIdempotencyKey,
 } from "../services/specialRefundIdempotency.server";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
@@ -156,19 +156,21 @@ export async function action({ request }: ActionFunctionArgs) {
     const eventTypeStr = String(eventType);
     const adjustKindStr = adjustKind ? String(adjustKind) : null;
     const sourceOrderIdStr = String(sourceOrderId);
-    const idempotencyKeyProvided = String(idempotencyKey ?? "").trim().length > 0;
-    const idempotentEventId = specialRefundEventIdFromIdempotencyKey(idempotencyKey);
-    if (!idempotencyKeyProvided) {
-      return corsJson(
-        { ok: false, error: "idempotencyKey is required" },
-        { status: 400 },
-      );
-    }
-    if (!idempotentEventId) {
+    const keyResolution = resolveSpecialRefundIdempotencyKey(idempotencyKey);
+    if (keyResolution.kind === "invalid") {
       return corsJson(
         { ok: false, error: "idempotencyKey is invalid" },
         { status: 400 },
       );
+    }
+    // 移行期間: キーを送らない古い POS の拡張からも受ける（POS の拡張を先に出し、そのあとサーバーを出す）。
+    // main と同じく登録ごとに新しい ID を作り、Shopify の @idempotent にはその ID を使う。
+    const idempotentEventId = keyResolution.kind === "keyed" ? keyResolution.eventId : null;
+    if (keyResolution.kind === "missing") {
+      console.warn("[special-refunds] idempotencyKey missing (old POS extension)", {
+        shopId: shop.id,
+        eventType: eventTypeStr,
+      });
     }
 
     const idempotencyPayload = {

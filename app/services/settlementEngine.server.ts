@@ -33,16 +33,13 @@ import {
 } from "./refundAggregation.server";
 import {
   aggregateGasStyleForOrders,
-  buildCrossLocationRefundOnlyOrder,
   ensurePayBucket,
   gasNormalizeGatewayLabel,
+  mergeCrossLocationRefundOrders,
   totalFromPayBuckets,
   type GasAggregateAttributionOpts,
 } from "./settlementAggregatePure.server";
-import {
-  extractLocationNumericId,
-  locationGidMatches,
-} from "./refundAggregationPure.server";
+import { extractLocationNumericId } from "./refundAggregationPure.server";
 import {
   applySpecialRefundEventsToTotals,
   assertNoPendingSpecialRefunds,
@@ -652,24 +649,15 @@ async function buildSettlementPreviewImpl(
     unionSettlementOrdersById(createdRaw, updatedRaw),
     cancelledRaw,
   );
-  const existingOrderIds = new Set(ordersUnion.map((order) => order.id));
-  const crossLocationRefundOrders = refundUpdatedRaw.flatMap((order) => {
-    const orderBelongsToSettlementLocation = locationGidMatches(
-      order.retailLocation?.id,
-      locationId,
-      locIdRaw,
-    );
-    if (existingOrderIds.has(order.id) && orderBelongsToSettlementLocation) return [];
-    const refundOnly = buildCrossLocationRefundOnlyOrder(
-      order,
-      inDay,
-      locationId,
-      locIdRaw,
-      attributionCtx.mode,
-    );
-    return refundOnly ? [refundOnly as ShopifyOrder] : [];
-  });
-  ordersUnion = unionSettlementOrdersById(ordersUnion, crossLocationRefundOrders);
+  // 店舗の取得に入っている注文は足さない（売上を持つ元の注文を返金だけの入力で上書きしない）
+  ordersUnion = mergeCrossLocationRefundOrders(
+    ordersUnion,
+    refundUpdatedRaw,
+    inDay,
+    locationId,
+    locIdRaw,
+    attributionCtx.mode,
+  );
 
   // GAS fetchAllOrdersSmart ③: 0件のとき processed_at（店舗TZの暦日）でフォールバック
   if (ordersUnion.length === 0) {

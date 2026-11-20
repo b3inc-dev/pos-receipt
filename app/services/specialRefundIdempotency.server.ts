@@ -39,6 +39,26 @@ export function specialRefundEventIdFromIdempotencyKey(value: unknown): string |
   return `pos_sr_${key}`;
 }
 
+export type SpecialRefundIdempotencyKeyResolution =
+  | { kind: "keyed"; eventId: string }
+  /**
+   * 移行期間だけ受ける（古い POS の拡張はキーを送らない）。
+   * main と同じく、登録ごとに新しい ID（cuid）を作る。Shopify の @idempotent にはその ID を使うので、
+   * 同じ登録の中の再送では返金は 2 回にならない。古い POS が画面から同じ内容を送り直したときは、
+   * main と同じく別の登録になる（新しい POS の拡張を先に出して、この期間を短くする）。
+   */
+  | { kind: "missing" }
+  | { kind: "invalid" };
+
+/** POST /api/special-refunds の idempotencyKey を見分ける */
+export function resolveSpecialRefundIdempotencyKey(
+  value: unknown,
+): SpecialRefundIdempotencyKeyResolution {
+  if (String(value ?? "").trim().length === 0) return { kind: "missing" };
+  const eventId = specialRefundEventIdFromIdempotencyKey(value);
+  return eventId ? { kind: "keyed", eventId } : { kind: "invalid" };
+}
+
 /** 同じキーを別内容へ再利用した場合は、既存イベントを返さず競合として止める。 */
 export function matchesSpecialRefundIdempotencyPayload(
   event: SpecialRefundIdempotencyPayload,

@@ -18,10 +18,12 @@ import {
   createSpecialRefund,
   createVoucherAdjustment,
   voidSpecialRefund,
+  recheckLegacySpecialRefund,
 } from "../../common/specialRefundApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import {
   buildShopifyRefundRecheckRequest,
+  canRecheckLegacyShopifyRefund,
   canRecheckShopifyRefund,
 } from "../../common/specialRefundRecheck.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
@@ -34,6 +36,45 @@ import {
 } from "../../common/paymentMethodFallback.js";
 
 const STORAGE_KEY_REFUND = "pos_special_refund_order_id";
+
+/**
+ * 確かめの画面（s-modal）。ブラウザの confirm() は POS UI 拡張で使えるか確かめられていないので使わない。
+ * 精算の「発行確認」と同じく、s-modal を常に置いておき、ボタンの command="--show" commandFor={id} で開く。
+ */
+const SPECIAL_REFUND_CONFIRM_MODAL_ID = "pos-receipt-special-refund-confirm";
+
+function hideSpecialRefundConfirmModal() {
+  try {
+    const el = document.getElementById(SPECIAL_REFUND_CONFIRM_MODAL_ID);
+    el?.hide?.();
+    el?.hideOverlay?.();
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+const RECHECK_CONFIRM_MESSAGE =
+  "この登録の Shopify 返金を確かめます。\n\nShopify に返金ができていれば、その結果を記録します。" +
+  "まだできていなければ、この登録の返金を今実行します（同じ登録なので 2 回にはなりません）。";
+
+const LEGACY_RECHECK_CONFIRM_MESSAGE =
+  "この登録の Shopify 返金を確かめます。\n\nShopify の注文の返金を読み直して、この登録の返金があれば「返金済」と記録します。" +
+  "この画面からは Shopify の返金を実行しません（お金は動きません）。";
+
+function buildLegacyLinkConfirmMessage(candidate) {
+  const amount = Number(candidate?.amount ?? 0).toLocaleString();
+  const at = candidate?.createdAt ? String(candidate.createdAt).slice(0, 16).replace("T", " ") : "-";
+  return (
+    `Shopify の返金（¥${amount}・${at}）を、この登録の返金として記録します。\n\n` +
+    "Shopify の返金は実行しません。この返金がこの登録のものかを、Shopify の管理画面で確かめてから進めてください。"
+  );
+}
+
+const LEGACY_NO_REFUND_CONFIRM_MESSAGE =
+  "「Shopify に返金はありません」として記録します。\n\n" +
+  "このあと精算では、この登録の金額をアプリの記録（店で渡したお金）として数えます。" +
+  "Shopify の管理画面でこの注文に、この登録の返金が無いことを確かめてから進めてください。\n\n" +
+  "Shopify の返金は実行しません。";
 const STORAGE_KEY_VOUCHER = "pos_voucher_adjustment_order_id";
 
 function tryDismissModal() {
@@ -255,10 +296,14 @@ function SpecialRefundModal() {
     }
   }, [selectedOrder]);
 
-  const handleVoid = useCallback(
+  // 確かめの画面に出す内容（{ kind, eventId, refundId?, candidate? }）。開くボタンの onClick で入れる
+  const [confirmAction, setConfirmAction] = useState(null);
+  // 前からの登録で、店の人が選ぶ必要があるとき（{ eventId, reason, candidates }）
+  const [legacyDecision, setLegacyDecision] = useState(null);
+
+  const runVoid = useCallback(
     async (id) => {
       const ev = events.find((e) => e.id === id);
-      if (!confirm(buildVoidConfirmMessage(ev))) return;
       setLoading(true);
       setError("");
       try {
@@ -280,19 +325,11 @@ function SpecialRefundModal() {
   );
 
   // pending の登録を同じキーのまま確かめ直す（返金は 2 回にならない。specialRefundRecheck.js）
-  const handleRecheck = useCallback(
+  const runRecheck = useCallback(
     async (id) => {
       const ev = events.find((e) => e.id === id);
       const req = buildShopifyRefundRecheckRequest(ev);
       if (!req) return;
-      if (
-        !confirm(
-          "この登録の Shopify 返金を確かめます。\n\nShopify に返金ができていれば、その結果を記録します。" +
-            "まだできていなければ、この登録の返金を今実行します（同じ登録なので 2 回にはなりません）。\n\n続けますか？",
-        )
-      ) {
-        return;
-      }
       setLoading(true);
       setError("");
       try {
@@ -311,9 +348,48 @@ function SpecialRefundModal() {
     [events, refreshEvents],
   );
 
-  const handleRedoDraft = useCallback(async () => {
+  // 前からの登録（ID が pos_sr_ で始まらない）。サーバーは Shopify を読み直すだけで、返金は実行しない
+  const runLegacyRecheck = useCallback(
+    async (id, body = {}) => {
+      setLoading(true);
+      setError("");
+      try {
+        const res = await recheckLegacySpecialRefund(id, body);
+        await refreshEvents();
+        if (res?.resolved) {
+          setLegacyDecision(null);
+          const st = res?.shopifyRefund?.status;
+          setSubmitNotice(
+            st === "success"
+              ? { tone: "success", text: "Shopify に返金がありました。「返金済」と記録しました。" }
+              : st === "failed"
+                ? {
+                    tone: "info",
+                    text: "「Shopify に返金はありません」と記録しました。精算ではアプリの記録として数えます。",
+                  }
+                : { tone: "info", text: "この登録はもう決まっています。" },
+          );
+          return;
+        }
+        setLegacyDecision({
+          eventId: id,
+          reason: res?.reason ?? "none_found",
+          candidates: Array.isArray(res?.candidates) ? res.candidates : [],
+        });
+      } catch (e) {
+        await refreshEvents();
+        setError(
+          `${toUserMessage(e?.message) || "確かめられませんでした"}。時間をおいて、もう一度「Shopify 返金を確かめる」を押してください。`,
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [refreshEvents],
+  );
+
+  const runRedoDraft = useCallback(async () => {
     if (!selectedOrder?.canRedoAsDraft) return;
-    if (!confirm(buildRedoDraftConfirmMessage(selectedOrder))) return;
     setLoading(true);
     setError("");
     try {
@@ -334,6 +410,42 @@ function SpecialRefundModal() {
       setLoading(false);
     }
   }, [selectedOrder]);
+
+  const confirmMessage = (() => {
+    if (!confirmAction) return "";
+    const ev = events.find((e) => e.id === confirmAction.eventId);
+    switch (confirmAction.kind) {
+      case "void":
+        return buildVoidConfirmMessage(ev);
+      case "recheck":
+        return RECHECK_CONFIRM_MESSAGE;
+      case "legacy_recheck":
+        return LEGACY_RECHECK_CONFIRM_MESSAGE;
+      case "legacy_link":
+        return buildLegacyLinkConfirmMessage(confirmAction.candidate);
+      case "legacy_no_refund":
+        return LEGACY_NO_REFUND_CONFIRM_MESSAGE;
+      case "redo_draft":
+        return buildRedoDraftConfirmMessage(selectedOrder);
+      default:
+        return "";
+    }
+  })();
+
+  const handleConfirmExecute = useCallback(async () => {
+    const action = confirmAction;
+    hideSpecialRefundConfirmModal();
+    setConfirmAction(null);
+    if (!action) return;
+    if (action.kind === "void") await runVoid(action.eventId);
+    else if (action.kind === "recheck") await runRecheck(action.eventId);
+    else if (action.kind === "legacy_recheck") await runLegacyRecheck(action.eventId);
+    else if (action.kind === "legacy_link") {
+      await runLegacyRecheck(action.eventId, { resolution: "link", refundId: action.refundId });
+    } else if (action.kind === "legacy_no_refund") {
+      await runLegacyRecheck(action.eventId, { resolution: "no_refund" });
+    } else if (action.kind === "redo_draft") await runRedoDraft();
+  }, [confirmAction, runVoid, runRecheck, runLegacyRecheck, runRedoDraft]);
 
   if (orderEntryLoading) {
     return (
@@ -396,15 +508,18 @@ function SpecialRefundModal() {
           setSelectedOrder(null);
           setEvents([]);
           setOrderCorrectionContext(null);
+          setLegacyDecision(null);
           setFromOrderEntry(false);
           setError("");
           setStep("day_list");
         }}
         onRefund={() => setStep("form_refund")}
         onVoucher={() => setStep("form_voucher")}
-        onVoid={handleVoid}
-        onRecheck={handleRecheck}
-        onRedoDraft={handleRedoDraft}
+        onAskConfirm={setConfirmAction}
+        legacyDecision={legacyDecision}
+        confirmMessage={confirmMessage}
+        onConfirmExecute={handleConfirmExecute}
+        onConfirmCancel={() => setConfirmAction(null)}
         submitNotice={submitNotice}
         onDismissNotice={() => setSubmitNotice(null)}
         orderCorrectionContext={orderCorrectionContext}
@@ -476,9 +591,11 @@ function OrderDetailView({
   onBack,
   onRefund,
   onVoucher,
-  onVoid,
-  onRecheck,
-  onRedoDraft,
+  onAskConfirm,
+  legacyDecision,
+  confirmMessage,
+  onConfirmExecute,
+  onConfirmCancel,
   submitNotice,
   onDismissNotice,
   orderCorrectionContext,
@@ -535,7 +652,9 @@ function OrderDetailView({
                     </s-text>
                     <s-button
                       kind="secondary"
-                      onClick={onRedoDraft}
+                      command="--show"
+                      commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+                      onClick={() => onAskConfirm({ kind: "redo_draft" })}
                       disabled={loading}
                       loading={loading}
                     >
@@ -568,7 +687,13 @@ function OrderDetailView({
               {activeEvents.length > 0 ? (
                 <s-stack gap="small">
                   {activeEvents.map((ev) => (
-                    <EventCard key={ev.id} event={ev} onVoid={onVoid} onRecheck={onRecheck} loading={loading} />
+                    <EventCard
+                      key={ev.id}
+                      event={ev}
+                      onAskConfirm={onAskConfirm}
+                      legacyDecision={legacyDecision?.eventId === ev.id ? legacyDecision : null}
+                      loading={loading}
+                    />
                   ))}
                 </s-stack>
               ) : (
@@ -601,11 +726,104 @@ function OrderDetailView({
           rightDisabled={loading}
         />
       </s-stack>
+      <SpecialRefundConfirmModal
+        message={confirmMessage}
+        loading={loading}
+        onExecute={onConfirmExecute}
+        onCancel={onConfirmCancel}
+      />
     </s-page>
   );
 }
 
-function EventCard({ event, onVoid, onRecheck, loading }) {
+function SpecialRefundConfirmModal({ message, loading, onExecute, onCancel }) {
+  const lines = String(message ?? "").split("\n");
+  return (
+    <s-modal id={SPECIAL_REFUND_CONFIRM_MODAL_ID} heading="確かめ">
+      <s-scroll-box>
+        <s-box padding="base">
+          <s-stack gap="small">
+            {lines.map((line, i) =>
+              line ? <s-text key={i}>{line}</s-text> : <s-box key={i} />,
+            )}
+          </s-stack>
+        </s-box>
+      </s-scroll-box>
+      <s-button
+        slot="secondary-actions"
+        kind="secondary"
+        command="--hide"
+        commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+        onClick={onCancel}
+        disabled={loading}
+      >
+        戻る
+      </s-button>
+      <s-button slot="primary-action" onClick={onExecute} disabled={loading || !message}>
+        {loading ? "処理中…" : "続ける"}
+      </s-button>
+    </s-modal>
+  );
+}
+
+function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
+  const candidates = decision?.candidates ?? [];
+  const hasLikely = candidates.some((c) => c.looksLikeThisEvent);
+  return (
+    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+      <s-stack gap="small">
+        <s-text fontWeight="bold" fontSize="small">
+          {decision?.reason === "none_found"
+            ? "Shopify の注文に、この登録の返金は見つかりませんでした"
+            : "Shopify の注文に、この登録かもしれない返金があります"}
+        </s-text>
+        <s-text tone="subdued" fontSize="small">
+          Shopify の管理画面でこの注文の返金を確かめて、下から選んでください。どれを選んでも Shopify の返金は実行しません。
+        </s-text>
+        {candidates.map((c) => (
+          <s-stack key={c.refundId} gap="extraSmall">
+            <s-text fontSize="small">
+              ¥{Number(c.amount ?? 0).toLocaleString()} ・
+              {c.createdAt ? ` ${String(c.createdAt).slice(0, 16).replace("T", " ")}` : " -"}
+              {c.looksLikeThisEvent ? "（特殊返金のメモ・金額が合う）" : ""}
+            </s-text>
+            {c.note ? <s-text tone="subdued" fontSize="small">メモ: {c.note}</s-text> : null}
+            <s-button
+              kind="secondary"
+              command="--show"
+              commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+              onClick={() =>
+                onAskConfirm({
+                  kind: "legacy_link",
+                  eventId: event.id,
+                  refundId: c.refundId,
+                  candidate: c,
+                })
+              }
+              disabled={loading}
+            >
+              この返金がこの登録のもの
+            </s-button>
+          </s-stack>
+        ))}
+        {hasLikely ? null : (
+          <s-button
+            kind="secondary"
+            tone="critical"
+            command="--show"
+            commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+            onClick={() => onAskConfirm({ kind: "legacy_no_refund", eventId: event.id })}
+            disabled={loading}
+          >
+            Shopify に返金はありません
+          </s-button>
+        )}
+      </s-stack>
+    </s-box>
+  );
+}
+
+function EventCard({ event, onAskConfirm, legacyDecision, loading }) {
   const label = EVENT_TYPE_LABELS[event.eventType] ?? event.eventType;
   return (
     <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
@@ -639,15 +857,35 @@ function EventCard({ event, onVoid, onRecheck, loading }) {
           error={event.shopifyRefundError}
         />
 
-        {canRecheckShopifyRefund(event) && onRecheck ? (
+        {canRecheckShopifyRefund(event) || canRecheckLegacyShopifyRefund(event) ? (
           <s-stack gap="extraSmall">
             <s-text tone="subdued" fontSize="small">
               先に Shopify の管理画面でこの注文に返金があるかを確かめてから押してください。登録し直さないでください。
             </s-text>
-            <s-button kind="secondary" onClick={() => onRecheck(event.id)} disabled={loading}>
+            <s-button
+              kind="secondary"
+              command="--show"
+              commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+              onClick={() =>
+                onAskConfirm({
+                  kind: canRecheckShopifyRefund(event) ? "recheck" : "legacy_recheck",
+                  eventId: event.id,
+                })
+              }
+              disabled={loading}
+            >
               Shopify 返金を確かめる
             </s-button>
           </s-stack>
+        ) : null}
+
+        {legacyDecision ? (
+          <LegacyDecisionPanel
+            event={event}
+            decision={legacyDecision}
+            onAskConfirm={onAskConfirm}
+            loading={loading}
+          />
         ) : null}
 
         <s-stack direction="horizontal" align="space-between">
@@ -657,7 +895,9 @@ function EventCard({ event, onVoid, onRecheck, loading }) {
           <s-button
             kind="plain"
             tone="critical"
-            onClick={() => onVoid(event.id)}
+            command="--show"
+            commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+            onClick={() => onAskConfirm({ kind: "void", eventId: event.id })}
             disabled={loading}
           >
             無効化

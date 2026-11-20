@@ -9,6 +9,7 @@ import {
   buildCrossLocationRefundOnlyOrder,
   decideRefundAttributionForSettlement,
   gasNormalizeGatewayLabel,
+  mergeCrossLocationRefundOrders,
   totalFromPayBuckets,
   type GasAggregateAttributionOpts,
   type GasStyleOrder,
@@ -796,5 +797,149 @@ describe("aggregateGasStyleForOrders — 支払バケット", () => {
     assert.equal(gas.pay["クレジットカード"]?.sale, 2000);
     assert.equal(gas.pay["クレジットカード"]?.refund, 500);
     assert.equal(totalFromPayBuckets(gas.pay), 2500);
+  });
+});
+
+describe("mergeCrossLocationRefundOrders — 返金基準で店舗の取得済み注文を上書きしない", () => {
+  const locX = "gid://shopify/Location/300";
+  const refundModeOpts: GasAggregateAttributionOpts = {
+    attributionCtx: {
+      mode: "refund_transaction_pos_location",
+      nonPosRefundFallbackMode: "exclude",
+      nonPosRefundTargetLocationGid: null,
+    },
+    settlementLocationId: locX,
+    locIdRaw: "300",
+  };
+
+  // オンライン注文（retailLocation 無し）を店 X から出荷し、同じ日に X で 1,000 円返金
+  function shippedOnlineOrderWithRefundAtX(): GasStyleOrder {
+    return saleOrder({
+      id: "o-online-shipped-from-x",
+      totalPriceSet: money(10000),
+      retailLocation: null,
+      transactions: [
+        {
+          id: "o-online-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(10000),
+          gateway: "cash",
+          location: { id: locX },
+        },
+        {
+          id: "o-online-refund",
+          createdAt: "2026-10-08T05:00:00Z",
+          kind: "REFUND",
+          amountSet: money(1000),
+          gateway: "cash",
+          location: { id: locX },
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T05:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-online-refund",
+              kind: "REFUND",
+              amountSet: money(1000),
+              gateway: "cash",
+              location: { id: locX },
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  it("店舗の取得に入った注文は、retailLocation が別でも返金だけの入力で上書きしない（9,000 円のまま）", () => {
+    const order = shippedOnlineOrderWithRefundAtX();
+    const merged = mergeCrossLocationRefundOrders(
+      [order],
+      [order],
+      alwaysInRange,
+      locX,
+      "300",
+      "refund_transaction_pos_location",
+    );
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0], order, "元の注文（売上あり）がそのまま残る");
+
+    const gas = aggregateGasStyleForOrders(merged, alwaysInRange, refundModeOpts);
+    assert.equal(gas.pay["現金"]?.sale, 10000);
+    assert.equal(gas.pay["現金"]?.refund, 1000);
+    assert.equal(totalFromPayBuckets(gas.pay), 9000);
+    assert.equal(gas.saleOrderSet.size, 1);
+  });
+
+  it("（直す前の形）返金だけの入力で上書きすると −1,000 円・売上 0 件になる", () => {
+    const order = shippedOnlineOrderWithRefundAtX();
+    const refundOnly = buildCrossLocationRefundOnlyOrder(
+      order,
+      alwaysInRange,
+      locX,
+      "300",
+      "refund_transaction_pos_location",
+    );
+    assert.ok(refundOnly);
+    const gas = aggregateGasStyleForOrders([refundOnly], alwaysInRange, refundModeOpts);
+    assert.equal(totalFromPayBuckets(gas.pay), -1000);
+    assert.equal(gas.saleOrderSet.size, 0);
+  });
+
+  it("店舗の取得に無い別店舗の注文は、X の返金だけを足す", () => {
+    const locA = "gid://shopify/Location/100";
+    const storeOrder = saleOrder({ id: "o-store-own", retailLocation: { id: locX } });
+    const otherStoreOrder = saleOrder({
+      id: "o-sold-at-a",
+      retailLocation: { id: locA },
+      transactions: [
+        {
+          id: "o-sold-at-a-sale",
+          createdAt: "2026-10-07T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "cash",
+          location: { id: locA },
+        },
+        {
+          id: "o-sold-at-a-refund",
+          createdAt: "2026-10-08T03:00:00Z",
+          kind: "REFUND",
+          amountSet: money(300),
+          gateway: "cash",
+          location: { id: locX },
+        },
+      ],
+      refunds: [],
+    });
+    const merged = mergeCrossLocationRefundOrders(
+      [storeOrder],
+      [storeOrder, otherStoreOrder],
+      alwaysInRange,
+      locX,
+      "300",
+      "refund_transaction_pos_location",
+    );
+    assert.equal(merged.length, 2);
+    const gas = aggregateGasStyleForOrders(merged, alwaysInRange, refundModeOpts);
+    assert.equal(gas.pay["現金"]?.sale, 1000);
+    assert.equal(gas.pay["現金"]?.refund, 300);
+  });
+
+  it("注文基準モードでは何も足さない", () => {
+    const storeOrder = saleOrder({ id: "o-store-own" });
+    const other = shippedOnlineOrderWithRefundAtX();
+    const merged = mergeCrossLocationRefundOrders(
+      [storeOrder],
+      [other],
+      alwaysInRange,
+      locX,
+      "300",
+      "order_transaction",
+    );
+    assert.deepEqual(merged, [storeOrder]);
   });
 });

@@ -13,6 +13,8 @@
 | D5 | 精算の冪等キーは `shopId:locationId:targetDate:printMode`。点検は除外 | create ルート |
 | D6 | 返金の店舗帰属は設定可能な metafield / Location フラグで制御。注文基準モードの精算は metafield を計上先に使わない（不一致ログのみ）。返金基準モードだけ当日返金 TX → metafield → resolve | `refundAggregation.server.ts` / `decideRefundAttributionForSettlement` |
 | D14 | 特殊返金の Shopify 返金が `pending`（成否不明）のあいだは精算を確定しない。二重計上も抜けも出さないため | `assertNoPendingSpecialRefunds`（`specialRefundOverlayPure.server.ts`） |
+| D15 | 精算注文（SETTLEMENT）を作るかは、印字設定「精算注文を作成」（`createSettlementOrderWhenPrinting`）の保存が無ければ ON。管理画面は保存が無いとチェックが入って見えるので、サーバーも同じにそろえる（今の本番の動きを続ける）。作らないのは、チェックを外して保存したとき・精算設定 `orderBasedCreateSettlementOrderEnabled=false`・`cloudprnt_direct`。作らなかったとき API は `settlementOrderSkipped: true` を返し、POS は「再インストール」を案内しない | `settlementSyncSettings.server.ts` `shouldCreateSettlementOrder` |
+| D16 | 前からある pending の特殊返金（ID が `pos_sr_` で始まらない）は、Shopify を読み直して決めるだけで返金を実行しない | `specialRefundLegacyRecheck.server.ts` / `api.special-refunds.$id.recheck.tsx` |
 | D7 | VIP は割引コード接頭辞 `VIP-` | `aggregateGasStyleForOrders` |
 | D8 | 公開／自社は別 toml・別 Render・APP_MODE。起動時に APP_DISTRIBUTION typo と既知 Render ホスト取り違えを拒否。deploy 後に APP_MODE を verify | `DEPLOY_PUBLIC_AND_INHOUSE.md` + `scripts/lib/deployGuard.mjs` + `server.js` |
 | D9 | アプリ課金プラン（Lite/Pro）でサマリー系を制限。精算・領収書・特殊返金は全プラン | `planFeatures.server.ts` |
