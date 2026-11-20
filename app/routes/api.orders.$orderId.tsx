@@ -31,7 +31,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       variables: { id: gid },
     });
 
-    const json = await response.json();
+    const json = (await response.json()) as Awaited<ReturnType<typeof response.json>> & {
+      errors?: { message?: string }[];
+    };
     if (json.errors?.length) {
       return corsJson(
         { ok: false, error: "GraphQL error", details: json.errors },

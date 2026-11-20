@@ -117,6 +117,16 @@ type GiftCardNode = {
   order?: { id?: string | null; retailLocation?: { id?: string | null } | null } | null;
 };
 
+type LegacyGiftCardsPageJson = {
+  data?: {
+    giftCards?: {
+      edges?: { node: GiftCardNode }[];
+      pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+    };
+  };
+  errors?: { message?: string }[];
+};
+
 function processEdges(
   edges: { node: GiftCardNode }[],
   startMs: number,
@@ -174,15 +184,7 @@ export async function fetchLegacyGiftCardIssuanceForDay(
   let usedFallback = false;
 
   while (hasNext) {
-    const json = await adminGraphqlWithRetry<{
-      data?: {
-        giftCards?: {
-          edges?: { node: GiftCardNode }[];
-          pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
-        };
-      };
-      errors?: { message?: string }[];
-    }>(admin, LEGACY_GIFT_CARDS_QUERY, {
+    const json: LegacyGiftCardsPageJson = await adminGraphqlWithRetry<LegacyGiftCardsPageJson>(admin, LEGACY_GIFT_CARDS_QUERY, {
       variables: { first: 100, after: cursor, query: q },
     }, "legacyGiftCards");
 
@@ -209,15 +211,7 @@ export async function fetchLegacyGiftCardIssuanceForDay(
   result.count = 0;
 
   while (hasNext) {
-    const json = await adminGraphqlWithRetry<{
-      data?: {
-        giftCards?: {
-          edges?: { node: GiftCardNode }[];
-          pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
-        };
-      };
-      errors?: { message?: string }[];
-    }>(admin, LEGACY_GIFT_CARDS_FALLBACK_QUERY, {
+    const json: LegacyGiftCardsPageJson = await adminGraphqlWithRetry<LegacyGiftCardsPageJson>(admin, LEGACY_GIFT_CARDS_FALLBACK_QUERY, {
       variables: { first: 100, after: cursor },
     }, "legacyGiftCardsFallback");
 

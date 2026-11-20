@@ -125,7 +125,7 @@ export function normalizeSalesSummaryMerged(merged: SalesSummarySettings): Sales
       out[key as string] = false;
     }
   }
-  return out as SalesSummarySettings;
+  return out as unknown as SalesSummarySettings;
 }
 
 export function mergeAndNormalizeSalesSummarySettings(

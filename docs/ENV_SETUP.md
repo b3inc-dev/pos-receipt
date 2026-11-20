@@ -11,6 +11,7 @@ cd /Users/develop/ShopifyApps/pos-receipt
 cp .env.example .env
 ```
 
+`.env.example` は変数名と非秘密の例だけです。本番の接続情報は書きません。本番マイグレーション用の `.env.migrate.example` とは別ファイルです。
 `.env` は Git に含めません（.gitignore 済み）。本番では Render 等の「Environment」で設定します。
 
 ---

@@ -136,9 +136,9 @@ export async function createRedoDraftFromOrder(
 ): Promise<CreateRedoDraftResult> {
   const gid = orderGid(sourceOrderId);
 
-  const res = await adminGraphqlWithRetry(admin, ORDER_DETAIL_QUERY, {
+  const res = (await adminGraphqlWithRetry(admin, ORDER_DETAIL_QUERY, {
     variables: { id: gid },
-  });
+  })) as { json: () => Promise<unknown> };
   const json = (await res.json()) as {
     data?: { order?: Record<string, unknown> };
     errors?: { message?: string }[];
@@ -182,7 +182,7 @@ export async function createRedoDraftFromOrder(
 
   const sourceTag = orderName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
 
-  const draftRes = await adminGraphqlWithRetry(admin, DRAFT_ORDER_CREATE, {
+  const draftRes = (await adminGraphqlWithRetry(admin, DRAFT_ORDER_CREATE, {
     variables: {
       input: {
         note: noteLines.join("\n").slice(0, 5000),
@@ -193,7 +193,7 @@ export async function createRedoDraftFromOrder(
         useCustomerDefaultAddress: Boolean(customer?.id),
       },
     },
-  });
+  })) as { json: () => Promise<unknown> };
 
   const draftJson = (await draftRes.json()) as {
     data?: {

@@ -92,3 +92,13 @@
 - 売上サマリーが同一プレビューを読むこと
 - 冪等キーとロック
 - order_based / cloudprnt_direct の分岐
+
+## 2026-10-04 継続開発の整備判断
+
+- Codexを継続ownerとし、既存他tool workstreamはhandoff確認後のみ引き継ぐ。
+- runtime/既存フォーマット/API/deploy設定は変更せず、docs・非本番fixtureと品質コマンドを追加。
+- lintはdocs確認限定、typecheckは既存Backend tsconfig、testは限定pure関数回帰、buildはBackend/Admin。POS/実印刷・全経路の品質成功とは扱わない。
+- 実行時ライブラリは増やさない。既存tsconfigが参照する型パッケージ `@shopify/polaris-types` のみdevDependencyに追加し、既存のTypeScriptとNode test runnerを使う。
+- Printing API候補はPR #1、preview候補はPR #4（調査時点）であり未統合。main mergeと本番操作は停止。[BACKLOG](BACKLOG.md)に完了条件を保存。
+
+品質baseline: 2026-10-04整備branchではdocs lint・fixture 5件・build成功。当時のtypecheckはTS2688（既存tsconfigの@shopify/polaris-types未導入）で停止し、以後の型エラーは未評価だった。同じbranchで型パッケージを追加して解消した。Node20クリーン環境とPOS実機は未確認。

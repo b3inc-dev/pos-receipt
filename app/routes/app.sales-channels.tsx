@@ -460,7 +460,7 @@ export default function SalesChannelsPage() {
                               {ch.salesSummaryEnabled ? (
                                 <Badge tone="success">集計有効</Badge>
                               ) : (
-                                <Badge tone="disabled">無効</Badge>
+                                <Badge tone={"disabled" as "info"}>無効</Badge>
                               )}
                               {ch.includeInOverallTotals && (
                                 <Badge>全体合計に含む</Badge>

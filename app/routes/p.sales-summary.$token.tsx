@@ -294,7 +294,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 function PasswordGateScreen() {
-  const actionData = useActionData<typeof action>();
+  const actionData = useActionData<typeof action>() as
+    | { ok?: boolean; error?: string }
+    | undefined;
   const navigation = useNavigation();
   const loc = useLocation();
   const busy = navigation.state === "submitting";

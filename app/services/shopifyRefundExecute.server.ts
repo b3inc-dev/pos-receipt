@@ -161,9 +161,9 @@ export async function executeShopifyRefundForEvent(
     return { status: "failed", error: "返金金額が不正です" };
   }
 
-  const res = await adminGraphqlWithRetry(admin, ORDER_FOR_REFUND_QUERY, {
+  const res = (await adminGraphqlWithRetry(admin, ORDER_FOR_REFUND_QUERY, {
     variables: { id: orderId },
-  });
+  })) as { json: () => Promise<unknown> };
   const json = (await res.json()) as {
     data?: {
       order?: {
@@ -208,7 +208,7 @@ export async function executeShopifyRefundForEvent(
     params.note?.trim() || "",
   ].filter(Boolean);
 
-  const refundRes = await adminGraphqlWithRetry(admin, REFUND_CREATE_MUTATION, {
+  const refundRes = (await adminGraphqlWithRetry(admin, REFUND_CREATE_MUTATION, {
     variables: {
       input: {
         orderId: order.id,
@@ -217,7 +217,7 @@ export async function executeShopifyRefundForEvent(
         transactions: refundTxs,
       },
     },
-  });
+  })) as { json: () => Promise<unknown> };
 
   const refundJson = (await refundRes.json()) as {
     data?: {

@@ -18,7 +18,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const targetDate = url.searchParams.get("targetDate");
     const limit = Math.min(50, parseInt(url.searchParams.get("limit") ?? "20", 10) || 20);
 
-    const where: Parameters<typeof prisma.settlement.findMany>[0]["where"] = {
+    const where: NonNullable<Parameters<typeof prisma.settlement.findMany>[0]>["where"] = {
       shopId: shop.id,
     };
     if (locationId) (where as Record<string, unknown>).locationId = locationId;

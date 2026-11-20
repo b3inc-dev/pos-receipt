@@ -612,7 +612,11 @@ async function createSettlementOrderAlwaysGas(
   }
 
   try {
-    await metafieldsSetGas(admin, order.id, [
+    await (metafieldsSetGas as unknown as (
+      admin: AdminClient,
+      ownerId: string,
+      metafields: Parameters<typeof metafieldsSetGas>[1],
+    ) => Promise<void>)(admin, order.id, [
       {
         ownerId: order.id,
         namespace: "settlement",
@@ -751,16 +755,16 @@ export async function fulfillAllForOrderGas(admin: AdminClient, orderId: string)
     let fRes = await admin.graphql(FULFILLMENT_CREATE_V2, { variables: { fulfillment } });
     let fJson = (await fRes.json()) as {
       errors?: { message: string }[];
-      data?: { fulfillmentCreateV2?: { userErrors: { message: string }[] } };
+      data?: {
+        fulfillmentCreateV2?: { userErrors: { message: string }[] };
+        fulfillmentCreate?: { userErrors: { message: string }[] };
+      };
     };
 
     const errMsg = fJson.errors?.map((e) => e.message).join(", ") ?? "";
     if (fJson.errors?.length && /fulfillmentCreateV2|Field.*not found/i.test(errMsg)) {
       fRes = await admin.graphql(FULFILLMENT_CREATE, { variables: { fulfillment } });
-      fJson = (await fRes.json()) as {
-        errors?: { message: string }[];
-        data?: { fulfillmentCreate?: { userErrors: { message: string }[] } };
-      };
+      fJson = (await fRes.json()) as typeof fJson;
       const ue = fJson.data?.fulfillmentCreate?.userErrors ?? [];
       if (ue.length) {
         throw new Error(`fulfillmentCreate error: ${ue.map((e) => e.message).join(", ")}`);

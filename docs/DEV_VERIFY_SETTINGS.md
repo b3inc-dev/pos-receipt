@@ -21,6 +21,7 @@ cd /Users/develop/ShopifyApps/pos-receipt
 cp .env.example .env
 ```
 
+`.env.example` はリポジトリにある変数名のサンプルです。`DATABASE_URL` はローカル用の例なので、開発用の値に置き換えます。本番マイグレーション用の `.env.migrate.example` は使いません。
 `.env` に最低限 **DATABASE_URL** を設定する（PostgreSQL の接続文字列）。  
 Shopify 用（SHOPIFY_API_KEY 等）は `npm run dev` 時に CLI が補完する場合もありますが、必要な場合は `docs/ENV_SETUP.md` を参照。
 
