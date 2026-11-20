@@ -33,8 +33,10 @@ type FakeOptions = {
   failingSearches?: string[];
   /** この検索はいつも Throttled で投げる。 */
   throttledSearches?: string[];
-  /** 定義の問い合わせが例外になる。 */
-  definitionThrows?: boolean;
+  /** 定義の問い合わせが例外になる。"throttled" はいつも Throttled、"error" は 502。 */
+  definitionThrows?: "throttled" | "error";
+  /** 定義の問い合わせが、はじめのこの回数だけ Throttled で投げる（そのあとは答える）。 */
+  definitionThrottledTimes?: number;
 };
 
 const FILTERABLE: Definition = { enabled: true, status: "FILTERABLE" };
@@ -59,7 +61,9 @@ function fakeAdmin(customers: Customer[], opts: FakeOptions = {}) {
       if (query.includes("metafieldDefinitions(")) {
         const label = `${v.namespace}.${v.key}`;
         definitionReads.push(label);
-        if (opts.definitionThrows) throw new Error("Throttled");
+        if (opts.definitionThrows === "throttled") throw new FakeGraphqlQueryError("Throttled");
+        if (opts.definitionThrows === "error") throw new Error("Received an error response (502 Bad Gateway) from Shopify");
+        if (definitionReads.length <= (opts.definitionThrottledTimes ?? 0)) throw new FakeGraphqlQueryError("Throttled");
         const def = definitions[label];
         const nodes = def ? [{ namespace: v.namespace, key: v.key, capabilities: { adminFilterable: def } }] : [];
         return new Response(JSON.stringify({ data: { metafieldDefinitions: { nodes } } }));
@@ -191,29 +195,17 @@ describe("全件スキャンは絞り込みが効く項目だけ（レビュー 
     assert.equal(shop.definitionReads.length, 3, "5 分を過ぎたら読み直す");
   });
 
-  it("2026-10 の API で検索がエラーになっても（client は GraphqlQueryError を投げる）、次の項目（socialplus.line）へ進む", async () => {
-    const shop = fakeAdmin(people(), { erroringSearches: ["metafields.line_crm.line_user_id:*"] });
-    const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP });
-    assert.ok(b.ok && b.memberId === "M2");
-    assert.deepEqual(shop.searches.slice(1), ["metafields.line_crm.line_user_id:*", "metafields.socialplus.line:*"]);
-    // どこにもいなければ、見られなかった項目があるので「見つからない」とは言わない。
-    const none = await getMemberIdByLineId(shop.admin, "U" + "c".repeat(32), { sleep: noop, shop: SHOP });
-    assert.deepEqual(none, { ok: false, error: "API_ERROR" });
-  });
-
-  it("本文で errors を返す client でも同じく次の項目へ進む", async () => {
-    const shop = fakeAdmin(people(), { erroringSearches: ["metafields.line_crm.line_user_id:*"], errorsInBody: true });
-    const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP });
-    assert.ok(b.ok && b.memberId === "M2");
-    assert.deepEqual(shop.searches.slice(1), ["metafields.line_crm.line_user_id:*", "metafields.socialplus.line:*"]);
-  });
-
-  it("5xx・通信の切断で投げても次の項目へ進み、どこにもいなければ API_ERROR", async () => {
-    const shop = fakeAdmin(people(), { failingSearches: ["metafields.line_crm.line_user_id:*"] });
-    const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP });
-    assert.ok(b.ok && b.memberId === "M2");
-    const a = await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: SHOP });
-    assert.deepEqual(a, { ok: false, error: "API_ERROR" }, "line_crm にいる人を「連携していない」と言わない");
+  it("先の項目の検索がエラー（投げる・本文の errors・5xx）なら、後の項目（socialplus.line）は見ずに API_ERROR（レビュー #36 の P2-1）", async () => {
+    const LINE_FIELD = "metafields.line_crm.line_user_id:*";
+    for (const opts of [{ erroringSearches: [LINE_FIELD] }, { erroringSearches: [LINE_FIELD], errorsInBody: true }, { failingSearches: [LINE_FIELD] }]) {
+      const shop = fakeAdmin(people(), opts);
+      for (const id of [LINE_A, LINE_B, "U" + "c".repeat(32)]) {
+        assert.deepEqual(await getMemberIdByLineId(shop.admin, id, { sleep: noop, shop: SHOP }), { ok: false, error: "API_ERROR" });
+      }
+      assert.ok(!shop.searches.includes("metafields.socialplus.line:*"), "後の項目は見ない");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(shop.tagged.length, 0, "タグを付けない");
+    }
   });
 
   it("Throttled を使い切ったら次へ進まず THROTTLED（前と同じ）", async () => {
@@ -250,13 +242,51 @@ describe("全件スキャンは絞り込みが効く項目だけ（レビュー 
     assert.equal(shop.definitionReads.length, 1);
   });
 
-  it("定義を読めないときはその項目を見ず、覚えない。どこにもいなければ API_ERROR", async () => {
-    const shop = fakeAdmin(people(), { definitionThrows: true });
-    const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP });
-    assert.ok(b.ok && b.memberId === "M2");
-    const a = await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: SHOP });
-    assert.deepEqual(a, { ok: false, error: "API_ERROR" });
+  it("定義を読めない（Throttled 以外）ときは後の項目を見ずに API_ERROR。読めなかった結果は覚えない", async () => {
+    const shop = fakeAdmin(people(), { definitionThrows: "error" });
+    assert.deepEqual(await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP }), { ok: false, error: "API_ERROR" });
+    assert.deepEqual(await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: SHOP }), { ok: false, error: "API_ERROR" });
     assert.equal(shop.definitionReads.length, 2, "読めなかった結果は覚えない");
+    assert.ok(!shop.searches.includes("metafields.socialplus.line:*"));
+  });
+
+  it("定義の読み込みの Throttled は待ってやり直し（レビュー #36 の P2-2）、使い切ったら THROTTLED", async () => {
+    const waits: number[] = [];
+    const record = async (ms: number) => { waits.push(ms); };
+    const once = fakeAdmin(people(), { definitionThrottledTimes: 2 });
+    const a = await getMemberIdByLineId(once.admin, LINE_A, { sleep: record, shop: SHOP });
+    assert.ok(a.ok && a.memberId === "M1", "やり直して読めれば、いつもどおり line_crm で見つける");
+    assert.equal(once.definitionReads.length, 3);
+    assert.equal(waits.length, 2, "差し替えた待ち方で待つ");
+
+    clearFieldFilterCache();
+    const always = fakeAdmin(people(), { definitionThrows: "throttled" });
+    assert.deepEqual(await getMemberIdByLineId(always.admin, LINE_B, { sleep: noop, shop: SHOP }), { ok: false, error: "THROTTLED" });
+    assert.equal(always.definitionReads.length, 5, "5 回まで");
+    assert.ok(!always.searches.includes("metafields.socialplus.line:*"), "後の項目は見ない");
+  });
+
+  it("同じ LINE ID が 2 人（C1 は line_crm、C9 は socialplus.line だけ）: 先の項目を見られなければ C9 を返さず、タグも付けない", async () => {
+    const twins = (): Customer[] => [
+      { id: "gid://shopify/Customer/1", tags: [], fields: { "line_crm.line_user_id": LINE_A }, memberId: "M1" },
+      { id: "gid://shopify/Customer/9", tags: [], fields: { "socialplus.line": LINE_A }, memberId: "M9" },
+    ];
+    const ok = fakeAdmin(twins());
+    const normal = await getMemberIdByLineId(ok.admin, LINE_A, { sleep: noop, shop: SHOP });
+    assert.ok(normal.ok && normal.memberId === "M1", "正常なときは C1");
+
+    const cases: Array<[FakeOptions, string]> = [
+      [{ failingSearches: ["metafields.line_crm.line_user_id:*"] }, "API_ERROR"],
+      [{ definitionThrows: "error" }, "API_ERROR"],
+      [{ definitionThrows: "throttled" }, "THROTTLED"],
+    ];
+    for (const [opts, error] of cases) {
+      clearFieldFilterCache();
+      const shop = fakeAdmin(twins(), opts);
+      assert.deepEqual(await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: SHOP }), { ok: false, error });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(shop.tagged.length, 0, "C9 にタグを付けない");
+    }
   });
 
   it("MEMBER_CARD_LINE_ID_METAFIELDS=socialplus.line なら、前と同じ動き（定義を確かめない）", async () => {

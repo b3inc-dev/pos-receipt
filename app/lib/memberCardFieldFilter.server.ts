@@ -8,10 +8,13 @@
  * （MetafieldCapabilityAdminFilterable / MetafieldDefinitionAdminFilterStatus）。
  *
  * 結果は店ごと・項目ごとに少しのあいだ覚えておく（定義を読めなかったときは覚えない）。
+ * 定義の読み込みも検索と同じく Throttled は待ってやり直す（adminGraphqlWithRetry）。使い切ったら
+ * ThrottledExhaustedError を投げる（呼ぶ側が THROTTLED にする）。
  */
 
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { fieldLabel, type LineIdField } from "../utils/memberCardLineFields";
+import { adminGraphqlWithRetry, ThrottledExhaustedError, type AdminGraphqlClient } from "./shopifyGraphqlThrottle.server";
 
 export const FIELD_FILTER_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -66,13 +69,16 @@ export function markFieldNotFilterable(shop: string | undefined, field: LineIdFi
 
 /**
  * その項目の定義で絞り込みが効くか。"usable" のときだけ全件スキャンしてよい。
- * 定義を読めなかった（エラー・例外）ときは "unknown"（この回はその項目を見ない。覚えない）。
+ * "no_definition"・"not_filterable" は「確かめた。この項目は見ない」。
+ * 定義を読めなかった（Throttled 以外のエラー・例外）ときは "unknown"（確かめられなかった。覚えない）。
+ * Throttled はやり直し、使い切ったら ThrottledExhaustedError を投げる。
  */
 export async function lineFieldFilterState(
   admin: Pick<AdminApiContext, "graphql">,
   shop: string | undefined,
   field: LineIdField,
-  now: number = Date.now()
+  now: number = Date.now(),
+  retry: { sleep?: (ms: number) => Promise<void> } = {}
 ): Promise<FieldFilterState> {
   const key = shop ? cacheKey(shop, field) : null;
   if (key) {
@@ -81,9 +87,15 @@ export async function lineFieldFilterState(
   }
   let json: DefinitionJson;
   try {
-    const res = await admin.graphql(DEFINITION_QUERY, { variables: { namespace: field.namespace, key: field.key } });
-    json = (await res.json()) as DefinitionJson;
+    json = await adminGraphqlWithRetry<DefinitionJson>(
+      admin as unknown as AdminGraphqlClient,
+      DEFINITION_QUERY,
+      { variables: { namespace: field.namespace, key: field.key } },
+      "member-card metafieldDefinitions",
+      retry
+    );
   } catch (err) {
+    if (err instanceof ThrottledExhaustedError) throw err;
     console.warn("[member-card] metafieldDefinitions failed:", fieldLabel(field), err instanceof Error ? err.message : err);
     return "unknown";
   }

@@ -8,6 +8,12 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { memberMetafieldValues, type MemberMetafieldNode } from "../utils/memberMetafields";
 import { lineFieldFilterState, markFieldNotFilterable } from "./memberCardFieldFilter.server";
 import {
+  adminGraphqlWithRetry,
+  sleep,
+  ThrottledExhaustedError,
+  type AdminGraphqlClient,
+} from "./shopifyGraphqlThrottle.server";
+import {
   customerLineId,
   fieldLabel,
   fieldLineId,
@@ -101,35 +107,6 @@ export type GetMemberIdResponse = GetMemberIdResult | GetMemberIdError;
 
 const FIRST_PAGE = 250;
 
-/** リトライ上限（Throttled 時） */
-const MAX_THROTTLE_RETRIES = 5;
-/** 初回待機 ms、以降は指数バックオフ（2s → 4s → 8s → 16s → 32s） */
-const THROTTLE_BACKOFF_MS = 2000;
-
-/**
- * Shopify GraphQL の Throttled かどうかを判定する。
- * クライアントは GraphqlQueryError で message に "Throttled" を含めて投げる。
- */
-function isThrottledError(err: unknown): boolean {
-  if (err instanceof Error) {
-    const msg = (err as Error & { message?: string }).message ?? "";
-    return msg.includes("Throttled");
-  }
-  return false;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** リトライし尽くしたときに投げる印 */
-export class ThrottledExhaustedError extends Error {
-  constructor() {
-    super("Throttled: max retries exhausted");
-    this.name = "ThrottledExhaustedError";
-  }
-}
-
 type CustomersJson = {
   data?: {
     customers?: {
@@ -168,6 +145,7 @@ function buildMemberResult(node: CustomerNode): GetMemberIdResult | GetMemberIdE
  * ファストパス: tag:"line:<lineUserId>" で1回検索（タグ登録済みの場合）。
  * スローパス:  項目ごとに metafields.<namespace>.<key>:* で全件スキャン（並べた順。ページ制限なし）。
  *              socialplus.line 以外は、定義の絞り込みが効く項目だけ（memberCardFieldFilter.server.ts）。
+ *              先の項目を見られなかったら、後の項目は見ずに API_ERROR（別の人を返さない）。
  *              見つかった顧客に line: タグを fire-and-forget で追加し、次回からファストパスが効く。
  */
 export async function getMemberIdByLineId(
@@ -198,30 +176,15 @@ export async function getMemberIdByLineId(
     return (await res.json()) as CustomersJson;
   };
 
-  const runQueryWithRetry = async (
-    search: string,
-    after: string | null
-  ): Promise<CustomersJson> => {
-    let lastErr: unknown;
-    for (let attempt = 1; attempt <= MAX_THROTTLE_RETRIES; attempt++) {
-      try {
-        return await runQuery(search, after);
-      } catch (err) {
-        lastErr = err;
-        if (!isThrottledError(err)) throw err;
-        if (attempt === MAX_THROTTLE_RETRIES) {
-          console.warn("[member-card] Throttled after", MAX_THROTTLE_RETRIES, "retries, giving up");
-          throw new ThrottledExhaustedError();
-        }
-        const baseMs = THROTTLE_BACKOFF_MS * Math.pow(2, attempt - 1);
-        const jitterMs = Math.floor(baseMs * 0.3 * Math.random());
-        const waitMs = baseMs + jitterMs;
-        console.info("[member-card] Throttled, retry", attempt, "/", MAX_THROTTLE_RETRIES, "after", waitMs, "ms");
-        await wait(waitMs);
-      }
-    }
-    throw lastErr;
-  };
+  /** 検索。Throttled は待ってやり直し（2s → 4s → 8s → 16s）、使い切ったら ThrottledExhaustedError を投げる。 */
+  const runQueryWithRetry = (search: string, after: string | null): Promise<CustomersJson> =>
+    adminGraphqlWithRetry<CustomersJson>(
+      admin as unknown as AdminGraphqlClient,
+      query,
+      { variables: { query: search, first: FIRST_PAGE, after, ...lineVariables } },
+      "member-card customers",
+      { sleep: wait }
+    );
 
   try {
     // ── ファストパス: タグ検索（write_customers スコープ取得後、2回目以降に有効）──
@@ -241,11 +204,12 @@ export async function getMemberIdByLineId(
     // ほかの項目は、定義で絞り込みが効く（adminFilterable が FILTERABLE）と確かめられたときだけ見る。
     // 効かない項目で全件を見ない（2026-07 までは条件が無視されて全顧客が返り、2026-10 からはエラーになるため）。
     // 値の空の人が返ってきたら絞り込みが効いていないと見て、その項目は打ち切る。
-    // その項目を見られなかったとき（定義を読めない・検索のエラー）は次の項目へ進む。
-    // 本物の client（@shopify/shopify-api）は GraphQL の errors・5xx・通信の切断を「投げる」ので、投げられても次へ進む。
-    // Throttled を使い切ったときだけは、ほかの項目も同じになるので進まずに THROTTLED を返す。
+    // 定義が無い・絞り込みがオフの項目は「確かめた。見ない」として次の項目へ進む（今の本番＝line_crm の定義なし は main と同じ）。
+    // その項目を見られなかったとき（定義を読めない・検索のエラー。本物の client は GraphQL の errors・5xx・通信の切断を
+    // 「投げる」ので、投げられたときも同じ）は、後の項目へ進まずに API_ERROR を返す（固く倒す。レビュー #36 の P2-1）。
+    // 後の項目で見つけた人を返すと、先の項目にいる本人とは別の人を返し、タグまで付けてファストパスで返し続けるため。
+    // Throttled を使い切ったときは THROTTLED を返す（定義の読み込みも検索も同じ）。
     console.info("[member-card] Tag miss. Falling back to full scan (last4):", lineIdNorm.slice(-4));
-    let gatedFieldFailed = false;
 
     /** 1 項目を全件スキャンする。見つけた人・"none"（いない）・"failed"（見られなかった）を返す。 */
     const scanField = async (
@@ -254,7 +218,7 @@ export async function getMemberIdByLineId(
     ): Promise<CustomerNode | "none" | "failed"> => {
       const legacy = isLegacyLineIdField(field);
       if (!legacy) {
-        const state = await lineFieldFilterState(admin, options.shop, field);
+        const state = await lineFieldFilterState(admin, options.shop, field, Date.now(), { sleep: wait });
         if (state !== "usable") {
           console.warn("[member-card] Skip full scan: filter not usable for", fieldLabel(field), state);
           return state === "unknown" ? "failed" : "none";
@@ -313,8 +277,9 @@ export async function getMemberIdByLineId(
         found = "failed";
       }
       if (found === "failed") {
-        gatedFieldFailed = true;
-        continue;
+        // 見られなかった項目にいる人かもしれないので、後の項目で探さず「見つからない」とも言わない。
+        console.warn("[member-card] Could not scan", fieldLabel(field), "- stop (no later field). sub (last4):", lineIdNorm.slice(-4));
+        return { ok: false, error: "API_ERROR" };
       }
       if (found === "none") continue;
 
@@ -330,11 +295,6 @@ export async function getMemberIdByLineId(
         .catch((e) => console.warn("[member-card] tagsAdd failed:", e));
 
       return buildMemberResult(node);
-    }
-    if (gatedFieldFailed) {
-      // 見られなかった項目にいる人かもしれないので「見つからない」とは言わない。
-      console.warn("[member-card] No match, but some field could not be scanned. sub (last4):", lineIdNorm.slice(-4));
-      return { ok: false, error: "API_ERROR" };
     }
     console.warn("[member-card] No match found. sub (last4):", lineIdNorm.slice(-4));
     return { ok: false, error: "CUSTOMER_NOT_FOUND" };
