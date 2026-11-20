@@ -7,6 +7,7 @@ import prisma from "../db.server";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import { formatTimeHmInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import { hasVoucherLikeGatewayHeuristic, matchPaymentMethodMaster } from "../utils/paymentMethodMatch.server";
+import { isShopifyRefundPending } from "../services/specialRefundOverlayPure.server";
 
 const ORDERS_SEARCH_QUERY = `#graphql
   query OrdersSearch($first: Int!, $after: String, $query: String) {
@@ -181,6 +182,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           receiptIssued: false,
           hasSpecialRefund: false,
           appSpecialApplied: false,
+          hasPendingShopifyRefund: false,
         },
       };
     });
@@ -204,15 +206,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         }),
         prisma.specialRefundEvent.findMany({
           where: { shopId: shop.id, sourceOrderId: { in: idKeys }, status: "active" },
-          select: { sourceOrderId: true, eventType: true },
+          select: { sourceOrderId: true, eventType: true, shopifyRefundStatus: true },
         }),
       ]);
       const receiptSet = new Set(receiptRows.map((r) => normalizeOrderIdKey(r.orderId)));
       const eventsByOrder = new Map<string, string[]>();
+      // Shopify 返金の結果が分かっていない（pending）登録がある注文。精算を止めるので一覧で分かるようにする
+      const pendingOrders = new Set<string>();
       for (const e of eventRows) {
         const oid = normalizeOrderIdKey(e.sourceOrderId);
         if (!eventsByOrder.has(oid)) eventsByOrder.set(oid, []);
         eventsByOrder.get(oid)!.push(e.eventType);
+        if (isShopifyRefundPending(e.shopifyRefundStatus)) pendingOrders.add(oid);
       }
       items = items.map((item) => {
         const oid = normalizeOrderIdKey(item.orderId);
@@ -227,6 +232,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             hasSpecialRefund,
             hasVoucherAdjustment,
             appSpecialApplied: hasSpecialRefund,
+            hasPendingShopifyRefund: pendingOrders.has(oid),
           },
         };
       });

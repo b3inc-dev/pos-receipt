@@ -90,7 +90,12 @@
 3. POS ロケーションなし（管理画面返金等）→ `nonPosRefundAttributionEnabled` 先があればそこ
 4. なければ fallback: exclude なら null（精算に載せない）／さもなくば retailLocation
 
-精算集計では、解決 GID が精算対象ロケーションと一致しない返金は **件数・金額とも加算しない**。  
+精算集計で使う計上先（`decideRefundAttributionForSettlement`）:
+
+- 注文基準（`order_transaction`・既定）: 上の解決順の結果だけを使う。注文の metafield `pos.refund_aggregation_location_gid` は不一致のログ（`refundAttributionMismatchCount`）にだけ使う。別の店で登録した特殊返金が metafield を書き換えても、通常の返品の計上先は変わらない
+- 返金基準（`refund_transaction_pos_location`）: 当日の返金 TX の POS ロケーション → metafield → 上の解決順
+
+精算集計では、計上先が精算対象ロケーションと一致しない返金は **件数・金額とも加算しない**。  
 照合は `locationGidMatches` で **数値ロケーション ID 同士**（GID / 数値 / 末尾パスの表記ゆれを吸収）。
 
 ---
@@ -141,13 +146,23 @@
 
 反映後に税・net の再計算ロジックあり（エンジン後半）。
 
+Shopify 返金の状態（`shopifyRefundStatus`）による扱い:
+
+| 状態 | 精算での扱い |
+|------|--------------|
+| `success` | Shopify の REFUND TX が正本。金額は足さず、元の手段から実際の手段へ振り替えるだけ |
+| `pending` | Shopify 返金を実行したが成否が分からない（タイムアウト等で再試行待ち）。**上乗せも振替もせず、精算・点検・売上サマリーの日次を確定しない**（`SpecialRefundPendingError`、API は 409）。店の人は Shopify 管理画面で返金の有無を確かめてから、POS の特殊返金の登録の「Shopify 返金を確かめる」を押す（同じ冪等キーで API を呼び直す。サーバーは返金ノートの印を探し、無ければ同じキーの `refundCreate` を呼ぶので 2 回にならない）。POS の日別一覧には「返金未確認」のバッジが出る。無効化や登録し直しは、二重返金・二重計上になりうるので案内しない。反映の設定がオフの種別は止めない |
+| `failed` / `skipped` / `none` | Shopify 返金は無い前提で、上の表どおりアプリの金額を足す |
+
+`pending` を止める理由: 数えると Shopify 側で返金ができていたとき二重（監査の合成データで 1,000 円が 2,000 円）、数えないとできていなかったとき抜ける。Shopify 側の返金ノートには `[POS_RECEIPT_EVENT:<イベントID>]` が入るが、精算の注文取得は返金ノートを読んでいないため、精算の中では成否を確かめていない。
+
 ---
 
 ## 11. 商品券・レガシー Gift Card
 
 - ゲートウェイ正規化で商品券／釣有り／釣無しを分類
 - 注文ノートの「商品券 N円」から額面観測（キャンセル除外）
-- `legacyGiftCardAggregationEnabled` が true のとき Gift Cards API 発行分を加算（POS union に含まれる order は二重加算回避）。失敗時は加算せず続行
+- `legacyGiftCardAggregationEnabled` が true のとき Gift Cards API 発行分を加算（POS union に含まれる order は二重加算回避）。取得が途中で失敗したとき（GraphQL errors・ページ情報の欠け・例外）は途中までの額で続けず `UpstreamAggregationError` で止め、精算・売上サマリーを確定しない（注文の取得と同じ考え方）。主クエリが errors のときだけ、新しい順の全件走査で最初から数え直す
 
 ---
 
