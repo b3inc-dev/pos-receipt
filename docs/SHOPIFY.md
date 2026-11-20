@@ -72,6 +72,18 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 
 定義 ensure: OAuth / `POST /api/admin/settlement-metafields/ensure`
 
+### 6.3 顧客の LINE ユーザー ID（LIFF 会員証が読む。書かない）
+
+| 順 | 項目 | 書くアプリ |
+|----|------|------------|
+| 1 | `line_crm.line_user_id` | LINE CRM（Shop CRM for LINE）。定義も LINE CRM が作る |
+| 2 | `socialplus.line` | SocialPlus。LINE CRM も店の設定がオンなら互換のために書く |
+
+- 順番は環境変数 `MEMBER_CARD_LINE_ID_METAFIELDS`（例 `line_crm.line_user_id,socialplus.line`）で変えられる。空なら上の既定（DECISIONS の D14）。
+- 顧客の LINE ユーザー ID は、並べた順で最初に値が入っている項目の値。値は生の `U…` でも JSON（`{"uid":"U…"}` など）でも読む。
+- 見つけ方: タグ `line:<小文字の id>` で 1 回探す（ファストパス）→ 無ければ項目ごとに `metafields.<namespace>.<key>:*` で全件を見る。見つけた人にはタグを付ける。
+- 未確認: `metafields.line_crm.line_user_id:*` の検索が効くには、`socialplus.line` と同じく、定義で「ストア分析でデータを絞り込む、またはグループ化する」をオンにする必要があると考えている（`MEMBER_CARD_DEBUG.md` の `socialplus.line` の記載から。`line_crm.line_user_id` ではまだ確かめていない）。効かないときも値で比べるので、まちがった人は出さない（見るのが遅くなるか、その項目では見つからず次の項目へ進む）。
+
 ## 7. Printing（現状と移行候補の分離）
 
 ### 7.1 現状フロー

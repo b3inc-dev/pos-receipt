@@ -1,22 +1,31 @@
 /**
- * Shopify 顧客から socialplus.line で照合し、membership.id（会員番号）を取得する。
- * 照合・取得はサーバーのみで行う。
+ * Shopify 顧客から LINE ユーザー ID の顧客メタフィールドで照合し、membership.id（会員番号）を取得する。
+ * 読む項目と順番は memberCardLineFields.ts（既定: line_crm.line_user_id → socialplus.line。
+ * 環境変数 MEMBER_CARD_LINE_ID_METAFIELDS で並べ替えられる）。照合・取得はサーバーのみで行う。
  */
 
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { memberMetafieldValues, type MemberMetafieldNode } from "../utils/memberMetafields";
+import {
+  customerLineId,
+  fullScanQuery,
+  lineFieldSelections,
+  readLineIdFields,
+  type LineIdField,
+} from "../utils/memberCardLineFields";
 
-const CUSTOMERS_QUERY = `#graphql
-  query findCustomerByLineId($query: String!, $first: Int!, $after: String) {
+/** 読む LINE ユーザー ID の項目を別名（lineField0…）で入れた問い合わせ。 */
+export function customersQuery(fields: readonly LineIdField[]): string {
+  const line = lineFieldSelections(fields);
+  return `#graphql
+  query findCustomerByLineId($query: String!, $first: Int!, $after: String, ${line.variableDefs}) {
     customers(first: $first, query: $query, after: $after) {
       nodes {
         id
         metafield(namespace: "membership", key: "id") {
           value
         }
-        lineMetafield: metafield(namespace: "socialplus", key: "line") {
-          value
-        }
+        ${line.selections}
         spRankName: metafield(namespace: "shop_point", key: "rank_name") {
           value
         }
@@ -52,6 +61,7 @@ const CUSTOMERS_QUERY = `#graphql
     }
   }
 `;
+}
 
 const TAGS_ADD_MUTATION = `#graphql
   mutation tagsAdd($id: ID!, $tags: [String!]!) {
@@ -116,33 +126,13 @@ export class ThrottledExhaustedError extends Error {
   }
 }
 
-/**
- * socialplus.line の値を LINE ユーザー ID に正規化する。
- * 生の "Uxxx..." または JSON（{"provider":"line","uid":"Uxxx..."} 等）の両方に対応。
- */
-function normalizeStoredLineId(value: unknown): string | undefined {
-  if (value == null) return undefined;
-  const str = typeof value === "string" ? value.trim() : String(value).trim();
-  if (!str) return undefined;
-  try {
-    const parsed = JSON.parse(str) as Record<string, unknown>;
-    const id =
-      parsed.uid ?? parsed.id ?? parsed.line_user_id ?? parsed.userId;
-    const idStr = typeof id === "string" ? id.trim() : id != null ? String(id).trim() : "";
-    return idStr || str;
-  } catch {
-    return str;
-  }
-}
-
 type CustomersJson = {
   data?: {
     customers?: {
       nodes?: Array<{
         id: string;
         metafield?: { value?: string } | null;
-        lineMetafield?: { value?: string } | null;
-      } & MemberMetafieldNode>;
+      } & MemberMetafieldNode & Record<string, unknown>>;
       pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
     };
   };
@@ -152,7 +142,6 @@ type CustomersJson = {
 type CustomerNode = {
   id: string;
   metafield?: { value?: string } | null;
-  lineMetafield?: { value?: string } | null;
 } & MemberMetafieldNode;
 
 /** ノードからメンバー情報を組み立てる共通処理 */
@@ -166,39 +155,52 @@ function buildMemberResult(node: CustomerNode): GetMemberIdResult | GetMemberIdE
 }
 
 /**
- * LINE user ID（sub）に一致する socialplus.line を持つ顧客を検索し、
+ * LINE user ID（sub）に一致する LINE ユーザー ID の顧客メタフィールドを持つ顧客を検索し、
  * その顧客の membership.id（会員番号）を返す。
  *
+ * 顧客の LINE ユーザー ID は、読む項目（既定: line_crm.line_user_id → socialplus.line）を並べた順で
+ * 最初に値が入っている項目の値（memberCardLineFields.ts の customerLineId）。
+ *
  * ファストパス: tag:"line:<lineUserId>" で1回検索（タグ登録済みの場合）。
- * スローパス:  metafields.socialplus.line:* で全件スキャン（ページ制限なし）。
+ * スローパス:  項目ごとに metafields.<namespace>.<key>:* で全件スキャン（並べた順。ページ制限なし）。
  *              見つかった顧客に line: タグを fire-and-forget で追加し、次回からファストパスが効く。
  */
 export async function getMemberIdByLineId(
-  admin: AdminApiContext,
-  lineUserId: string
+  admin: Pick<AdminApiContext, "graphql">,
+  lineUserId: string,
+  options: { fields?: readonly LineIdField[]; sleep?: (ms: number) => Promise<void> } = {}
 ): Promise<GetMemberIdResponse> {
   if (!lineUserId?.trim()) {
     return { ok: false, error: "CUSTOMER_NOT_FOUND" };
   }
 
+  const fields = options.fields && options.fields.length > 0 ? options.fields : readLineIdFields();
+  const wait = options.sleep ?? sleep;
+  const query = customersQuery(fields);
+  const lineVariables = lineFieldSelections(fields).variables;
   const lineIdNorm = lineUserId.trim().toLowerCase();
   console.info("[member-card] Searching for LINE sub (last4):", lineIdNorm.slice(-4));
 
-  const runQuery = async (query: string, after: string | null): Promise<CustomersJson> => {
-    const res = await admin.graphql(CUSTOMERS_QUERY, {
-      variables: { query, first: FIRST_PAGE, after },
+  const matches = (node: CustomerNode & Record<string, unknown>) => {
+    const storedLineId = customerLineId(node, fields);
+    return Boolean(storedLineId && storedLineId.toLowerCase() === lineIdNorm);
+  };
+
+  const runQuery = async (search: string, after: string | null): Promise<CustomersJson> => {
+    const res = await admin.graphql(query, {
+      variables: { query: search, first: FIRST_PAGE, after, ...lineVariables },
     });
     return (await res.json()) as CustomersJson;
   };
 
   const runQueryWithRetry = async (
-    query: string,
+    search: string,
     after: string | null
   ): Promise<CustomersJson> => {
     let lastErr: unknown;
     for (let attempt = 1; attempt <= MAX_THROTTLE_RETRIES; attempt++) {
       try {
-        return await runQuery(query, after);
+        return await runQuery(search, after);
       } catch (err) {
         lastErr = err;
         if (!isThrottledError(err)) throw err;
@@ -210,7 +212,7 @@ export async function getMemberIdByLineId(
         const jitterMs = Math.floor(baseMs * 0.3 * Math.random());
         const waitMs = baseMs + jitterMs;
         console.info("[member-card] Throttled, retry", attempt, "/", MAX_THROTTLE_RETRIES, "after", waitMs, "ms");
-        await sleep(waitMs);
+        await wait(waitMs);
       }
     }
     throw lastErr;
@@ -223,64 +225,62 @@ export async function getMemberIdByLineId(
     if (tagJson && !tagJson.errors?.length) {
       const tagNodes = tagJson.data?.customers?.nodes ?? [];
       for (const node of tagNodes) {
-        if (!node) continue;
-        const storedLineId = normalizeStoredLineId(node.lineMetafield?.value);
-        if (!storedLineId || storedLineId.toLowerCase() !== lineIdNorm) continue;
+        if (!node || !matches(node)) continue;
         console.info("[member-card] Cache hit via tag (last4):", lineIdNorm.slice(-4));
         return buildMemberResult(node);
       }
     }
 
-    // ── スローパス: 全件スキャン（件数制限なし）──
+    // ── スローパス: 項目ごとに全件スキャン（件数制限なし）──
     console.info("[member-card] Tag miss. Falling back to full scan (last4):", lineIdNorm.slice(-4));
-    let cursor: string | null = null;
-    let pageCount = 0;
+    for (const field of fields) {
+      const search = fullScanQuery(field);
+      let cursor: string | null = null;
+      let pageCount = 0;
 
-    while (true) {
-      const json = await runQueryWithRetry('metafields.socialplus.line:*', cursor);
+      while (true) {
+        const json = await runQueryWithRetry(search, cursor);
 
-      if (json.errors?.length) {
-        console.error("Customer query errors:", json.errors);
-        return { ok: false, error: "API_ERROR" };
-      }
-
-      const nodes = json.data?.customers?.nodes ?? [];
-      const pageInfo = json.data?.customers?.pageInfo;
-
-      if (pageCount === 0) {
-        if (nodes.length === 0) {
-          console.warn("[member-card] metafields.socialplus.line:* returned 0 customers.");
-          return { ok: false, error: "CUSTOMER_NOT_FOUND" };
+        if (json.errors?.length) {
+          console.error("Customer query errors:", json.errors);
+          return { ok: false, error: "API_ERROR" };
         }
-        console.info("[member-card] Full scan first page:", nodes.length, "customers");
+
+        const nodes = json.data?.customers?.nodes ?? [];
+        const pageInfo = json.data?.customers?.pageInfo;
+
+        if (pageCount === 0) {
+          if (nodes.length === 0) {
+            console.warn("[member-card]", search, "returned 0 customers.");
+            break;
+          }
+          console.info("[member-card] Full scan first page:", search, nodes.length, "customers");
+        }
+
+        for (const node of nodes) {
+          if (!node || !matches(node)) continue;
+
+          // タグを追加して次回からファストパスが効くようにする（fire-and-forget）
+          admin.graphql(TAGS_ADD_MUTATION, { variables: { id: node.id, tags: [lineTag] } })
+            .then(async (res) => {
+              const j = await res.json() as { data?: { tagsAdd?: { userErrors?: Array<{ message?: string }> } } };
+              const errs = j.data?.tagsAdd?.userErrors;
+              if (errs?.length) console.warn("[member-card] tagsAdd userErrors:", errs);
+              else console.info("[member-card] Tag added for future fast lookup (last4):", lineIdNorm.slice(-4));
+            })
+            .catch((e) => console.warn("[member-card] tagsAdd failed:", e));
+
+          return buildMemberResult(node);
+        }
+
+        if (!pageInfo?.hasNextPage || !pageInfo?.endCursor) break;
+
+        cursor = pageInfo.endCursor;
+        pageCount++;
       }
-
-      for (const node of nodes) {
-        if (!node) continue;
-        const storedLineId = normalizeStoredLineId(node.lineMetafield?.value);
-        if (!storedLineId || storedLineId.toLowerCase() !== lineIdNorm) continue;
-
-        // タグを追加して次回からファストパスが効くようにする（fire-and-forget）
-        admin.graphql(TAGS_ADD_MUTATION, { variables: { id: node.id, tags: [lineTag] } })
-          .then(async (res) => {
-            const j = await res.json() as { data?: { tagsAdd?: { userErrors?: Array<{ message?: string }> } } };
-            const errs = j.data?.tagsAdd?.userErrors;
-            if (errs?.length) console.warn("[member-card] tagsAdd userErrors:", errs);
-            else console.info("[member-card] Tag added for future fast lookup (last4):", lineIdNorm.slice(-4));
-          })
-          .catch((e) => console.warn("[member-card] tagsAdd failed:", e));
-
-        return buildMemberResult(node);
-      }
-
-      if (!pageInfo?.hasNextPage || !pageInfo?.endCursor) {
-        console.warn("[member-card] No match found. sub (last4):", lineIdNorm.slice(-4));
-        return { ok: false, error: "CUSTOMER_NOT_FOUND" };
-      }
-
-      cursor = pageInfo.endCursor;
-      pageCount++;
     }
+    console.warn("[member-card] No match found. sub (last4):", lineIdNorm.slice(-4));
+    return { ok: false, error: "CUSTOMER_NOT_FOUND" };
   } catch (err) {
     if (err instanceof ThrottledExhaustedError) {
       return { ok: false, error: "THROTTLED" };
