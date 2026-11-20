@@ -4,6 +4,7 @@ import {
   ThrottledExhaustedError,
 } from "../lib/shopifyGraphqlThrottle.server";
 import { SpecialRefundPendingError } from "../services/specialRefundOverlayPure.server";
+import { UpstreamAggregationError } from "../services/settlementUpstreamPage.server";
 import { corsErrorJson } from "./posAuth.server";
 
 /**
@@ -22,6 +23,13 @@ export function settlementApiErrorResponse(
   }
   if (err instanceof SpecialRefundPendingError) {
     return corsErrorJson(request, { ok: false, error: err.message, code: err.code }, 409);
+  }
+  if (err instanceof UpstreamAggregationError) {
+    return corsErrorJson(
+      request,
+      { ok: false, error: err.message, code: err.code },
+      500,
+    );
   }
   const message = err instanceof Error ? err.message : "Unknown error";
   return corsErrorJson(request, { ok: false, error: message }, 500);

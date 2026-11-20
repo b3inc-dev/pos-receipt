@@ -7,6 +7,7 @@
 import prisma from "../db.server";
 import PgBoss from "pg-boss";
 import { executeSalesSummaryOrderWebhookJob } from "./salesSummaryWebhookRefresh.server";
+import { backgroundRefreshNeedsRetry } from "./salesSummaryBackgroundSlice.server";
 
 export const SALES_SUMMARY_WEBHOOK_QUEUE_NAME = "pos-receipt-sales-summary-orders-updated";
 
@@ -66,11 +67,12 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
             dbShop.id,
             payload,
           );
-          if (errors.length > 0) {
+          if (backgroundRefreshNeedsRetry(errors)) {
             console.warn(
               `[pg-boss] sales-summary partial shop=${shopDomain} dates=${targetDates.join(",")}`,
               errors.slice(0, 6),
             );
+            throw new Error("sales-summary background incomplete");
           } else {
             console.log(
               `[pg-boss] sales-summary ok shop=${shopDomain} dates=${targetDates.join(",")}`,
