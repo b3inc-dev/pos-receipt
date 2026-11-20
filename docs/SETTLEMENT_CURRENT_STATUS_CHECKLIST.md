@@ -1,7 +1,9 @@
 # 精算処理の現状チェックシート
 
-最終更新日: 2026-03-27  
+最終更新日: 2026-08-18  
 対象: POS Receipt の「精算」機能
+
+印字経路の改訂（Shopify Printing API 1本化）は `docs/SETTLEMENT_PRINT_UNIFICATION.md`。本チェックシートの D-3 / D-4 は現行互換経路用。標準経路（`shopify_printing`）実装後は D-3b を追加する。
 
 ---
 
@@ -64,6 +66,7 @@
 | D-2 | 完了画面に精算ID・対象日・総売上が表示される |  |  |
 | D-3 | `order_based` の場合、精算注文番号が表示される |  |  |
 | D-4 | `cloudprnt_direct` の場合、印字ペイロードURLが表示される |  |  |
+| D-3b | `shopify_printing` の場合、保存後に Printing API で印字される（未実装） |  |  |
 | D-5 | 同条件で連続実行しても重複精算が作られない（通常精算） |  |  |
 
 ---

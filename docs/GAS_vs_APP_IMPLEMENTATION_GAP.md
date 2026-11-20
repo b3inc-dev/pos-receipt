@@ -3,6 +3,8 @@
 要件書を正本とし、GAS は CloudPRNT 非対応のみの参考実装として、今回のアプリで **CloudPRNT 対応を追加** する前提で比較しました。  
 ロケーション名や自社用の調整は、管理画面から各社ごとに設定できる想定です。
 
+**2026-08-18 以降の印字方針**: CloudPRNT / order_based の二系統必須は改訂済み。標準印字は Shopify Printing API。本書の印字分岐の記述は現行コード（互換経路）の説明として残し、改訂後の正本は `docs/SETTLEMENT_PRINT_UNIFICATION.md`。
+
 **実装済み（2026-03 対応）**  
 - 1.1・1.2: 日次集計のタイムゾーンを Shopify の `shop.ianaTimezone`（フォールバック: 一般設定の defaultTimezone）で算出し、精算・売上サマリー・特殊返金イベントの対象日に適用。  
 - 1.3: 返金の再集計（別パス）を実装。その日に `updated_at` で更新された注文を取得し、`refund.createdAt` がその日かつ「その日作成」でない注文の返金のみをオーバーレイして payment sections と refundTotal / refundCount にマージ。  

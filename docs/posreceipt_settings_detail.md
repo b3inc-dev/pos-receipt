@@ -14,6 +14,8 @@
 - Cursor が管理画面・設定テーブル・設定APIを実装しやすい状態にする
 - 特定のポイントアプリや会員施策アプリへの依存を避ける
 
+印字設定の標準経路は Shopify Printing API。詳細は `docs/SETTLEMENT_PRINT_UNIFICATION.md`（2026-08-18 改訂）。
+
 ---
 
 ## 1. 前提方針
@@ -142,7 +144,7 @@ Shopify ロケーションごとの表示名や機能有効可否、運用差分
 - visible_in_summary_default
 
 #### 4.2.4 印字関連
-- print_mode (`cloudprnt_direct` / `order_based`)
+- print_mode (`shopify_printing` / `cloudprnt_direct` / `order_based`)
 - printer_profile_id_nullable
 - cloudprnt_enabled
 
@@ -251,7 +253,7 @@ Shopify ロケーションごとの表示名や機能有効可否、運用差分
 ### 5.4 受け入れ条件
 - 表示項目の ON/OFF がレシートプレビューへ反映される
 - 項目名変更が反映される
-- print_mode に応じて処理が切り替わる
+- print_mode に応じて処理が切り替わる（標準は `shopify_printing`。互換は CloudPRNT / order_based）
 - `loyalty_usage` の表示有無とラベル変更が反映される
 
 ---
@@ -623,36 +625,44 @@ MVP では自由入力 JSON ではなく単純なテーブル実装でもよい�
 ## 12. 印字設定
 
 ### 12.1 目的
-ロケーションやプリンタごとに、どの印字方式を使うかを管理する。
+ロケーションやプリンタごとに、どの印字方式を使うかを管理する。  
+標準は Shopify Printing API。CloudPRNT と order-based は互換。詳細は `docs/SETTLEMENT_PRINT_UNIFICATION.md`。
 
 ### 12.2 設定項目
 
 #### 12.2.1 印字方式
-- default_print_mode (`cloudprnt_direct` / `order_based`)
+- default_print_mode (`shopify_printing` / `cloudprnt_direct` / `order_based`)
 - location_print_mode_override_enabled
+- paper_width（58mm / 80mm。Printing API と CloudPRNT で共用）
+- fallback_when_no_printer (`system_dialog` / `error`)
 
-#### 12.2.2 CloudPRNT設定
+#### 12.2.2 CloudPRNT設定（互換経路）
 - cloudprnt_profile_name
 - cloudprnt_paper_width
 - cloudprnt_enabled
 
-#### 12.2.3 order-based設定
-- create_settlement_order_when_printing
+#### 12.2.3 Shopify精算注文同期（印字方式から独立）
+- create_settlement_order_on_settle（旧 create_settlement_order_when_printing）
 - attach_settlement_note_to_order
 - attach_settlement_metafields_to_order
 
+互換の `order_based` では従来どおり印字のために注文を作ってよい。  
+`shopify_printing` では監査が必要な店舗だけ同期 ON にする。
+
 #### 12.2.4 領収書印字設定
-- receipt_print_mode
+- receipt_print_mode（標準は `shopify_printing`。精算アダプタ安定後に寄せる）
 - receipt_preview_before_print_required
 
 ### 12.3 GAS 由来の置換対象
 - ロケーション別印字切替
-- 非対応プリンタ時の精算注文生成有無
+- 非対応プリンタ時の精算注文生成有無 → **印字手段ではなく任意の監査同期**へ変更
 
 ### 12.4 受け入れ条件
 - ロケーション別 print_mode を切り替えられる
-- cloudprnt_direct 設定時は精算注文を作成しない
-- order_based 設定時は精算注文を利用する
+- `shopify_printing` では精算注文なしでも印字できる
+- `cloudprnt_direct` 設定時は精算注文を作成しない
+- `order_based` 設定時は精算注文を利用する（互換）
+- 精算確定時の Shopify 同期を印字方式と独立して ON/OFF できる
 
 ---
 

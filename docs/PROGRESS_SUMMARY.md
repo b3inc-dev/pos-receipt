@@ -1,7 +1,7 @@
 # POS Receipt アプリ 進捗サマリー
 
 要件書 `posreceipt_requirements_spec.md` に基づく実装進捗です。  
-最終更新: 2026-03-12
+最終更新: 2026-08-18
 
 ---
 
@@ -72,6 +72,10 @@
 
 詳細な手順・ファイル参照は **`docs/NEXT_STEPS_IMPLEMENTATION.md`** を参照してください。
 
+### 直近: 精算レシート印字の1本化
+- Shopify Printing API（`shopify.printing`）を標準経路にする。正本は **`docs/SETTLEMENT_PRINT_UNIFICATION.md`**。
+- コード実装は Phase 1（POS `api_version` 2026-07 + `print.html`）から。
+
 ### 直近: POS タイルの UID 設定
 - 領収書・売上サマリー含め **4 タイルすべて UID は設定済み**（`extensions/pos-smart-grid/shopify.extension.toml`）。
 - 新規アプリや拡張の作り直しをした場合は、`shopify app generate extension` で UID を取得し、同 toml の該当ブロックに `uid` を設定する。
@@ -86,7 +90,7 @@
 
 ### オプション（必要に応じて）
 - **location_settings の key-value テーブル** … 必要になったら LocationSetting 等を追加。
-- **CloudPRNT 実機** … 実機での印字確認（後ほど実施）。
+- **CloudPRNT 実機** … 互換経路としてポーリング確認のみ。新規の標準印字は Printing API。Star SDK 直送は実装しない。
 
 ---
 
