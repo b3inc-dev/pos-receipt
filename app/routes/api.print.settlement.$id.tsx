@@ -19,7 +19,7 @@ import {
 import {
   getAppSetting,
   PRINT_SETTINGS_KEY,
-  DEFAULT_PRINT_SETTINGS,
+  resolvePrintPaperWidthMm,
   type PrintSettings,
 } from "../utils/appSettings.server";
 
@@ -87,10 +87,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const printSettings =
       (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
-    const paper =
-      (printSettings.cloudprntPaperWidth ?? DEFAULT_PRINT_SETTINGS.cloudprntPaperWidth) === "58mm"
-        ? 58
-        : 80;
+    const paper = resolvePrintPaperWidthMm(printSettings);
 
     const isInspection = String(settlement.periodLabel ?? "").startsWith("点検");
     const html = renderPrintReceiptHtml(

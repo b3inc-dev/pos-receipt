@@ -50,7 +50,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | Topic | URI | 処理（コード） |
 |-------|-----|----------------|
 | `app/uninstalled` | `/webhooks/app/uninstalled` | アンインストール処理 |
-| compliance（customers/data_request, customers/redact, shop/redact） | `/webhooks/compliance` | GDPR。`data_request` は DB 列挙＋根拠ログ後に 200（email/phone 非保存。開示は運用）。詳細は `gdprCustomerDataRequest.server.ts` |
+| compliance（customers/data_request, customers/redact, shop/redact） | `/webhooks/compliance` | GDPR。`data_request` は DB 列挙＋根拠ログ後に 200（email/phone 非保存。開示は運用）。`customers/redact` は `ReceiptIssue.recipientName` と `SpecialRefundEvent.note` を `[redacted]` に対称化。詳細は `gdprCustomerDataRequest.server.ts` |
 | `orders/updated` | `/webhooks/orders/updated` | 売上サマリー更新キュー + 返金計上 metafield 同期 |
 
 ## 6. メタフィールド
@@ -72,41 +72,41 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 
 定義 ensure: OAuth / `POST /api/admin/settlement-metafields/ensure`
 
-## 7. Printing（現状と移行候補の分離）
+## 7. Printing（現行: Conditional-Go）
+
+基準: `c69438d` 以降。POS UI Extensions `api_version = "2026-07"` + `extensions/common/printApi.js`（`shopify.printing.getPrinters` / `print`）。
 
 ### 7.1 現状フロー
 
 ```
 注文作成（Shopify 標準）
   │
-  ├─ 領収書: アプリ DB 発行のみ（Printing API 不使用）
+  ├─ 販売レシート: HTML `/api/print/sales/:id` → shopify.printing（SalesReceiptModal）
+  │
+  ├─ 領収書: DB 発行 +（設定 ON 時）HTML `/api/print/receipt/:id` → shopify.printing
   │
   └─ 精算:
-       order_based → SETTLEMENT 注文を作り、人間が POS 標準レシート印字
-       cloudprnt_direct → アプリがテキスト payload を提供。プリンタ側ポーリング想定
+       ├─ Printing API（preferPrintingApi 等）: HTML `/api/print/settlement/:id` → shopify.printing
+       ├─ order_based → SETTLEMENT 注文 → 人が POS 標準レシート印字（旧経路・残置）
+       └─ cloudprnt_direct → テキスト payload 提供（ポーリング想定・送信アダプタなし・Advanced）
 ```
 
-**Shopify Printing API / printJob / device.print 等の呼び出しはリポジトリに存在しない。**
+**方針（監査既定 / P0）**: Printing を主経路にする店舗では印字用途の SETTLEMENT 作成を抑制しうる（アーカイブ明示オプトインのみ作成）。旧経路の完全削除は mPOP 実機 Go 後。
 
 ### 7.2 ギフトレシート
 
-- 要件・コードともに Shopify Gift Receipt 連携は **未実装**
-- 本アプリの「レシート」は精算レシートと領収書を指す
+- Shopify Gift Receipt 連携は **未実装**
+- 本アプリの「レシート」は精算・領収書・販売レシート HTML を指す
 
-### 7.3 Printing API 等へ移行できそうな部分（調査のみ・実装しない）
+### 7.3 旧経路との関係
 
-| 現状 | 移行検討候補（アイデアレベル） | 制約・未確認 |
-|------|--------------------------------|--------------|
-| order_based で SETTLEMENT 注文を作り POS 標準印字 | Printing API で精算レイアウトを直接印字できれば、精算注文作成を省略できる可能性 | Printing API の POS 対応範囲・店舗プリンタ要件は未確認 |
-| cloudprnt_direct のテキスト payload | 同じペイロード生成を維持したまま送信経路だけ Printing API / 他プロトコルに差し替える可能性 | 現行はポーリング URL 提供のみ。送信アダプタなし |
-| 領収書の画面表示のみ | Printing API または CloudPRNT への出力を追加する余地 | `receiptPrintMode` 設定はあるが issue 経路で未使用 |
-| 点検レシート | 精算と同レイアウト経路を共有しているため、印字経路変更の影響を精算と同時に受ける | DoneView 文言と order_based 同期の不一致あり（DECISIONS） |
+| 経路 | 状態 |
+|------|------|
+| `shopify.printing` + HTML エンドポイント | **現行の推奨／追加経路**（Conditional-Go） |
+| `order_based` SETTLEMENT 注文 | **残置**。Printing 優先時は作成スキップ方針（P0） |
+| `cloudprnt_direct` | **Advanced／レガシー**。廃止候補。紙幅は中立 `paperWidthMm`（レガシー `cloudprntPaperWidth` と同期） |
 
-**移行しない／分離して残る可能性が高い部分**
-
-- 集計エンジン・特殊返金 DB・冪等キー・メタフィールドへの数値保存
-- PaymentMethodMaster と GAS 正規化ロジック
-- 返金計上ロケーション解決
+集計エンジン・特殊返金 DB・metafield・返金帰属は印字経路と分離（移行しても触らない核）。
 
 ## 8. POS Extension ターゲット
 
@@ -127,6 +127,6 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 
 ## 10. 未確認
 
-- Printing API の店舗導入前提（ハードウェア・POS バージョン）
+- mPOP 実機での Printing 直印字品質（紙幅・日本語・切断）。旧経路削除の前提
 - 各ストアで有効なカスタム決済の gateway 実文字列の完全一覧（マスタで吸収する設計）
 - Webhook 再送時の売上サマリーキューの完全な idempotency 保証範囲

@@ -102,7 +102,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (topicStr === "customers/redact") {
       // 顧客データの削除要求。
-      // 指定注文 ID に紐づく領収書発行履歴の宛名を匿名化する。
+      // data_request と対称: ReceiptIssue.recipientName と SpecialRefundEvent.note を匿名化。
       const body = payload as {
         shop_domain?: string;
         orders_to_redact?: number[];
@@ -113,10 +113,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (orderIds.length > 0) {
         const dbShop = await prisma.shop.findFirst({ where: { shopDomain } });
         if (dbShop) {
-          await prisma.receiptIssue.updateMany({
-            where: { shopId: dbShop.id, orderId: { in: orderIds } },
-            data: { recipientName: "[redacted]" },
-          });
+          await Promise.all([
+            prisma.receiptIssue.updateMany({
+              where: { shopId: dbShop.id, orderId: { in: orderIds } },
+              data: { recipientName: "[redacted]" },
+            }),
+            prisma.specialRefundEvent.updateMany({
+              where: { shopId: dbShop.id, sourceOrderId: { in: orderIds } },
+              data: { note: "[redacted]" },
+            }),
+          ]);
         }
       }
       return new Response(null, { status: 200 });
