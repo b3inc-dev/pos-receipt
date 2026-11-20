@@ -1,5 +1,9 @@
 /**
  * 精算注文の Shopify 側処理（GAS docs/GAS_精算レシート.md 準拠）
+ *
+ * 印字一本化後、create / recalculate / 再印刷からは呼び出さない。
+ * 既存 SETTLEMENT / INSPECTION 注文は削除しない（履歴参照用に残置）。
+ *
  * - newSettlementFresh → createSettlementOrderAlways + upsertSettlement 相当
  * - uiCreateZeroInspection → createZeroInspectionOrder 相当
  * - fulfillAllForOrder（発送済み化）

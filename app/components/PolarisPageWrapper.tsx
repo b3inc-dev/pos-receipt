@@ -4,11 +4,11 @@
  * 各ページ内でのみラップする構成にする。
  */
 import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
-import enTranslations from "@shopify/polaris/locales/en.json";
+import jaTranslations from "@shopify/polaris/locales/ja.json";
 
 export function PolarisPageWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <PolarisAppProvider i18n={enTranslations}>
+    <PolarisAppProvider i18n={jaTranslations}>
       {children}
     </PolarisAppProvider>
   );

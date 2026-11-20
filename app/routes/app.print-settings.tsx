@@ -1,14 +1,14 @@
 /**
  * /app/print-settings — 印字設定（要件 §12）
+ * アプリ独自印字は Shopify Printing API に統一。旧方式は保存値の読み取りのみ。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate, useFetcher } from "react-router";
+import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
 import {
   Page,
   Layout,
   Card,
   Text,
-  TextField,
   Checkbox,
   Button,
   BlockStack,
@@ -24,15 +24,17 @@ import {
   setAppSetting,
   PRINT_SETTINGS_KEY,
   DEFAULT_PRINT_SETTINGS,
+  SALES_RECEIPT_SETTINGS_KEY,
   type PrintSettings,
+  type SalesReceiptSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
+import { PaperWidthCorrespondence } from "../components/PaperWidthCorrespondence";
+import { parseSalesPaperWidth, parseSharedPaperWidth } from "../utils/paperWidthCorrespondence";
 
-const PRINT_MODE_OPTIONS = [
-  { label: "CloudPRNT 直印字", value: "cloudprnt_direct" },
-  { label: "注文経由（order_based）", value: "order_based" },
-];
+const UNIFIED_PRINT_MODE = "shopify_printing" as const;
+
 const PAPER_WIDTH_OPTIONS = [
   { label: "58mm", value: "58mm" },
   { label: "80mm", value: "80mm" },
@@ -43,49 +45,52 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shop = await resolveShop(session.shop, admin);
   const saved = await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY);
   const settings: PrintSettings = { ...DEFAULT_PRINT_SETTINGS, ...saved };
-  return { settings };
+  const sales = await getAppSetting<Partial<SalesReceiptSettings>>(shop.id, SALES_RECEIPT_SETTINGS_KEY);
+  return {
+    settings,
+    storedDefaultPrintMode: saved?.defaultPrintMode ?? null,
+    salesPaperWidthMm: parseSalesPaperWidth(sales?.paperWidthMm),
+  };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
   const formData = await request.formData();
-  const get = (k: string) => formData.get(k);
-  const str = (k: string, d: string) => String(get(k) ?? d).trim();
-  const bool = (k: string, def: boolean) => get(k) === "true" || (def && get(k) !== "false");
+  const str = (k: string, d: string) => String(formData.get(k) ?? d).trim();
+  const bool = (k: string, def: boolean) => {
+    const v = formData.get(k);
+    return v === "true" || (def && v !== "false");
+  };
+  const existing =
+    (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
   const settings: PrintSettings = {
     ...DEFAULT_PRINT_SETTINGS,
-    defaultPrintMode: (get("defaultPrintMode") as PrintSettings["defaultPrintMode"]) || "order_based",
-    locationPrintModeOverrideEnabled: bool("locationPrintModeOverrideEnabled", true),
-    cloudprntProfileName: str("cloudprntProfileName", ""),
-    cloudprntPaperWidth: str("cloudprntPaperWidth", "80mm"),
-    cloudprntEnabled: bool("cloudprntEnabled", false),
-    createSettlementOrderWhenPrinting: bool("createSettlementOrderWhenPrinting", true),
-    attachSettlementNoteToOrder: bool("attachSettlementNoteToOrder", true),
-    attachSettlementMetafieldsToOrder: bool("attachSettlementMetafieldsToOrder", true),
-    receiptPrintMode: str("receiptPrintMode", "order_based"),
-    receiptPreviewBeforePrintRequired: bool("receiptPreviewBeforePrintRequired", true),
-    preferPrintingApi: bool("preferPrintingApi", true),
-    settlementPrintingApiEnabled: bool("settlementPrintingApiEnabled", true),
-    receiptPrintingApiEnabled: bool("receiptPrintingApiEnabled", true),
+    ...existing,
+    defaultPrintMode: UNIFIED_PRINT_MODE,
+    locationPrintModeOverrideEnabled: false,
+    cloudprntPaperWidth: str("cloudprntPaperWidth", existing.cloudprntPaperWidth ?? "80mm"),
+    cloudprntEnabled: false,
+    createSettlementOrderWhenPrinting: false,
+    attachSettlementNoteToOrder: false,
+    attachSettlementMetafieldsToOrder: false,
+    receiptPrintMode: UNIFIED_PRINT_MODE,
+    receiptPreviewBeforePrintRequired: bool(
+      "receiptPreviewBeforePrintRequired",
+      existing.receiptPreviewBeforePrintRequired !== false,
+    ),
+    preferPrintingApi: true,
+    settlementPrintingApiEnabled: true,
+    receiptPrintingApiEnabled: true,
+    cloudprntProfileName: str("cloudprntProfileName", existing.cloudprntProfileName ?? ""),
   };
   await setAppSetting(shop.id, PRINT_SETTINGS_KEY, settings);
   return Response.json({ ok: true });
 }
 
-type MetafieldEnsureResponse = {
-  ok?: boolean;
-  created?: string[];
-  skipped?: string[];
-  errors?: { key: string; message: string }[];
-  message?: string;
-  error?: string;
-};
-
 export default function PrintSettingsPage() {
-  const { settings: initial } = useLoaderData<typeof loader>();
+  const { settings: initial, storedDefaultPrintMode, salesPaperWidthMm } = useLoaderData<typeof loader>();
   const submit = useSubmit();
-  const metafieldFetcher = useFetcher<MetafieldEnsureResponse>();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
@@ -94,9 +99,11 @@ export default function PrintSettingsPage() {
 
   const handleSave = () => {
     const fd = new FormData();
-    Object.entries(form).forEach(([k, v]) => {
-      fd.set(k, typeof v === "boolean" ? (v ? "true" : "false") : String(v));
-    });
+    fd.set("cloudprntPaperWidth", form.cloudprntPaperWidth);
+    fd.set(
+      "receiptPreviewBeforePrintRequired",
+      form.receiptPreviewBeforePrintRequired ? "true" : "false",
+    );
     submit(fd, { method: "post" });
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
@@ -105,6 +112,11 @@ export default function PrintSettingsPage() {
   const set = <K extends keyof PrintSettings>(key: K, value: PrintSettings[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
+
+  const legacyNote =
+    storedDefaultPrintMode && storedDefaultPrintMode !== UNIFIED_PRINT_MODE
+      ? `保存済みの旧 defaultPrintMode は「${storedDefaultPrintMode}」です。出力には使いません。`
+      : null;
 
   return (
     <PolarisPageWrapper>
@@ -117,124 +129,93 @@ export default function PrintSettingsPage() {
           <TabGroupBar tabs={RECEIPT_TABS} />
         </Card>
         <Layout>
-          {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
+          {saved && (
+            <Layout.Section>
+              <Banner tone="success">保存しました。</Banner>
+            </Layout.Section>
+          )}
           <Layout.Section>
-            <Banner tone="info">ショップ全体のデフォルト印字方式・CloudPRNT・order_based 時の挙動・領収書印字を設定します。ロケーション別の上書きは設定ページのロケーション設定で行います。</Banner>
+            <Banner tone="info">
+              精算・点検・領収書・販売レシートのアプリ独自印字は Shopify Printing API（shopify.printing）に統一しています。
+              CloudPRNT ポーリングと精算注文経由の印字は選べません。通常の Shopify 販売注文の標準レシートは対象外です。
+              POS 11.11+ とペアリング済みレシートプリンタ（HTML 直印字）が必要です。
+            </Banner>
           </Layout.Section>
 
-          <Layout.AnnotatedSection title="印字方式" description="§12.2.1">
+          <Layout.AnnotatedSection
+            title="印字方式"
+            description="実行時は常に Shopify Printing API。旧 Location.printMode は正規化のみ"
+          >
             <Card>
               <BlockStack gap="400">
-                <Select label="デフォルト印字方式" options={PRINT_MODE_OPTIONS} value={form.defaultPrintMode} onChange={(v) => set("defaultPrintMode", v as PrintSettings["defaultPrintMode"])} />
-                <Checkbox label="ロケーション別で印字方式を上書き可能" checked={form.locationPrintModeOverrideEnabled} onChange={(v) => set("locationPrintModeOverrideEnabled", v)} />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-          <Layout.AnnotatedSection title="CloudPRNT" description="§12.2.2">
-            <Card>
-              <BlockStack gap="400">
-                <Checkbox label="CloudPRNT を有効にする" checked={form.cloudprntEnabled} onChange={(v) => set("cloudprntEnabled", v)} />
-                <TextField label="プロファイル名" value={form.cloudprntProfileName} onChange={(v) => set("cloudprntProfileName", v)} autoComplete="off" />
-                <Select label="用紙幅" options={PAPER_WIDTH_OPTIONS} value={form.cloudprntPaperWidth} onChange={(v) => set("cloudprntPaperWidth", v)} />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-          <Layout.AnnotatedSection title="order-based 時の挙動" description="§12.2.3">
-            <Card>
-              <BlockStack gap="300">
-                <Checkbox label="印字時に精算注文を作成" checked={form.createSettlementOrderWhenPrinting} onChange={(v) => set("createSettlementOrderWhenPrinting", v)} />
-                <Checkbox label="精算メモを注文に付与" checked={form.attachSettlementNoteToOrder} onChange={(v) => set("attachSettlementNoteToOrder", v)} />
-                <Checkbox label="精算メタフィールドを注文に付与" checked={form.attachSettlementMetafieldsToOrder} onChange={(v) => set("attachSettlementMetafieldsToOrder", v)} />
-                <Text as="p" tone="subdued">
-                  注文経由印字では Shopify 上に「注文」のメタフィールド定義（namespace: settlement）が必要なことがあります。アプリインストール時に自動作成を試みますが、失敗した場合や別ストアにコピーした場合は下のボタンで再実行できます。
+                <Text as="p" variant="bodyMd" fontWeight="semibold">
+                  Shopify Printing API（統一）
                 </Text>
-                <InlineStack gap="200" blockAlign="center">
-                  <Button
-                    loading={metafieldFetcher.state === "submitting"}
-                    onClick={() =>
-                      metafieldFetcher.submit(null, {
-                        method: "POST",
-                        action: "/api/admin/settlement-metafields/ensure",
-                      })
-                    }
-                  >
-                    注文の精算メタフィールド定義を作成・確認
-                  </Button>
-                </InlineStack>
-                {metafieldFetcher.data ? (
-                  metafieldFetcher.data.error ? (
-                    <Banner tone="critical">エラー: {metafieldFetcher.data.error}</Banner>
-                  ) : (
-                    <Banner tone={metafieldFetcher.data.ok ? "success" : "warning"}>
-                      {metafieldFetcher.data.message}
-                      {metafieldFetcher.data.created && metafieldFetcher.data.created.length > 0 ? (
-                        <Text as="p" variant="bodySm">新規作成キー: {metafieldFetcher.data.created.join(", ")}</Text>
-                      ) : null}
-                      {metafieldFetcher.data.skipped && metafieldFetcher.data.skipped.length > 0 ? (
-                        <Text as="p" variant="bodySm">既存のためスキップ: {metafieldFetcher.data.skipped.join(", ")}</Text>
-                      ) : null}
-                      {metafieldFetcher.data.errors && metafieldFetcher.data.errors.length > 0 ? (
-                        <BlockStack gap="100">
-                          {metafieldFetcher.data.errors.map((err) => (
-                            <Text key={err.key} as="p" variant="bodySm">
-                              {err.key}: {err.message}
-                            </Text>
-                          ))}
-                        </BlockStack>
-                      ) : null}
-                    </Banner>
-                  )
-                ) : null}
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-          <Layout.AnnotatedSection title="領収書印字" description="§12.2.4">
-            <Card>
-              <BlockStack gap="400">
-                <TextField label="領収書印字方式（旧）" value={form.receiptPrintMode} onChange={(v) => set("receiptPrintMode", v)} helpText="例: order_based。Printing API 並存時は下のフラグを優先試行" autoComplete="off" />
-                <Checkbox label="印字前にプレビュー必須" checked={form.receiptPreviewBeforePrintRequired} onChange={(v) => set("receiptPreviewBeforePrintRequired", v)} />
+                <Text as="p" tone="subdued">
+                  接続中（connected: true）のプリンタへ HTML を送ります。未接続を成功扱いしません。
+                  システム印刷ダイアログを使う場合は直接印字成功と区別して表示します。
+                  print() の完了は API 受付であり、紙の排出完了ではありません。
+                </Text>
+                {legacyNote ? <Banner>{legacyNote}</Banner> : null}
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
 
           <Layout.AnnotatedSection
-            title="Shopify Printing API（新経路）"
-            description="Conditional-Go: 旧 order_based / cloudprnt は残置。POS 完了画面は下のフラグを読んで primary/secondary を切替"
+            title="用紙幅"
+            description="精算・点検・領収書が使う幅です。販売レシートの幅は別の設定です。"
           >
             <Card>
               <BlockStack gap="400">
-                <Banner tone="info">
-                  これらのフラグは POS（精算・領収書の完了画面）で実際に参照されます。OFF のときは Printing API
-                  ボタンを出さず、従来導線（order_based / CloudPRNT）を案内します。ON かつ「優先」ON
-                  のときだけ Printing API を primary にし、旧経路は secondary＋二重印字警告にします。
-                </Banner>
-                <Checkbox
-                  label="Printing API を優先する（ON のとき POS で新経路を primary）"
-                  checked={form.preferPrintingApi ?? true}
-                  onChange={(v) => set("preferPrintingApi", v)}
+                <Select
+                  label="レシート用紙幅"
+                  options={PAPER_WIDTH_OPTIONS}
+                  value={form.cloudprntPaperWidth}
+                  onChange={(v) => set("cloudprntPaperWidth", v)}
+                  helpText="精算・点検・領収書の HTML 幅です。販売レシートの幅は販売レシート設定です。"
                 />
-                <Checkbox
-                  label="精算完了後に Printing API 印字を案内"
-                  checked={form.settlementPrintingApiEnabled ?? true}
-                  onChange={(v) => set("settlementPrintingApiEnabled", v)}
+                <PaperWidthCorrespondence
+                  sharedWidthMm={parseSharedPaperWidth(form.cloudprntPaperWidth)}
+                  salesWidthMm={salesPaperWidthMm}
+                  search={q}
                 />
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection title="領収書" description="§12.2.4">
+            <Card>
+              <BlockStack gap="400">
                 <Checkbox
-                  label="領収書発行後に Printing API 印字を案内"
-                  checked={form.receiptPrintingApiEnabled ?? true}
-                  onChange={(v) => set("receiptPrintingApiEnabled", v)}
+                  label="印字前にプレビュー必須"
+                  checked={form.receiptPreviewBeforePrintRequired}
+                  onChange={(v) => set("receiptPreviewBeforePrintRequired", v)}
                 />
                 <Text as="p" tone="subdued">
-                  Location.printMode（order_based / cloudprnt_direct）は変更しません。POS 拡張 api_version 2026-07+ と POS 11.11+ が必要です。両方の導線で印字すると二重印字になります。
+                  領収書も販売レシートと同じ shopify.printing です。旧 receiptPrintMode は出力に使いません。
+                </Text>
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection title="廃止した経路" description="管理画面から選べません。保存済みフラグは旧処理を復活させません">
+            <Card>
+              <BlockStack gap="300">
+                <Text as="p">CloudPRNT 直印字（print-payload ポーリング）— 410 Gone</Text>
+                <Text as="p">注文経由印字（SETTLEMENT / INSPECTION 注文の作成・更新・履行）— 呼び出しません</Text>
+                <Text as="p">
+                  「Printing API を有効化／優先」切替 — 常に Printing API。OFF 保存が残っていても旧経路は出ません。
                 </Text>
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
 
           <Layout.Section>
-            <InlineStack align="end"><Button variant="primary" onClick={handleSave}>保存</Button></InlineStack>
+            <InlineStack align="end">
+              <Button variant="primary" onClick={handleSave}>
+                保存
+              </Button>
+            </InlineStack>
           </Layout.Section>
         </Layout>
       </Page>

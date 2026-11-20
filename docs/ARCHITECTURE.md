@@ -55,18 +55,15 @@ C. POS「精算」→ GET/POST preview（buildSettlementPreview）
       │  表示: SettlementModal プレビュー
       ▼
 D. POST /api/settlements/create
-      │  printMode = Location.printMode（body の printMode は決定に使わない）
-      │  冪等: shopId:locationId:targetDate:printMode（点検除く）
+      │  実行時 printMode = shopify_printing（保存済み Location.printMode は無視）
+      │  冪等: shopId:locationId:targetDate（旧 printMode 付きキーも検索。点検除く）
       │  ロック: SettlementOperationLock
-      ├─ order_based → Draft 精算/点検注文 → complete → note/metafields → fulfill
-      │                 Settlement 行に sourceOrderId 等を保存
-      └─ cloudprnt_direct → Settlement 保存 + printPayload テキスト（Shopify 精算注文なし）
+      │  Shopify SETTLEMENT / INSPECTION 注文は作らない
       ▼
 E. 印字
-      ├─ order_based: スタッフが POS 上で精算注文のレシートを印字（アプリはプリンタ API 未使用）
-      └─ cloudprnt_direct: プリンタが GET .../print-payload をポーリング（想定）。アプリ内に CloudPRNT 送信アダプタなし
+      └─ shopify.printing → GET /api/print/settlement/:id（保存済み表示内容・帳票版。用紙幅は機器）
       ▼
-F. POST /api/settlements/print → status=printed（DB マークのみ）
+F. POST /api/settlements/print → status=printed（API 受付の記録。紙面完了ではない）
 ```
 
 ### 各段階の整理
@@ -76,9 +73,9 @@ F. POST /api/settlements/print → status=printed（DB マークのみ）
 | 販売注文 | POS/Admin 操作 | Shopify 標準 | Shopify Order | POS / Admin |
 | 返金計上先 | Order + refund TX location + 設定 | `resolveRefundAggregationLocationGid` | `pos.refund_aggregation_location_gid` | 精算集計時に参照 |
 | 精算プレビュー | Orders + SpecialRefundEvent +（任意）Gift Cards API | `aggregateGasStyleForOrders` 等 | なし／サマリーキャッシュ | POS 精算 UI |
-| 精算確定 | プレビュー DTO | 永続化＋（任意）Shopify 同期 | `Settlement` / Shopify SETTLEMENT 注文 | Done 画面 |
-| 精算印字 | Settlement / 精算注文 | テキスト生成 or 人的 POS 印字 | `printedAt` | プリンタ／POS |
-| 領収書 | Order totalPriceSet | テンプレ合成 | `ReceiptIssue` | POS 完了画面（印字 API なし） |
+| 精算確定 | プレビュー DTO | 永続化のみ（Shopify 精算注文なし） | `Settlement` | Done 画面 |
+| 精算印字 | 保存済み Settlement（発行時の店名・金額・帳票版） | HTML + shopify.printing | `printedAt`（送信受付） | ペアリング済みプリンタ（用紙幅は機器設定） |
+| 領収書 | Order totalPriceSet | テンプレ合成 + Printing API | `ReceiptIssue` | POS 完了画面 |
 
 ## 4. 領収書フロー（ギフトレシートではない）
 
@@ -89,8 +86,8 @@ F. POST /api/settlements/print → status=printed（DB マークのみ）
   → 履歴表示
 ```
 
-- Shopify Gift Receipt / Printing API への接続は **コード上なし**。
-- `receiptPrintMode` 設定キーは存在するが、issue/preview ルートでは未使用。
+- Shopify Gift Receipt 連携は未実装。領収書 HTML は `shopify.printing`。
+- 旧 `receiptPrintMode` は出力に使わない。
 
 ## 5. 特殊返金フロー（要約）
 
@@ -105,8 +102,9 @@ F. POST /api/settlements/print → status=printed（DB マークのみ）
 
 ```
 app/services/settlementEngine.server.ts     … 集計の中核
-app/services/settlementOrderGas.server.ts   … SETTLEMENT/INSPECTION 注文
-app/services/settlementSyncSettings.server.ts … printMode × 設定で同期可否
+app/services/settlementOrderGas.server.ts   … 印字経路からは未使用（既存注文は削除しない）
+app/services/printUnification.server.ts     … 実行時 printMode 正規化・冪等キー
+app/services/settlementSyncSettings.server.ts … 常に createOrder: false
 app/services/settlementLock.server.ts       … 同時作成ロック
 app/services/refundAggregation.server.ts   … 返金ロケーション解決
 app/services/salesSummaryEngine.server.ts  … buildSettlementPreview 再利用

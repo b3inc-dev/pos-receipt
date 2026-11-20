@@ -3,7 +3,7 @@
  * プレビュー HTML は印字と同じ renderPrintReceiptHtml を使用。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useLoaderData, useFetcher, useSubmit, useLocation, useNavigate } from "react-router";
 import {
   Page,
   Layout,
@@ -28,6 +28,7 @@ import {
   DEFAULT_SALES_RECEIPT_SETTINGS,
   type SalesReceiptSettings,
 } from "../utils/appSettings.server";
+import { DEFAULT_GIFT_LAYOUT, GIFT_LAYOUT_KEY, type GiftLayout } from "../utils/salesReceiptSettings";
 import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
@@ -47,7 +48,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...(saved?.layoutJson ?? {}),
     },
   };
-  return { settings };
+  const giftLayout = await getAppSetting<GiftLayout>(shop.id, GIFT_LAYOUT_KEY);
+  return { settings, giftLayout: giftLayout ?? DEFAULT_GIFT_LAYOUT };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -57,6 +59,15 @@ export async function action({ request }: ActionFunctionArgs) {
   const get = (k: string) => formData.get(k);
   const bool = (k: string) => get(k) === "true";
   const str = (k: string, d: string) => String(get(k) ?? d);
+  if (get("intent") === "gift") {
+    const title = str("title", "").trim();
+    const footer = str("footer", "");
+    if (!title || title.length > 80 || footer.length > 500) {
+      return Response.json({ error: "見出しは1〜80文字、末尾文は500文字以内で入力してください。" }, { status: 400 });
+    }
+    await setAppSetting(shop.id, GIFT_LAYOUT_KEY, { title, footer, showOrderNumber: bool("showOrderNumber") });
+    return Response.json({ ok: true });
+  }
   const prev =
     (await getAppSetting<Partial<SalesReceiptSettings>>(shop.id, SALES_RECEIPT_SETTINGS_KEY)) ??
     {};
@@ -79,7 +90,13 @@ export async function action({ request }: ActionFunctionArgs) {
   return Response.json({ ok: true });
 }
 
-function buildSampleHtml(settings: SalesReceiptSettings): string {
+function buildSampleHtml(settings: SalesReceiptSettings, gift: boolean, layout: GiftLayout): string {
+  if (gift) {
+    return renderPrintReceiptHtml({
+      kind: "gift", layout, orderName: "#1042", paperWidthMm: settings.paperWidthMm,
+      items: [{ name: "サンプル商品 A（M / 黒）", quantity: 1 }, { name: "サンプル商品 B", quantity: 2 }],
+    });
+  }
   // 実印字（buildSalesReceiptPrintModel）と同じく layoutJson フラグで描画制御する
   return renderPrintReceiptHtml({
     kind: "sales",
@@ -137,7 +154,7 @@ function buildSampleHtml(settings: SalesReceiptSettings): string {
 }
 
 export default function SalesReceiptLayoutPage() {
-  const { settings: initial } = useLoaderData<typeof loader>();
+  const { settings: initial, giftLayout: initialGift } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
@@ -145,7 +162,10 @@ export default function SalesReceiptLayoutPage() {
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState(initial);
 
-  const previewHtml = useMemo(() => buildSampleHtml(form), [form]);
+  const [gift, setGift] = useState(false);
+  const [giftLayout, setGiftLayout] = useState(initialGift);
+  const giftSave = useFetcher<{ ok?: boolean; error?: string }>();
+  const previewHtml = useMemo(() => buildSampleHtml(form, gift, giftLayout), [form, gift, giftLayout]);
 
   const handleSave = () => {
     const fd = new FormData();
@@ -272,6 +292,24 @@ export default function SalesReceiptLayoutPage() {
                 <Text as="h2" variant="headingMd">
                   印字プレビュー（同一 HTML）
                 </Text>
+                <Checkbox label="ギフトレシートをプレビュー（金額なし）" checked={gift} onChange={setGift} />
+                {gift && (
+                  <BlockStack gap="200">
+                    <TextField label="ギフトの見出し" value={giftLayout.title} maxLength={80} autoComplete="off"
+                      onChange={(title) => setGiftLayout((prev) => ({ ...prev, title }))} />
+                    <TextField label="ギフトの末尾文" value={giftLayout.footer} maxLength={500} multiline={2} autoComplete="off"
+                      onChange={(footer) => setGiftLayout((prev) => ({ ...prev, footer }))} />
+                    <Checkbox label="ギフトに注文番号を表示" checked={giftLayout.showOrderNumber}
+                      onChange={(showOrderNumber) => setGiftLayout((prev) => ({ ...prev, showOrderNumber }))} />
+                    <Button loading={giftSave.state !== "idle"} disabled={!giftLayout.title.trim()}
+                      onClick={() => giftSave.submit({ intent: "gift", title: giftLayout.title, footer: giftLayout.footer,
+                        showOrderNumber: String(giftLayout.showOrderNumber) }, { method: "post" })}>ギフト設定を保存</Button>
+                    {giftSave.state === "idle" && giftSave.data?.error && <Banner tone="critical">{giftSave.data.error}</Banner>}
+                    {giftSave.state === "idle" && giftSave.data?.ok && giftLayout.title === initialGift.title &&
+                      giftLayout.footer === initialGift.footer && giftLayout.showOrderNumber === initialGift.showOrderNumber &&
+                      <Banner tone="success">ギフト設定を保存しました。</Banner>}
+                  </BlockStack>
+                )}
                 <Box
                   padding="300"
                   background="bg-surface-secondary"

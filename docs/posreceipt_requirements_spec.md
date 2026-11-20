@@ -8,7 +8,7 @@
 - 実装は Cursor を用いて進める
 - Shopify POS Extension / Admin App / Backend / App DB を用いて構築する
 - 日本の商業施設運用を想定し、Shopify POS標準では不足する業務を補完する
-- CloudPRNT対応プリンタと非対応プリンタの両方に対応する
+- アプリ独自印字（精算・点検・領収書・販売レシート）は Shopify Printing API（`shopify.printing`）に統一する。CloudPRNT / 精算注文経由は出力しない
 - **公開用（App Store 販売）と自社用（カスタムアプリ）の2種デプロイ**を同一コードベースでサポートする（POS Stock / Location Stock と同様の構成）
 
 ---
@@ -222,19 +222,16 @@ POSログイン中ロケーションの売上を集計し、日本の商業施�
 - 0点検対象店舗設定は不要とする
 
 ### 6.7 印字方式
-印字方式は両対応必須とする。
+アプリ独自印字は Shopify Printing API（`shopify.printing`）に統一する。CloudPRNT 直印字と注文経由印字を店舗が選べる運用、および旧経路優先／新 API 有効化の切替は廃止する。既存店舗の `printMode` が `order_based` / `cloudprnt_direct` でも実行時は Printing API に正規化し、無効な旧設定が旧処理を復活させてはならない。通常の Shopify 販売注文は対象外。
 
-#### A. CloudPRNT対応
-- 集計後、直接印字する
-- 精算注文は作成しない
-
-#### B. CloudPRNT非対応
-- 印字用の精算注文を作成する
-- 既存の注文レシート導線を用いて印字する
+- 接続中（`connected: true`）のレシートプリンタだけを直接印字に使う
+- 未接続を成功扱いしない。システム印刷ダイアログは同じ API 内でも直接印字成功と区別する
+- `print()` の完了は API 受付であり、紙の排出完了と混同しない
+- 58mm / 80mm を設定可能（帳票スナップショットではなく出力機器）。機種対応と実紙面の未確認は `docs/PRINT_DEVICE_COMPAT.md`
+- POS Lite/Pro（Shopify 契約）とアプリ Lite/Pro（本アプリ課金）を区別する
 
 ### 6.8 精算注文の扱い
-- CloudPRNT対応時は精算注文を作成しない
-- CloudPRNT非対応時のみ精算注文を作成する
+印字目的の SETTLEMENT / INSPECTION 注文の作成・更新・履行は行わない。監査用の任意作成も行わない。集計結果と帳票再現データはアプリ DB に保存する。既存の精算注文・メタフィールド・履歴は削除せず、再印刷はアプリ DB から行う。精算・点検の帳票再現は発行時の店舗表示名・表題・帳票版・金額・支払内訳を使う。用紙幅は出力機器設定であり帳票内容に含めない。スナップショット以前の旧履歴は発行時店舗名と帳票版を復元できない。
 
 ### 6.9 保存先
 - 正本はアプリDBに保存する
@@ -453,9 +450,9 @@ MVP から以下を含める。
 最低限以下を持つ。
 
 #### A. プリンタ / 印字設定
-- ロケーションごとの印字方式
-  - CloudPRNT direct
-  - order-based print
+- 実行時印字方式は Shopify Printing API 固定
+- レシート用紙幅（58mm / 80mm）
+- 保存済みの旧 printMode は出力に使わない
 
 #### B. 領収書設定
 - テンプレート編集
@@ -634,15 +631,18 @@ Backend は以下を担う。
 ## 13. 印字方針
 
 ### 13.1 精算
-- CloudPRNT対応: 直接印字
-- 非対応: 精算注文経由で印字
+- Shopify Printing API で HTML を直印字する
+- 精算注文は作らない。再印刷は保存済み Settlement（発行時の表示内容・帳票版。用紙幅は再印刷時点の機器設定）
 
 ### 13.2 領収書
-- アプリ側レンダリング + 印字
-- 詳細なプリント制御は店舗設定で切り替え可能な設計にする
+- アプリ側レンダリング + 同一 Printing API
+- 再発行は新しい発行記録、再印刷は保存済み発行を使う
 
 ### 13.3 点検レシート
-- 精算レイアウトと同系統で出力
+- 精算レイアウトと同系統で Printing API 出力
+
+### 13.4 販売レシート
+- 同一 Printing API（`/api/print/sales/:orderId`）。通常の Shopify 販売注文作成はしない
 
 ---
 
@@ -673,7 +673,7 @@ MVP は日本語固定でよい。
 ### 15.1 MVPに含む
 - POSタイル4つ
 - 取引検索一覧 + 取引詳細起動
-- 精算（CloudPRNT direct / order-based 両対応）
+- 精算（Shopify Printing API。CloudPRNT / 注文経由は出力しない）
 - 点検レシート
 - 特殊返金イベント登録
 - 商品券後処理イベント登録
@@ -709,7 +709,7 @@ MVP は日本語固定でよい。
 ### 16.2 先に固定してよい前提
 - 権限分離は実装しない
 - 領収書テンプレートは1種類
-- CloudPRNT対応時は精算注文を作成しない
+- 精算・点検用 Shopify 注文は作成しない
 - 入店数報告は売上サマリー内に内包する
 - 商品券釣有りは精算で自動反映しつつ、後処理イベントも持てる
 
@@ -738,8 +738,8 @@ MVP は日本語固定でよい。
 - 元データは Shopify、独自業務データはアプリDB正本
 - 権限分離は MVP 不要
 - 料金プランはスタンダード / プロ
-- CloudPRNT直印字と注文経由印字は両対応必須
-- CloudPRNT時は精算注文を作らない
+- アプリ独自印字は Shopify Printing API に統一する
+- 精算・点検用 Shopify 注文は作らない
 - 特殊返金イベント種別は4種類で分ける
 - 領収書テンプレートは1つ固定、管理画面編集
 - 売上サマリーは日付指定・期間指定を最初から含む
@@ -782,7 +782,7 @@ MVP は日本語固定でよい。
 
 成果物:
 - Settlement Engine
-- 印字分岐（CloudPRNT / order-based）
+- Shopify Printing API 一本化（旧経路は出力しない）
 - 点検レシート
 - 精算履歴
 
@@ -930,7 +930,7 @@ MVP は日本語固定でよい。
 - shopify_location_gid
 - name
 - code_nullable
-- print_mode (`cloudprnt_direct` / `order_based`)
+- print_mode（保存互換。実行時は `shopify_printing` に正規化）
 - sales_summary_enabled
 - footfall_reporting_enabled
 - created_at
@@ -1164,17 +1164,17 @@ Response:
 Body:
 - locationId
 - targetDate
-- printMode
+- printMode（リクエストでは無視。実行時は shopify_printing）
 - isInspection boolean default false
 
 Response:
 - settlementId
-- printable payload or order-based print reference
-- created resources
+- printMode: shopify_printing
+- sourceOrderId / sourceOrderName は常に null（新規）
 
 Rules:
-- cloudprnt_direct: Shopify精算注文を作らない
-- order_based: Shopify精算注文を作る
+- Shopify 精算注文（SETTLEMENT / INSPECTION）は作らない
+- 再実行は既存 Settlement を返し、精算行も注文も増やさない
 
 #### POST /api/settlements/recalculate
 Body:
@@ -1425,8 +1425,8 @@ Settings keys example:
 - 再集計
 
 Acceptance:
-- CloudPRNT直印字店舗で直接印字できる
-- 非対応店舗では注文経由導線に遷移できる
+- 接続中プリンタへ Printing API で直印字できる
+- 未接続を成功扱いにしない。ダイアログは直接印字と区別する
 
 ### 23.2 特殊返金・商品券調整タイル画面
 
@@ -1611,9 +1611,8 @@ Responsibility:
 - settlement engine
 - preview API
 - create API
-- print adapter interface
-- cloudprnt adapter
-- order-based adapter
+- print HTML (`/api/print/settlement/:id`)
+- shopify.printing adapter
 - POS settlement UI
 
 ### Phase 7. Sales summary
@@ -1685,7 +1684,7 @@ Responsibility:
 ## 28. 実装で後回しにしない注意点
 
 - Shopify order data と app DB event data を混同しないこと
-- CloudPRNT時に精算注文を作らないこと
+- 精算・点検印字で Shopify 精算注文を作らないこと
 - 商品券釣有りは自動推定だけに依存しないこと
 - 領収書テンプレートは1つでも version を持つこと
 - 取引選択UIは特殊返金・領収書で共通化すること
@@ -1710,7 +1709,7 @@ Responsibility:
 特殊返金・商品券調整イベントの create/list/void API と POS UI を実装してください。event_type は要件書の4種に対応してください。
 
 ### Prompt 5
-精算プレビュー API と print adapter interface を実装してください。印字方式は cloudprnt_direct と order_based を切り替えられるようにしてください。
+精算プレビュー API と Shopify Printing API 用 HTML を実装してください。CloudPRNT / 注文経由は出力しないでください。
 
 ### Prompt 6
 領収書テンプレート編集画面、プレビュー API、発行 API、履歴保存を実装してください。テンプレートは1つ固定です。
@@ -1737,7 +1736,7 @@ Responsibility:
 | **Prompt 4（特殊返金・商品券調整）** | Backend: `app/utils/shopResolver.server.ts`、`api.special-refunds.tsx`（GET list / POST create）、`api.special-refunds.$id.void.tsx`（POST void）、`api.voucher-adjustments.tsx`（POST create）を実装。POS 拡張: ソースファイルを4タイル分割構成に整備（`SpecialRefundTile/Modal/OrderAction.jsx`、`SettlementTile/Modal.jsx`、`ReceiptTile/Modal/OrderAction.jsx`、`SalesSummaryTile/Modal.jsx`）。`extensions/common/specialRefundApi.js` を追加。`shopify.extension.toml` は登録済み UID 1本（pos-special-refund）のみ使用し、他3タイルは `shopify app generate extension` で UID 発行後に接続予定（Phase 5–7）。 |
 | **バグ修正: Render 502 / Session テーブル未作成** | `prisma/migrations/` が未コミットだったため Render 上で `prisma migrate deploy` が何も実行せず全テーブルが未作成だった。`prisma/migrations/20260310112900_init/migration.sql` をコミット・プッシュして解消。 |
 | **バグ修正: POS ビルドエラー（Tile.jsx not found）** | `.shopify/dev-bundle` キャッシュが旧ファイル（`Tile.jsx/Modal.jsx/OrderAction.jsx`）を参照していた。キャッシュ削除 + TOML を登録済み UID 1本に修正して解消。 |
-| **Prompt 5（精算）** | Settlement Engine（`app/services/settlementEngine.server.ts`）を実装。API 4本（preview / create / recalculate / print）と `api.locations.tsx` を追加。`extensions/common/settlementApi.js` を追加。`SettlementModal.jsx` を全ステップ実装（main → preview → confirm → done → history）。CloudPRNT直印字 / 注文経由印字（Shopify精算注文作成）の両分岐に対応。点検レシートも同フローで `isInspection=true` で処理。`shopify.extension.toml` に精算タイルエントリを追加（UID は `shopify app generate extension` で取得必要）。 |
+| **Prompt 5（精算）** | Settlement Engine と Printing API 一本化。精算注文は作らない。点検レシートも同フロー。 |
 | **Prompt 6（領収書）** | `api.settings.receipt-template.tsx`（GET/POST テンプレート）、`api.receipts.preview.tsx`、`api.receipts.issue.tsx`、`api.receipts.history.tsx` を実装。`extensions/common/receiptApi.js` を追加。`ReceiptModal.jsx` を全ステップ実装（search → form → preview → confirm → done → history）。テンプレートは1件 active 管理。再発行 `isReissue` フラグ対応。`shopify.extension.toml` に領収書タイルエントリを追加（UID 未設定）。 |
 | **Prompt 7（売上サマリー）** | Sales Summary Engine（`app/services/salesSummaryEngine.server.ts`）を実装。API 5本（`api.sales-summary.daily.tsx`、`api.sales-summary.period.tsx`、`api.footfall.tsx`、`api.budgets.upsert.tsx`、`api.budgets.import.tsx`）を追加。`extensions/common/salesSummaryApi.js` を追加。`SalesSummaryModal.jsx` を全実装（日次/期間モード切替、ロケーション別KPIカード、入店数入力・保存）。`shopify.extension.toml` に売上サマリータイルエントリを追加（UID 未設定）。 |
 | **Prompt 8（Billing・管理画面）** | `app/utils/planFeatures.server.ts`（プラン別機能フラグ・inhouse判定）を実装。`api.billing.tsx`（GET プラン状態 / POST Shopify サブスクリプション URL 発行）を追加。管理画面4ページ（`app._index.tsx`・`app.settings.tsx`・`app.settings.billing.tsx`・`app.settings.billing.callback.tsx`）と `app.receipt-template.tsx`（領収書テンプレート編集・リアルタイムプレビュー）を実装。プロ機能 API 5本にプランゲート（`checkPlanAccess`）を追加。 |

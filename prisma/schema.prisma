@@ -72,7 +72,7 @@ model Location {
   shortName                 String?  // 短縮表示名
   sortOrder                 Int      @default(0) // 並び順（小さいほど上）
   code                      String?
-  printMode                 String   @default("order_based") // cloudprnt_direct | order_based
+  printMode                 String   @default("order_based") // 保存互換。実行時は shopify_printing に正規化（DB行は自動変換しない）
   salesSummaryEnabled       Boolean  @default(false)
   footfallReportingEnabled  Boolean  @default(false)
   // §4.2.2 機能有効可否
@@ -161,10 +161,10 @@ model Settlement {
   itemCount            Int
   voucherChangeAmount  Decimal   @db.Decimal(18, 2)
   paymentSectionsJson  String    // 支払方法別内訳の JSON
-  printMode            String    // cloudprnt_direct | order_based
-  printedAt            DateTime?
+  printMode            String    // 新規は shopify_printing。旧 order_based / cloudprnt_direct は履歴互換
+  printedAt            DateTime? // 印字 API 受付時刻。紙の排出完了ではない
   status               String    @default("draft") // draft | completed | printed | failed
-  idempotencyKey       String?   @unique // locationId+targetDate+printMode のハッシュ。重複精算防止
+  idempotencyKey       String?   @unique // shopId:locationId:targetDate（旧キーは printMode 付きも検索）
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -243,6 +243,7 @@ model ReceiptIssue {
   currency        String?
   templateId      String?
   templateVersion Int?
+  printSnapshotJson String? // 発行時の帳票設定と58/80mm HTML。再印字で現在設定・現行rendererを参照しない
   isReissue       Boolean  @default(false)
   createdBy       String?
   idempotencyKey  String?  @unique // クライアント生成UUID。同一キーは重複発行しない

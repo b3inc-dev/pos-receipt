@@ -5,7 +5,7 @@
 import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
 import { getOrder } from "../../common/orderPickerApi.js";
-import { printSalesReceipt } from "../../common/printApi.js";
+import { printSalesReceipt, printResultMessage, PRINT_OUTCOME } from "../../common/printApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 
@@ -20,6 +20,7 @@ function SalesReceiptModal() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [gift, setGift] = useState(false);
   const [printResult, setPrintResult] = useState(null);
   const [bootstrapError, setBootstrapError] = useState("");
   const [orderEntryLoading, setOrderEntryLoading] = useState(false);
@@ -44,6 +45,8 @@ function SalesReceiptModal() {
     setError("");
     try {
       const order = await getOrder(orderId);
+      setGift(false);
+      setPrintResult(null);
       setSelectedOrder(order);
       setStep("confirm");
     } catch (e) {
@@ -53,15 +56,15 @@ function SalesReceiptModal() {
     }
   }, []);
 
-  const handlePrint = useCallback(async () => {
-    if (!selectedOrder?.orderId) return;
+  const handlePrint = useCallback(async (allowDialog = false) => {
+    if (!selectedOrder?.orderId || loading) return;
     setLoading(true);
     setError("");
     try {
-      const res = await printSalesReceipt(selectedOrder.orderId);
+      const res = await printSalesReceipt(selectedOrder.orderId, { allowDialog, gift });
       setPrintResult(res);
       if (!res.ok) {
-        setError(res.error || "印字に失敗しました");
+        setError(printResultMessage(res));
         return;
       }
       setStep("done");
@@ -70,7 +73,7 @@ function SalesReceiptModal() {
     } finally {
       setLoading(false);
     }
-  }, [selectedOrder]);
+  }, [selectedOrder, loading, gift]);
 
   if (orderEntryLoading) {
     return (
@@ -100,15 +103,17 @@ function SalesReceiptModal() {
       <s-page heading="印字完了">
         <s-box padding="base">
           <s-stack gap="base">
-            <s-text fontWeight="bold">販売レシートを送信しました</s-text>
+            <s-text fontWeight="bold">
+              {printResult?.outcome === PRINT_OUTCOME.DIALOG_PRESENTED
+                ? "システム印刷ダイアログを開きました"
+                : `${gift ? "ギフト" : "販売"}レシートをプリンタへ送信しました`}
+            </s-text>
             <s-text tone="subdued">
               {selectedOrder?.orderName || selectedOrder?.orderId}
             </s-text>
-            {printResult?.usedDialog ? (
-              <s-text tone="subdued" fontSize="small">
-                接続プリンタが見つからなかったため、印刷ダイアログを開きました。
-              </s-text>
-            ) : null}
+            <s-text tone="subdued" fontSize="small">
+              {printResultMessage(printResult)}
+            </s-text>
             <s-button
               variant="primary"
               onClick={() => {
@@ -132,12 +137,24 @@ function SalesReceiptModal() {
           <s-stack gap="base">
             <s-text fontWeight="bold">{selectedOrder?.orderName || "注文"}</s-text>
             <s-text tone="subdued">
-              注文・商品の属性（ON の場合）を末尾に含めて印刷します。設定は管理画面の「販売レシート」から変更できます。
+              {gift ? "ギフト用に注文番号・品名・数量を印刷します。" : "販売レシートでは設定に応じて金額・注文属性・商品属性を印刷します。"}
             </s-text>
-            {error ? <s-banner tone="critical" heading={error} /> : null}
-            <s-button variant="primary" onClick={handlePrint} disabled={loading}>
-              {loading ? "印字中…" : "プリンタへ送信"}
+            <s-button disabled={loading} onClick={() => {
+              setGift(!gift);
+              setPrintResult(null);
+              setError("");
+            }}>
+              {gift ? "通常の販売レシートに切り替え" : "金額なしのギフトレシートに切り替え"}
             </s-button>
+            {error ? <s-banner tone="critical" heading={error} /> : null}
+            <s-button variant="primary" onClick={() => handlePrint(false)} disabled={loading}>
+              {loading ? "印字中…" : `${gift ? "ギフト" : "販売"}レシートをプリンタへ送信`}
+            </s-button>
+            {printResult?.canUseDialog ? (
+              <s-button onClick={() => handlePrint(true)} disabled={loading}>
+                システム印刷ダイアログを開く
+              </s-button>
+            ) : null}
             <s-button
               onClick={() => {
                 setSelectedOrder(null);
