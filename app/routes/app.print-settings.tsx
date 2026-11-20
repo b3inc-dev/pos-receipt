@@ -144,7 +144,12 @@ export default function PrintSettingsPage() {
           <Layout.AnnotatedSection title="order-based 時の挙動" description="§12.2.3">
             <Card>
               <BlockStack gap="300">
-                <Checkbox label="印字時に精算注文を作成" checked={form.createSettlementOrderWhenPrinting} onChange={(v) => set("createSettlementOrderWhenPrinting", v)} />
+                <Checkbox
+                  label="精算注文を作成（監査アーカイブ／旧 order_based 印字）"
+                  checked={form.createSettlementOrderWhenPrinting}
+                  onChange={(v) => set("createSettlementOrderWhenPrinting", v)}
+                  helpText="Printing API 優先時は印字用には作りません。監査アーカイブが必要なときだけ ON（未設定のままなら作成スキップ）。Printing API を OFF にした旧 order_based 印字では従来どおり作成します。"
+                />
                 <Checkbox label="精算メモを注文に付与" checked={form.attachSettlementNoteToOrder} onChange={(v) => set("attachSettlementNoteToOrder", v)} />
                 <Checkbox label="精算メタフィールドを注文に付与" checked={form.attachSettlementMetafieldsToOrder} onChange={(v) => set("attachSettlementMetafieldsToOrder", v)} />
                 <Text as="p" tone="subdued">

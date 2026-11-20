@@ -25,6 +25,7 @@ import {
   withSettlementOperationLock,
 } from "../services/settlementLock.server";
 import { resolveSettlementOrderSyncOptions } from "../services/settlementSyncSettings.server";
+import { SpecialRefundPendingError } from "../services/specialRefundOverlayPure.server";
 
 /** locationId + targetDate + printMode から冪等キーを生成 */
 function buildIdempotencyKey(
@@ -323,6 +324,9 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     });
   } catch (err) {
+    if (err instanceof SpecialRefundPendingError) {
+      return corsErrorJson(request, { ok: false, error: err.message, code: err.code }, 409);
+    }
     const message = err instanceof Error ? err.message : "Unknown error";
     const status = message.includes("混み合っています") ? 429 : 500;
     return corsErrorJson(request, { ok: false, error: message }, status);

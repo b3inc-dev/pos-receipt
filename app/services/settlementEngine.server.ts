@@ -35,12 +35,20 @@ import {
 } from "./refundAggregation.server";
 import {
   aggregateGasStyleForOrders,
+  buildCrossLocationRefundOnlyOrder,
   ensurePayBucket,
   gasNormalizeGatewayLabel,
   totalFromPayBuckets,
   type GasAggregateAttributionOpts,
 } from "./settlementAggregatePure.server";
-import { extractLocationNumericId } from "./refundAggregationPure.server";
+import {
+  extractLocationNumericId,
+  locationGidMatches,
+} from "./refundAggregationPure.server";
+import {
+  applySpecialRefundEventsToTotals,
+  assertNoPendingSpecialRefunds,
+} from "./specialRefundOverlayPure.server";
 
 export type { GasAggregateAttributionOpts } from "./settlementAggregatePure.server";
 import {
@@ -123,6 +131,11 @@ export interface SettlementPreviewDebugDTO {
   ordersUpdatedAtLocationCount: number;
   /** ユニオン集計のため常に 0 */
   overlayRefundCount: number;
+  /**
+   * 返金帰属: 注文 metafield(pos.refund_aggregation_location_gid) と
+   * 実行時 resolve 結果が不一致だった件数（金額ロジックは metafield 優先のまま）
+   */
+  refundAttributionMismatchCount?: number;
 }
 
 // ── Gateway Labels（支払方法マスタ未設定時はフォールバックを paymentMethod.server で使用） ───
@@ -188,6 +201,8 @@ interface ShopifyOrder {
   retailLocation?: { id: string } | null;
   /** GAS fetchAllOrdersSmart フォールバック（processed_at）用 */
   processedAt?: string | null;
+  /** pos.refund_aggregation_location_gid（集計時 metafield 優先） */
+  refundAggregationLocationGid?: string | null;
 }
 
 type AdminClient = {
@@ -254,6 +269,9 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
         tags
         processedAt
         retailLocation { id }
+        metafield(namespace: "pos", key: "refund_aggregation_location_gid") {
+          value
+        }
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -331,6 +349,10 @@ async function fetchAllOrders(
       // クエリで -tag:SETTLEMENT 済みだが、タグ表記ゆれ（SETTLEMENT / settlement）に備えて大文字小文字無視で除外
       const isSettlement = (node.tags ?? []).some((t) => String(t).toLowerCase() === "settlement");
       if (!isSettlement) {
+        const nodeWithMf = node as ShopifyOrder & {
+          metafield?: { value?: string | null } | null;
+        };
+        const mfVal = nodeWithMf.metafield?.value?.trim() || null;
         const order: ShopifyOrder = {
           ...node,
           transactions: node.transactions ?? [],
@@ -339,6 +361,7 @@ async function fetchAllOrders(
             refundLineItems: r.refundLineItems?.nodes ?? [],
             transactions: r.transactions?.nodes ?? [],
           })),
+          refundAggregationLocationGid: mfVal,
         };
         orders.push(order);
       }
@@ -523,64 +546,6 @@ async function payBucketsToPaymentSections(
   return out;
 }
 
-/** payment sections から gateway または label で該当セクションのインデックスを返す */
-function findSectionIndex(sections: PaymentSectionDTO[], gatewayOrLabel: string | null): number {
-  if (!gatewayOrLabel) return -1;
-  const s = String(gatewayOrLabel).trim().toLowerCase();
-  const i = sections.findIndex(
-    (sec) => sec.gateway.toLowerCase() === s || sec.label.toLowerCase() === s
-  );
-  if (i >= 0) return i;
-  // 現金系の表記ゆれ
-  if (["現金", "cash"].some((k) => s.includes(k) || k.includes(s))) {
-    return sections.findIndex((sec) => sec.gateway.toLowerCase() === "cash" || sec.label === "現金");
-  }
-  return -1;
-}
-
-/** 特殊返金イベントを total / refundTotal / paymentSections に反映（GAS overlay 相当） */
-function applySpecialRefundEventsToTotals(
-  sections: PaymentSectionDTO[],
-  otherEvents: { eventType: string; amount: { toString(): string }; originalPaymentMethod: string | null; actualRefundMethod: string | null; adjustKind: string | null }[],
-  totals: { total: number; refundTotal: number }
-): void {
-  for (const e of otherEvents) {
-    const amount = Number(e.amount);
-    if (!Number.isFinite(amount) || amount <= 0) continue;
-
-    switch (e.eventType) {
-      case "cash_refund": {
-        totals.refundTotal += amount;
-        const idx = findSectionIndex(sections, e.actualRefundMethod ?? "cash");
-        if (idx >= 0) sections[idx].refund += amount;
-        else if (sections.length > 0) sections[0].refund += amount;
-        break;
-      }
-      case "receipt_cash_adjustment": {
-        const kind = (e.adjustKind ?? "undo").toLowerCase();
-        const method = e.originalPaymentMethod ?? e.actualRefundMethod ?? "cash";
-        const idx = findSectionIndex(sections, method);
-        if (kind === "undo") {
-          totals.refundTotal -= amount;
-          if (idx >= 0) sections[idx].refund = Math.max(0, sections[idx].refund - amount);
-        } else {
-          totals.total += amount;
-          if (idx >= 0) sections[idx].net += amount;
-        }
-        break;
-      }
-      case "payment_method_override": {
-        totals.refundTotal += amount;
-        const idx = findSectionIndex(sections, e.actualRefundMethod ?? "cash");
-        if (idx >= 0) sections[idx].refund += amount;
-        break;
-      }
-      default:
-        break;
-    }
-  }
-}
-
 /**
  * 税込の合計金額から税抜純売上と内税相当額を算出する。
  * buildSettlementPreview の netSales / tax と同一の式（精算設定の税率％を税込ベースから逆算）。
@@ -650,6 +615,7 @@ async function buildSettlementPreviewImpl(
   // ショップタイムゾーンで「その日」の UTC 範囲を算出
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
+  const attributionCtx = await loadRefundAggregationContext(shopId);
 
   // 精算の注文境界（D1 / BUSINESS_RULES §1）:
   // - 絞り込みは location_id（数値）+ 日付レンジ + tag_not:settlement のみ
@@ -658,6 +624,9 @@ async function buildSettlementPreviewImpl(
   const qCreated   = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const qUpdated   = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
   const qCancelled = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement status:cancelled`;
+  // 販売店舗とは別の店舗で処理した返金も拾う。後段で対象店舗の返金 TX のみに
+  // 縮約してから union するため、他店舗の売上は混入しない。
+  const qRefundUpdated = `updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement`;
 
   const createdRaw   = await fetchAllOrders(admin, qCreated, "CREATED_AT");
   await sleep(GRAPHQL_PAGE_DELAY_MS);
@@ -665,11 +634,44 @@ async function buildSettlementPreviewImpl(
   await sleep(GRAPHQL_PAGE_DELAY_MS);
   const cancelledRaw = await fetchAllOrders(admin, qCancelled, "UPDATED_AT");
   await sleep(GRAPHQL_PAGE_DELAY_MS);
+  const includeCrossLocationRefunds =
+    attributionCtx.mode === "refund_transaction_pos_location";
+  const refundUpdatedRaw =
+    includeCrossLocationRefunds
+      ? await fetchAllOrders(admin, qRefundUpdated, "UPDATED_AT")
+      : [];
+  if (includeCrossLocationRefunds) {
+    await sleep(GRAPHQL_PAGE_DELAY_MS);
+  }
+
+  const inDay = (iso?: string) => {
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
+    return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
+  };
 
   let ordersUnion = unionSettlementOrdersById(
     unionSettlementOrdersById(createdRaw, updatedRaw),
     cancelledRaw,
   );
+  const existingOrderIds = new Set(ordersUnion.map((order) => order.id));
+  const crossLocationRefundOrders = refundUpdatedRaw.flatMap((order) => {
+    const orderBelongsToSettlementLocation = locationGidMatches(
+      order.retailLocation?.id,
+      locationId,
+      locIdRaw,
+    );
+    if (existingOrderIds.has(order.id) && orderBelongsToSettlementLocation) return [];
+    const refundOnly = buildCrossLocationRefundOnlyOrder(
+      order,
+      inDay,
+      locationId,
+      locIdRaw,
+      attributionCtx.mode,
+    );
+    return refundOnly ? [refundOnly as ShopifyOrder] : [];
+  });
+  ordersUnion = unionSettlementOrdersById(ordersUnion, crossLocationRefundOrders);
 
   // GAS fetchAllOrdersSmart ③: 0件のとき processed_at（店舗TZの暦日）でフォールバック
   if (ordersUnion.length === 0) {
@@ -683,7 +685,6 @@ async function buildSettlementPreviewImpl(
     });
   }
 
-  const attributionCtx = await loadRefundAggregationContext(shopId);
   const attributionOpts: GasAggregateAttributionOpts = {
     attributionCtx,
     settlementLocationId: locationId,
@@ -699,14 +700,9 @@ async function buildSettlementPreviewImpl(
   const ordersUpdatedAtLocationCount = updatedRaw.length;
   const overlayRefundCount = 0;
 
-  const inDay = (iso?: string) => {
-    if (!iso) return false;
-    const t = new Date(iso).getTime();
-    return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
-  };
-
   // ポイント利用額に数える割引（旧 VIP の VIP-・Shop Point の SP-POINT- と旧形式・POS の「Shop Point」）。
   // 「ポイント/会員施策設定」で変えられる。保存していない店は初めの値。
+  // （inDay は #11 で注文取得の直後へ移した。ここでは定義し直さない）
   const loyaltySettings = await getAppSetting<Partial<LoyaltySettings>>(shopId, LOYALTY_SETTINGS_KEY);
   const pointRules = resolvePointRedemptionRules(loyaltySettings);
 
@@ -798,6 +794,11 @@ async function buildSettlementPreviewImpl(
     return true;
   });
 
+  // 精算に入る特殊返金で Shopify 返金の成否が分からないもの（pending）があれば確定しない。
+  // 数えると Shopify の返金と上乗せの二重、数えないと返金の抜けになりうるため（監査 P1-1）。
+  // 反映の設定がオフの種別は上乗せしないので止めない。
+  assertNoPendingSpecialRefunds(otherEvents);
+
   /** DB の手入力調整 + ノート観測（GAS _voucher_change_total と同系） */
   const voucherChangeAmount =
     Math.round(gas.voucherChangeObserved) +
@@ -810,9 +811,26 @@ async function buildSettlementPreviewImpl(
 
   let paymentSections = await payBucketsToPaymentSections(gas.pay, shopId);
   const eventTotals = { total, refundTotal };
-  applySpecialRefundEventsToTotals(paymentSections, otherEvents, eventTotals);
+  applySpecialRefundEventsToTotals(
+    paymentSections,
+    otherEvents.map((e) => ({
+      eventType: e.eventType,
+      amount: e.amount,
+      originalPaymentMethod: e.originalPaymentMethod,
+      actualRefundMethod: e.actualRefundMethod,
+      adjustKind: e.adjustKind,
+      shopifyRefundStatus: e.shopifyRefundStatus,
+    })),
+    eventTotals,
+  );
   total = eventTotals.total;
   refundTotal = eventTotals.refundTotal;
+
+  if (gas.refundAttributionMismatchCount > 0) {
+    console.warn(
+      `[settlement] refund attribution metafield≠resolve mismatches=${gas.refundAttributionMismatchCount} shop=${shopId} location=${locationId} date=${targetDate}`,
+    );
+  }
 
   // 小数は不要運用のため、精算数値はすべて四捨五入（整数）で統一
   const roundInt = (n: number) => Math.round(n);
@@ -858,6 +876,7 @@ async function buildSettlementPreviewImpl(
           ordersUpdatedPosSourceMatchedCount,
           ordersUpdatedAtLocationCount,
           overlayRefundCount,
+          refundAttributionMismatchCount: gas.refundAttributionMismatchCount,
         }
       : undefined,
     appliedSpecialRefundEvents: otherEvents.map((e) => ({
