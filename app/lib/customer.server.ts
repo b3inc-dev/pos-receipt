@@ -6,9 +6,13 @@
 
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { memberMetafieldValues, type MemberMetafieldNode } from "../utils/memberMetafields";
+import { lineFieldFilterState, markFieldNotFilterable } from "./memberCardFieldFilter.server";
 import {
   customerLineId,
+  fieldLabel,
+  fieldLineId,
   fullScanQuery,
+  isLegacyLineIdField,
   lineFieldSelections,
   readLineIdFields,
   type LineIdField,
@@ -163,12 +167,13 @@ function buildMemberResult(node: CustomerNode): GetMemberIdResult | GetMemberIdE
  *
  * ファストパス: tag:"line:<lineUserId>" で1回検索（タグ登録済みの場合）。
  * スローパス:  項目ごとに metafields.<namespace>.<key>:* で全件スキャン（並べた順。ページ制限なし）。
+ *              socialplus.line 以外は、定義の絞り込みが効く項目だけ（memberCardFieldFilter.server.ts）。
  *              見つかった顧客に line: タグを fire-and-forget で追加し、次回からファストパスが効く。
  */
 export async function getMemberIdByLineId(
   admin: Pick<AdminApiContext, "graphql">,
   lineUserId: string,
-  options: { fields?: readonly LineIdField[]; sleep?: (ms: number) => Promise<void> } = {}
+  options: { fields?: readonly LineIdField[]; sleep?: (ms: number) => Promise<void>; shop?: string } = {}
 ): Promise<GetMemberIdResponse> {
   if (!lineUserId?.trim()) {
     return { ok: false, error: "CUSTOMER_NOT_FOUND" };
@@ -232,18 +237,35 @@ export async function getMemberIdByLineId(
     }
 
     // ── スローパス: 項目ごとに全件スキャン（件数制限なし）──
+    // socialplus.line（前からの項目）は main と同じ動き: 定義を確かめずに全件を見て、エラーなら API_ERROR。
+    // ほかの項目は、定義で絞り込みが効く（adminFilterable が FILTERABLE）と確かめられたときだけ見る。
+    // 効かない項目で全件を見ない（2026-07 までは条件が無視されて全顧客が返り、2026-10 からはエラーになるため）。
+    // 問い合わせのエラーは次の項目へ進む。値の空の人が返ってきたら絞り込みが効いていないと見て、その項目は打ち切る。
     console.info("[member-card] Tag miss. Falling back to full scan (last4):", lineIdNorm.slice(-4));
-    for (const field of fields) {
+    let gatedFieldFailed = false;
+    for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
+      const field = fields[fieldIndex];
+      const legacy = isLegacyLineIdField(field);
+      if (!legacy) {
+        const state = await lineFieldFilterState(admin, options.shop, field);
+        if (state !== "usable") {
+          console.warn("[member-card] Skip full scan: filter not usable for", fieldLabel(field), state);
+          if (state === "unknown") gatedFieldFailed = true;
+          continue;
+        }
+      }
       const search = fullScanQuery(field);
       let cursor: string | null = null;
       let pageCount = 0;
 
-      while (true) {
+      scan: while (true) {
         const json = await runQueryWithRetry(search, cursor);
 
         if (json.errors?.length) {
-          console.error("Customer query errors:", json.errors);
-          return { ok: false, error: "API_ERROR" };
+          console.error("Customer query errors:", search, json.errors);
+          if (legacy) return { ok: false, error: "API_ERROR" };
+          gatedFieldFailed = true;
+          break;
         }
 
         const nodes = json.data?.customers?.nodes ?? [];
@@ -258,7 +280,14 @@ export async function getMemberIdByLineId(
         }
 
         for (const node of nodes) {
-          if (!node || !matches(node)) continue;
+          if (!node) continue;
+          if (!legacy && !fieldLineId(node, fieldIndex)) {
+            // 絞り込みが効いていれば値のある人だけが返る。値の空の人がいれば全顧客を見ている。
+            console.warn("[member-card] Filter ignored (customer without value returned). Stop full scan:", search);
+            markFieldNotFilterable(options.shop, field);
+            break scan;
+          }
+          if (!matches(node)) continue;
 
           // タグを追加して次回からファストパスが効くようにする（fire-and-forget）
           admin.graphql(TAGS_ADD_MUTATION, { variables: { id: node.id, tags: [lineTag] } })
@@ -278,6 +307,11 @@ export async function getMemberIdByLineId(
         cursor = pageInfo.endCursor;
         pageCount++;
       }
+    }
+    if (gatedFieldFailed) {
+      // 見られなかった項目にいる人かもしれないので「見つからない」とは言わない。
+      console.warn("[member-card] No match, but some field could not be scanned. sub (last4):", lineIdNorm.slice(-4));
+      return { ok: false, error: "API_ERROR" };
     }
     console.warn("[member-card] No match found. sub (last4):", lineIdNorm.slice(-4));
     return { ok: false, error: "CUSTOMER_NOT_FOUND" };

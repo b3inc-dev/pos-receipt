@@ -97,3 +97,19 @@ export function customerLineId(node: Record<string, unknown> | null | undefined,
   }
   return undefined;
 }
+
+/**
+ * 前からの項目 `socialplus.line`。main と同じ動きを保つため、定義の確かめをせずに全件を見る
+ * （エラーなら API_ERROR を返す）。ほかの項目は、定義で絞り込みが効くと確かめられたときだけ全件を見る。
+ */
+export const LEGACY_LINE_ID_FIELD: LineIdField = { namespace: "socialplus", key: "line" };
+
+export function isLegacyLineIdField(field: LineIdField): boolean {
+  return field.namespace === LEGACY_LINE_ID_FIELD.namespace && field.key === LEGACY_LINE_ID_FIELD.key;
+}
+
+/** 1 つの項目の値（並べた順の index の別名）。空なら undefined。 */
+export function fieldLineId(node: Record<string, unknown> | null | undefined, index: number): string | undefined {
+  if (!node) return undefined;
+  return normalizeStoredLineId((node[lineFieldAlias(index)] as Field)?.value);
+}

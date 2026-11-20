@@ -19,7 +19,7 @@
 | D11 | 追加ロケーション $20 従量は未実装。Billing は Lite/Pro 定額のみ。UI で課金済み表示にしない（`EXTRA_LOCATION_USAGE_BILLING_ENABLED=false`） | `app.plan.tsx` + `planFeatures.server.ts` |
 | D12 | プライバシーポリシー URL は AppSetting `privacyPolicyUrl` 優先、なければ env `PRIVACY_POLICY_URL`。ダミー固定 URL なし | `privacyPolicyUrl.ts` + 一般設定 / ホーム |
 | D13 | `customers/data_request` は注文紐づけの ReceiptIssue / SpecialRefundEvent を列挙し PII 本文なしでログ。新規 PII 永続化なし。webhook は 200 | `webhooks.compliance.tsx` |
-| D14 | LIFF 会員証は、LINE ユーザー ID の顧客メタフィールドを決めた順で読む。既定は `line_crm.line_user_id`（LINE CRM＝Shop CRM for LINE の項目。line-crm の D-APP-14）→ `socialplus.line`（SocialPlus と、LINE CRM の互換の書き込み）。環境変数 `MEMBER_CARD_LINE_ID_METAFIELDS`（`<namespace>.<key>` をカンマ区切り、多くて 4 つ）で並べ替えられる。顧客の LINE ユーザー ID は「並べた順で最初に値が入っている項目」の値（LINE CRM の項目に値があれば、古い項目の別の ID では見つけない）。タグ `line:<id>` のファストパスはそのまま（タグで見つかった人も同じ決まりで確かめる）。全件スキャンは項目ごとに `metafields.<namespace>.<key>:*` を並べた順に行う | `app/utils/memberCardLineFields.ts` + `app/lib/customer.server.ts` |
+| D14 | LIFF 会員証は、LINE ユーザー ID の顧客メタフィールドを決めた順で読む。既定は `line_crm.line_user_id`（LINE CRM＝Shop CRM for LINE の項目。line-crm の D-APP-14）→ `socialplus.line`（SocialPlus と、LINE CRM の互換の書き込み）。環境変数 `MEMBER_CARD_LINE_ID_METAFIELDS`（`<namespace>.<key>` をカンマ区切り、多くて 4 つ）で並べ替えられる。顧客の LINE ユーザー ID は「並べた順で最初に値が入っている項目」の値（LINE CRM の項目に値があれば、古い項目の別の ID では見つけない）。タグ `line:<id>` のファストパスはそのまま（タグで見つかった人も同じ決まりで確かめる）。全件スキャンは項目ごとに `metafields.<namespace>.<key>:*` を並べた順に行う。`socialplus.line` 以外は、定義の `adminFilterable` が FILTERABLE のときだけ全件を見る（絞り込みが効かない項目で全顧客を見ない。検索のエラーは次の項目へ）。`socialplus.line` は前と同じ | `app/utils/memberCardLineFields.ts` + `app/lib/customer.server.ts` + `app/lib/memberCardFieldFilter.server.ts` |
 
 ## 2. 古い docs との差分（注意）
 

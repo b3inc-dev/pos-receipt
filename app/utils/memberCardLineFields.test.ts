@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import { customersQuery, getMemberIdByLineId } from "../lib/customer.server";
+import { clearFieldFilterCache, lineFieldFilterState } from "../lib/memberCardFieldFilter.server";
 import {
   DEFAULT_LINE_ID_FIELDS,
   customerLineId,
@@ -15,22 +16,52 @@ const LINE_B = "U" + "b".repeat(32);
 
 type Customer = { id: string; tags: string[]; fields: Record<string, string>; memberId?: string };
 
-/** customers の検索（tag: と metafields.<ns>.<key>:*）をまねる。呼んだ検索を残す。 */
-function fakeAdmin(customers: Customer[]) {
+type Definition = { enabled: boolean; status: string };
+type FakeOptions = {
+  /** `<ns>.<key>` → 定義。書かない項目は定義なし。既定は line_crm.line_user_id が絞り込みオン。 */
+  definitions?: Record<string, Definition>;
+  /** この検索は絞り込みを無視して全顧客を返す（2026-07 までの Shopify の動き）。 */
+  ignoredFilters?: string[];
+  /** この検索はエラーを返す（2026-10 からの Shopify の動き）。 */
+  erroringSearches?: string[];
+  /** 定義の問い合わせが例外になる。 */
+  definitionThrows?: boolean;
+};
+
+const FILTERABLE: Definition = { enabled: true, status: "FILTERABLE" };
+
+/** customers の検索（tag: と metafields.<ns>.<key>:*）と metafieldDefinitions をまねる。呼んだ検索を残す。 */
+function fakeAdmin(customers: Customer[], opts: FakeOptions = {}) {
+  const definitions = opts.definitions ?? { "line_crm.line_user_id": FILTERABLE };
   const searches: string[] = [];
+  const definitionReads: string[] = [];
   const tagged: unknown[] = [];
   const admin = {
     async graphql(query: string, options?: { variables?: Record<string, unknown> }) {
       const v = options?.variables ?? {};
+      if (query.includes("metafieldDefinitions(")) {
+        const label = `${v.namespace}.${v.key}`;
+        definitionReads.push(label);
+        if (opts.definitionThrows) throw new Error("Throttled");
+        const def = definitions[label];
+        const nodes = def ? [{ namespace: v.namespace, key: v.key, capabilities: { adminFilterable: def } }] : [];
+        return new Response(JSON.stringify({ data: { metafieldDefinitions: { nodes } } }));
+      }
       if (query.includes("tagsAdd")) {
         tagged.push(v);
         return new Response(JSON.stringify({ data: { tagsAdd: { userErrors: [] } } }));
       }
       const search = String(v.query);
       searches.push(search);
+      if (opts.erroringSearches?.includes(search)) {
+        return new Response(JSON.stringify({ errors: [{ message: "Metafield definition does not allow filtering" }] }));
+      }
       const tag = /^tag:"(.+)"$/.exec(search)?.[1];
       const meta = /^metafields\.([^.]+)\.([^:]+):\*$/.exec(search);
-      const hits = customers.filter((c) => (tag ? c.tags.includes(tag) : meta ? Boolean(c.fields[`${meta[1]}.${meta[2]}`]) : false));
+      const ignored = opts.ignoredFilters?.includes(search);
+      const hits = customers.filter((c) =>
+        tag ? c.tags.includes(tag) : meta ? ignored || Boolean(c.fields[`${meta[1]}.${meta[2]}`]) : false
+      );
       const nodes = hits.map((c) => {
         const node: Record<string, unknown> = { id: c.id, metafield: c.memberId ? { value: c.memberId } : null };
         for (let i = 0; `lineNs${i}` in v; i += 1) {
@@ -42,8 +73,10 @@ function fakeAdmin(customers: Customer[]) {
       return new Response(JSON.stringify({ data: { customers: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } }));
     },
   };
-  return { admin: admin as unknown as Parameters<typeof getMemberIdByLineId>[0], searches, tagged };
+  return { admin: admin as unknown as Parameters<typeof getMemberIdByLineId>[0], searches, definitionReads, tagged };
 }
+
+beforeEach(() => clearFieldFilterCache());
 
 describe("会員証が読む LINE ユーザー ID の項目", () => {
   it("既定は line_crm.line_user_id → socialplus.line。環境変数で並べ替えられ、形の合わないものと予約の namespace は捨てる", () => {
@@ -102,5 +135,83 @@ describe("会員証が読む LINE ユーザー ID の項目", () => {
     const shop = fakeAdmin([{ id: "gid://shopify/Customer/1", tags: [], fields: { "socialplus.line": LINE_A } }]);
     assert.deepEqual(await getMemberIdByLineId(shop.admin, LINE_A, { sleep: async () => {} }), { ok: false, error: "MEMBER_ID_NOT_SET" });
     assert.deepEqual(await getMemberIdByLineId(fakeAdmin([]).admin, LINE_A, { sleep: async () => {} }), { ok: false, error: "CUSTOMER_NOT_FOUND" });
+  });
+});
+
+describe("全件スキャンは絞り込みが効く項目だけ（レビュー #36 の P1）", () => {
+  const SHOP = "example.myshopify.com";
+  const noop = async () => {};
+  const people = (): Customer[] => [
+    { id: "gid://shopify/Customer/1", tags: [], fields: { "line_crm.line_user_id": LINE_A }, memberId: "M1" },
+    { id: "gid://shopify/Customer/2", tags: [], fields: { "socialplus.line": LINE_B }, memberId: "M2" },
+    { id: "gid://shopify/Customer/3", tags: [], fields: {}, memberId: "M3" },
+  ];
+
+  it("定義が無い・絞り込みがオフ・処理中の項目は全件を見ず、socialplus.line は main と同じに見る", async () => {
+    for (const definitions of [{}, { "line_crm.line_user_id": { enabled: false, status: "NOT_FILTERABLE" } }, { "line_crm.line_user_id": { enabled: true, status: "IN_PROGRESS" } }]) {
+      clearFieldFilterCache();
+      const shop = fakeAdmin(people(), { definitions });
+      const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP });
+      assert.ok(b.ok && b.memberId === "M2");
+      assert.deepEqual(shop.searches, [`tag:"line:${LINE_B.toLowerCase()}"`, "metafields.socialplus.line:*"]);
+      assert.deepEqual(shop.definitionReads, ["line_crm.line_user_id"], "socialplus.line の定義は確かめない");
+    }
+  });
+
+  it("定義の結果は店ごとに覚え、5 分のあいだは読み直さない", async () => {
+    const shop = fakeAdmin(people());
+    await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: SHOP });
+    await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: SHOP });
+    assert.deepEqual(shop.definitionReads, ["line_crm.line_user_id"]);
+    await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: "other.myshopify.com" });
+    assert.equal(shop.definitionReads.length, 2, "別の店は読み直す");
+    const field = DEFAULT_LINE_ID_FIELDS[0];
+    assert.equal(await lineFieldFilterState(shop.admin, SHOP, field, Date.now() + 5 * 60 * 1000 + 1), "usable");
+    assert.equal(shop.definitionReads.length, 3, "5 分を過ぎたら読み直す");
+  });
+
+  it("2026-10 の API で検索がエラーになっても、次の項目（socialplus.line）へ進む", async () => {
+    const shop = fakeAdmin(people(), { erroringSearches: ["metafields.line_crm.line_user_id:*"] });
+    const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP });
+    assert.ok(b.ok && b.memberId === "M2");
+    assert.deepEqual(shop.searches.slice(1), ["metafields.line_crm.line_user_id:*", "metafields.socialplus.line:*"]);
+    // どこにもいなければ、見られなかった項目があるので「見つからない」とは言わない。
+    const none = await getMemberIdByLineId(shop.admin, "U" + "c".repeat(32), { sleep: noop, shop: SHOP });
+    assert.deepEqual(none, { ok: false, error: "API_ERROR" });
+  });
+
+  it("socialplus.line の検索がエラーなら、main と同じく API_ERROR", async () => {
+    const shop = fakeAdmin(people(), { erroringSearches: ["metafields.socialplus.line:*"] });
+    assert.deepEqual(await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP }), { ok: false, error: "API_ERROR" });
+  });
+
+  it("定義はオンでも絞り込みが無視されて値の空の人が返ったら、その項目の全件は打ち切り、しばらく見ない", async () => {
+    // 値の空の人を先頭に置いて、絞り込みが無視されたことを 1 ページめで見つける。
+    const list = [people()[2], people()[0], people()[1]];
+    const shop = fakeAdmin(list, { ignoredFilters: ["metafields.line_crm.line_user_id:*"] });
+    const a = await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: SHOP });
+    // line_crm の項目は打ち切ったので見つからない。socialplus.line にもいない。
+    assert.deepEqual(a, { ok: false, error: "CUSTOMER_NOT_FOUND" });
+    assert.deepEqual(shop.searches.slice(1), ["metafields.line_crm.line_user_id:*", "metafields.socialplus.line:*"]);
+    await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: SHOP });
+    assert.deepEqual(shop.searches.slice(4), ["metafields.socialplus.line:*"], "次からは line_crm の全件を見ない");
+    assert.equal(shop.definitionReads.length, 1);
+  });
+
+  it("定義を読めないときはその項目を見ず、覚えない。どこにもいなければ API_ERROR", async () => {
+    const shop = fakeAdmin(people(), { definitionThrows: true });
+    const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP });
+    assert.ok(b.ok && b.memberId === "M2");
+    const a = await getMemberIdByLineId(shop.admin, LINE_A, { sleep: noop, shop: SHOP });
+    assert.deepEqual(a, { ok: false, error: "API_ERROR" });
+    assert.equal(shop.definitionReads.length, 2, "読めなかった結果は覚えない");
+  });
+
+  it("MEMBER_CARD_LINE_ID_METAFIELDS=socialplus.line なら、前と同じ動き（定義を確かめない）", async () => {
+    const shop = fakeAdmin(people(), { definitions: {} });
+    const b = await getMemberIdByLineId(shop.admin, LINE_B, { sleep: noop, shop: SHOP, fields: parseLineIdFields("socialplus.line") });
+    assert.ok(b.ok && b.memberId === "M2");
+    assert.deepEqual(shop.definitionReads, []);
+    assert.deepEqual(shop.searches.slice(1), ["metafields.socialplus.line:*"]);
   });
 });

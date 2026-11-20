@@ -82,7 +82,10 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 - 順番は環境変数 `MEMBER_CARD_LINE_ID_METAFIELDS`（例 `line_crm.line_user_id,socialplus.line`）で変えられる。空なら上の既定（DECISIONS の D14）。
 - 顧客の LINE ユーザー ID は、並べた順で最初に値が入っている項目の値。値は生の `U…` でも JSON（`{"uid":"U…"}` など）でも読む。
 - 見つけ方: タグ `line:<小文字の id>` で 1 回探す（ファストパス）→ 無ければ項目ごとに `metafields.<namespace>.<key>:*` で全件を見る。見つけた人にはタグを付ける。
-- 未確認: `metafields.line_crm.line_user_id:*` の検索が効くには、`socialplus.line` と同じく、定義で「ストア分析でデータを絞り込む、またはグループ化する」をオンにする必要があると考えている（`MEMBER_CARD_DEBUG.md` の `socialplus.line` の記載から。`line_crm.line_user_id` ではまだ確かめていない）。効かないときも値で比べるので、まちがった人は出さない（見るのが遅くなるか、その項目では見つからず次の項目へ進む）。
+- 全件を見るのは、絞り込みが効く項目だけ（`app/lib/memberCardFieldFilter.server.ts`）。Shopify は、定義が無い・定義の絞り込み（`capabilities.adminFilterable`）がオフのメタフィールドで絞ると、2026-07 までの API では条件を黙って無視してすべての顧客を返し、2026-10 からはエラーを返す（Shopify changelog「Invalid metafield queries now return errors in the GraphQL Admin API」）。そのため `socialplus.line` 以外の項目は、先に `metafieldDefinitions(ownerType: CUSTOMER, namespace, key)` を読み、定義があって `adminFilterable.enabled = true` かつ `status = FILTERABLE` のときだけ全件を見る（店ごと・項目ごとに 5 分覚える。読めなかったときは覚えない）。定義がオンでも、値の空の顧客が返ってきたら絞り込みが効いていないと見て、その項目は打ち切る（5 分見ない）。
+- その項目の検索がエラーになったら次の項目へ進む。どの項目にもいなくて、見られなかった項目があったときは `CUSTOMER_NOT_FOUND` ではなく `API_ERROR` を返す。
+- `socialplus.line` は前と同じ動き（定義を確かめずに `metafields.socialplus.line:*` で全件を見る。エラーなら `API_ERROR`）。
+- 未確認: 開発ストアで `line_crm.line_user_id` の定義の絞り込みがオン／オフのときに、全件の検索が何件返すか（オフなら全顧客が返り、上の打ち切りが働くはず）。定義の絞り込みは LINE CRM が定義を作るときにオンにする（line-crm 側の PR）。
 
 ## 7. Printing（現状と移行候補の分離）
 
