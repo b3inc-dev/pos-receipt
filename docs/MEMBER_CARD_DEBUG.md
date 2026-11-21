@@ -1,3 +1,5 @@
+> 2026-11-21 追記: 会員証は `line_crm.line_user_id` → `socialplus.line` の順に読む（`MEMBER_CARD_LINE_ID_METAFIELDS` で変えられる。`docs/SHOPIFY.md` の 6.3）。下の `socialplus.line` の確かめ方は、`line_crm.line_user_id` にも同じように当てはまる。ログの検索の文字は項目ごとに `metafields.<namespace>.<key>:*` と出る。
+
 # 会員証（LIFF）で表示されないときの原因の追求
 
 ## 1. 「LINE認証に失敗しました」／「トークンの有効期限が切れました」

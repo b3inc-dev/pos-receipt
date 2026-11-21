@@ -98,7 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const memberResult = await ((): Promise<GetMemberIdResponse> => {
     const prev = shopMemberCardQueue.get(shop) ?? Promise.resolve();
     const task = prev
-      .then(() => getMemberIdByLineId(admin, verifyResult.sub))
+      .then(() => getMemberIdByLineId(admin, verifyResult.sub, { shop }))
       .finally(() => {
         if (shopMemberCardQueue.get(shop) === task) shopMemberCardQueue.delete(shop);
       });
