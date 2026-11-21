@@ -11,7 +11,7 @@
 | API | `app/routes/api.*` | POS はセッショントークン認証（`posAuth.server`） |
 | DB | PostgreSQL + Prisma | `prisma/schema.prisma` |
 | POS Extension | UI Extension `api_version = "2026-01"` | `extensions/pos-smart-grid` |
-| Shopify Admin API | `ApiVersion.October25`（`app/shopify.server.ts`） | Webhook TOML は `2026-04` |
+| Shopify Admin API | `ApiVersion.April26`（`app/shopify.server.ts`。ロックの `@shopify/shopify-api` 12.3.0 に `April26 = '2026-04'` があることを確かめた） | Webhook TOML も `2026-04` |
 | ジョブ | pg-boss | `orders/updated` 経由の売上サマリー更新キュー |
 
 ## 2. コンポーネント境界

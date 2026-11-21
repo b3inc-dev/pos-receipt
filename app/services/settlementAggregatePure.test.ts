@@ -6,8 +6,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   aggregateGasStyleForOrders,
+  buildCrossLocationRefundOnlyOrder,
+  decideRefundAttributionForSettlement,
   gasNormalizeGatewayLabel,
   isPointRedemption,
+  mergeCrossLocationRefundOrders,
   totalFromPayBuckets,
   type GasAggregateAttributionOpts,
   type GasStyleOrder,
@@ -161,6 +164,111 @@ describe("aggregateGasStyleForOrders — 件数", () => {
 });
 
 describe("aggregateGasStyleForOrders — 返金帰属", () => {
+  it("別店舗販売の注文を返金店舗向け入力へ変換しても元売上を混入させない", () => {
+    const locA = "gid://shopify/Location/100";
+    const locB = "gid://shopify/Location/200";
+    const order = saleOrder({
+      id: "o-cross-location",
+      retailLocation: { id: locA },
+      transactions: [
+        {
+          id: "o-cross-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "cash",
+          location: { id: locA },
+        },
+        {
+          id: "o-cross-refund",
+          createdAt: "2026-10-08T03:00:00Z",
+          kind: "REFUND",
+          amountSet: money(300),
+          gateway: "cash",
+          location: { id: locB },
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T03:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-cross-refund",
+              kind: "REFUND",
+              amountSet: money(300),
+              gateway: "cash",
+              location: { id: locB },
+            },
+          ],
+        },
+      ],
+    });
+
+    const refundOnly = buildCrossLocationRefundOnlyOrder(
+      order,
+      alwaysInRange,
+      locB,
+      "200",
+      "refund_transaction_pos_location",
+    );
+    assert.ok(refundOnly);
+    assert.deepEqual(refundOnly.transactions?.map((tx) => tx.id), ["o-cross-refund"]);
+
+    const gas = aggregateGasStyleForOrders(
+      [refundOnly],
+      alwaysInRange,
+      attributionOpts(locB, "200"),
+    );
+    assert.equal(gas.pay["現金"]?.sale ?? 0, 0);
+    assert.equal(gas.pay["現金"]?.refund, 300);
+    assert.equal(gas.saleOrderSet.size, 0);
+    assert.equal(gas.refundOrderSet.size, 1);
+    assert.equal(gas.itemCount, -1);
+  });
+
+  it("注文基準モードでは別店舗の返金専用入力を生成しない", () => {
+    const order = saleOrder({
+      id: "o-order-mode-cross-refund",
+      retailLocation: { id: locA },
+      transactions: [
+        {
+          id: "o-order-mode-cross-refund-tx",
+          createdAt: "2026-10-08T03:00:00Z",
+          kind: "REFUND",
+          amountSet: money(300),
+          gateway: "cash",
+          location: { id: locB },
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T03:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-order-mode-cross-refund-tx",
+              kind: "REFUND",
+              amountSet: money(300),
+              gateway: "cash",
+              location: { id: locB },
+            },
+          ],
+        },
+      ],
+    });
+
+    const refundOnly = buildCrossLocationRefundOnlyOrder(
+      order,
+      alwaysInRange,
+      locB,
+      "200",
+      "order_transaction",
+    );
+
+    assert.equal(refundOnly, null);
+  });
+
   const locA = "gid://shopify/Location/100";
   const locB = "gid://shopify/Location/200";
 
@@ -267,6 +375,361 @@ describe("aggregateGasStyleForOrders — 返金帰属", () => {
     assert.equal(gas.itemCount, 1);
     assert.equal(gas.refundsGross, 400);
   });
+
+  it("当日返金 TX は注文全体の最新 metafield より優先する", () => {
+    // 後日の部分返品で metafield が locA へ変わっても、当日の TX locB を維持する
+    const order = saleOrder({
+      id: "o4mf",
+      lineItems: { nodes: [{ quantity: 2 }] },
+      retailLocation: { id: locA },
+      refundAggregationLocationGid: locA,
+      transactions: [
+        {
+          id: "o4mf-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "cash",
+        },
+        {
+          id: "o4mf-refund",
+          createdAt: "2026-10-08T02:00:00Z",
+          kind: "REFUND",
+          amountSet: money(400),
+          gateway: "cash",
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T02:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o4mf-refund",
+              kind: "REFUND",
+              amountSet: money(400),
+              gateway: "cash",
+              location: { id: locB },
+            },
+          ],
+        },
+      ],
+    });
+
+    const gas = aggregateGasStyleForOrders([order], alwaysInRange, attributionOpts(locA, "100"));
+    assert.equal(gas.refundOrderSet.size, 0);
+    assert.equal(gas.pay["現金"]?.refund ?? 0, 0);
+    assert.equal(gas.refundsGross, 0);
+    assert.equal(gas.refundAttributionMismatchCount, 1);
+  });
+
+  it("別日・別店舗の部分返品は後続 metafield で過去日の帰属が変わらない", () => {
+    const order = saleOrder({
+      id: "o-history",
+      retailLocation: { id: locA },
+      // 注文単位 metafield は後発の店舗Bへ更新済み
+      refundAggregationLocationGid: locB,
+      transactions: [
+        {
+          id: "o-history-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "cash",
+        },
+        {
+          id: "o-history-r-a",
+          createdAt: "2026-10-08T02:00:00Z",
+          kind: "REFUND",
+          amountSet: money(300),
+          gateway: "cash",
+        },
+        {
+          id: "o-history-r-b",
+          createdAt: "2026-10-09T02:00:00Z",
+          kind: "REFUND",
+          amountSet: money(200),
+          gateway: "cash",
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T02:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-history-r-a",
+              kind: "REFUND",
+              amountSet: money(300),
+              gateway: "cash",
+              location: { id: locA },
+            },
+          ],
+        },
+        {
+          createdAt: "2026-10-09T02:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-history-r-b",
+              kind: "REFUND",
+              amountSet: money(200),
+              gateway: "cash",
+              location: { id: locB },
+            },
+          ],
+        },
+      ],
+    });
+    const dayA = (iso?: string) => String(iso ?? "").startsWith("2026-10-08");
+    const dayB = (iso?: string) => String(iso ?? "").startsWith("2026-10-09");
+
+    const a = aggregateGasStyleForOrders([order], dayA, attributionOpts(locA, "100"));
+    const b = aggregateGasStyleForOrders([order], dayB, attributionOpts(locB, "200"));
+
+    assert.equal(a.refundsGross, 300);
+    assert.equal(a.pay["現金"]?.refund, 300);
+    assert.equal(b.refundsGross, 200);
+    assert.equal(b.pay["現金"]?.refund, 200);
+  });
+
+  it("同日・別店舗の部分返品は返金 TX ごとに金額を分ける", () => {
+    const order = saleOrder({
+      id: "o-same-day-split",
+      retailLocation: { id: locA },
+      refundAggregationLocationGid: locB,
+      transactions: [
+        {
+          id: "o-same-day-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "cash",
+        },
+        {
+          id: "o-same-day-r-a",
+          createdAt: "2026-10-08T02:00:00Z",
+          kind: "REFUND",
+          amountSet: money(300),
+          gateway: "cash",
+        },
+        {
+          id: "o-same-day-r-b",
+          createdAt: "2026-10-08T03:00:00Z",
+          kind: "REFUND",
+          amountSet: money(200),
+          gateway: "cash",
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T02:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-same-day-r-a",
+              kind: "REFUND",
+              amountSet: money(300),
+              gateway: "cash",
+              location: { id: locA },
+            },
+          ],
+        },
+        {
+          createdAt: "2026-10-08T03:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-same-day-r-b",
+              kind: "REFUND",
+              amountSet: money(200),
+              gateway: "cash",
+              location: { id: locB },
+            },
+          ],
+        },
+      ],
+    });
+
+    const a = aggregateGasStyleForOrders([order], alwaysInRange, attributionOpts(locA, "100"));
+    const b = aggregateGasStyleForOrders([order], alwaysInRange, attributionOpts(locB, "200"));
+
+    assert.equal(a.refundsGross, 300);
+    assert.equal(a.pay["現金"]?.refund, 300);
+    assert.equal(a.pay["現金"]?.refundTx, 1);
+    assert.equal(b.refundsGross, 200);
+    assert.equal(b.pay["現金"]?.refund, 200);
+    assert.equal(b.pay["現金"]?.refundTx, 1);
+  });
+
+  it("当日 POS 返金 TX が無い場合は処理店舗 metafield を fallback に使う", () => {
+    const order = saleOrder({
+      id: "o-non-pos",
+      retailLocation: { id: locA },
+      refundAggregationLocationGid: locB,
+      transactions: [
+        {
+          id: "o-non-pos-refund",
+          createdAt: "2026-10-08T02:00:00Z",
+          kind: "REFUND",
+          amountSet: money(400),
+          gateway: "cash",
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T02:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-non-pos-refund",
+              kind: "REFUND",
+              amountSet: money(400),
+              gateway: "cash",
+              location: null,
+            },
+          ],
+        },
+      ],
+    });
+    const gas = aggregateGasStyleForOrders([order], alwaysInRange, attributionOpts(locB, "200"));
+    assert.equal(gas.refundsGross, 400);
+    assert.equal(gas.pay["現金"]?.refund, 400);
+  });
+
+  it("metafield 無しなら従来どおり resolve", () => {
+    const order = saleOrder({
+      id: "o4resolve",
+      retailLocation: { id: locA },
+      refundAggregationLocationGid: null,
+      transactions: [
+        {
+          id: "o4r-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "cash",
+        },
+        {
+          id: "o4r-refund",
+          createdAt: "2026-10-08T02:00:00Z",
+          kind: "REFUND",
+          amountSet: money(400),
+          gateway: "cash",
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T02:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o4r-refund",
+              kind: "REFUND",
+              amountSet: money(400),
+              gateway: "cash",
+              location: { id: locB },
+            },
+          ],
+        },
+      ],
+    });
+    const gas = aggregateGasStyleForOrders([order], alwaysInRange, attributionOpts(locA, "100"));
+    assert.equal(gas.refundsGross, 0);
+    assert.equal(gas.refundAttributionMismatchCount, 0);
+  });
+
+  it("decideRefundAttributionForSettlement は不一致時に当日返金 TX を usedGid にする", () => {
+    const order = saleOrder({
+      id: "o-dec",
+      retailLocation: { id: locA },
+      refundAggregationLocationGid: locA,
+      refunds: [
+        {
+          createdAt: "2026-10-08T02:00:00Z",
+          transactions: [
+            {
+              id: "o-dec-r",
+              kind: "REFUND",
+              location: { id: locB },
+            },
+          ],
+        },
+      ],
+    });
+    const d = decideRefundAttributionForSettlement(
+      order,
+      alwaysInRange,
+      attributionOpts(locA, "100"),
+    );
+    assert.equal(d.metafieldGid, locA);
+    assert.equal(d.resolvedGid, locB);
+    assert.equal(d.usedGid, locB);
+    assert.equal(d.mismatch, true);
+    assert.equal(d.counts, false);
+  });
+});
+
+describe("aggregateGasStyleForOrders — 注文基準モードの返金帰属", () => {
+  const locA = "gid://shopify/Location/100";
+  const locB = "gid://shopify/Location/200";
+  function orderModeOpts(settlementGid: string, locIdRaw: string): GasAggregateAttributionOpts {
+    return {
+      attributionCtx: {
+        mode: "order_transaction",
+        nonPosRefundFallbackMode: "order_retail_location",
+        nonPosRefundTargetLocationGid: null,
+      },
+      settlementLocationId: settlementGid,
+      locIdRaw,
+    };
+  }
+  // 店 A で売った注文。店 B で特殊返金を登録したので metafield は B。そのあと店 A でふつうの POS 返品をした
+  function returnedAtA(): GasStyleOrder {
+    return saleOrder({
+      id: "o-order-mode",
+      lineItems: { nodes: [{ quantity: 2 }] },
+      retailLocation: { id: locA },
+      refundAggregationLocationGid: locB,
+      transactions: [
+        { id: "om-sale", createdAt: "2026-10-08T01:00:00Z", kind: "SALE", amountSet: money(1000), gateway: "cash" },
+        { id: "om-refund", createdAt: "2026-10-08T05:00:00Z", kind: "REFUND", amountSet: money(500), gateway: "cash" },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T05:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            { id: "om-refund", kind: "REFUND", amountSet: money(500), gateway: "cash", location: { id: locA } },
+          ],
+        },
+      ],
+    });
+  }
+
+  it("特殊返金が metafield を別の店に書き換えても、通常の返品は注文の店 A に載る", () => {
+    const gas = aggregateGasStyleForOrders([returnedAtA()], alwaysInRange, orderModeOpts(locA, "100"));
+    assert.equal(gas.refundsGross, 500);
+    assert.equal(gas.pay["現金"]?.refund, 500);
+    assert.equal(gas.refundOrderSet.size, 1);
+    assert.equal(gas.itemCount, 1);
+    assert.equal(gas.refundAttributionMismatchCount, 1);
+  });
+
+  it("metafield の店 B には載らない（二重にならない）", () => {
+    const gas = aggregateGasStyleForOrders([returnedAtA()], alwaysInRange, orderModeOpts(locB, "200"));
+    assert.equal(gas.refundsGross, 0);
+    assert.equal(gas.pay["現金"]?.refund ?? 0, 0);
+  });
+
+  it("decideRefundAttributionForSettlement は注文基準で resolve を使う", () => {
+    const d = decideRefundAttributionForSettlement(returnedAtA(), alwaysInRange, orderModeOpts(locA, "100"));
+    assert.equal(d.metafieldGid, locB);
+    assert.equal(d.resolvedGid, locA);
+    assert.equal(d.usedGid, locA);
+    assert.equal(d.mismatch, true);
+    assert.equal(d.counts, true);
+  });
 });
 
 describe("aggregateGasStyleForOrders — 支払バケット", () => {
@@ -335,6 +798,150 @@ describe("aggregateGasStyleForOrders — 支払バケット", () => {
     assert.equal(gas.pay["クレジットカード"]?.sale, 2000);
     assert.equal(gas.pay["クレジットカード"]?.refund, 500);
     assert.equal(totalFromPayBuckets(gas.pay), 2500);
+  });
+});
+
+describe("mergeCrossLocationRefundOrders — 返金基準で店舗の取得済み注文を上書きしない", () => {
+  const locX = "gid://shopify/Location/300";
+  const refundModeOpts: GasAggregateAttributionOpts = {
+    attributionCtx: {
+      mode: "refund_transaction_pos_location",
+      nonPosRefundFallbackMode: "exclude",
+      nonPosRefundTargetLocationGid: null,
+    },
+    settlementLocationId: locX,
+    locIdRaw: "300",
+  };
+
+  // オンライン注文（retailLocation 無し）を店 X から出荷し、同じ日に X で 1,000 円返金
+  function shippedOnlineOrderWithRefundAtX(): GasStyleOrder {
+    return saleOrder({
+      id: "o-online-shipped-from-x",
+      totalPriceSet: money(10000),
+      retailLocation: null,
+      transactions: [
+        {
+          id: "o-online-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(10000),
+          gateway: "cash",
+          location: { id: locX },
+        },
+        {
+          id: "o-online-refund",
+          createdAt: "2026-10-08T05:00:00Z",
+          kind: "REFUND",
+          amountSet: money(1000),
+          gateway: "cash",
+          location: { id: locX },
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T05:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-online-refund",
+              kind: "REFUND",
+              amountSet: money(1000),
+              gateway: "cash",
+              location: { id: locX },
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  it("店舗の取得に入った注文は、retailLocation が別でも返金だけの入力で上書きしない（9,000 円のまま）", () => {
+    const order = shippedOnlineOrderWithRefundAtX();
+    const merged = mergeCrossLocationRefundOrders(
+      [order],
+      [order],
+      alwaysInRange,
+      locX,
+      "300",
+      "refund_transaction_pos_location",
+    );
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0], order, "元の注文（売上あり）がそのまま残る");
+
+    const gas = aggregateGasStyleForOrders(merged, alwaysInRange, refundModeOpts);
+    assert.equal(gas.pay["現金"]?.sale, 10000);
+    assert.equal(gas.pay["現金"]?.refund, 1000);
+    assert.equal(totalFromPayBuckets(gas.pay), 9000);
+    assert.equal(gas.saleOrderSet.size, 1);
+  });
+
+  it("（直す前の形）返金だけの入力で上書きすると −1,000 円・売上 0 件になる", () => {
+    const order = shippedOnlineOrderWithRefundAtX();
+    const refundOnly = buildCrossLocationRefundOnlyOrder(
+      order,
+      alwaysInRange,
+      locX,
+      "300",
+      "refund_transaction_pos_location",
+    );
+    assert.ok(refundOnly);
+    const gas = aggregateGasStyleForOrders([refundOnly], alwaysInRange, refundModeOpts);
+    assert.equal(totalFromPayBuckets(gas.pay), -1000);
+    assert.equal(gas.saleOrderSet.size, 0);
+  });
+
+  it("店舗の取得に無い別店舗の注文は、X の返金だけを足す", () => {
+    const locA = "gid://shopify/Location/100";
+    const storeOrder = saleOrder({ id: "o-store-own", retailLocation: { id: locX } });
+    const otherStoreOrder = saleOrder({
+      id: "o-sold-at-a",
+      retailLocation: { id: locA },
+      transactions: [
+        {
+          id: "o-sold-at-a-sale",
+          createdAt: "2026-10-07T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "cash",
+          location: { id: locA },
+        },
+        {
+          id: "o-sold-at-a-refund",
+          createdAt: "2026-10-08T03:00:00Z",
+          kind: "REFUND",
+          amountSet: money(300),
+          gateway: "cash",
+          location: { id: locX },
+        },
+      ],
+      refunds: [],
+    });
+    const merged = mergeCrossLocationRefundOrders(
+      [storeOrder],
+      [storeOrder, otherStoreOrder],
+      alwaysInRange,
+      locX,
+      "300",
+      "refund_transaction_pos_location",
+    );
+    assert.equal(merged.length, 2);
+    const gas = aggregateGasStyleForOrders(merged, alwaysInRange, refundModeOpts);
+    assert.equal(gas.pay["現金"]?.sale, 1000);
+    assert.equal(gas.pay["現金"]?.refund, 300);
+  });
+
+  it("注文基準モードでは何も足さない", () => {
+    const storeOrder = saleOrder({ id: "o-store-own" });
+    const other = shippedOnlineOrderWithRefundAtX();
+    const merged = mergeCrossLocationRefundOrders(
+      [storeOrder],
+      [other],
+      alwaysInRange,
+      locX,
+      "300",
+      "order_transaction",
+    );
+    assert.deepEqual(merged, [storeOrder]);
   });
 });
 

@@ -144,7 +144,12 @@ export default function PrintSettingsPage() {
           <Layout.AnnotatedSection title="order-based 時の挙動" description="§12.2.3">
             <Card>
               <BlockStack gap="300">
-                <Checkbox label="印字時に精算注文を作成" checked={form.createSettlementOrderWhenPrinting} onChange={(v) => set("createSettlementOrderWhenPrinting", v)} />
+                <Checkbox
+                  label="精算注文を作成（監査アーカイブ／旧 order_based 印字）"
+                  checked={form.createSettlementOrderWhenPrinting}
+                  onChange={(v) => set("createSettlementOrderWhenPrinting", v)}
+                  helpText="ON のとき、精算・点検のたびに Shopify に精算注文（tag SETTLEMENT）を作ります。まだ保存していない店も ON として動きます。Printing API で印字していて精算注文がいらないときは、チェックを外して保存してください。"
+                />
                 <Checkbox label="精算メモを注文に付与" checked={form.attachSettlementNoteToOrder} onChange={(v) => set("attachSettlementNoteToOrder", v)} />
                 <Checkbox label="精算メタフィールドを注文に付与" checked={form.attachSettlementMetafieldsToOrder} onChange={(v) => set("attachSettlementMetafieldsToOrder", v)} />
                 <Text as="p" tone="subdued">
