@@ -42,7 +42,7 @@
 | 精算設定ラベル未使用 | UI で項目名を変えられても `buildSettlementReceiptText` は固定文言 |
 | 点検 UI と実装 | DoneView は点検で Shopify 注文を作らない旨を示しうるが、`order_based` では `syncInspectionOrderLikeGas` を呼びうる |
 | customAttributes | 取得するが UI 非表示 |
-| レガシー Gift Card | 設定デフォルト／検証用フラグ。API 失敗は握りつぶして続行 |
+| レガシー Gift Card | 設定デフォルト／検証用フラグ。取得失敗時は精算を確定しない（以前は握りつぶして 0 円のまま続行していた）。設定 ON で取得が続けて失敗する店は精算できないため、ON/OFF の既定は T の判断待ち（#13） |
 | API バージョン分散 | Admin SDK / Webhook TOML / POS extension で宣言が異なる |
 | Fulfillment / Draft complete | V2→旧 API、paymentPending→単純 complete のフォールバック（互換のための分岐） |
 

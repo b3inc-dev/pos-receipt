@@ -147,7 +147,7 @@
 
 - ゲートウェイ正規化で商品券／釣有り／釣無しを分類
 - 注文ノートの「商品券 N円」から額面観測（キャンセル除外）
-- `legacyGiftCardAggregationEnabled` が true のとき Gift Cards API 発行分を加算（POS union に含まれる order は二重加算回避）。失敗時は加算せず続行
+- `legacyGiftCardAggregationEnabled` が true のとき Gift Cards API 発行分を加算（POS union に含まれる order は二重加算回避）。取得が途中で失敗したとき（GraphQL errors・ページ情報の欠け・例外）は途中までの額で続けず `UpstreamAggregationError` で止め、精算・売上サマリーを確定しない（注文の取得と同じ考え方）。主クエリが errors のときだけ、新しい順の全件走査で最初から数え直す
 
 ---
 

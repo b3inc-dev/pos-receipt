@@ -49,6 +49,7 @@ import {
   runSettlementGraphqlSerial,
   sleep,
 } from "../lib/shopifyGraphqlThrottle.server";
+import { readOrdersPageOrThrow } from "./settlementUpstreamPage.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -323,6 +324,7 @@ async function fetchAllOrders(
       { variables: { first: 100, after: cursor, query, sortKey } },
       "settlementOrders",
     );
+    readOrdersPageOrThrow(json, "settlementOrders");
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
@@ -399,6 +401,7 @@ async function fetchOrdersUpdatedInDayRange(
       { variables: { first: 100, after: cursor, query } },
       "refundsOrders",
     );
+    readOrdersPageOrThrow(json, "refundsOrders");
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
@@ -720,24 +723,22 @@ async function buildSettlementPreviewImpl(
   let legacyGiftCardsAddedCount = 0;
   if (legacyGiftOn) {
     const posOrderIds = new Set(ordersUnion.map((o) => o.id));
-    try {
-      const leg = await fetchLegacyGiftCardIssuanceForDay(
-        admin,
-        dayRange,
-        locationId,
-        locationName,
-        posOrderIds,
-      );
-      legacyGiftCardsAddedAmount = leg.amount;
-      legacyGiftCardsAddedCount = leg.count;
-      if (leg.amount > 0) {
-        const bucket = gasNormalizeGatewayLabel("gift_card", null);
-        ensurePayBucket(gas.pay, bucket);
-        gas.pay[bucket].sale += leg.amount;
-        gas.pay[bucket].saleTx += leg.count;
-      }
-    } catch {
-      // read_gift_cards 未付与・API 差異時は加算せず続行
+    // 取得が途中で失敗したら UpstreamAggregationError / ThrottledExhaustedError がそのまま上がる。
+    // 以前は握りつぶして 0 円のまま精算を確定していた（商品券の売上が欠ける）。#16 と同じく確定しない。
+    const leg = await fetchLegacyGiftCardIssuanceForDay(
+      admin,
+      dayRange,
+      locationId,
+      locationName,
+      posOrderIds,
+    );
+    legacyGiftCardsAddedAmount = leg.amount;
+    legacyGiftCardsAddedCount = leg.count;
+    if (leg.amount > 0) {
+      const bucket = gasNormalizeGatewayLabel("gift_card", null);
+      ensurePayBucket(gas.pay, bucket);
+      gas.pay[bucket].sale += leg.amount;
+      gas.pay[bucket].saleTx += leg.count;
     }
   }
 
