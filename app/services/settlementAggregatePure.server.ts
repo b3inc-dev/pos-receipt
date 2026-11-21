@@ -10,6 +10,11 @@ import {
   type RefundAggregationLocationMode,
   type RefundAggregationContext,
 } from "./refundAggregationPure.server";
+import {
+  DEFAULT_POINT_REDEMPTION_RULES,
+  isPointRedemption,
+  type PointRedemptionRules,
+} from "../utils/pointRedemptionRules";
 
 export type GasAggregateAttributionOpts = {
   attributionCtx: RefundAggregationContext;
@@ -368,6 +373,8 @@ export function aggregateGasStyleForOrders(
   orders: GasStyleOrder[],
   inRange: (iso?: string) => boolean,
   attributionOpts?: GasAggregateAttributionOpts,
+  /** ポイント利用額に数える割引（保存した「ポイント/会員施策設定」。無ければ初めの値） */
+  pointRules: PointRedemptionRules = DEFAULT_POINT_REDEMPTION_RULES,
 ): {
   pay: Record<string, GasPayBucket>;
   refundsGross: number;
@@ -565,7 +572,12 @@ export function aggregateGasStyleForOrders(
         const typ = da.discountApplication?.__typename ?? "";
         const code =
           typ === "DiscountCodeApplication" ? String(da.discountApplication?.code ?? "") : "";
-        if (code && code.toUpperCase().startsWith("VIP-")) {
+        // POS の Shop Point は手動割引（タイトル "Shop Point"）として入る。自動割引は同名でも数えない。
+        const title =
+          typ === "ManualDiscountApplication" || typ === "ScriptDiscountApplication"
+            ? String(da.discountApplication?.title ?? "")
+            : "";
+        if (isPointRedemption(code, title, pointRules)) {
           orderVip += alloc;
         } else {
           orderDiscount += alloc;
@@ -607,3 +619,9 @@ export function totalFromPayBuckets(pay: Record<string, GasPayBucket>): number {
   }
   return Math.round(sum);
 }
+
+/**
+ * ポイント利用として集計する割引か。見分け方の正本は `app/utils/pointRedemptionRules.ts`（設定で変えられる）。
+ * 既存の呼び出しとテストのためにここからも export する。
+ */
+export { isPointRedemption };
