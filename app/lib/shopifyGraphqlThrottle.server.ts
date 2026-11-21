@@ -55,13 +55,16 @@ function jitterMs(maxJitter: number): number {
 /**
  * admin.graphql を実行し、Throttled 時は指数バックオフでリトライする。
  * レスポンス JSON の errors に THROTTLED が含まれる場合もリトライ対象。
+ * retry.sleep は待ち方を差し替えるとき（試験用）。書かなければ本当に待つ。
  */
 export async function adminGraphqlWithRetry<TJson = unknown>(
   admin: AdminGraphqlClient,
   query: string,
   options?: object,
   context?: string,
+  retry: { sleep?: (ms: number) => Promise<void> } = {},
 ): Promise<TJson> {
+  const wait = retry.sleep ?? sleep;
   for (let attempt = 1; attempt <= MAX_THROTTLE_RETRIES; attempt++) {
     try {
       const response = await admin.graphql(query, options);
@@ -95,7 +98,7 @@ export async function adminGraphqlWithRetry<TJson = unknown>(
         waitMs,
         "ms",
       );
-      await sleep(waitMs);
+      await wait(waitMs);
     }
   }
   throw new ThrottledExhaustedError();

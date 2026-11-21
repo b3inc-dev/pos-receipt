@@ -62,7 +62,11 @@
 ## 4. 割引・VIP
 
 - 行の `discountAllocations` を走査
-- `DiscountCodeApplication` かつコードが `VIP-` で始まる（大文字化比較）→ `vipPointsUsed`
+- 次の割当 → `vipPointsUsed`（精算の「ポイント利用額」）。見分け方は `app/utils/pointRedemptionRules.ts`、設定は「ポイント/会員施策設定」の「精算のポイント利用額に数える割引」（`loyalty_settings` の `pointRedemption*`）
+  - `DiscountCodeApplication` で、コードが設定の頭のどれかで始まる（大文字化比較）。初めの値は `VIP-`（旧 VIP）と `SP-POINT-`（Shop Point のオンラインの顧客専用コード）
+  - `DiscountCodeApplication` で、Shop Point の旧形式（`SP` ＋ 16 桁の 16 進）。初めの値は数える（設定で切れる）
+  - コードの無い `ManualDiscountApplication` / `ScriptDiscountApplication` で、名前が設定の名前のどれかと一致（前後の空白を除き、半角英字の大小は区別しない）。初めの値は `Shop Point`（POS のカートの割引）。自動割引は同じ名前でも数えない
+  - 保存していない店・保存値が壊れている店は初めの値で数える。「ポイント利用額を有効にする」「抽出元」の設定や前からの欄 `loyaltyUsageDiscountCodePrefixes` は精算では使わない
 - それ以外の割当 → `discounts`
 - いずれも `keepRatioToday = max(0, 実効売上 − 当日返金) / 実効売上` で按分し `Math.round`
 - GraphQL で取る `totalDiscountsSet` は、この VIP/割引合計には **未使用**（取得していても集計式は allocations 経路）
