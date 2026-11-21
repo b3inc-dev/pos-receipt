@@ -83,6 +83,48 @@ export async function getOrder(orderId) {
   return apiGet(`/api/orders/${id}`);
 }
 
+function orderPathId(orderId) {
+  return String(orderId).replace(/^gid:\/\/shopify\/Order\//, "");
+}
+
+/**
+ * 保存済みの担当訂正。Shopify の注文は変更しない。
+ * @param {string} orderId
+ */
+export async function getStaffAttribution(orderId) {
+  if (!orderId) throw new Error("orderId required");
+  return apiGet(`/api/orders/${orderPathId(orderId)}/staff-attribution`);
+}
+
+/**
+ * @param {string} orderId
+ * @param {Record<string, unknown>} body
+ */
+export async function saveStaffAttribution(orderId, body) {
+  if (!orderId) throw new Error("orderId required");
+  return apiPost(`/api/orders/${orderPathId(orderId)}/staff-attribution`, body);
+}
+
+export async function getPosStaff() {
+  return apiGet("/api/pos-staff");
+}
+
+export async function savePosStaff(label) {
+  return apiPost("/api/pos-staff", { label });
+}
+
+export async function saveCartStaffDraft(draftKey, lines) {
+  return apiPost("/api/pos-staff", { draftKey, lines });
+}
+
+export async function getCartStaffDraft(draftKey, orderId) {
+  return apiGet("/api/pos-staff", { draftKey, orderId: orderId ?? undefined });
+}
+
+export async function bindCartStaffDraft(draftKey, orderId) {
+  return apiPost("/api/pos-staff", { draftKey, bindOrderId: orderId });
+}
+
 /**
  * POST /api/orders/:orderId/redo-draft
  * 会計やり直し用の下書き注文を作成

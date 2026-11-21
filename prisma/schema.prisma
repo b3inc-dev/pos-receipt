@@ -59,6 +59,9 @@ model Shop {
   salesChannelCacheDaily   SalesChannelCacheDaily[]
   salesChannelBudgets      SalesChannelBudget[]
   salesChannelCachePeriod  SalesChannelCachePeriod[]
+  orderStaffAttributionCorrections OrderStaffAttributionCorrection[]
+  posStaff                 PosStaff[]
+  cartStaffDrafts          CartStaffDraft[]
 }
 
 // ========== 20.2 ロケーション（印字方式・サマリー設定）要件 §4 ==========
@@ -426,4 +429,50 @@ model SalesChannelCacheDaily {
 
   @@unique([shopId, channelId, targetDate])
   @@index([shopId, targetDate])
+}
+
+// 確定済み取引の担当訂正。決済・返金・在庫は変更しない。
+model OrderStaffAttributionCorrection {
+  id             String   @id @default(cuid())
+  shopId         String
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  orderId        String
+  lineId         String
+  idempotencyKey String   @unique
+  /// この訂正の直前にあった訂正ID。先頭の訂正は空文字。同時保存の直列化に使う。
+  previousCorrectionId String @default("")
+  beforeJson     String
+  afterJson      String
+  recordedAt     DateTime
+  createdAt      DateTime @default(now())
+
+  @@unique([shopId, orderId, lineId, previousCorrectionId], map: "OrderStaffCorrection_predecessor_key")
+  @@index([shopId, orderId, lineId])
+}
+
+// 標準の担当IDが無いときのアプリ内担当。表示名は一致キーにしない。
+model PosStaff {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  staffKey  String
+  label     String
+  createdAt DateTime @default(now())
+
+  @@unique([shopId, staffKey])
+  @@index([shopId])
+}
+
+// 会計前の担当順。決済後に明細へ戻すための記録。
+model CartStaffDraft {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  draftKey  String   @unique
+  linesJson String
+  boundOrderId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shopId, updatedAt])
 }
