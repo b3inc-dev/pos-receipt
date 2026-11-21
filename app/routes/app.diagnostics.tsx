@@ -119,7 +119,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     envChecks,
     optionalEnvChecks,
     checkedAt: new Date().toISOString(),
-    memberCardEnabled: isInhouseMode(),
   };
 }
 
@@ -132,7 +131,6 @@ export default function DiagnosticsPage() {
     envChecks,
     optionalEnvChecks,
     checkedAt,
-    memberCardEnabled,
   } = useLoaderData<typeof loader>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -147,7 +145,7 @@ export default function DiagnosticsPage() {
       subtitle={`確認日時: ${new Date(checkedAt).toLocaleString("ja-JP")}`}
       backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
     >
-      <SystemPageNav memberCardEnabled={memberCardEnabled} />
+      <SystemPageNav />
       <Layout>
         {/* ── 環境変数エラー ── */}
         {!allEnvOk && (

@@ -163,9 +163,101 @@ describe("printReceiptHtml", () => {
       currency: "JPY",
       issueDate: "2026-10-08",
       orderName: "#99",
+      showOrderAttributes: false,
+      showLineAttributes: false,
       paperWidthMm: 80,
     });
     assert.match(giftHtml, /山田/);
     assert.match(giftHtml, /5000|¥5,000/);
+  });
+
+  it("settlement and gift receipt respect attribute toggles", () => {
+    const settlementOn = renderPrintReceiptHtml(
+      settlementPreviewToPrintModel(
+        {
+          targetDate: "2026-10-08",
+          locationName: "渋谷",
+          total: 1000,
+          netSales: 900,
+          tax: 100,
+          discounts: 0,
+          refundTotal: 0,
+          orderCount: 1,
+          refundCount: 0,
+          itemCount: 2,
+          voucherChangeAmount: 0,
+          paymentSections: [{ label: "現金", net: 1000, txCount: 1 }],
+        },
+        {
+          showOrderAttributes: true,
+          showLineAttributes: true,
+          orderAttributes: [{ key: "memo", value: "settle-attr" }],
+          lineAttributes: [{ key: "sku-color", value: "red" }],
+        },
+      ),
+    );
+    assert.match(settlementOn, /settle-attr/);
+    assert.match(settlementOn, /sku-color/);
+
+    const settlementOff = renderPrintReceiptHtml(
+      settlementPreviewToPrintModel(
+        {
+          targetDate: "2026-10-08",
+          locationName: "渋谷",
+          total: 1000,
+          netSales: 900,
+          tax: 100,
+          discounts: 0,
+          refundTotal: 0,
+          orderCount: 1,
+          refundCount: 0,
+          itemCount: 2,
+          voucherChangeAmount: 0,
+          paymentSections: [{ label: "現金", net: 1000, txCount: 1 }],
+        },
+        {
+          showOrderAttributes: false,
+          showLineAttributes: false,
+          orderAttributes: [{ key: "memo", value: "settle-attr" }],
+          lineAttributes: [{ key: "sku-color", value: "red" }],
+        },
+      ),
+    );
+    assert.doesNotMatch(settlementOff, /settle-attr/);
+    assert.doesNotMatch(settlementOff, /sku-color/);
+
+    const giftOn = renderPrintReceiptHtml({
+      kind: "receipt",
+      title: "領　収　書",
+      recipientName: "山田",
+      proviso: "お買上品代として",
+      amount: 5000,
+      currency: "JPY",
+      issueDate: "2026-10-08",
+      showOrderAttributes: true,
+      showLineAttributes: true,
+      orderAttributes: [{ key: "memo", value: "gift-attr" }],
+      lineAttributes: [{ key: "wrap", value: "yes" }],
+      paperWidthMm: 80,
+    });
+    assert.match(giftOn, /gift-attr/);
+    assert.match(giftOn, /wrap/);
+
+    const giftOff = renderPrintReceiptHtml({
+      kind: "receipt",
+      title: "領　収　書",
+      recipientName: "山田",
+      proviso: "お買上品代として",
+      amount: 5000,
+      currency: "JPY",
+      issueDate: "2026-10-08",
+      showOrderAttributes: false,
+      showLineAttributes: false,
+      orderAttributes: [{ key: "memo", value: "gift-attr" }],
+      lineAttributes: [{ key: "wrap", value: "yes" }],
+      paperWidthMm: 80,
+    });
+    assert.doesNotMatch(giftOff, /gift-attr/);
+    assert.doesNotMatch(giftOff, /wrap/);
   });
 });

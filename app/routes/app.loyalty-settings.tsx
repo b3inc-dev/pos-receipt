@@ -171,7 +171,7 @@ export default function LoyaltySettingsPage() {
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
-        <SystemPageNav memberCardEnabled={false} />
+        <SystemPageNav />
         <Layout>
           {saved && (
             <Layout.Section>

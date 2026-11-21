@@ -115,7 +115,7 @@ export default function SalesReceiptSettingsPage() {
           <Layout.Section>
             <Banner tone="info">
               Lite プラン以上で利用できます。注文まとめて（order customAttributes）／商品別（line
-              properties）の末尾印字を個別に ON/OFF できます。
+              properties）の末尾印字を個別に ON/OFF できます。同じ設定は精算・領収書の印字 HTML にも適用されます。
             </Banner>
           </Layout.Section>
           <Layout.AnnotatedSection title="有効化" description="POS の販売レシート印字">

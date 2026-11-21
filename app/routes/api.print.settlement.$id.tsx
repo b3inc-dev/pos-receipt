@@ -22,6 +22,7 @@ import {
   DEFAULT_PRINT_SETTINGS,
   type PrintSettings,
 } from "../utils/appSettings.server";
+import { loadSalesReceiptAttrFlags } from "../utils/loadSalesReceiptAttrFlags.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -93,10 +94,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         : 80;
 
     const isInspection = String(settlement.periodLabel ?? "").startsWith("点検");
+    const attrFlags = await loadSalesReceiptAttrFlags(shop.id);
+    // 日次精算の注文属性サマリ取得は集計エンジン外のため未配線（ON でもデータ無し＝非表示）。
+    // レンダラは販売レシートと同じ ON/OFF キーを尊重する。
     const html = renderPrintReceiptHtml(
       settlementPreviewToPrintModel(preview, {
         isInspection,
         paperWidthMm: paper,
+        showOrderAttributes: attrFlags.printOrderAttributes,
+        showLineAttributes: attrFlags.printLineAttributes,
       }),
     );
     return corsHtml(request, html);

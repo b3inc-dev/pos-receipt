@@ -27,6 +27,7 @@ import {
   DEFAULT_SETTLEMENT_SETTINGS,
   type SettlementSettings,
 } from "../utils/appSettings.server";
+import { resolveDefaultLocationPrintMode } from "../utils/resolveDefaultPrintMode.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 
@@ -115,6 +116,7 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { shopId: shop.id, shopifyLocationGid: { not: nonPosTargetGid } },
       data: { nonPosRefundAttributionEnabled: false },
     });
+    const defaultPrintMode = await resolveDefaultLocationPrintMode(shop.id);
     await prisma.location.upsert({
       where: { shopId_shopifyLocationGid: { shopId: shop.id, shopifyLocationGid: nonPosTargetGid } },
       update: { nonPosRefundAttributionEnabled: true },
@@ -123,6 +125,7 @@ export async function action({ request }: ActionFunctionArgs) {
         shopifyLocationGid: nonPosTargetGid,
         name: nonPosTargetName || nonPosTargetGid,
         nonPosRefundAttributionEnabled: true,
+        printMode: defaultPrintMode,
       },
     });
   } else {

@@ -34,6 +34,7 @@ import {
   DEFAULT_PRINT_SETTINGS,
   type PrintSettings,
 } from "../utils/appSettings.server";
+import { loadSalesReceiptAttrFlags } from "../utils/loadSalesReceiptAttrFlags.server";
 import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
@@ -53,7 +54,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...((await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {}),
   };
   const paperWidthMm = printSettings.cloudprntPaperWidth === "58mm" ? 58 : 80;
-  return { template, paperWidthMm, templateId: tmpl?.id ?? null };
+  const attrFlags = await loadSalesReceiptAttrFlags(shop.id);
+  return { template, paperWidthMm, templateId: tmpl?.id ?? null, attrFlags };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -121,6 +123,7 @@ export async function action({ request }: ActionFunctionArgs) {
 function buildPreviewHtml(
   template: ReceiptTemplateData,
   paperWidthMm: 58 | 80,
+  attrFlags: { printOrderAttributes: boolean; printLineAttributes: boolean },
 ): string {
   return renderPrintReceiptHtml({
     kind: "receipt",
@@ -137,12 +140,24 @@ function buildPreviewHtml(
     phone: template.phone,
     showOrderNumber: template.showOrderName,
     showDate: template.showIssueDate,
+    showOrderAttributes: attrFlags.printOrderAttributes,
+    showLineAttributes: attrFlags.printLineAttributes,
+    orderAttributes: attrFlags.printOrderAttributes
+      ? [{ key: "memo", value: "サンプル注文属性" }]
+      : [],
+    lineAttributes: attrFlags.printLineAttributes
+      ? [{ key: "wrap", value: "gift" }]
+      : [],
     paperWidthMm,
   });
 }
 
 export default function ReceiptPrintLayoutPage() {
-  const { template: initial, paperWidthMm: initialPaper } = useLoaderData<typeof loader>();
+  const {
+    template: initial,
+    paperWidthMm: initialPaper,
+    attrFlags,
+  } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
@@ -153,8 +168,8 @@ export default function ReceiptPrintLayoutPage() {
     initialPaper === 58 ? 58 : 80,
   );
   const previewHtml = useMemo(
-    () => buildPreviewHtml(form, paperWidthMm),
-    [form, paperWidthMm],
+    () => buildPreviewHtml(form, paperWidthMm, attrFlags),
+    [form, paperWidthMm, attrFlags],
   );
 
   const handleSave = () => {
@@ -194,7 +209,7 @@ export default function ReceiptPrintLayoutPage() {
           <Layout.Section>
             <Banner tone="info">
               詳細テンプレート編集は「領収書テンプレート」タブ。ここでは印字 HTML
-              に効く主要項目だけを触り、見た目の一致を確認できます。
+              に効く主要項目だけを触り、見た目の一致を確認できます。注文／商品属性の ON/OFF は「販売レシート設定」と共通です。
             </Banner>
           </Layout.Section>
           <Layout.Section variant="oneHalf">

@@ -22,6 +22,7 @@ import {
 } from "../utils/salesSummaryBudgetFromDb.server";
 import { sumOptionalBudgetColumn } from "../utils/salesSummaryTotals";
 import { getShopTimezoneForDaily, getCalendarDateStringInTimeZone } from "../utils/shopTimezone.server";
+import { resolveDefaultLocationPrintMode } from "../utils/resolveDefaultPrintMode.server";
 import type { Shop } from "@prisma/client";
 
 type SalesSummaryAdmin = Parameters<typeof computeAndCacheDailySummary>[0];
@@ -90,11 +91,18 @@ export async function buildDailySalesSummaryPayload(
       data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
     };
     const shopifyLocs = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
+    const defaultPrintMode = await resolveDefaultLocationPrintMode(shop.id);
     for (const loc of shopifyLocs) {
       await prisma.location.upsert({
         where: { shopId_shopifyLocationGid: { shopId: shop.id, shopifyLocationGid: loc.id } },
         update: { name: loc.name, salesSummaryEnabled: true },
-        create: { shopId: shop.id, shopifyLocationGid: loc.id, name: loc.name, salesSummaryEnabled: true },
+        create: {
+          shopId: shop.id,
+          shopifyLocationGid: loc.id,
+          name: loc.name,
+          salesSummaryEnabled: true,
+          printMode: defaultPrintMode,
+        },
       });
     }
     allLocations = await prisma.location.findMany({

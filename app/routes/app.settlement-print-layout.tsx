@@ -27,6 +27,7 @@ import {
   DEFAULT_PRINT_SETTINGS,
   type PrintSettings,
 } from "../utils/appSettings.server";
+import { loadSalesReceiptAttrFlags } from "../utils/loadSalesReceiptAttrFlags.server";
 import {
   renderPrintReceiptHtml,
   settlementPreviewToPrintModel,
@@ -64,7 +65,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     paperWidthMm: paperFromPrint,
     ...saved,
   };
-  return { prefs, printSettings };
+  const attrFlags = await loadSalesReceiptAttrFlags(shop.id);
+  return { prefs, printSettings, attrFlags };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -88,7 +90,10 @@ export async function action({ request }: ActionFunctionArgs) {
   return Response.json({ ok: true });
 }
 
-function buildPreviewHtml(prefs: SettlementPreviewPrefs): string {
+function buildPreviewHtml(
+  prefs: SettlementPreviewPrefs,
+  attrFlags: { printOrderAttributes: boolean; printLineAttributes: boolean },
+): string {
   return renderPrintReceiptHtml(
     settlementPreviewToPrintModel(
       {
@@ -109,20 +114,35 @@ function buildPreviewHtml(prefs: SettlementPreviewPrefs): string {
           { label: "クレジットカード", net: 80000, txCount: 24, refund: 3000, refundCount: 2 },
         ],
       },
-      { isInspection: prefs.isInspection, paperWidthMm: prefs.paperWidthMm },
+      {
+        isInspection: prefs.isInspection,
+        paperWidthMm: prefs.paperWidthMm,
+        showOrderAttributes: attrFlags.printOrderAttributes,
+        showLineAttributes: attrFlags.printLineAttributes,
+        // プレビュー用サンプル（実印字の日次サマリ取得は未配線）
+        orderAttributes: attrFlags.printOrderAttributes
+          ? [{ key: "memo", value: "サンプル注文属性" }]
+          : [],
+        lineAttributes: attrFlags.printLineAttributes
+          ? [{ key: "size", value: "L" }]
+          : [],
+      },
     ),
   );
 }
 
 export default function SettlementPrintLayoutPage() {
-  const { prefs: initial } = useLoaderData<typeof loader>();
+  const { prefs: initial, attrFlags } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState(initial);
-  const previewHtml = useMemo(() => buildPreviewHtml(form), [form]);
+  const previewHtml = useMemo(
+    () => buildPreviewHtml(form, attrFlags),
+    [form, attrFlags],
+  );
 
   const handleSave = () => {
     const fd = new FormData();
@@ -154,7 +174,7 @@ export default function SettlementPrintLayoutPage() {
             <Banner tone="info">
               `/api/print/settlement/:id` と同じ `renderPrintReceiptHtml` /
               `settlementPreviewToPrintModel` を使います。用紙幅は印字設定にも反映されます。旧
-              order_based / cloudprnt 経路は変更しません。
+              order_based / cloudprnt 経路は変更しません。注文／商品属性の ON/OFF は「販売レシート設定」と共通です（プレビューのみサンプル表示）。
             </Banner>
           </Layout.Section>
           <Layout.Section variant="oneHalf">
