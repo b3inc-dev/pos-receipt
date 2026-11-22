@@ -25,6 +25,7 @@ import {
   summarizeInventoryForLog,
   type CustomerDataRequestPayload,
 } from "../services/gdprCustomerDataRequest.server";
+import { redactShopData, type ShopRedactDb } from "../services/shopRedact.server";
 
 export const loader = async (_: LoaderFunctionArgs) => {
   return new Response("Method Not Allowed", { status: 405 });
@@ -124,18 +125,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (topicStr === "shop/redact") {
       // ショップデータの削除要求（アンインストール 48 時間後）。
-      // 当該ショップの全データをカスケード削除する。
+      // 使用量の記録（AppUsageReport）・セッション・Shop（CASCADE で関連テーブルも）を消す。
       const body = payload as { shop_domain?: string };
       const shopDomain = body.shop_domain ?? shop;
 
-      // セッション削除
-      await prisma.session.deleteMany({ where: { shop: shopDomain } });
-
-      // Shop レコード削除（CASCADE で関連テーブルも全削除）
-      const dbShop = await prisma.shop.findFirst({ where: { shopDomain } });
-      if (dbShop) {
-        await prisma.shop.delete({ where: { id: dbShop.id } });
-      }
+      await redactShopData({ db: prisma as unknown as ShopRedactDb, shopDomain });
 
       return new Response(null, { status: 200 });
     }

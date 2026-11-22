@@ -7,8 +7,10 @@
 import prisma from "../db.server";
 import PgBoss from "pg-boss";
 import { executeSalesSummaryOrderWebhookJob } from "./salesSummaryWebhookRefresh.server";
+import { SALES_SUMMARY_WEBHOOK_QUEUE_NAME } from "./salesSummaryWebhookQueue.constants";
+import { startOrderWebhookQueueRetentionTimer } from "./orderWebhookQueueRetention.server";
 
-export const SALES_SUMMARY_WEBHOOK_QUEUE_NAME = "pos-receipt-sales-summary-orders-updated";
+export { SALES_SUMMARY_WEBHOOK_QUEUE_NAME };
 
 type JobData = { shopDomain: string; payload: unknown };
 
@@ -83,6 +85,12 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
       }
     },
   );
+
+  // 処理待ちに置いた注文の通知を 30 日で消す（スイッチ ORDER_WEBHOOK_QUEUE_PURGE。既定オフ）
+  startOrderWebhookQueueRetentionTimer({
+    sql: (text, ...params) =>
+      prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(text, ...params),
+  });
 
   const stop = () => {
     void boss.stop({ timeout: 20000 }).catch(() => {});
