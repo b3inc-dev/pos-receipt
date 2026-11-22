@@ -83,6 +83,8 @@ export type ShopPlanDeps = {
   partnerLookup?: typeof getPartnerActiveSubscription;
   /** 従量を報告する関数（テスト用。既定は待たずに reportExtraLocationUsage） */
   reportUsage?: typeof reportExtraLocationUsage;
+  /** 門番の覚えの時刻（テスト用。既定は Date.now） */
+  now?: () => number;
 };
 
 const SHOP_PLAN_QUERY = `#graphql
@@ -310,7 +312,7 @@ export async function getShopPlan(
     }
   }
 
-  return {
+  const state: ShopPlanState = {
     distribution: "public",
     fullAccess,
     fullAccessReason,
@@ -324,11 +326,21 @@ export async function getShopPlan(
     ...(partnerStatus ? { partnerStatus } : {}),
     ...(extraLocationUsage ? { extraLocationUsage } : {}),
   };
+  // 門番の覚えも今読んだ結果で置きかえる。プランを変えてアプリに戻ったとき（ホーム・料金プラン画面が読む）、
+  // 前に覚えた古いプランで最大 60 秒 Pro の機能を断らないように。読めなかったときは覚えを消す
+  rememberGateState(shopDomain, state, deps.now ?? Date.now);
+  return state;
 }
 
 // 契約を読めた店だけ少しのあいだ覚える（POS の 1 回の操作で API が何度も呼ばれるため）。読めなかった結果は覚えない。
 const GATE_CACHE_MS = 60_000;
 const gateCache = new Map<string, { state: ShopPlanState; at: number }>();
+
+function rememberGateState(key: string, state: ShopPlanState, now: () => number) {
+  if (!key) return;
+  if (state.subscriptionsRead) gateCache.set(key, { state, at: now() });
+  else gateCache.delete(key);
+}
 
 /** テスト用 */
 export function __clearShopPlanCacheForTest() {
@@ -343,7 +355,7 @@ export async function checkShopPlanAccess(
   admin: AdminGraphql,
   shop: ShopRecordForPlan,
   feature: FeatureKey,
-  deps: ShopPlanDeps & { now?: () => number } = {}
+  deps: ShopPlanDeps = {}
 ): Promise<PlanAccessResult & { state: ShopPlanState }> {
   if (isInhouseMode()) {
     const state = inhouseState(shop);
@@ -356,9 +368,7 @@ export async function checkShopPlanAccess(
   if (hit && now() - hit.at < GATE_CACHE_MS) {
     state = hit.state;
   } else {
-    state = await getShopPlan(admin, shop, deps);
-    if (key && state.subscriptionsRead) gateCache.set(key, { state, at: now() });
-    else if (key) gateCache.delete(key);
+    state = await getShopPlan(admin, shop, { ...deps, now }); // 覚えるのは getShopPlan の中（rememberGateState）
   }
   return { ...checkPlanAccess(state.planCode, feature, state.fullAccess), state };
 }

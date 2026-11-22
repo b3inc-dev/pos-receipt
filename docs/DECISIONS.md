@@ -29,7 +29,7 @@
   - `app.plan.callback.tsx` は planCode を書かない（URL の `?plan=` でプランを変えられた穴をふさぐ）。古いリンクのために料金プラン画面へ戻すだけ。
   - プランは `app/utils/shopPlan.server.ts` の `getShopPlan` が読む: Admin API `currentAppInstallation.activeSubscriptions`（ACTIVE で名前に Pro/プロ → Pro、Lite/Standard/ライト/スタンダード → Lite）。`PARTNER_API_SUBSCRIPTION_ENABLED=1` と `PARTNER_API_TOKEN`・`PARTNER_API_ORG_ID`・`PARTNER_API_APP_ID`（任意で `PARTNER_API_VERSION`、既定 `2026-10`）がそろったときだけ Partner API の `activeSubscription` も読む（**既定オフ**。処理は `partnerSubscription.server.ts`、POS Stock と同じ中身）。Partner で見つかればそれを正、「契約なし」なら Admin の結果、失敗なら Admin の結果だけ。
   - 読めたプランは DB `Shop.planCode` に書く（変わったときだけ）。契約なしは `lite`（今まで通り Lite の機能は使える）。読めなかったら DB の値のまま。DB の `unlimited` は上書きしない。
-  - 門番は `checkShopPlanAccess(admin, shop, feature)` に一本化（今までの `getFullAccess` ＋ `checkPlanAccess(shop.planCode, …)`）。契約を読めた結果は店ごとに 60 秒覚える。
+  - 門番は `checkShopPlanAccess(admin, shop, feature)` に一本化（今までの `getFullAccess` ＋ `checkPlanAccess(shop.planCode, …)`）。契約を読めた結果は店ごとに 60 秒覚える（ホーム・料金プラン画面などで読み直すと、その結果に置きかわる。プランを変えて戻った店を古いプランで断らない）。
   - 自社用（`APP_DISTRIBUTION=inhouse`・Ciara）は今まで通り: Shopify に聞かず全機能・請求なし。`CUSTOM_APP_STORE_IDS`・開発ストアも今まで通り全機能（POS Stock は開発ストアもプランを選ぶ形にしたが、ここでは変えていない）。
 - **料金（未確定）**: Lite $100/月（3 ロケーションまで）・Pro $200/月（10 ロケーションまで）・超えた 1 か所 +$20/月。**T はまだ金額を確定していない**。画面の金額は目安で、請求は Partner Dashboard の App Pricing の設定で決まる。
 - **残り**: 未契約の店を止めるか（POS Stock #78 の形）は決めていない。Admin API に App Pricing の契約が出るかは未確認（出なければ Partner API のスイッチで読む）。
