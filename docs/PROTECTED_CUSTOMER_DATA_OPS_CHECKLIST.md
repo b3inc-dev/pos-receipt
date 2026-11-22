@@ -15,6 +15,10 @@ Partner Dashboard での申請そのものはコード外。手順の詳細・�
 - [ ] アプリ内プライバシーポリシー導線: 一般設定 `privacyPolicyUrl` または env `PRIVACY_POLICY_URL`（ダミー URL 禁止）
 - [ ] GDPR compliance webhook（`customers/data_request` / `redact` / `shop/redact`）が公開 URL で到達可能
 
+## 店舗運用
+
+- [ ] 店舗スタッフに「領収書の但し書きにお客様の名前を入れない（名前は宛名へ）」を周知した。削除依頼でも但し書きは消さないため。詳細は [RECEIPT_OPERATIONS.md](./RECEIPT_OPERATIONS.md)
+
 ## 開発ストア検証
 
 - [ ] Request access 後、開発ストアで Order 検索・領収書・精算が 500（protected data）にならない

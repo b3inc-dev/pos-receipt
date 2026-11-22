@@ -155,6 +155,7 @@
 
 - 金額: 注文 `totalPriceSet`
 - 宛名・但し書き（既定「お買上品代として」）・再発行フラグ
+- 但し書きにお客様の名前を入れない運用（削除依頼 `customers/redact` でも但し書きは消さない。T 決定 2026-11-23）: [RECEIPT_OPERATIONS.md](./RECEIPT_OPERATIONS.md)
 - ロケーション: 注文の `retailLocation`
 - テンプレ: 有効な `ReceiptTemplate`
 - 発行は DB 記録が主。プリンタ送信なし
