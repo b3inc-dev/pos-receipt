@@ -116,7 +116,7 @@
 - 注文詳細 API が lineItems の `staffMember` を `staffMemberName` として返す
 - POS 詳細 UI で「販売: …」表示
 - 精算集計・精算レシート文言・領収書金額計算には **未使用**
-- 領収書の発行者（T さん決定 F・2026-11-22、11/23 に「帰属スタッフ」と確定）: 発行 API が注文の明細 `lineItems.staffMember`（帰属スタッフ）を引き、ID を `ReceiptIssue.createdByStaffId`（複数は `,`）、名前を `createdBy`（複数は `・`）に保存する。POS でピン留め中・ログイン中のスタッフではない。POS から送る名前・ID は使わない。帰属スタッフがいない注文は空
+- 領収書の発行者（T さん決定 F・2026-11-22、11/23 に「帰属スタッフ」と確定）: 発行 API が注文の明細 `lineItems.staffMember`（帰属スタッフ）を引き、ID を `ReceiptIssue.createdByStaffId`（複数は `,`）、名前を `createdBy`（複数は `・`）に保存する。POS でピン留め中・ログイン中のスタッフではない。POS から送る名前・ID は使わない。帰属スタッフがいない注文は空。`LineItem.staffMember` は `read_users` スコープ（Plus/Advanced・Shopify の許可）が要り、今の TOML には無いので、注文の取得とは別の問い合わせにして失敗しても発行は止めない（現行スコープでは発行者は空になる想定）。スコープの要らない取り方（Webhook の `attributed_staffs`＋スタッフ名表）は販売の帰属スタッフ対応の共通部品に合わせる予定
 - 管理画面「領収書発行履歴」の「発行者」列は 名前 → `スタッフ ID n` → `—` の順で出す（`app/utils/receiptIssuer.ts`）。印字に出すかは #69 のレイアウト編集で扱う
 
 ---

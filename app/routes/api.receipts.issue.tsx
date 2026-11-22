@@ -21,12 +21,41 @@ const ORDER_QUERY = `#graphql
       createdAt
       totalPriceSet { shopMoney { amount currencyCode } }
       retailLocation { id name }
+    }
+  }
+`;
+
+/**
+ * 発行者（帰属スタッフ）だけを別の問い合わせで読む。
+ * LineItem.staffMember は read_users スコープが要るので、無い店ではエラーになる。
+ * 注文の取得と分けて、失敗しても発行は止めない（発行者は空のまま）。
+ */
+const ORDER_ATTRIBUTED_STAFF_QUERY = `#graphql
+  query ReceiptIssueOrderAttributedStaff($id: ID!) {
+    order(id: $id) {
       lineItems(first: 250) {
         nodes { staffMember { id name firstName lastName } }
       }
     }
   }
 `;
+
+async function readAttributedStaff(
+  admin: { graphql: (q: string, o?: { variables?: Record<string, unknown> }) => Promise<Response> },
+  gid: string,
+): Promise<{ staffIds: string | null; names: string | null }> {
+  try {
+    const res = await admin.graphql(ORDER_ATTRIBUTED_STAFF_QUERY, { variables: { id: gid } });
+    const json = (await res.json()) as {
+      errors?: unknown;
+      data?: { order?: { lineItems?: { nodes?: Array<{ staffMember?: AttributedStaffMember }> } | null } | null };
+    };
+    if (json.errors) return { staffIds: null, names: null };
+    return attributedStaffFromLineItems(json.data?.order?.lineItems?.nodes);
+  } catch {
+    return { staffIds: null, names: null };
+  }
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method === "OPTIONS") return corsPreflightResponse(request);
@@ -88,7 +117,6 @@ export async function action({ request }: ActionFunctionArgs) {
           name: string;
           totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
           retailLocation?: { id: string; name: string } | null;
-          lineItems?: { nodes?: Array<{ staffMember?: AttributedStaffMember }> } | null;
         } | null;
       };
     };
@@ -98,7 +126,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return corsJson({ ok: false, error: "Order not found" }, { status: 404 });
     }
 
-    const issuer = attributedStaffFromLineItems(order.lineItems?.nodes);
+    const issuer = await readAttributedStaff(admin, gid);
 
     const tmpl = await prisma.receiptTemplate.findFirst({
       where: { shopId: shop.id, isActive: true },
