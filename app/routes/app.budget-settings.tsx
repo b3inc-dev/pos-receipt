@@ -2,7 +2,8 @@
  * /app/budget-settings — 予算設定（要件 §11）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { SuccessToast, AdminIntro } from "../components/admin-ui";
 import {
   Page,
   Layout,
@@ -66,10 +67,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function BudgetSettingsPage() {
   const { settings: initial } = useLoaderData<typeof loader>();
   const submit = useSubmit();
+  const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<BudgetSettings>({ ...initial });
 
   const handleSave = () => {
@@ -78,8 +79,6 @@ export default function BudgetSettingsPage() {
       fd.set(k, typeof v === "boolean" ? (v ? "true" : "false") : String(v));
     });
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = <K extends keyof BudgetSettings>(key: K, value: BudgetSettings[K]) => {
@@ -97,12 +96,14 @@ export default function BudgetSettingsPage() {
           <TabGroupBar tabs={REPORTS_TABS} />
         </Card>
         <Layout>
-          {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
+          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
           <Layout.Section>
-            <Banner tone="info">予算の入力単位・適用モード・CSV操作・手動編集・一括編集の有無を設定します。実際の予算データは「レポート・履歴」の予算管理で登録・編集します。</Banner>
+            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+            <AdminIntro><p>予算の入力単位・適用モード・CSV操作・手動編集・一括編集の有無を設定します。実際の予算データは「レポート・履歴」の予算管理で登録・編集します。</p></AdminIntro>
           </Layout.Section>
 
-          <Layout.AnnotatedSection title="CSV操作" description="§11.2.1">
+          <Layout.AnnotatedSection title="CSV操作">
             <Card>
               <BlockStack gap="300">
                 <Checkbox
@@ -115,7 +116,7 @@ export default function BudgetSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="手動編集" description="§11.2.2">
+          <Layout.AnnotatedSection title="手動編集">
             <Card>
               <BlockStack gap="300">
                 <Checkbox
@@ -132,7 +133,7 @@ export default function BudgetSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="表示・適用" description="§11.2.3">
+          <Layout.AnnotatedSection title="表示・適用">
             <Card>
               <BlockStack gap="400">
                 <Select
@@ -150,10 +151,6 @@ export default function BudgetSettingsPage() {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end"><Button variant="primary" onClick={handleSave}>保存</Button></InlineStack>
-          </Layout.Section>
         </Layout>
       </Page>
     </PolarisPageWrapper>

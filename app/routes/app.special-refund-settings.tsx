@@ -3,7 +3,8 @@
  * 要件 §8: 利用可能イベント種別・入力要件・表示名
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { SuccessToast, AdminIntro } from "../components/admin-ui";
 import {
   Page,
   Layout,
@@ -83,10 +84,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function SpecialRefundSettingsPage() {
   const { settings: initial } = useLoaderData<typeof loader>();
   const submit = useSubmit();
+  const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<SpecialRefundSettings>({ ...initial });
 
   const handleSave = () => {
@@ -95,8 +96,6 @@ export default function SpecialRefundSettingsPage() {
       fd.set(k, typeof v === "boolean" ? (v ? "true" : "false") : String(v));
     });
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = <K extends keyof SpecialRefundSettings>(key: K, value: SpecialRefundSettings[K]) => {
@@ -114,11 +113,11 @@ export default function SpecialRefundSettingsPage() {
           <TabGroupBar tabs={SETTLEMENT_TABS} />
         </Card>
         <Layout>
-          {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
+          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
           <Layout.Section>
-            <Banner tone="info">
-              POS で利用できる特殊返金の種別と、各種別の入力要件・表示名を設定します。OFF にした種別は API でも拒否されます。
-            </Banner>
+            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+            <AdminIntro><p>POS で利用できる特殊返金の種別と、各種別の入力要件・表示名を設定します。OFF にした種別は API でも拒否されます。</p></AdminIntro>
           </Layout.Section>
 
           <Layout.AnnotatedSection
@@ -193,7 +192,7 @@ export default function SpecialRefundSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="利用可能イベント種別" description="§8.2.1">
+          <Layout.AnnotatedSection title="利用可能イベント種別">
             <Card>
               <BlockStack gap="300">
                 <Checkbox label="現金返金" checked={form.enableCashRefund} onChange={(v) => set("enableCashRefund", v)} />
@@ -204,7 +203,7 @@ export default function SpecialRefundSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="入力要件" description="§8.2.2">
+          <Layout.AnnotatedSection title="入力要件">
             <Card>
               <BlockStack gap="300">
                 <Checkbox label="返金手段変更: 元の支払手段を必須" checked={form.requireOriginalPaymentMethodForPaymentOverride} onChange={(v) => set("requireOriginalPaymentMethodForPaymentOverride", v)} />
@@ -217,7 +216,7 @@ export default function SpecialRefundSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="精算反映・表示名" description="§8.2.3, §8.2.4">
+          <Layout.AnnotatedSection title="精算反映・表示名">
             <Card>
               <BlockStack gap="400">
                 <Checkbox label="現金返金を精算に反映" checked={form.reflectCashRefundToSettlement} onChange={(v) => set("reflectCashRefundToSettlement", v)} />
@@ -231,10 +230,6 @@ export default function SpecialRefundSettingsPage() {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end"><Button variant="primary" onClick={handleSave}>保存</Button></InlineStack>
-          </Layout.Section>
         </Layout>
       </Page>
     </PolarisPageWrapper>
