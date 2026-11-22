@@ -8,6 +8,7 @@
  * - 区分「支払方法」の行は paymentSectionsJson を 1 支払方法 = 1 行で出す。
  *   区分「精算合計」の行は保存済みの合計値（total / refundTotal / 税・割引など）を出す。
  */
+import { parsePaymentSectionsJson } from "./settlementPrintSnapshot.server";
 
 export interface SettlementCsvSourceRow {
   id: string;
@@ -132,24 +133,19 @@ interface ParsedSection {
   refundCount: number;
 }
 
+/**
+ * 保存した支払方法の行を読む。#22 のあとの新しい形（{ format, snapshot, sections }）も、前の配列の形も読む。
+ * 読み方は印字と同じ parsePaymentSectionsJson に任せる（形が増えても CSV だけ取り残されない）。
+ */
 export function parsePaymentSections(json: string): ParsedSection[] {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(json || "[]");
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((r): r is Record<string, unknown> => typeof r === "object" && r !== null)
-    .map((r) => ({
-      gateway: String(r.gateway ?? ""),
-      label: String(r.label ?? r.gateway ?? ""),
-      net: Number(r.net) || 0,
-      refund: Number(r.refund) || 0,
-      txCount: Number(r.txCount) || 0,
-      refundCount: Number(r.refundCount) || 0,
-    }));
+  return parsePaymentSectionsJson(json).sections.map((s) => ({
+    gateway: s.gateway,
+    label: s.label || s.gateway,
+    net: Number(s.net) || 0,
+    refund: Number(s.refund) || 0,
+    txCount: Number(s.txCount) || 0,
+    refundCount: Number(s.refundCount) || 0,
+  }));
 }
 
 /** 店舗 × 日ごとに、点検を除いた最新の精算 1 件を選ぶ */

@@ -77,6 +77,15 @@ describe("settlementCsvPure", () => {
   it("parses payment sections defensively", () => {
     assert.deepEqual(parsePaymentSections("not json"), []);
     assert.deepEqual(parsePaymentSections("{}"), []);
+    // #22 のあとの新しい形（印字のスナップショットつき）も読む
+    const envelope = JSON.stringify({
+      format: "settlement_print_v1",
+      snapshot: { formVersion: "settlement-receipt-v1", locationName: "梅田", title: "精算", isInspection: false },
+      sections: [{ gateway: "cash", label: "現金", net: 1200, refund: 200, txCount: 3, refundCount: 1 }],
+    });
+    assert.deepEqual(parsePaymentSections(envelope), [
+      { gateway: "cash", label: "現金", net: 1200, refund: 200, txCount: 3, refundCount: 1 },
+    ]);
     assert.equal(parsePaymentSections('[{"gateway":"cash","net":"10"}]')[0].label, "cash");
   });
 
