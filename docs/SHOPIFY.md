@@ -37,7 +37,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | Order（location_id 検索、transactions, refunds, lineItems, tags, note, tax, total） | 精算集計 |
 | Order.retailLocation | 領収書ロケーション、注文検索フィルタ、返金帰属 |
 | Discount allocations / VIP- codes | 割引・VIP 集計 |
-| staffMember on lineItems | 注文詳細表示のみ |
+| 帰属スタッフ（Webhook の `line_items[].attributed_staffs`） | 注文詳細・領収書の発行者。GraphQL の `staffMember` は `read_users` が要るので読まない（`read_users` がある店だけ名前を `nodes` で引く） |
 | customAttributes | 取得のみ（精算・領収書 UI では未使用） |
 | DraftOrder → Order（SETTLEMENT / INSPECTION） | **印字経路では新規作成しない。** 既存履歴は削除しない |
 | Fulfillment create（V2→フォールバック） | 精算注文クローズ |
@@ -51,7 +51,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 |-------|-----|----------------|
 | `app/uninstalled` | `/webhooks/app/uninstalled` | アンインストール処理 |
 | compliance（customers/data_request, customers/redact, shop/redact） | `/webhooks/compliance` | GDPR。`data_request` は DB 列挙＋根拠ログ後に 200（email/phone 非保存。開示は運用）。詳細は `gdprCustomerDataRequest.server.ts` |
-| `orders/updated` | `/webhooks/orders/updated` | 売上サマリー更新キュー + 返金計上 metafield 同期 |
+| `orders/updated` | `/webhooks/orders/updated` | 売上サマリー更新キュー + 返金計上 metafield 同期 + 帰属スタッフの記録（本文だけ・Shopify は呼ばない） |
 
 ## 6. メタフィールド
 

@@ -111,9 +111,13 @@
 
 ---
 
-## 8. スタッフ名
+## 8. スタッフ名（販売の帰属スタッフ）
 
-- 注文詳細 API が lineItems の `staffMember` を `staffMemberName` として返す
+- 帰属スタッフ＝Shopify POS で明細の販売に付いたスタッフ（T 2026-11-23。旧 #18 の「販売担当の入力」ではない）
+- スタッフ ID と数量は orders/updated Webhook の `line_items[].attributed_staffs` から `OrderStaffAttribution` に記録（注文ごとに入れ替え、古い通知は `updated_at` で捨てる）。注文・カートは書き換えない
+- 名前は管理画面「店舗 › スタッフ名」（AppSetting `staff_display_names_v1`）の登録。offline トークンに `read_users` がある店だけ Shopify の StaffMember の名前を優先
+- 注文詳細 API は `attributedStaffs`（注文）・`attributedStaffLabel`・明細の `attributedStaffs` / `staffMemberName` を返す（`staffMember` は GraphQL で読まない）
+- 記録はこの機能を入れた後に届いた通知から。前の注文・通知がまだ来ていない注文は空
 - POS 詳細 UI で「販売: …」表示
 - 精算集計・精算レシート文言・領収書金額計算には **未使用**
 - `ReceiptIssue.createdBy` は API で受け取れるが、POS `receiptApi.js` は送っていない

@@ -76,14 +76,16 @@ export function corsHtml(request: Request, html: string, init?: ResponseInit): R
 export async function authenticatePosRequest(request: Request) {
   const { sessionToken, cors } = await authenticate.pos(request);
   const shopDomain = new URL(sessionToken.dest as string).hostname;
-  const { admin } = await unauthenticated.admin(shopDomain);
+  const { admin, session } = await unauthenticated.admin(shopDomain);
   const shop = await resolveShop(shopDomain, admin);
+  /** offline トークンのスコープ（read_users があるかを見るため。帰属スタッフの名前） */
+  const scope: string | null = session?.scope ?? null;
 
   /** CORS ヘッダー付きの JSON レスポンスを返すヘルパー */
   const corsJson = (data: unknown, init?: ResponseInit): Promise<Response> =>
     cors(Response.json(data, init));
 
-  return { admin, shop, corsJson };
+  return { admin, shop, scope, corsJson };
 }
 
 /**
