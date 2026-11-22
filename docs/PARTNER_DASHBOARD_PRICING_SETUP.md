@@ -14,6 +14,7 @@
 | Lite | $100/月・3 ロケーションまで | `planFeatures.server.ts` の `BILLING_PLANS.lite` |
 | Pro | $200/月・10 ロケーションまで | `BILLING_PLANS.pro` |
 | 超えた 1 か所 | +$20/月（Lite・Pro とも） | `EXTRA_LOCATION_PRICE_USD`（`planFeatures`・`appEventsUsage` の 2 か所。`tests/pricing.test.mjs` で一致を確かめる） |
+| 無料体験 | 14 日（Lite・Pro とも） | アプリでは持たない（Shopify の契約の設定） |
 | app handle | `pos-receipt`（T 確認済み） | `getPublicAppHandle`（`SHOPIFY_APP_HANDLE` は入れなくてよい） |
 | メーターの handle | `extra_location_lite` / `extra_location_pro` | `APP_EVENTS_HANDLE_LITE` / `APP_EVENTS_HANDLE_PRO`（既定のままでよい） |
 
@@ -21,7 +22,6 @@
 
 設定の前に決めておくと手戻りがありません。決まっていなくても手順 1〜3 は進められます。
 
-- 無料体験（free trial）の日数を付けるか（未決。付けないなら 0 日）
 - 年額のプランも出すか（未決。メーターは月額のプランにだけ付けられるので、年額を出すなら超えたロケーションは年額では取れない）
 - 未契約の店を止めるか（D15 の残り。今のコードは未契約でも Lite の機能が使える）
 - ロケーションの数え方（D16 の残り。今のコードは Shopify の有効なロケーション全部を数える）
@@ -57,7 +57,7 @@
 | 名前 | `Lite` | `Pro` |
 | 請求 | 毎月（Monthly） | 毎月（Monthly） |
 | 金額 | $100 | $200 |
-| 無料体験 | 先に決めた日数（未決） | 同じ |
+| 無料体験 | 14 日（2026-11-22 T の決定） | 14 日 |
 | 説明（例） | 3 ロケーションまで。精算・点検レシート、特殊返金・商品券調整、領収書、販売レシート | 10 ロケーションまで。Lite の機能に加えて、売上サマリー・入店数報告・予算管理 |
 
 ## 3. メーター（超えたロケーション）を付ける
