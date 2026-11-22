@@ -26,6 +26,7 @@
 | D18 | 特殊返金の Shopify 返金が `pending`（成否不明）のあいだは精算を確定しない。二重計上も抜けも出さないため | `assertNoPendingSpecialRefunds`（`specialRefundOverlayPure.server.ts`） |
 | D19 | 精算注文（SETTLEMENT）を作るかは、印字設定「精算注文を作成」（`createSettlementOrderWhenPrinting`）の保存が無ければ ON。管理画面は保存が無いとチェックが入って見えるので、サーバーも同じにそろえる（今の本番の動きを続ける）。作らないのは、チェックを外して保存したとき・精算設定 `orderBasedCreateSettlementOrderEnabled=false`・`cloudprnt_direct`。作らなかったとき API は `settlementOrderSkipped: true` を返し、POS は「再インストール」を案内しない | `settlementSyncSettings.server.ts` `shouldCreateSettlementOrder` |
 | D20 | 前からある pending の特殊返金（ID が `pos_sr_` で始まらない）は、Shopify を読み直して決めるだけで返金を実行しない | `specialRefundLegacyRecheck.server.ts` / `api.special-refunds.$id.recheck.tsx` |
+| D22 | 返金処理中（`pending`）のまま最後に試してから 5 分（`SPECIAL_REFUND_AUTO_RESOLVE_AFTER_MINUTES`・2〜1440）たった特殊返金は、アプリが自動で Shopify の注文の返金を **読むだけ** で決める（T 2026-11-23 4:25）。`pos_sr_` の登録は返金ノートの印 `[POS_RECEIPT_EVENT:<ID>]` があれば `success`、無ければ `failed`（返金は作られていない）。前からの登録は印か「特殊返金」のノート・種別・金額が合う 1 件だけなら `success`、それ以外は店の人が選ぶまで `pending`。refundCreate は呼ばないので返金は 2 回にならない。DB は active・pending・`updatedAt` が読んだときと同じ行だけ書き換える（POS の送り直しと重ならない）。呼ぶのは精算の集計の最初（その日・その店）、POS の特殊返金の一覧（その注文）、pg-boss の 5 分ごとの見回り（`pos_sr_` だけ・全店）。`SPECIAL_REFUND_AUTO_RESOLVE=0` で止まる。番号はほかの積み上げ PR（D20・D21）と重なったら付け直す | `specialRefundAutoResolvePure.server.ts` / `specialRefundAutoResolveCore.server.ts` / `specialRefundAutoResolve.server.ts` / `specialRefundAutoResolveQueue.server.ts` |
 
 ## 2. 古い docs との差分（注意）
 

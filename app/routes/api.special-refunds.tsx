@@ -22,6 +22,7 @@ import {
   resolveSpecialRefundIdempotencyKey,
 } from "../services/specialRefundIdempotency.server";
 import { normalizeLocationGid } from "../utils/locationGid";
+import { autoResolveStalePendingSpecialRefunds } from "../services/specialRefundAutoResolve.server";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
 
@@ -63,6 +64,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         { ok: false, error: "sourceOrderId is required" },
         { status: 400 }
       );
+    }
+
+    // 返金処理中のまま数分たった登録は、Shopify を読み直して決めてから返す（読むだけ・返金は作らない）
+    try {
+      await autoResolveStalePendingSpecialRefunds(
+        admin,
+        shop.id,
+        { sourceOrderId },
+        { refreshDailySummary: "background", limit: 10 },
+      );
+    } catch (e) {
+      console.warn("[special-refunds] auto-resolve on list failed", e);
     }
 
     const items = await prisma.specialRefundEvent.findMany({
