@@ -155,6 +155,14 @@ export function isSafeCss(css: string): boolean {
   return !/\{%-?\s*endraw/i.test(css) && !/<\/style/i.test(css);
 }
 
+/**
+ * 断片を読みやすくする（コード編集で見るため）。<div・<hr・for の前で改行するだけで、
+ * 属性の中には入らない場所なので、出す HTML の見た目は変わらない（改行はブロックの間の空白になるだけ）。
+ */
+function readableTemplate(t: string): string {
+  return t.replace(/(?!^)(<div\b|<hr\b|\{% for |\{% endfor %\})/g, "\n$1");
+}
+
 /** ブロックのレイアウト → Liquid のテンプレート（HTML 文書全体） */
 export function blocksToCode(layout: ReceiptLayout): string {
   const parts: string[] = [];
@@ -167,7 +175,7 @@ export function blocksToCode(layout: ReceiptLayout): string {
     for (const [k, v] of Object.entries(def.derived?.(block.settings) ?? {})) {
       assigns.push(`{% assign s_${k} = "${String(v).replace(/[^a-z_]/gi, "")}" %}`);
     }
-    parts.push(`{%- comment -%} ${def.label} {%- endcomment -%}\n${assigns.join("")}\n${def.template}`);
+    parts.push(`{%- comment -%} ${def.label} {%- endcomment -%}\n${assigns.join("\n")}\n${readableTemplate(def.template)}`);
   }
   const css = layout.style.customCss && isSafeCss(layout.style.customCss) ? `\n${layout.style.customCss}` : "";
   return `<!DOCTYPE html>
