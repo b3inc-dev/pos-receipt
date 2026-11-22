@@ -224,3 +224,7 @@ order_based の Shopify 注文ノート／metafields は `settlementOrderGas` �
 ## 16. タイムゾーン
 
 日次境界は Shopify `shop.ianaTimezone`（フォールバック: 一般設定 defaultTimezone）で UTC 範囲に変換（`shopTimezone.server`）。
+
+## 17. 精算の数え方（店ごとの設定）
+
+売上を数える日・点数に数えない商品・返金の支払方法の付け替え・ギフトカードの返金・支払方法ごとの取引件数・マイナスの日の合計は、管理画面「精算の数え方」で店ごとに選ぶ。初めの値は上の 1〜16 の動きのまま。詳しくは [SETTLEMENT_CALC_SETTINGS.md](SETTLEMENT_CALC_SETTINGS.md)。
