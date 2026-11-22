@@ -7,6 +7,8 @@
  * - shop/redact:            ショップデータの削除要求（アンインストール 48 時間後）
  *
  * HMAC 検証は authenticate.webhook(request) 内で実施され、不正な場合は 401 を返す。
+ * それより後の失敗（DB・入っているかの確かめ）は 500 を返す（Shopify はもう一度送る。どの処理も何度来ても安全）。
+ * topic は "SHOP_REDACT" の形で来るので normalizeWebhookTopic でそろえてから分ける。
  *
  * customers/data_request 方針:
  * - Shopify への必須応答は 200（受理）。開示データ本体は webhook レスポンスに載せない。
@@ -17,7 +19,7 @@
  *   またはサポート連絡先）で対応する。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticate, unauthenticated } from "../shopify.server";
 import prisma from "../db.server";
 import {
   buildCustomerDataInventory,
@@ -26,6 +28,28 @@ import {
   type CustomerDataRequestPayload,
 } from "../services/gdprCustomerDataRequest.server";
 import { redactShopData, type ShopRedactDb } from "../services/shopRedact.server";
+import {
+  INSTALL_PROBE_QUERY,
+  normalizeWebhookTopic,
+  probeShopStillInstalled,
+} from "../services/shopInstallProbe.server";
+
+/** 入れ直した店か（オフラインのセッションがあり、Admin API を呼べる） */
+async function isShopStillInstalled(shop: string): Promise<boolean> {
+  return probeShopStillInstalled({
+    shop,
+    findOfflineSession: (s) => prisma.session.findFirst({ where: { shop: s, isOnline: false } }),
+    runProbeQuery: async (s) => {
+      const { admin } = await unauthenticated.admin(s);
+      const resp = await admin.graphql(INSTALL_PROBE_QUERY);
+      const body = (await resp.json()) as { data?: { shop?: { id?: string } }; errors?: unknown };
+      if (!body?.data?.shop?.id) {
+        throw new Error(`install probe returned no shop: ${JSON.stringify(body?.errors ?? null)}`);
+      }
+      return body;
+    },
+  });
+}
 
 export const loader = async (_: LoaderFunctionArgs) => {
   return new Response("Method Not Allowed", { status: 405 });
@@ -36,11 +60,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
-  try {
-    const { payload, topic, shop } = await authenticate.webhook(request);
-    const topicStr = String(topic ?? "");
+  // HMAC が不正なら authenticate.webhook が 401 の Response を投げる（try の外に置いて 401 のまま返す）
+  const { payload, topic, shop } = await authenticate.webhook(request);
+  const topicStr = normalizeWebhookTopic(topic);
 
-    if (topicStr === "customers/data_request") {
+  try {
+    if (topicStr === "CUSTOMERS_DATA_REQUEST") {
       const body = payload as CustomerDataRequestPayload;
       const shopDomain = body.shop_domain ?? shop;
       const orderVariants = expandOrderIdVariants(body.orders_requested);
@@ -101,7 +126,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response(null, { status: 200 });
     }
 
-    if (topicStr === "customers/redact") {
+    if (topicStr === "CUSTOMERS_REDACT") {
       // 顧客データの削除要求。
       // 指定注文 ID に紐づく領収書発行履歴の宛名を匿名化する。
       const body = payload as {
@@ -123,20 +148,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response(null, { status: 200 });
     }
 
-    if (topicStr === "shop/redact") {
+    if (topicStr === "SHOP_REDACT") {
       // ショップデータの削除要求（アンインストール 48 時間後）。
       // 使用量の記録（AppUsageReport）・セッション・Shop（CASCADE で関連テーブルも）を消す。
+      // 48 時間のうちに入れ直した店なら何も消さない。
       const body = payload as { shop_domain?: string };
       const shopDomain = body.shop_domain ?? shop;
 
-      await redactShopData({ db: prisma as unknown as ShopRedactDb, shopDomain });
+      await redactShopData({
+        db: prisma as unknown as ShopRedactDb,
+        shopDomain,
+        isShopStillInstalled,
+      });
 
       return new Response(null, { status: 200 });
     }
 
     return new Response(null, { status: 200 });
   } catch (err) {
-    console.error("[webhooks.compliance] Error:", err);
-    return new Response("Unauthorized", { status: 401 });
+    // DB の失敗・入っているか確かめられないとき。500 を返し、Shopify にもう一度送ってもらう。
+    console.error(
+      `[webhooks.compliance] ${topicStr} failed:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return new Response(null, { status: 500 });
   }
 };

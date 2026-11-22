@@ -6,6 +6,8 @@
  * - Shop の行を消す（ほかの表は onDelete: Cascade で一緒に消える）
  *
  * アンインストールの webhook では AppUsageReport を消さない（48 時間のうちに入れ直したとき、同じ期間を二重に報告しないため）。
+ * 消す前に「入れ直していないか」を isShopStillInstalled で確かめ、入れ直した店なら何も消さない（Location Stock と同じ）。
+ * 確かめられないとき・消すのに失敗したときは投げる（ルートが 500 を返し、Shopify がもう一度送る）。
  * どれも何度消しても同じ結果になる。記録（ログ）には件数だけを出す。
  */
 
@@ -22,7 +24,7 @@ export type ShopRedactDb = {
 };
 
 export type ShopRedactResult = {
-  skipped?: "no_shop";
+  skipped?: "no_shop" | "reinstalled";
   usageReportsDeleted: number;
   sessionsDeleted: number;
   shopDeleted: boolean;
@@ -31,16 +33,27 @@ export type ShopRedactResult = {
 export async function redactShopData({
   db,
   shopDomain,
+  isShopStillInstalled,
   log = console.info,
 }: {
   db: ShopRedactDb;
   shopDomain: string | null | undefined;
+  /** true = 今も入っている（入れ直した）。消さない */
+  isShopStillInstalled: (shop: string) => Promise<boolean>;
   log?: (...args: unknown[]) => void;
 }): Promise<ShopRedactResult> {
   const domain = String(shopDomain ?? "").trim();
   if (!domain) {
     log("[webhooks.compliance] shop/redact without shop domain; nothing deleted");
     return { skipped: "no_shop", usageReportsDeleted: 0, sessionsDeleted: 0, shopDeleted: false };
+  }
+
+  if (typeof isShopStillInstalled !== "function") {
+    throw new Error("isShopStillInstalled is required for shop/redact");
+  }
+  if (await isShopStillInstalled(domain)) {
+    log(`[webhooks.compliance] shop/redact shop=${domain}: app is installed again; nothing deleted`);
+    return { skipped: "reinstalled", usageReportsDeleted: 0, sessionsDeleted: 0, shopDeleted: false };
   }
 
   const usage = await db.appUsageReport.deleteMany({ where: { shop: domain } });
