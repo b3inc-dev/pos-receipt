@@ -15,6 +15,7 @@
 | Pro | $200/月・10 ロケーションまで | `BILLING_PLANS.pro` |
 | 超えた 1 か所 | +$20/月（Lite・Pro とも） | `EXTRA_LOCATION_PRICE_USD`（`planFeatures`・`appEventsUsage` の 2 か所。`tests/pricing.test.mjs` で一致を確かめる） |
 | 無料体験 | 14 日（Lite・Pro とも） | アプリでは持たない（Shopify の契約の設定） |
+| 請求の間隔 | 月額だけ（年額は出さない。2026-11-22 T の決定。メーターは月額のプランにだけ付くため） | — |
 | app handle | `pos-receipt`（T 確認済み） | `getPublicAppHandle`（`SHOPIFY_APP_HANDLE` は入れなくてよい） |
 | メーターの handle | `extra_location_lite` / `extra_location_pro` | `APP_EVENTS_HANDLE_LITE` / `APP_EVENTS_HANDLE_PRO`（既定のままでよい） |
 
@@ -22,7 +23,6 @@
 
 設定の前に決めておくと手戻りがありません。決まっていなくても手順 1〜3 は進められます。
 
-- 年額のプランも出すか（未決。メーターは月額のプランにだけ付けられるので、年額を出すなら超えたロケーションは年額では取れない）
 - 未契約の店を止めるか（D15 の残り。今のコードは未契約でも Lite の機能が使える）
 - ロケーションの数え方（D16 の残り。今のコードは Shopify の有効なロケーション全部を数える）
 
