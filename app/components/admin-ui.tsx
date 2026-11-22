@@ -495,6 +495,10 @@ export const adminCss = `
     .Member-num-pending { grid-row: 2; }
     .Member-chevron { grid-column: 4; grid-row: 1 / 3; }
   }
+  /* POS Receipt で足したもの: Polaris の Page は 490px 未満で左右の余白が無くなり、カードの外の説明（AdminIntro）が画面の端に付く（11/22 画面確認） */
+  @media (max-width: 489.98px) {
+    .Polaris-Page .Admin-intro { padding: 0 16px; }
+  }
   @media (min-width: 768px) {
     .Admin-home-main { order: 1; }
     .Admin-home-side { order: 2; }
