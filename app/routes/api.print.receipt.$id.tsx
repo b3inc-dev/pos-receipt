@@ -23,6 +23,7 @@ import {
 } from "../utils/appSettings.server";
 import { resolvePaperWidthMm } from "../services/printUnification.server";
 import { parseReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
+import { PRINT_CSP } from "../services/receiptLayoutPrint.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -58,7 +59,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
     const paper = resolvePaperWidthMm(printSettings);
     if (snapshot) {
-      return corsHtml(request, snapshot.renderedHtmlByPaperWidth[paper]);
+      const html = snapshot.renderedHtmlByPaperWidth[paper];
+      // レイアウト（#69）で作った領収書は、スクリプトを止める CSP をヘッダーでも付ける
+      const fromLayout = html.includes('http-equiv="Content-Security-Policy"');
+      return corsHtml(request, html, fromLayout ? { headers: { "Content-Security-Policy": PRINT_CSP } } : undefined);
     }
 
     let templateData: ReceiptTemplateData = normalizeTemplateData({ ...DEFAULT_TEMPLATE });

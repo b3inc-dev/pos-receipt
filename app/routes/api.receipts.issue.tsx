@@ -175,24 +175,31 @@ export async function action({ request }: ActionFunctionArgs) {
         80: renderPrintReceiptHtml({ ...model, paperWidthMm: 80 }),
       };
       if (receiptLayout && layoutSource) {
-        const data = receiptTemplateData({
-          shop: layoutSource.shop,
-          order: layoutSource.order,
-          issue: {
-            recipientName: created.recipientName ?? "",
-            proviso: created.proviso ?? effectiveProviso,
-            amount: Number(created.amount),
-            currency: created.currency ?? "JPY",
-            orderName: created.orderName ?? "",
-            createdAt: created.createdAt,
-          },
-          timezone: layoutSource.timezone,
-          printedAt: created.createdAt.toISOString(),
-        });
-        const html58 = renderLayoutForPrint(receiptLayout, data, 58);
-        const html80 = renderLayoutForPrint(receiptLayout, data, 80);
-        // どちらかでも作れなければ、今までの領収書のまま（58 と 80 で紙面が違うものを保存しない）
-        if (html58 && html80) rendered = { 58: html58, 80: html80 };
+        // レイアウトで作れなくても（タイムゾーンの設定の誤りなど）領収書の発行は止めない
+        try {
+          const data = receiptTemplateData({
+            shop: layoutSource.shop,
+            order: layoutSource.order,
+            issue: {
+              recipientName: created.recipientName ?? "",
+              proviso: created.proviso ?? effectiveProviso,
+              amount: Number(created.amount),
+              currency: created.currency ?? "JPY",
+              orderName: created.orderName ?? "",
+              createdAt: created.createdAt,
+            },
+            timezone: layoutSource.timezone,
+            printedAt: created.createdAt.toISOString(),
+          });
+          const html58 = renderLayoutForPrint(receiptLayout, data, 58);
+          const html80 = renderLayoutForPrint(receiptLayout, data, 80);
+          // どちらかでも作れなければ、今までの領収書のまま（58 と 80 で紙面が違うものを保存しない）
+          if (html58 && html80) rendered = { 58: html58, 80: html80 };
+        } catch (e) {
+          console.warn("[receipt-layout] receipt render failed; using the standard receipt", {
+            error: (e instanceof Error ? e.message : String(e)).slice(0, 200),
+          });
+        }
       }
       const printSnapshotJson = encodeReceiptPrintSnapshot({
         locationName,

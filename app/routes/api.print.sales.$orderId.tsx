@@ -24,7 +24,7 @@ import {
 } from "../services/salesReceiptPrint.server";
 import { GIFT_LAYOUT_KEY, type GiftLayout } from "../utils/salesReceiptSettings";
 import { GIFT_ORDER_QUERY, giftOrderHtml } from "../services/giftOrderReceipt";
-import { getPrintLayout } from "../services/receiptLayoutPrint.server";
+import { getPrintLayout, PRINT_CSP } from "../services/receiptLayoutPrint.server";
 import { layoutOrderHtml } from "../services/receiptLayoutOrderPrint.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -85,7 +85,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       if (result.status === "not_found") {
         return corsErrorJson(request, { ok: false, error: "注文が見つかりません。" }, 404);
       }
-      if (result.status === "ok") return corsHtml(request, result.html);
+      if (result.status === "ok") {
+        return corsHtml(request, result.html, { headers: { "Content-Security-Policy": PRINT_CSP } });
+      }
     }
 
     if (copy === "gift") {

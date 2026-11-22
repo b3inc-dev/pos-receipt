@@ -5,6 +5,7 @@ import {
   domesticPhone,
   japanesePrefecture,
   orderData,
+  orderLevelDiscount,
   receiptTemplateData,
   sampleSettlementData,
   salesTemplateData,
@@ -20,6 +21,7 @@ import {
   settlementCashDeposit,
   type SettlementSectionInput,
 } from "./receiptLayoutSettlementCalc";
+import { layoutOrderHtml } from "./receiptLayoutOrderPrint.server";
 import { normalizePrintEnabled, PRINT_CSP, renderLayoutForPrint, withPrintCsp } from "./receiptLayoutPrint.server";
 import { ciaraReceiptLayout, ciaraSalesLayout, ciaraSettlementLayout, defaultLayout } from "./receiptLayoutPresets";
 import {
@@ -143,6 +145,17 @@ describe("販売レシートのデータ", () => {
     assert.deepEqual(data.shipping_address?.lines, ["大阪府大阪市北区梅田1-2-3", "梅田ハイツ 101"]);
     assert.equal(data.shipping_address?.phone, "090-1234-5678");
     assert.equal(orderData({ ...ORDER, shippingLine: null }, { timezone: "Asia/Tokyo" }).is_shipping_order, false);
+  });
+  it("小計の後の割引は 小計＋送料＋（税抜きなら）税−合計。明細の割引は入れない", () => {
+    assert.equal(data.discounts, 0);
+    assert.equal(orderLevelDiscount({ ...ORDER, subtotalPriceSet: m(5000), totalPriceSet: m(4500) }), 500);
+    assert.equal(orderLevelDiscount({ ...ORDER, taxesIncluded: false, subtotalPriceSet: m(1000), totalPriceSet: m(1000) }), 450);
+    assert.equal(orderLevelDiscount({ ...ORDER, totalShippingPriceSet: m(500), totalPriceSet: m(5450) }), 0);
+  });
+  it("Shopify がエラーを返したら（例外）今までの印字に戻す", async () => {
+    const admin = { graphql: async () => { throw new Error("ACCESS_DENIED"); } };
+    const r = await layoutOrderHtml(admin, "shop", "gid://shopify/Order/1", ciaraSalesLayout(), { kind: "sales", paperWidthMm: 80 });
+    assert.deepEqual(r, { status: "fallback" });
   });
   it("税の内訳", () => {
     assert.deepEqual(data.tax_lines, [{ title: "消費税", rate_label: "10%", amount: 450 }]);

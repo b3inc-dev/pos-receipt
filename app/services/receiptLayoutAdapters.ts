@@ -151,6 +151,18 @@ export function ymd(iso: string, timezone: string): string {
 
 // ── 販売・ギフト ────────────────────────────────────────
 
+/**
+ * 配送先は「保護されたお客様のデータ」なので、読めない店でも注文の印字を止めないよう別に読む。
+ * 読めなければ配送先なし（配送の案内・配送先のブロックが出ないだけ）。
+ */
+export const LAYOUT_SHIPPING_ADDRESS_QUERY = `#graphql
+  query ReceiptLayoutShippingAddress($id: ID!) {
+    order(id: $id) {
+      shippingAddress { zip province provinceCode city address1 address2 company name phone countryCodeV2 }
+    }
+  }
+`;
+
 type MoneyBag = { shopMoney?: { amount?: string | number | null; currencyCode?: string | null } | null } | null | undefined;
 const money = (m: MoneyBag) => Number(m?.shopMoney?.amount ?? 0) || 0;
 const currencyOf = (m: MoneyBag) => String(m?.shopMoney?.currencyCode ?? "") || "JPY";
@@ -169,9 +181,10 @@ export const LAYOUT_ORDER_QUERY = `#graphql
       totalPriceSet { shopMoney { amount currencyCode } }
       totalDiscountsSet { shopMoney { amount currencyCode } }
       totalShippingPriceSet { shopMoney { amount currencyCode } }
+      totalTipReceivedSet { shopMoney { amount currencyCode } }
+      taxesIncluded
       taxLines { title rate priceSet { shopMoney { amount currencyCode } } }
       shippingLine { title }
-      shippingAddress { zip province provinceCode city address1 address2 company name phone countryCodeV2 }
       retailLocation {
         id
         name
@@ -311,6 +324,23 @@ function payments(raw: unknown): { payments: NamedAmount[]; change: number } {
   };
 }
 
+/**
+ * 小計の後に引く割引（Ciara の sales-receipt.liquid と同じ式）
+ * = 小計 ＋ 送料 ＋ （税抜きの店なら）税 ＋ チップ − 合計。明細の割引は明細に出るので、ここには入らない
+ */
+export function orderLevelDiscount(order: RawLine): number {
+  const taxes = order.taxesIncluded === false
+    ? ((order.taxLines as RawLine[] | null) ?? []).reduce((a, t) => a + money(t.priceSet as MoneyBag), 0)
+    : 0;
+  const d =
+    money(order.subtotalPriceSet as MoneyBag) +
+    money(order.totalShippingPriceSet as MoneyBag) +
+    taxes +
+    money(order.totalTipReceivedSet as MoneyBag) -
+    money(order.totalPriceSet as MoneyBag);
+  return d > 0.005 ? Math.round(d * 100) / 100 : 0;
+}
+
 export function orderData(order: RawLine, opts: LayoutOrderOptions): OrderData {
   const lines = (((order.lineItems as { nodes?: RawLine[] } | null)?.nodes) ?? []) as RawLine[];
   const createdAt = String(order.createdAt ?? "");
@@ -335,7 +365,7 @@ export function orderData(order: RawLine, opts: LayoutOrderOptions): OrderData {
     shipping: money(order.totalShippingPriceSet as MoneyBag),
     line_items: lines.map(lineItem),
     subtotal: money(order.subtotalPriceSet as MoneyBag),
-    discounts: money(order.totalDiscountsSet as MoneyBag),
+    discounts: orderLevelDiscount(order),
     tax_lines: taxLines(order.taxLines),
     total: money(order.totalPriceSet as MoneyBag),
     payments: pay.payments,
