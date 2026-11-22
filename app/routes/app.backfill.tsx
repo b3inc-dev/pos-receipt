@@ -1,9 +1,11 @@
 /**
  * /app/backfill — 過去データ一括取込
  * 管理画面向け：SalesSummaryCacheDaily を指定期間分バックフィル
+ * キューが使えるときは裏で 1 日ずつ進める（画面を閉じても続く。T さんの決定 2026-11-22・UI ルール v1.1 12章）。
+ * 使えないとき（BACKFILL_QUEUE=0 など）は、今までどおり画面から 1 日ずつ送る。
  */
-import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useLocation, useNavigate } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { useFetcher, useLoaderData, useLocation, useNavigate, useRevalidator } from "react-router";
 import {
   Page,
   Layout,
@@ -25,7 +27,12 @@ import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SystemPageNav } from "../components/SystemPageNav";
 import { AdminIntro, SuccessToast } from "../components/admin-ui";
 import { isInhouseMode } from "../utils/planFeatures.server";
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { ensureBackfillWorker, enqueueBackfillStep, readBackfillRun, setStopRequest, writeBackfillRun } from "../services/backfillQueue.server";
+import { newRun, resumedRun, type BackfillRun } from "../utils/backfillRun";
+
+/** 裏の取り込みがこの時間動いていなければ、止まったとみなして「続きから再開」を出す */
+const STALE_MS = 10 * 60 * 1000;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
@@ -35,7 +42,62 @@ export async function loader({ request }: LoaderFunctionArgs) {
     select: { shopifyLocationGid: true, name: true },
     orderBy: { name: "asc" },
   });
-  return { locations, memberCardEnabled: isInhouseMode() };
+  const queueAvailable = (await ensureBackfillWorker()) !== null;
+  const run = queueAvailable ? await readBackfillRun(shop.id) : null;
+  return { locations, memberCardEnabled: isInhouseMode(), queueAvailable, run, now: new Date().toISOString() };
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  const { admin, session } = await authenticate.admin(request);
+  const shop = await resolveShop(session.shop, admin);
+  const form = await request.formData();
+  const intent = String(form.get("intent") ?? "");
+  const now = new Date().toISOString();
+  const current = await readBackfillRun(shop.id);
+  const stale = current?.state === "running" && Date.now() - Date.parse(current.updatedAt) > STALE_MS;
+
+  if (intent === "stop") {
+    if (!current || current.state !== "running") return { ok: true };
+    await setStopRequest(shop.id, current.runId);
+    await writeBackfillRun(shop.id, { ...current, state: "stopped", updatedAt: now });
+    return { ok: true };
+  }
+
+  let run: BackfillRun;
+  if (intent === "start") {
+    if (current?.state === "running" && !stale) {
+      return { ok: false, error: "ほかの取り込みが動いています。止めてから始めてください。" };
+    }
+    const locationId = String(form.get("locationId") ?? "");
+    const month = String(form.get("month") ?? "");
+    const loc = await prisma.location.findFirst({
+      where: { shopId: shop.id, shopifyLocationGid: locationId },
+      select: { shopifyLocationGid: true, name: true },
+    });
+    if (!loc || !/^\d{4}-\d{2}$/.test(month)) return { ok: false, error: "ロケーションと対象月を選んでください。" };
+    run = newRun({
+      runId: crypto.randomUUID(),
+      locationId: loc.shopifyLocationGid,
+      locationName: loc.name ?? "",
+      month,
+      today: now.slice(0, 10),
+      now,
+    });
+  } else if (intent === "resume") {
+    if (!current || (current.state === "running" && !stale)) return { ok: true };
+    run = resumedRun(current, now);
+  } else {
+    return { ok: false, error: "操作が分かりません。" };
+  }
+
+  await setStopRequest(shop.id, null);
+  await writeBackfillRun(shop.id, run);
+  const queued = await enqueueBackfillStep({ shopDomain: session.shop, shopId: shop.id, runId: run.runId });
+  if (!queued) {
+    await writeBackfillRun(shop.id, { ...run, state: "stopped", updatedAt: now });
+    return { ok: false, error: "裏で進める仕組みが今使えません。しばらくしてからもう一度お試しください。" };
+  }
+  return { ok: true };
 }
 
 function buildMonthOptions() {
@@ -66,7 +128,9 @@ function getDaysInMonth(ym: string): string[] {
 type DayResult = { targetDate: string; status: "pending" | "processing" | "done" | "skipped" | "error"; reason?: string };
 
 export default function BackfillPage() {
-  const { locations, memberCardEnabled } = useLoaderData<typeof loader>();
+  const { locations, memberCardEnabled, queueAvailable, run, now } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const revalidator = useRevalidator();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -78,10 +142,32 @@ export default function BackfillPage() {
 
   const [selectedLocation, setSelectedLocation] = useState(locationOptions[0]?.value ?? "");
   const [selectedMonth, setSelectedMonth] = useState(monthOptions[0]?.value ?? "");
-  const [running, setRunning] = useState(false);
-  const [dayResults, setDayResults] = useState<DayResult[]>([]);
-  const [error, setError] = useState("");
+  // キューが使えないときだけ使う、画面から 1 日ずつ送る取り込みの状態
+  const [localRunning, setRunning] = useState(false);
+  const [localDayResults, setDayResults] = useState<DayResult[]>([]);
+  const [localError, setError] = useState("");
   const abortRef = useRef(false);
+
+  // 裏の取り込み（キュー）の状態。止まったまま 10 分動いていなければ「続きから再開」を出す
+  const stale = Boolean(run && run.state === "running" && Date.parse(now) - Date.parse(run.updatedAt) > STALE_MS);
+  const running = queueAvailable ? Boolean(run && run.state === "running" && !stale) : localRunning;
+  const dayResults: DayResult[] = queueAvailable ? (run?.days ?? []) : localDayResults;
+  const error = queueAvailable ? (fetcher.data?.ok === false ? fetcher.data.error ?? "" : "") : localError;
+  const busy = fetcher.state !== "idle";
+  // この画面で動いているのを見ていた取り込みが終わったときだけ「取込完了」のトーストを出す（開き直すたびに出さない）
+  const [watchedRunning, setWatchedRunning] = useState(false);
+  useEffect(() => {
+    if (running) setWatchedRunning(true);
+  }, [running]);
+
+  // 裏で動いている間は、数秒ごとに進み具合を読み直す（画面を開いている間の自動更新）
+  useEffect(() => {
+    if (!queueAvailable || !running) return;
+    const timer = window.setInterval(() => {
+      if (revalidator.state === "idle") revalidator.revalidate();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [queueAvailable, running, revalidator]);
 
   const processed = dayResults.filter((r) => r.status === "done" || r.status === "skipped" || r.status === "error").length;
   const total = dayResults.length;
@@ -89,16 +175,20 @@ export default function BackfillPage() {
   const done = total > 0 && processed === total;
   const errorCount = dayResults.filter((r) => r.status === "error").length;
   const stopped = !running && total > 0 && !done;
+  // 続きから再開できる取り込み（止めた・失敗した日がある・裏で止まったまま）
+  const resumable = stopped || errorCount > 0 || stale;
   // 状態はバッジで 1 行に出す（処理中・完了・停止中・要確認。UI ルール v1.1 12章）
   const runState: { label: string; tone?: "info" | "success" | "warning" } = running
     ? { label: "処理中", tone: "info" }
+    : stale
+    ? { label: "要確認", tone: "warning" }
     : stopped
     ? { label: "停止中" }
     : errorCount > 0
     ? { label: "要確認", tone: "warning" }
     : { label: "完了", tone: "success" };
 
-  const handleStart = useCallback(async () => {
+  const handleLocalStart = useCallback(async () => {
     if (!selectedLocation || !selectedMonth) return;
     abortRef.current = false;
     setError("");
@@ -155,9 +245,26 @@ export default function BackfillPage() {
     setRunning(false);
   }, [selectedLocation, selectedMonth, locations]);
 
-  const handleStop = useCallback(() => {
+  const handleLocalStop = useCallback(() => {
     abortRef.current = true;
   }, []);
+
+  const handleStart = () => {
+    if (!queueAvailable) return void handleLocalStart();
+    // 前の取り込みが止まっている・失敗した日があるときは続きから（取込済みの日は飛ばす）
+    if (run && (stopped || errorCount > 0 || stale)) {
+      fetcher.submit({ intent: "resume" }, { method: "post" });
+      return;
+    }
+    fetcher.submit({ intent: "start", locationId: selectedLocation, month: selectedMonth }, { method: "post" });
+  };
+  const handleNewStart = () => {
+    fetcher.submit({ intent: "start", locationId: selectedLocation, month: selectedMonth }, { method: "post" });
+  };
+  const handleStop = () => {
+    if (!queueAvailable) return handleLocalStop();
+    fetcher.submit({ intent: "stop" }, { method: "post" });
+  };
 
   const q = location.search || "";
   const to = (path: string) => () => navigate(path + q);
@@ -174,12 +281,21 @@ export default function BackfillPage() {
             {/* 画面全体の説明は AdminIntro（1〜2文）。開発用の名前（テーブル名）は出さない（UI ルール v1.1 5章・10章） */}
             <AdminIntro>
               <p>
-                選んだ月の売上サマリーの集計を、1日ずつ取り込みます。取込済みの日は飛ばすので、止めたあとは「続きから再開」で残りの日を進めます。画面を閉じると止まります。
+                {queueAvailable
+                  ? "選んだ月の売上サマリーの集計を、1日ずつ取り込みます。画面を閉じても裏で続き、取込済みの日は飛ばします。止めたあとは「続きから再開」で残りの日を進めます。"
+                  : "選んだ月の売上サマリーの集計を、1日ずつ取り込みます。取込済みの日は飛ばすので、止めたあとは「続きから再開」で残りの日を進めます。画面を閉じると止まります。"}
               </p>
             </AdminIntro>
             {/* 終わったらトーストで知らせる（成功は画面に残さない。UI ルール v1.1 5章） */}
-            <SuccessToast message={done && errorCount === 0 ? "取込完了しました" : null} trigger={dayResults} />
+            <SuccessToast message={done && errorCount === 0 && (!queueAvailable || watchedRunning) ? "取込完了しました" : null} trigger={queueAvailable ? run?.runId : localDayResults} />
             {/* 止まった・失敗した日があるときは、お知らせ枠 1 つに理由を出す（UI ルール v1.1 5章・12章） */}
+            {stale && errorCount === 0 && (
+              <Box paddingBlockStart="300">
+                <Banner tone="warning">
+                  <Text as="p">裏の取り込みが 10 分以上進んでいません。「続きから再開」で止まった日から続けます。</Text>
+                </Banner>
+              </Box>
+            )}
             {!running && errorCount > 0 && (
               <Box paddingBlockStart="300">
                 <Banner tone="critical">
@@ -213,11 +329,19 @@ export default function BackfillPage() {
                     />
                     <InlineStack gap="300">
                       {!running ? (
-                        <Button variant="primary" onClick={handleStart} disabled={!selectedLocation || !selectedMonth}>
-                          {stopped || errorCount > 0 ? "続きから再開" : "取込開始"}
-                        </Button>
+                        <>
+                          <Button variant="primary" onClick={handleStart} loading={busy} disabled={!selectedLocation || !selectedMonth}>
+                            {resumable ? "続きから再開" : "取込開始"}
+                          </Button>
+                          {/* 前の取り込みを続けずに、選んだロケーション・月で始める（白いボタン。UI ルール v1.1 12章） */}
+                          {queueAvailable && resumable && (
+                            <Button onClick={handleNewStart} disabled={busy || !selectedLocation || !selectedMonth}>
+                              選んだ月で最初から取り込む
+                            </Button>
+                          )}
+                        </>
                       ) : (
-                        <Button onClick={handleStop}>
+                        <Button onClick={handleStop} loading={busy}>
                           停止
                         </Button>
                       )}
@@ -234,6 +358,9 @@ export default function BackfillPage() {
               <Card>
                 <BlockStack gap="300">
                   <Text variant="headingSm" as="h2">進捗</Text>
+                  {queueAvailable && run && (
+                    <Text as="p" tone="subdued">{run.locationName || "（名前なし）"}・{run.month.replace("-", "年")}月</Text>
+                  )}
                   {/* 状態のバッジと件数を 1 行で（UI ルール v1.1 12章） */}
                   <div role="status">
                     <InlineStack gap="200" align="space-between" blockAlign="center">
