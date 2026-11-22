@@ -27,6 +27,11 @@ uri = "/webhooks/compliance"
 topics = ["orders/updated"]
 uri = "/webhooks/orders/updated"
 
+# 注文の作成時に販売の帰属スタッフ（line_items[].attributed_staffs）を記録する（本文だけ・Shopify は呼ばない）
+[[webhooks.subscriptions]]
+topics = ["orders/create"]
+uri = "/webhooks/orders/create"
+
 [access.admin]
 direct_api_mode = "offline"
 embedded_app_direct_api_access = true

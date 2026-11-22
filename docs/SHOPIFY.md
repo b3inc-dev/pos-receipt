@@ -52,6 +52,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | `app/uninstalled` | `/webhooks/app/uninstalled` | アンインストール処理 |
 | compliance（customers/data_request, customers/redact, shop/redact） | `/webhooks/compliance` | GDPR。`data_request` は DB 列挙＋根拠ログ後に 200（email/phone 非保存。開示は運用）。詳細は `gdprCustomerDataRequest.server.ts` |
 | `orders/updated` | `/webhooks/orders/updated` | 売上サマリー更新キュー + 返金計上 metafield 同期 + 帰属スタッフの記録（本文だけ・Shopify は呼ばない） |
+| `orders/create` | `/webhooks/orders/create` | 帰属スタッフの記録だけ（本文だけ・Shopify は呼ばない。売上サマリーは動かさない） |
 
 ## 6. メタフィールド
 
