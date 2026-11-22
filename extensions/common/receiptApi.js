@@ -51,30 +51,15 @@ export async function previewReceipt({ orderId, recipientName, proviso }) {
 }
 
 /**
- * 発行者のスタッフ ID（POS でピン留め中のスタッフ。無ければ POS にログイン中のユーザー）。
- * 名前はサーバーが引く。取れなければ undefined（発行は止めない）。
- */
-export function currentStaffMemberId() {
-  try {
-    const s = globalThis?.shopify?.session?.currentSession;
-    const id = s?.staffMemberId ?? s?.userId;
-    return id === null || id === undefined || id === 0 ? undefined : id;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
  * 領収書発行
  * idempotencyKey を自動生成して送信することで、ネットワーク再試行時の重複発行を防ぐ。
  * 再発行時（isReissue=true）は毎回新規キーを生成する。
  */
 export async function issueReceipt({ orderId, recipientName, proviso, isReissue = false }) {
   const idempotencyKey = crypto.randomUUID();
-  const staffMemberId = currentStaffMemberId();
   return apiFetch("/api/receipts/issue", {
     method: "POST",
-    body: JSON.stringify({ orderId, recipientName, proviso, isReissue, idempotencyKey, staffMemberId }),
+    body: JSON.stringify({ orderId, recipientName, proviso, isReissue, idempotencyKey }),
   });
 }
 

@@ -11,7 +11,7 @@ import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
 import { encodeReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
 import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
-import { normalizeStaffId, resolveStaffDisplayName } from "../utils/receiptIssuer";
+import { attributedStaffFromLineItems, type AttributedStaffMember } from "../utils/receiptIssuer";
 
 const ORDER_QUERY = `#graphql
   query ReceiptIssueOrder($id: ID!) {
@@ -21,6 +21,9 @@ const ORDER_QUERY = `#graphql
       createdAt
       totalPriceSet { shopMoney { amount currencyCode } }
       retailLocation { id name }
+      lineItems(first: 250) {
+        nodes { staffMember { id name firstName lastName } }
+      }
     }
   }
 `;
@@ -36,9 +39,8 @@ export async function action({ request }: ActionFunctionArgs) {
     const { admin, shop, corsJson } = authResult;
 
     const body = await request.json() as Record<string, unknown>;
-    const { orderId, recipientName, proviso, isReissue, staffMemberId, idempotencyKey } = body;
-    // 発行者: POS でピン留め中のスタッフ ID。名前はサーバーで引けたときだけ（自由入力の createdBy は受けない）
-    const createdByStaffId = normalizeStaffId(staffMemberId);
+    // 発行者は注文の帰属スタッフ（サーバーが注文の明細から引く）。POS から来る createdBy は使わない
+    const { orderId, recipientName, proviso, isReissue, idempotencyKey } = body;
 
     if (!orderId) {
       return corsJson({ ok: false, error: "orderId is required" }, { status: 400 });
@@ -86,6 +88,7 @@ export async function action({ request }: ActionFunctionArgs) {
           name: string;
           totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
           retailLocation?: { id: string; name: string } | null;
+          lineItems?: { nodes?: Array<{ staffMember?: AttributedStaffMember }> } | null;
         } | null;
       };
     };
@@ -95,7 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return corsJson({ ok: false, error: "Order not found" }, { status: 404 });
     }
 
-    const createdByName = await resolveStaffDisplayName(admin, createdByStaffId);
+    const issuer = attributedStaffFromLineItems(order.lineItems?.nodes);
 
     const tmpl = await prisma.receiptTemplate.findFirst({
       where: { shopId: shop.id, isActive: true },
@@ -123,8 +126,8 @@ export async function action({ request }: ActionFunctionArgs) {
           templateId: tmpl?.id ?? null,
           templateVersion: tmpl?.version ?? 1,
           isReissue: Boolean(isReissue),
-          createdBy: createdByName,
-          createdByStaffId,
+          createdBy: issuer.names,
+          createdByStaffId: issuer.staffIds,
           idempotencyKey: idempotencyKey && typeof idempotencyKey === "string"
             ? idempotencyKey
             : null,
