@@ -286,7 +286,7 @@ function ChannelForm({
         value={form.sourceNamesInput}
         onChange={(v) => set("sourceNamesInput", v)}
         placeholder="例: web  /  amazon, amazon_marketplace  /  tiktok"
-        helpText="Shopify 注文の source_name フィールドの値を入力してください。デバッグAPI (/api/debug/channel-sources) で確認できます。"
+        helpText="Shopify 注文の source_name の値を入力します。わからないときは「チャネルを自動検出」で直近の注文から探せます。"
         multiline={2}
         autoComplete="off"
       />

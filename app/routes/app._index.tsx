@@ -2,6 +2,7 @@
  * /app — 管理画面トップ
  */
 import type { LoaderFunctionArgs } from "react-router";
+import { isDevelopmentStore } from "../utils/devStore.server";
 import { useLoaderData, useLocation, useNavigate } from "react-router";
 import {
   Page,
@@ -34,6 +35,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const fullAccess = planState.fullAccess;
   const general = await getAppSetting<Partial<GeneralSettings>>(shop.id, GENERAL_SETTINGS_KEY);
   const privacyPolicyUrl = resolvePrivacyPolicyUrl(general?.privacyPolicyUrl);
+  // 「システム診断」の枠は開発ストアだけに出す（T さんの決定 2026-11-22。読めなければ出さない）
+  const isDevStore = await isDevelopmentStore(admin);
   return {
     planCode: planState.planCode,
     planLabel: fullAccess
@@ -41,11 +44,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : planLabel(planState.planCode),
     isInhouse: fullAccess,
     privacyPolicyUrl,
+    isDevStore,
   };
 }
 
 export default function AppIndex() {
-  const { planCode, planLabel: label, isInhouse, privacyPolicyUrl } =
+  const { planCode, planLabel: label, isInhouse, privacyPolicyUrl, isDevStore } =
     useLoaderData<typeof loader>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -147,7 +151,8 @@ export default function AppIndex() {
           </Card>
         </Layout.AnnotatedSection>
 
-        {/* ── システム診断 ── */}
+        {/* ── システム診断（開発ストアだけ） ── */}
+        {isDevStore && (
         <Layout.AnnotatedSection
           title="システム診断"
           description="DB接続・テーブル件数・環境変数の設定状態を確認できます。障害調査や設定確認にご利用ください。"
@@ -161,6 +166,7 @@ export default function AppIndex() {
             </BlockStack>
           </Card>
         </Layout.AnnotatedSection>
+        )}
 
         {/* ── プライバシー ── */}
         <Layout.AnnotatedSection

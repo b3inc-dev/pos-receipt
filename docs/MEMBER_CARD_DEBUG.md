@@ -8,13 +8,20 @@
 
 Render のログで次のような行を探す。
 
-- `[member-card] LINE verify failed: 400 {"error":"invalid_request","error_description":"IdToken expired."}`
-  - **原因**: id_token の有効期限切れ。
+> 2026-11-22 から、ログには LINE の答えの本文を出さない（HTTP の番号と、LINE の決まった `error` の名前だけ）。
+
+- `[member-card] ID_TOKEN_EXPIRED: status=400 error=invalid_request`
+  - **原因**: id_token の有効期限切れ（LINE が断り、トークンの `exp` がもう過ぎている。本文の「expired」の文字では決めない）。
   - **対処**: 会員証ページを**再読み込み**する。PCブラウザで開いている場合は、**LINEアプリから同じURLを開き直す**と新しいトークンが取得できる。
 
-- `LINE verify failed: 401` や `client_id` まわり
-  - **原因**: LINE_CHANNEL_ID の不一致や設定ミス。
+- `[member-card] LINE verify failed: status=400 error=invalid_request`（期限は残っている）や `status=401`・`error=invalid_client` など
+  - **原因**: LINE_CHANNEL_ID の不一致や設定ミス、正しくないトークン。
   - **対処**: 環境変数 `LINE_CHANNEL_ID` が、LIFF を登録している LINE チャネルの Channel ID と一致しているか確認。
+
+- `[member-card] LINE verify unavailable: status=503` など（429・5xx）や `[member-card] LINE verify request error: TypeError`（通信の失敗）
+  - **原因**: LINE 側の混雑・障害、または通信の失敗。トークンが悪いとは限らない。
+  - **画面**: 「混雑しています。しばらくしてからお試しください。」（API は 503 `THROTTLED`）。
+  - **対処**: 少し待ってから開き直す。続くときは LINE の障害情報を見る。
 
 ---
 
