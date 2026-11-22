@@ -21,6 +21,12 @@ import {
   matchesSpecialRefundIdempotencyPayload,
   resolveSpecialRefundIdempotencyKey,
 } from "../services/specialRefundIdempotency.server";
+import {
+  REFUND_METHOD_NOT_IN_MASTER_CODE,
+  eventTypeNeedsRefundMethod,
+  findSelectableRefundMethod,
+  refundMethodNotInMasterMessage,
+} from "../utils/specialRefundMethodValidation";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
 
@@ -227,6 +233,25 @@ export async function action({ request }: ActionFunctionArgs) {
       !["none", "pending"].includes(existingIdempotentEvent.shopifyRefundStatus)
     ) {
       return replayResponse(existingIdempotentEvent);
+    }
+
+    // 新しい登録だけ: 実際の返金手段は支払方法マスタ（有効・特殊返金で選べる）からだけ受ける。
+    // 同じキーの呼び直し（Shopify 返金を確かめる）は、あとでマスタを変えても止めない。
+    if (!existingIdempotentEvent && eventTypeNeedsRefundMethod(eventTypeStr)) {
+      const selectable = await prisma.paymentMethodMaster.findMany({
+        where: { shopId: shop.id, enabled: true, selectableForSpecialRefund: true },
+        select: { rawGatewayPattern: true, displayLabel: true },
+      });
+      if (!findSelectableRefundMethod(actualRefundMethod, selectable)) {
+        return corsJson(
+          {
+            ok: false,
+            code: REFUND_METHOD_NOT_IN_MASTER_CODE,
+            error: refundMethodNotInMasterMessage(actualRefundMethod),
+          },
+          { status: 400 },
+        );
+      }
     }
 
     const voidedOnOrder = await countVoidedEventsOnOrder(shop.id, sourceOrderIdStr);
