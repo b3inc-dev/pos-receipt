@@ -2,7 +2,6 @@
  * 注文詳細の GraphQL 取得・POS 向け JSON 整形
  */
 import { formatTimeHmInTimeZone } from "../utils/shopTimezone.server";
-import { formatAttributedStaffList, normalizeLineItemId, type AttributedStaff } from "../utils/attributedStaff";
 
 export const ORDER_DETAIL_QUERY = `#graphql
   query OrderDetail($id: ID!) {
@@ -42,6 +41,12 @@ export const ORDER_DETAIL_QUERY = `#graphql
           refundableQuantity
           originalUnitPriceSet { shopMoney { amount currencyCode } }
           discountedUnitPriceSet { shopMoney { amount currencyCode } }
+          staffMember {
+            id
+            name
+            firstName
+            lastName
+          }
           customAttributes {
             key
             value
@@ -118,15 +123,7 @@ function discountApplicationLabel(app: Record<string, unknown> | null | undefine
 
 export function serializeOrderDetail(
   order: Record<string, unknown>,
-  opts?: {
-    timezone?: string;
-    /**
-     * 販売の帰属スタッフ（orderStaffAttribution.server の getOrderAttributedStaff）。
-     * `staffMember` は read_users が無い店では読めず、同じクエリに入れると注文の取得ごと失敗するので、
-     * クエリには入れずアプリの記録から入れる。
-     */
-    attributedStaff?: { staffs: AttributedStaff[]; byLineItem: Record<string, AttributedStaff[]> } | null;
-  },
+  opts?: { timezone?: string },
 ): Record<string, unknown> {
   const tz = opts?.timezone ?? "Asia/Tokyo";
   const createdAt = String(order.createdAt ?? "");
@@ -153,9 +150,16 @@ export function serializeOrderDetail(
       const suffix = lineName.slice(titleOnly.length).replace(/^[\s\-–—]+/, "");
       if (suffix) variantTitle = suffix;
     }
-    const lineKey = normalizeLineItemId(li.id);
-    const lineStaffs = (lineKey && opts?.attributedStaff?.byLineItem[lineKey]) || [];
-    const staffName = formatAttributedStaffList(lineStaffs);
+    const staff = li.staffMember as {
+      id?: string;
+      name?: string;
+      firstName?: string;
+      lastName?: string;
+    } | null;
+    const staffName =
+      staff?.name?.trim() ||
+      [staff?.firstName, staff?.lastName].filter(Boolean).join(" ").trim() ||
+      "";
     return {
       id: li.id,
       title: titleOnly || lineName,
@@ -169,7 +173,6 @@ export function serializeOrderDetail(
       lineTotal: String(Math.round(unit * qty)),
       refundableQuantity: Number(li.refundableQuantity ?? 0),
       staffMemberName: staffName,
-      attributedStaffs: lineStaffs,
       customAttributes: ((li.customAttributes as { key?: string; value?: string }[]) ?? []).map((a) => ({
         key: a.key,
         value: a.value,
@@ -219,10 +222,6 @@ export function serializeOrderDetail(
   return {
     orderId: String(order.id ?? "").replace("gid://shopify/Order/", ""),
     orderName: order.name,
-    /** 販売の帰属スタッフ（明細の順に重複なし）。記録が無ければ空 */
-    attributedStaffs: opts?.attributedStaff?.staffs ?? [],
-    /** 帰属スタッフを 1 行にしたもの（「・」区切り・名前が無い人は「スタッフ ID 123」） */
-    attributedStaffLabel: formatAttributedStaffList(opts?.attributedStaff?.staffs ?? []),
     createdAt,
     processedAt: order.processedAt ?? null,
     cancelledAt: order.cancelledAt ?? null,

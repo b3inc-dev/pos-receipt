@@ -7,7 +7,6 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import { ORDER_DETAIL_QUERY, serializeOrderDetail } from "../services/orderDetail.server";
 import { isOrderEligibleForRedoDraft } from "../services/orderRedoDraft.server";
-import { getOrderAttributedStaff } from "../services/orderStaffAttribution.server";
 import { getPaymentMethodVoucherInfo } from "../utils/paymentMethod.server";
 import {
   getAppSetting,
@@ -20,7 +19,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
-    const { admin, shop, scope, corsJson } = authResult;
+    const { admin, shop, corsJson } = authResult;
     const orderId = params.orderId;
     if (!orderId) {
       return corsJson({ ok: false, error: "orderId required" }, { status: 400 });
@@ -46,12 +45,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     const timezone = await getShopTimezoneForDaily(admin, shop.id);
-    // 帰属スタッフはアプリの記録から（失敗しても注文の表示は止めない）
-    const attributedStaff = await getOrderAttributedStaff(shop.id, order.id, { admin, scope }).catch((e) => {
-      console.warn("[api/orders] attributed staff lookup failed", e);
-      return null;
-    });
-    const result = serializeOrderDetail(order as Record<string, unknown>, { timezone, attributedStaff });
+    const result = serializeOrderDetail(order as Record<string, unknown>, { timezone });
 
     const gateways = ((result.transactions as { gateway?: string }[]) ?? []).map((t) => t.gateway ?? "");
     let hasVoucherChange = false;

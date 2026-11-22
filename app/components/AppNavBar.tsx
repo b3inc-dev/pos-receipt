@@ -29,7 +29,6 @@ const GROUP_PATHS: Record<string, string[]> = {
     "/app/settings",
     "/app/location-profiles",
     "/app/payment-methods",
-    "/app/staff-names",
   ],
   "/app/sales-summary": [
     "/app/sales-summary",

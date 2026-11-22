@@ -20,7 +20,6 @@
 | D12 | プライバシーポリシー URL は AppSetting `privacyPolicyUrl` 優先、なければ env `PRIVACY_POLICY_URL`。ダミー固定 URL なし | `privacyPolicyUrl.ts` + 一般設定 / ホーム |
 | D13 | `customers/data_request` は注文紐づけの ReceiptIssue / SpecialRefundEvent を列挙し PII 本文なしでログ。新規 PII 永続化なし。webhook は 200 | `webhooks.compliance.tsx` |
 | D14 | LIFF 会員証は、LINE ユーザー ID の顧客メタフィールドを決めた順で読む。既定は `line_crm.line_user_id`（LINE CRM＝Shop CRM for LINE の項目。line-crm の D-APP-14）→ `socialplus.line`（SocialPlus と、LINE CRM の互換の書き込み）。環境変数 `MEMBER_CARD_LINE_ID_METAFIELDS`（`<namespace>.<key>` をカンマ区切り、多くて 4 つ）で並べ替えられる。顧客の LINE ユーザー ID は「並べた順で最初に値が入っている項目」の値（LINE CRM の項目に値があれば、古い項目の別の ID では見つけない）。タグ `line:<id>` のファストパスはそのまま（タグで見つかった人も同じ決まりで確かめる）。全件スキャンは項目ごとに `metafields.<namespace>.<key>:*` を並べた順に行う。`socialplus.line` 以外は、定義の `adminFilterable` が FILTERABLE のときだけ全件を見る（絞り込みが効かない項目で全顧客を見ない。定義が無い・オフの項目は飛ばす。先の項目を定義の読み込み・検索のエラーで見られなかったら、後の項目で探さず `API_ERROR`。Throttled は定義の読み込みも検索もやり直し、使い切ったら `THROTTLED`）。`socialplus.line` は前と同じ | `app/utils/memberCardLineFields.ts` + `app/lib/customer.server.ts` + `app/lib/memberCardFieldFilter.server.ts` |
-| D15 | 販売の帰属スタッフ（T 2026-11-23、カードで決定）: スタッフ ID・数量は orders/updated の `line_items[].attributed_staffs` を `OrderStaffAttribution` に残し、名前は管理画面の登録（`staff_display_names_v1`）。`read_users` は足さない（Plus/Advanced 限定で Shopify の許可も要り、公開版の全プランで使えないため）。`read_users` がある店だけ Shopify の名前を優先。`staffMember` を注文のクエリに入れない（スコープの無い店で注文の取得ごと失敗するため）。orders/create も購読して作成時に記録する（T 2026-11-23。Webhook の変更なので本番に出すのは T の承認後） | `app/utils/attributedStaff.ts` + `app/services/orderStaffAttribution.server.ts` + `app/routes/app.staff-names.tsx` |
 
 ## 2. 古い docs との差分（注意）
 
@@ -59,7 +58,7 @@
 | 返金ロケーション不一致 | その精算から除外 → **他店計上漏れ／過少**のリスク（設定依存） |
 | GraphQL エラー | リトライ／スロットルあり。同期失敗時 create は 500。キャッシュ失敗は精算成功を落とさない箇所あり |
 | 過去データ | 履歴は Settlement スナップショット。再計算 API はプレビュー中心 |
-| 領収書 | idempotencyKey。発行者は注文の帰属スタッフ（販売の帰属スタッフの記録）をサーバーで引いて保存 |
+| 領収書 | idempotencyKey。発行者は発行した人（POS のピン留め中スタッフ）の ID を createdByStaffId に保存 |
 
 ## 5. Printing API 一本化
 
@@ -75,7 +74,7 @@
 3. Shopify POS Pro / Lite プラン差分はコードで未検出（アプリ Lite/Pro とは別）
 4. 配送注文・送料を精算に含める／除外する業務ルールの正式決定（コード上は送料非集計）
 5. POS キャンセルと Admin キャンセルを件数上どう区別すべきか（コード上区別なし）
-6. ~~`ReceiptIssue.createdBy` を運用で埋めるか~~ → 決定 F（2026-11-22・11/23 に確定）: 注文の帰属スタッフを記録（販売の帰属スタッフの記録 `getOrderAttributedStaff` を使う）
+6. ~~`ReceiptIssue.createdBy` を運用で埋めるか~~ → 決定（2026-11-23 4:20）: 領収書を発行した人 1 人を記録（販売担当とは別）
 7. line item properties を精算／領収書に出す要件の有無
 8. ギフトレシート（Shopify Gift Receipt）要件の有無（現行未実装）
 9. GitHub 上の CI / 必須チェックの有無（リポジトリ内 workflow なし）

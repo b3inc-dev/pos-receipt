@@ -23,8 +23,8 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
-import { formatReceiptIssuer } from "../utils/receiptIssuer";
-import { loadStaffDisplayNames } from "../services/orderStaffAttribution.server";
+import { getAppSetting } from "../utils/appSettings.server";
+import { formatReceiptIssuer, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
 
 const PAGE_SIZE = 30;
 
@@ -55,7 +55,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : {}),
   };
 
-  const [total, items, staffNames] = await Promise.all([
+  const [total, items, staffNameSetting] = await Promise.all([
     prisma.receiptIssue.count({ where: whereClean }),
     prisma.receiptIssue.findMany({
       where: whereClean,
@@ -78,8 +78,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         createdAt: true,
       },
     }),
-    loadStaffDisplayNames(shop.id).catch(() => ({} as Record<string, string>)),
+    getAppSetting(shop.id, STAFF_DISPLAY_NAMES_SETTING_KEY).catch(() => null),
   ]);
+  const staffNames = parseStaffNameMap(staffNameSetting);
 
   return {
     items: items.map((r) => ({

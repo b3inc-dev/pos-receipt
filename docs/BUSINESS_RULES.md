@@ -111,17 +111,13 @@
 
 ---
 
-## 8. スタッフ名（販売の帰属スタッフ）
+## 8. スタッフ名
 
-- 帰属スタッフ＝Shopify POS で明細の販売に付いたスタッフ（T 2026-11-23。旧 #18 の「販売担当の入力」ではない）
-- スタッフ ID と数量は orders/create・orders/updated Webhook の `line_items[].attributed_staffs` から `OrderStaffAttribution` に記録（注文ごとに入れ替え、古い通知は `updated_at` で捨てる）。注文・カートは書き換えない
-- 名前は管理画面「店舗 › スタッフ名」（AppSetting `staff_display_names_v1`）の登録。offline トークンに `read_users` がある店だけ Shopify の StaffMember の名前を優先
-- 注文詳細 API は `attributedStaffs`（注文）・`attributedStaffLabel`・明細の `attributedStaffs` / `staffMemberName` を返す（`staffMember` は GraphQL で読まない）
-- 記録はこの機能を入れた後に届いた通知から。前の注文・通知がまだ来ていない注文は空
+- 注文詳細 API が lineItems の `staffMember` を `staffMemberName` として返す
 - POS 詳細 UI で「販売: …」表示
 - 精算集計・精算レシート文言・領収書金額計算には **未使用**
-- 領収書の発行者（T さん決定 F・2026-11-22、11/23 に「帰属スタッフ」と確定）: 発行 API が `getOrderAttributedStaff`（販売の帰属スタッフの記録・orders/updated の `attributed_staffs`）で注文の帰属スタッフを引き、ID を `ReceiptIssue.createdByStaffId`（複数は `,`）、発行時に分かった名前を `createdBy`（複数は `・`）に保存する。POS でピン留め中・ログイン中のスタッフではない。POS から送る名前・ID は使わない。記録が無い注文（通知の前）・帰属スタッフがいない注文・読み込みの失敗は空にして、発行は止めない
-- 管理画面「領収書発行履歴」の「発行者」列は ID ごとに いまの「スタッフ名」の登録 → 発行時の名前 → `スタッフ ID n`、ID が無ければ `—`（`app/utils/receiptIssuer.ts`）。印字に出すかは #69 のレイアウト編集で扱う
+- 領収書の発行者（T さん決定・2026-11-23 4:20）: 「領収書を発行した人 1 人」で、販売担当（帰属スタッフ）とは別。POS `receiptApi.js` が `currentSession.staffMemberId`（ピン留め中のスタッフ。無ければ `userId`）を `staffMemberId` として送り、サーバーが数字だけにそろえて `ReceiptIssue.createdByStaffId` に保存する。名前は管理画面「スタッフ名」の登録（AppSetting `staff_display_names_v1`）があれば発行時に `createdBy` に残す。POS からの自由入力の名前は受けない。`staffMember` は `read_users` が要るので読まない
+- 管理画面「領収書発行履歴」の「発行者」列は いまの登録名 → 発行時の名前 → `スタッフ ID n` → `—`（`app/utils/receiptIssuer.ts`）。印字に出すかは #69 のレイアウト編集で扱う
 
 ---
 

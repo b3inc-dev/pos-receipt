@@ -11,8 +11,8 @@ import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
 import { encodeReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
 import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
-import { receiptIssuerFromAttributedStaff } from "../utils/receiptIssuer";
-import { getOrderAttributedStaff } from "../services/orderStaffAttribution.server";
+import { getAppSetting } from "../utils/appSettings.server";
+import { issuerNameAtIssue, normalizeStaffId, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
 
 const ORDER_QUERY = `#graphql
   query ReceiptIssueOrder($id: ID!) {
@@ -26,23 +26,6 @@ const ORDER_QUERY = `#graphql
   }
 `;
 
-/**
- * 発行者＝注文の帰属スタッフ（販売の帰属スタッフ対応の記録から）。
- * 記録が無い・失敗のときは空にして、発行は止めない。
- */
-async function readReceiptIssuer(
-  shopId: string,
-  orderId: string,
-  opts: Parameters<typeof getOrderAttributedStaff>[2],
-): Promise<{ createdBy: string | null; createdByStaffId: string | null }> {
-  try {
-    const res = await getOrderAttributedStaff(shopId, orderId, opts);
-    return receiptIssuerFromAttributedStaff(res.recorded ? res.staffs : []);
-  } catch {
-    return { createdBy: null, createdByStaffId: null };
-  }
-}
-
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method === "OPTIONS") return corsPreflightResponse(request);
   if (request.method !== "POST") {
@@ -51,11 +34,18 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
-    const { admin, shop, scope, corsJson } = authResult;
+    const { admin, shop, corsJson } = authResult;
 
     const body = await request.json() as Record<string, unknown>;
-    // 発行者は注文の帰属スタッフ（サーバーが注文の明細から引く）。POS から来る createdBy は使わない
-    const { orderId, recipientName, proviso, isReissue, idempotencyKey } = body;
+    const { orderId, recipientName, proviso, isReissue, staffMemberId, idempotencyKey } = body;
+    // 発行者＝領収書を発行した人（POS のピン留め中スタッフ）。名前は「スタッフ名」の登録から。自由入力の createdBy は受けない
+    const createdByStaffId = normalizeStaffId(staffMemberId);
+    const createdByName = createdByStaffId
+      ? issuerNameAtIssue(
+          createdByStaffId,
+          parseStaffNameMap(await getAppSetting(shop.id, STAFF_DISPLAY_NAMES_SETTING_KEY).catch(() => null)),
+        )
+      : null;
 
     if (!orderId) {
       return corsJson({ ok: false, error: "orderId is required" }, { status: 400 });
@@ -112,8 +102,6 @@ export async function action({ request }: ActionFunctionArgs) {
       return corsJson({ ok: false, error: "Order not found" }, { status: 404 });
     }
 
-    const issuer = await readReceiptIssuer(shop.id, rawOrderId, { admin, scope });
-
     const tmpl = await prisma.receiptTemplate.findFirst({
       where: { shopId: shop.id, isActive: true },
       orderBy: { updatedAt: "desc" },
@@ -140,8 +128,8 @@ export async function action({ request }: ActionFunctionArgs) {
           templateId: tmpl?.id ?? null,
           templateVersion: tmpl?.version ?? 1,
           isReissue: Boolean(isReissue),
-          createdBy: issuer.createdBy,
-          createdByStaffId: issuer.createdByStaffId,
+          createdBy: createdByName,
+          createdByStaffId,
           idempotencyKey: idempotencyKey && typeof idempotencyKey === "string"
             ? idempotencyKey
             : null,
