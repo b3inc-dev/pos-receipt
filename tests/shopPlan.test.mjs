@@ -263,6 +263,31 @@ describe("checkShopPlanAccess（門番）", () => {
   });
 });
 
+describe("プランを変えたあとの門番", () => {
+  test("ホーム・料金プラン画面が契約を読み直したら、門番の覚えもその結果になる（60 秒待たずに Pro を使える）", async () => {
+    let now = 0;
+    const before = await checkShopPlanAccess(fakeAdmin({ subs: [sub("Lite")] }), SHOP, "sales_summary", { ...deps(), now: () => now });
+    assert.equal(before.allowed, false);
+    now += 10_000;
+    // 店が Shopify の料金プラン画面で Pro にしてアプリに戻る → ホームの loader が getShopPlan を呼ぶ
+    await getShopPlan(fakeAdmin({ subs: [sub("Pro")] }), SHOP, { ...deps(), now: () => now });
+    const gateAdmin = fakeAdmin({ subs: [sub("Pro")] });
+    const after = await checkShopPlanAccess(gateAdmin, SHOP, "sales_summary", { ...deps(), now: () => now });
+    assert.equal(after.allowed, true);
+    assert.equal(gateAdmin.calls.length, 0); // 読み直した結果を使う（もう一度は聞かない）
+  });
+
+  test("読み直しで読めなかったら覚えを消す（古いプランを使い続けない）", async () => {
+    let now = 0;
+    await checkShopPlanAccess(fakeAdmin({ subs: [sub("Pro")] }), SHOP, "sales_summary", { ...deps(), now: () => now });
+    await getShopPlan(fakeAdmin({ fail: true }), SHOP, { ...deps(), now: () => now });
+    const gateAdmin = fakeAdmin({ subs: [sub("Lite")] });
+    const r = await checkShopPlanAccess(gateAdmin, SHOP, "sales_summary", { ...deps(), now: () => now });
+    assert.equal(gateAdmin.calls.length, 1);
+    assert.equal(r.allowed, false);
+  });
+});
+
 describe("Shopify の料金プラン画面の URL", () => {
   test("admin.shopify.com の pricing_plans（app handle は env か pos-receipt）", () => {
     assert.equal(
