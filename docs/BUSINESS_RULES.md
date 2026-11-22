@@ -189,7 +189,7 @@ Shopify 精算注文ノート／metafields は印字経路では新規作成し�
 | 操作 | ルール |
 |------|--------|
 | 精算 create | `idempotencyKey = shopId:locationId:targetDate`（旧 printMode 付きキーも検索）。既存なら新規 Settlement を作らず返す。Shopify 精算注文は作らない |
-| 点検 | 冪等キー対象外 |
+| 点検 | 冪等キー対象外。1 日に何回でも発行でき、発行ごとに Settlement を 1 行作り、その時点の金額・件数・支払方法別内訳を残す（T 決定 2026-11-22）。点検の行はその日の精算（確定）として扱わない（POS の月別一覧は点検の回数だけ出す。照合 CSV は除外） |
 | 同時実行 | `SettlementOperationLock` |
 | 領収書 | クライアント UUID `idempotencyKey` |
 | 精算 recalculate | プレビュー再計算＋任意の Shopify 同期。履歴行の金額を常に書き換えるわけではない（API 実装参照） |

@@ -140,3 +140,31 @@ export function buildSettlementHistoryWhere(filter: SettlementHistoryFilter) {
     ...kindWhere,
   };
 }
+
+/**
+ * 月別一覧（POS）用: 日ごとに「その日の精算（確定）」と点検の回数を分ける。
+ * 点検は 1 日に何回でも発行でき、毎回記録されるが、精算の確定ではない。
+ * 精算が同じ日に複数あるときは作成日時が新しいものを採る。
+ */
+export function splitDailySettlementsAndInspections<
+  T extends { targetDate: string; periodLabel: string | null; createdAt: Date },
+>(rows: T[]): {
+  settlementByDate: Map<string, T>;
+  inspectionsByDate: Map<string, { count: number; lastAt: Date }>;
+} {
+  const settlementByDate = new Map<string, T>();
+  const inspectionsByDate = new Map<string, { count: number; lastAt: Date }>();
+  for (const row of rows) {
+    if (isInspectionPeriod(row.periodLabel)) {
+      const prev = inspectionsByDate.get(row.targetDate);
+      inspectionsByDate.set(row.targetDate, {
+        count: (prev?.count ?? 0) + 1,
+        lastAt: !prev || row.createdAt > prev.lastAt ? row.createdAt : prev.lastAt,
+      });
+      continue;
+    }
+    const prev = settlementByDate.get(row.targetDate);
+    if (!prev || row.createdAt > prev.createdAt) settlementByDate.set(row.targetDate, row);
+  }
+  return { settlementByDate, inspectionsByDate };
+}

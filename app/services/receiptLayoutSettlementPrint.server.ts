@@ -6,11 +6,7 @@ import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import { locationData, settlementTemplateData } from "./receiptLayoutAdapters";
 import { getSettlementCalc, renderLayoutForPrint } from "./receiptLayoutPrint.server";
 import type { ReceiptLayout } from "./receiptLayoutSchema";
-import {
-  parsePaymentSectionsJson,
-  settlementReceiptTitle,
-  settlementRowForPrint,
-} from "./settlementPrintSnapshot.server";
+import { parsePaymentSectionsJson, settlementReceiptTitle } from "./settlementPrintSnapshot.server";
 import type { SettlementRowLike } from "./printUnification.server";
 
 type AdminLike = { graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }> };
@@ -36,8 +32,9 @@ export async function layoutSettlementHtml(
   const isInspection = snapshot?.isInspection ?? String(row.periodLabel ?? "").startsWith("点検");
   const locationName = snapshot?.locationName?.trim() ? snapshot.locationName : opts.currentLocationName;
   const title = snapshot?.title?.trim() ? snapshot.title : settlementReceiptTitle(isInspection);
-  const printRow = settlementRowForPrint(row, parsed, isInspection);
-  const sectionsParsed = isInspection && parsed.display ? parsed.display.sections : parsed.sections;
+  // 点検も発行した時点の金額で行を保存する（#78）。古い点検の行は 0 のまま
+  const printRow = row;
+  const sectionsParsed = parsed.sections;
 
   let shop: { name?: string; currencyCode?: string } | null = null;
   let address: Parameters<typeof locationData>[1] = null;
@@ -79,7 +76,7 @@ export async function layoutSettlementHtml(
     location: locationData(locationName, address),
     shopName: String(shop?.name ?? ""),
     currency: String(row.currency ?? shop?.currencyCode ?? "JPY"),
-    issuedAt: parsed.display?.issuedAt || row.createdAt?.toISOString() || "",
+    issuedAt: row.createdAt?.toISOString() || "",
     printedAt: new Date().toISOString(),
     timezone,
     calc,

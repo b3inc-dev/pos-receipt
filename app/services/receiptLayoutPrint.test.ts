@@ -24,14 +24,6 @@ import {
 import { layoutOrderHtml } from "./receiptLayoutOrderPrint.server";
 import { normalizePrintEnabled, PRINT_CSP, renderLayoutForPrint, withPrintCsp } from "./receiptLayoutPrint.server";
 import { ciaraReceiptLayout, ciaraSalesLayout, ciaraSettlementLayout, defaultLayout } from "./receiptLayoutPresets";
-import {
-  buildSettlementPrintSnapshot,
-  buildSettlementReprintView,
-  encodePaymentSectionsJson,
-  parsePaymentSectionsJson,
-  paymentSectionsForApi,
-  settlementRowForPrint,
-} from "./settlementPrintSnapshot.server";
 
 const m = (amount: number) => ({ shopMoney: { amount: String(amount), currencyCode: "JPY" } });
 
@@ -284,44 +276,6 @@ describe("精算レシートのデータとレイアウトの印字", () => {
     if (d.kind !== "settlement") throw new Error("kind");
     assert.equal(d.settlement.payments[0].label, "現金");
     assert.ok(d.settlement.payments.some((p) => p.is_group));
-  });
-});
-
-describe("点検の金額（行は 0、発行時の display から印字）", () => {
-  const preview = { total: 1000, netSales: 909, tax: 91, discounts: 0, vipPointsUsed: 0, refundTotal: 0, orderCount: 2, refundCount: 0, itemCount: 3, voucherChangeAmount: 0 };
-  const sections = [{ gateway: "cash", label: "現金", net: 1000, refund: 0, txCount: 2, refundCount: 0 }];
-  const json = encodePaymentSectionsJson([], buildSettlementPrintSnapshot({ locationName: "渋谷店", isInspection: true }), {
-    issuedAt: "2026-11-22T03:00:00Z",
-    figures: preview,
-    sections,
-  });
-  const row = {
-    locationId: "gid://shopify/Location/1",
-    targetDate: "2026-11-22",
-    currency: "JPY",
-    total: 0, netSales: 0, tax: 0, discounts: 0, vipPointsUsed: 0, refundTotal: 0,
-    orderCount: 0, refundCount: 0, itemCount: 0, voucherChangeAmount: 0,
-    paymentSectionsJson: json,
-    periodLabel: "点検_2026-11-22",
-  };
-  it("集計に使う sections は空のまま", () => {
-    assert.deepEqual(paymentSectionsForApi(json), []);
-  });
-  it("印字は display の金額", () => {
-    const parsed = parsePaymentSectionsJson(json);
-    assert.equal(parsed.display?.figures.total, 1000);
-    const p = settlementRowForPrint(row, parsed, true);
-    assert.equal(p.total, 1000);
-    const view = buildSettlementReprintView(row, { currentLocationName: "渋谷店", devicePaperWidthMm: 80 });
-    assert.equal(view.model.total, 1000);
-    assert.equal(view.model.paymentSections[0].net, 1000);
-    assert.ok(view.html.includes("¥1,000"));
-  });
-  it("精算は行の値のまま、display の無い古い点検も行のまま", () => {
-    const parsed = parsePaymentSectionsJson(json);
-    assert.equal(settlementRowForPrint({ ...row, total: 5 }, parsed, false).total, 5);
-    const legacy = { ...row, paymentSectionsJson: "[]" };
-    assert.equal(buildSettlementReprintView(legacy, { currentLocationName: "渋谷店", devicePaperWidthMm: 80 }).model.total, 0);
   });
 });
 
