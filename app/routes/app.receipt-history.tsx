@@ -23,6 +23,7 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
+import { formatReceiptIssuer } from "../utils/receiptIssuer";
 
 const PAGE_SIZE = 30;
 
@@ -72,6 +73,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         templateVersion: true,
         isReissue: true,
         createdBy: true,
+        createdByStaffId: true,
         createdAt: true,
       },
     }),
@@ -89,7 +91,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       currency: r.currency ?? "JPY",
       templateVersion: r.templateVersion,
       isReissue: r.isReissue,
-      createdBy: r.createdBy,
+      issuerLabel: formatReceiptIssuer(r.createdBy, r.createdByStaffId),
       createdAt: r.createdAt.toISOString(),
     })),
     total,
@@ -191,7 +193,7 @@ export default function ReceiptHistoryPage() {
                   { title: "但し書き" },
                   { title: "金額" },
                   { title: "種別" },
-                  { title: "担当" },
+                  { title: "発行者" },
                   { title: "発行日時" },
                 ]}
                 selectable={false}
@@ -229,7 +231,7 @@ export default function ReceiptHistoryPage() {
                     </IndexTable.Cell>
                     <IndexTable.Cell>
                       <Text as="span" variant="bodySm" tone="subdued">
-                        {item.createdBy ?? "—"}
+                        {item.issuerLabel}
                       </Text>
                     </IndexTable.Cell>
                     <IndexTable.Cell>

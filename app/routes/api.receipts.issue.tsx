@@ -11,6 +11,7 @@ import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
 import { encodeReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
 import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
+import { normalizeStaffId, resolveStaffDisplayName } from "../utils/receiptIssuer";
 
 const ORDER_QUERY = `#graphql
   query ReceiptIssueOrder($id: ID!) {
@@ -35,7 +36,9 @@ export async function action({ request }: ActionFunctionArgs) {
     const { admin, shop, corsJson } = authResult;
 
     const body = await request.json() as Record<string, unknown>;
-    const { orderId, recipientName, proviso, isReissue, createdBy, idempotencyKey } = body;
+    const { orderId, recipientName, proviso, isReissue, staffMemberId, idempotencyKey } = body;
+    // 発行者: POS でピン留め中のスタッフ ID。名前はサーバーで引けたときだけ（自由入力の createdBy は受けない）
+    const createdByStaffId = normalizeStaffId(staffMemberId);
 
     if (!orderId) {
       return corsJson({ ok: false, error: "orderId is required" }, { status: 400 });
@@ -92,6 +95,8 @@ export async function action({ request }: ActionFunctionArgs) {
       return corsJson({ ok: false, error: "Order not found" }, { status: 404 });
     }
 
+    const createdByName = await resolveStaffDisplayName(admin, createdByStaffId);
+
     const tmpl = await prisma.receiptTemplate.findFirst({
       where: { shopId: shop.id, isActive: true },
       orderBy: { updatedAt: "desc" },
@@ -118,7 +123,8 @@ export async function action({ request }: ActionFunctionArgs) {
           templateId: tmpl?.id ?? null,
           templateVersion: tmpl?.version ?? 1,
           isReissue: Boolean(isReissue),
-          createdBy: createdBy ? String(createdBy) : null,
+          createdBy: createdByName,
+          createdByStaffId,
           idempotencyKey: idempotencyKey && typeof idempotencyKey === "string"
             ? idempotencyKey
             : null,

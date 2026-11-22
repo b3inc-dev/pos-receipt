@@ -6,6 +6,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import { formatReceiptIssuer } from "../utils/receiptIssuer";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -49,6 +50,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isReissue: r.isReissue,
         templateVersion: r.templateVersion,
         createdBy: r.createdBy,
+        createdByStaffId: r.createdByStaffId,
+        issuerLabel: formatReceiptIssuer(r.createdBy, r.createdByStaffId),
         createdAt: r.createdAt.toISOString(),
       })),
     });

@@ -245,7 +245,8 @@ model ReceiptIssue {
   templateVersion Int?
   printSnapshotJson String? // 発行時の帳票設定と58/80mm HTML。再印字で現在設定・現行rendererを参照しない
   isReissue       Boolean  @default(false)
-  createdBy       String?
+  createdBy       String?  // 発行者の表示名（サーバーがスタッフ ID から引けたときだけ。POS からの自由入力は受けない）
+  createdByStaffId String? // 発行者: POS でピン留め中のスタッフ ID（数字）。無ければ POS にログイン中のユーザー ID
   idempotencyKey  String?  @unique // クライアント生成UUID。同一キーは重複発行しない
   createdAt       DateTime @default(now())
 
