@@ -136,7 +136,7 @@ export type ShopPlanDeps = {
   listUsedLocationIds?: (shopId: string, since: Date) => Promise<string[]>;
 };
 
-/** 「POS で使うロケーション」を見る日数（2026-11-22 T の決定を受けた実装の読み方。docs/DECISIONS.md D16） */
+/** 「POS で使うロケーション」を見る日数（2026-11-23 T がカードで確定。docs/DECISIONS.md D16） */
 export const POS_LOCATION_WINDOW_DAYS = 30;
 
 /**
