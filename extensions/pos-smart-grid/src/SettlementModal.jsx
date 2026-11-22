@@ -1247,6 +1247,20 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
         </s-box>
       );
     }
+    if (isOrderBased && !result?.sourceOrderName && result?.settlementOrderSkipped === true) {
+      // 印字設定で「精算注文を作成」が OFF の店。失敗ではないので赤字にしない
+      return (
+        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+          <s-stack gap="small">
+            <s-text fontWeight="bold">精算を記録しました（精算注文は作っていません）</s-text>
+            <s-text tone="subdued" fontSize="small">
+              管理画面の印字設定で「精算注文を作成」が OFF のため、Shopify の精算注文は作っていません。
+              {showPrintingApi ? " レシートは上の Printing API の印字を使ってください。" : ""}
+            </s-text>
+          </s-stack>
+        </s-box>
+      );
+    }
     if (isOrderBased && !result?.sourceOrderName) {
       return (
         <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
@@ -1255,8 +1269,8 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
               注文番号を取得できませんでした
             </s-text>
             <s-text tone="subdued" fontSize="small">
-              印字方式は注文経由（order_based）ですが、精算注文の名前が返っていません。管理画面の Shopify 注文一覧で tag SETTLEMENT
-              を確認するか、アプリを再インストールして権限を更新してください。
+              精算は記録しましたが、精算注文の名前が返っていません。管理画面の Shopify 注文一覧で tag SETTLEMENT
+              の注文ができているかを確かめてください。無ければ、同じ日・同じ店の精算をもう一度発行すると、その日の精算注文を探して、無ければ作ります（精算の記録は二重になりません）。
             </s-text>
           </s-stack>
         </s-box>

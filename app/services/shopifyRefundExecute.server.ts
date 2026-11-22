@@ -12,7 +12,30 @@ type AdminClient = {
 export type ShopifyRefundExecutionResult =
   | { status: "skipped"; reason: string }
   | { status: "success"; refundId: string }
+  | { status: "retryable"; error: string }
   | { status: "failed"; error: string };
+
+const RETRYABLE_REFUND_ERROR_CODES = new Set([
+  "IDEMPOTENCY_CONCURRENT_REQUEST",
+  "THROTTLED",
+  "INTERNAL_SERVER_ERROR",
+  "SERVICE_UNAVAILABLE",
+]);
+
+export function isRetryableRefundError(
+  errors: Array<{ code?: string | null; message?: string | null }>,
+): boolean {
+  return errors.some((error) => {
+    const code = String(error.code ?? "").trim().toUpperCase();
+    const message = String(error.message ?? "").toUpperCase();
+    return (
+      RETRYABLE_REFUND_ERROR_CODES.has(code) ||
+      message.includes("IDEMPOTENCY_CONCURRENT_REQUEST") ||
+      message.includes("TRY AGAIN") ||
+      message.includes("TEMPORAR")
+    );
+  });
+}
 
 const ORDER_FOR_REFUND_QUERY = `#graphql
   query OrderForRefund($id: ID!) {
@@ -21,6 +44,10 @@ const ORDER_FOR_REFUND_QUERY = `#graphql
       name
       refundable
       displayFinancialStatus
+      refunds {
+        id
+        note
+      }
       transactions(first: 30) {
         id
         kind
@@ -38,14 +65,15 @@ const ORDER_FOR_REFUND_QUERY = `#graphql
 `;
 
 const REFUND_CREATE_MUTATION = `#graphql
-  mutation RefundCreate($input: RefundInput!) {
-    refundCreate(input: $input) {
+  mutation RefundCreate($input: RefundInput!, $idempotencyKey: String!) {
+    refundCreate(input: $input) @idempotent(key: $idempotencyKey) {
       refund {
         id
       }
       userErrors {
         field
         message
+        code
       }
     }
   }
@@ -58,6 +86,24 @@ type OrderTx = {
   gateway?: string;
   amountSet?: { shopMoney?: { amount?: string } };
 };
+
+type ExistingRefund = {
+  id: string;
+  note?: string | null;
+};
+
+export function refundEventMarker(idempotencyKey: string): string {
+  return `[POS_RECEIPT_EVENT:${idempotencyKey}]`;
+}
+
+export function refundNoteMatchesEvent(
+  note: string | null | undefined,
+  idempotencyKey: string,
+): boolean {
+  const marker = refundEventMarker(idempotencyKey);
+  const value = String(note ?? "");
+  return value === marker || value.startsWith(`${marker} /`);
+}
 
 function orderGid(sourceOrderId: string): string {
   const s = String(sourceOrderId).trim();
@@ -96,13 +142,19 @@ export function shouldExecuteShopifyRefund(
   return false;
 }
 
-function pickParentTransactions(transactions: OrderTx[], preferGateway?: string | null): OrderTx[] {
+export function pickParentTransactions(
+  transactions: OrderTx[],
+  preferGateway?: string | null,
+): OrderTx[] {
   const sales = transactions.filter(isSaleTransaction);
   if (sales.length === 0) return [];
   if (preferGateway) {
     const gw = String(preferGateway).toLowerCase();
     const matched = sales.filter((t) => String(t.gateway ?? "").toLowerCase().includes(gw));
     if (matched.length > 0) return matched;
+    // 選択した元手段と異なる親へ返金すると、実手段への振替元を確定できない。
+    // 二重控除を避けるため別 gateway への暗黙 fallback は行わない。
+    return [];
   }
   return sales.sort(
     (a, b) =>
@@ -153,6 +205,8 @@ export async function executeShopifyRefundForEvent(
     originalPaymentMethod?: string | null;
     actualRefundMethod?: string | null;
     adjustKind?: string | null;
+    /** Shopify refundCreate の再送でも同じ値を使う。 */
+    idempotencyKey: string;
   },
 ): Promise<ShopifyRefundExecutionResult> {
   const orderId = orderGid(params.sourceOrderId);
@@ -161,19 +215,19 @@ export async function executeShopifyRefundForEvent(
     return { status: "failed", error: "返金金額が不正です" };
   }
 
-  const res = await adminGraphqlWithRetry(admin, ORDER_FOR_REFUND_QUERY, {
-    variables: { id: orderId },
-  });
-  const json = (await res.json()) as {
+  const json = await adminGraphqlWithRetry<{
     data?: {
       order?: {
         id?: string;
         refundable?: boolean;
         transactions?: OrderTx[];
+        refunds?: ExistingRefund[];
       };
     };
     errors?: { message?: string }[];
-  };
+  }>(admin, ORDER_FOR_REFUND_QUERY, {
+    variables: { id: orderId },
+  });
 
   if (json.errors?.length) {
     return { status: "failed", error: json.errors.map((e) => e.message).join("; ") };
@@ -183,12 +237,21 @@ export async function executeShopifyRefundForEvent(
   if (!order?.id) {
     return { status: "failed", error: "注文が見つかりません" };
   }
-  if (order.refundable === false) {
-    return { status: "failed", error: "この注文は Shopify 上で返金できない状態です" };
+  const eventMarker = refundEventMarker(params.idempotencyKey);
+  const existingRefund = (order.refunds ?? []).find((refund) =>
+    refundNoteMatchesEvent(refund.note, params.idempotencyKey),
+  );
+  if (existingRefund?.id) {
+    return { status: "success", refundId: existingRefund.id };
   }
+  // refundable=false でも、直前の同じ冪等キーによる返金が成功済みの再送では
+  // refundCreate を同じ入力で再実行して Shopify の保存済み応答を受け取る必要がある。
+  // 新規の返金不可は mutation の userErrors を正本として扱う。
 
+  // Shopify の返金先は実際に払い出す手段ではなく、元売上の親取引。
+  // 複数決済では original を優先し、対象が無ければ安全に失敗させる。
   const preferGw =
-    params.actualRefundMethod || params.originalPaymentMethod || null;
+    params.originalPaymentMethod || params.actualRefundMethod || null;
   const parents = pickParentTransactions(order.transactions ?? [], preferGw);
   if (parents.length === 0) {
     return { status: "failed", error: "返金対象の支払いトランザクションがありません" };
@@ -203,13 +266,23 @@ export async function executeShopifyRefundForEvent(
   }
 
   const noteParts = [
-    "POS Receipt 特殊返金",
+    eventMarker,
+    "特殊返金",
     params.eventType,
     params.note?.trim() || "",
   ].filter(Boolean);
 
-  const refundRes = await adminGraphqlWithRetry(admin, REFUND_CREATE_MUTATION, {
+  const refundJson = await adminGraphqlWithRetry<{
+    data?: {
+      refundCreate?: {
+        refund?: { id?: string };
+        userErrors?: { field?: string[]; message: string; code?: string }[];
+      };
+    };
+    errors?: { message?: string; extensions?: { code?: string } }[];
+  }>(admin, REFUND_CREATE_MUTATION, {
     variables: {
+      idempotencyKey: params.idempotencyKey,
       input: {
         orderId: order.id,
         notify: false,
@@ -219,27 +292,24 @@ export async function executeShopifyRefundForEvent(
     },
   });
 
-  const refundJson = (await refundRes.json()) as {
-    data?: {
-      refundCreate?: {
-        refund?: { id?: string };
-        userErrors?: { field?: string[]; message: string }[];
-      };
-    };
-    errors?: { message?: string }[];
-  };
-
   if (refundJson.errors?.length) {
-    return { status: "failed", error: refundJson.errors.map((e) => e.message).join("; ") };
+    const error = refundJson.errors.map((e) => e.message).join("; ");
+    const classified = refundJson.errors.map((e) => ({
+      code: e.extensions?.code,
+      message: e.message,
+    }));
+    return isRetryableRefundError(classified)
+      ? { status: "retryable", error }
+      : { status: "failed", error };
   }
 
   const payload = refundJson.data?.refundCreate;
   const userErrors = payload?.userErrors ?? [];
   if (userErrors.length > 0) {
-    return {
-      status: "failed",
-      error: userErrors.map((e) => e.message).join("; "),
-    };
+    const error = userErrors.map((e) => e.message).join("; ");
+    return isRetryableRefundError(userErrors)
+      ? { status: "retryable", error }
+      : { status: "failed", error };
   }
 
   const refundId = payload?.refund?.id;

@@ -18,6 +18,8 @@ export function financialStatusLabel(status, cancelledAt) {
 export function formatListBadges(item) {
   const b = item?.posBadges ?? {};
   const out = [];
+  // Shopify 返金の結果が分かっていない特殊返金がある（この日の精算が止まる）
+  if (b.hasPendingShopifyRefund) out.push({ key: "pending", label: "返金未確認", tone: "critical" });
   if (b.cancelled) out.push({ key: "cancelled", label: "キャンセル", tone: "critical" });
   if (b.refundedShopify) out.push({ key: "refund", label: "返金", tone: "warning" });
   if (b.hasVoucherAdjustment) out.push({ key: "vadj", label: "釣調整済", tone: "success" });
