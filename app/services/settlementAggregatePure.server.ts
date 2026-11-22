@@ -64,6 +64,10 @@ export interface GasStyleOrder {
     id: string;
     createdAt?: string;
     kind: string;
+    /** SUCCESS / FAILURE / ERROR / PENDING など。「注文の日」でオーソリを売上に数えるかの判定に使う */
+    status?: string | null;
+    /** VOID がどのオーソリを取り消したか */
+    parentTransaction?: { id: string } | null;
     amountSet?: { shopMoney: { amount: string; currencyCode?: string } };
     gateway?: string;
     formattedGateway?: string | null;
@@ -494,10 +498,25 @@ export function aggregateGasStyleForOrders(
     const byOrderDate = calcOpts.saleDateBasis === "order";
     const hasSettledSaleTx = txs.some((tx) => isSettledSaleKind(tx.kind));
     const orderOnThisDay = byOrderDate && inRange(o.processedAt ?? undefined);
-    const countsAsSale = (kind: string) =>
-      isSettledSaleKind(kind) || (byOrderDate && !hasSettledSaleTx && normalizeTxKind(kind) === "AUTHORIZATION");
+    // オーソリを売上に数えるのは、成功していて、取り消し（VOID）されていないものだけ。
+    // 失敗・期限切れ・VOID のオーソリは売上にも件数にも入れない。
+    const voidedAuthIds = new Set<string>();
+    let voidWithoutParent = false;
+    for (const tx of txs) {
+      if (normalizeTxKind(tx.kind) !== "VOID" || !isSuccessStatus(tx.status)) continue;
+      const parentId = tx.parentTransaction?.id;
+      if (parentId) voidedAuthIds.add(parentId);
+      else voidWithoutParent = true;
+    }
+    const isCountableAuthorization = (tx: (typeof txs)[number]) =>
+      normalizeTxKind(tx.kind) === "AUTHORIZATION" &&
+      isSuccessStatus(tx.status) &&
+      !voidWithoutParent &&
+      !voidedAuthIds.has(tx.id);
+    const countsAsSaleTx = (tx: (typeof txs)[number]) =>
+      isSettledSaleKind(tx.kind) || (byOrderDate && !hasSettledSaleTx && isCountableAuthorization(tx));
     const todaysTx = txs.filter((tx) => {
-      if (byOrderDate && countsAsSale(tx.kind)) return orderOnThisDay;
+      if (byOrderDate && countsAsSaleTx(tx)) return orderOnThisDay;
       const byTime = inRange(tx.createdAt);
       const byRefundLink = refundTxIdsInDay.has(tx.id);
       return byTime || (String(tx.kind) === "REFUND" && byRefundLink);
@@ -516,7 +535,7 @@ export function aggregateGasStyleForOrders(
           : baseGw;
       ensurePayBucket(pay, gw);
 
-      if (kind === "SALE" || kind === "CAPTURE" || (byOrderDate && countsAsSale(kind))) {
+      if (kind === "SALE" || kind === "CAPTURE" || (byOrderDate && countsAsSaleTx(tx))) {
         gwSaleMapToday[gw] = (gwSaleMapToday[gw] || 0) + amt;
         pay[gw].saleTx += 1;
       } else if (kind === "REFUND") {
@@ -677,6 +696,11 @@ export function aggregateGasStyleForOrders(
 
 function normalizeTxKind(kind: string | null | undefined): string {
   return String(kind ?? "").trim().toUpperCase();
+}
+
+/** 決済が成功したか（status が無いときは成功と見なさない） */
+function isSuccessStatus(status: string | null | undefined): boolean {
+  return String(status ?? "").trim().toUpperCase() === "SUCCESS";
 }
 
 /** 確定した売上の決済（SALE / CAPTURE） */

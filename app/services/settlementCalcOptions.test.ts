@@ -168,7 +168,7 @@ describe("売上を数える日", () => {
     const authOnly = order({
       id: "auth",
       transactions: [
-        { id: "auth-1", createdAt: "2026-11-22T01:00:00Z", kind: "AUTHORIZATION", amountSet: money(1000), gateway: "credit_card" },
+        { id: "auth-1", createdAt: "2026-11-22T01:00:00Z", kind: "AUTHORIZATION", status: "SUCCESS", amountSet: money(1000), gateway: "credit_card" },
       ],
     });
     assert.equal(aggregateGasStyleForOrders([authOnly], inDay).pay["クレジットカード"]?.sale ?? 0, 0);
@@ -177,11 +177,43 @@ describe("売上を数える日", () => {
     const captured = order({
       id: "cap",
       transactions: [
-        { id: "cap-1", createdAt: "2026-11-22T01:00:00Z", kind: "AUTHORIZATION", amountSet: money(1000), gateway: "credit_card" },
+        { id: "cap-1", createdAt: "2026-11-22T01:00:00Z", kind: "AUTHORIZATION", status: "SUCCESS", amountSet: money(1000), gateway: "credit_card" },
         { id: "cap-2", createdAt: "2026-11-22T01:05:00Z", kind: "CAPTURE", amountSet: money(1000), gateway: "credit_card" },
       ],
     });
     assert.equal(aggregateGasStyleForOrders([captured], inDay, undefined, undefined, byOrder).pay["クレジットカード"]?.sale, 1000);
+  });
+
+  it("注文の日: 失敗・取り消し（VOID）のオーソリは売上にも件数にも入れない", () => {
+    const byOrder = opts({ saleDateBasis: "order" });
+    const failed = order({
+      id: "auth-failed",
+      transactions: [
+        { id: "f-1", createdAt: "2026-11-22T01:00:00Z", kind: "AUTHORIZATION", status: "FAILURE", amountSet: money(1000), gateway: "credit_card" },
+      ],
+    });
+    const voided = order({
+      id: "auth-voided",
+      transactions: [
+        { id: "v-1", createdAt: "2026-11-22T01:00:00Z", kind: "AUTHORIZATION", status: "SUCCESS", amountSet: money(2000), gateway: "credit_card" },
+        { id: "v-2", createdAt: "2026-11-22T02:00:00Z", kind: "VOID", status: "SUCCESS", parentTransaction: { id: "v-1" }, amountSet: money(2000), gateway: "credit_card" },
+      ],
+    });
+    const voidFailed = order({
+      id: "auth-void-failed",
+      transactions: [
+        { id: "w-1", createdAt: "2026-11-22T01:00:00Z", kind: "AUTHORIZATION", status: "SUCCESS", amountSet: money(3000), gateway: "credit_card" },
+        { id: "w-2", createdAt: "2026-11-22T02:00:00Z", kind: "VOID", status: "FAILURE", parentTransaction: { id: "w-1" }, amountSet: money(3000), gateway: "credit_card" },
+      ],
+    });
+    const gas = aggregateGasStyleForOrders([failed, voided], inDay, undefined, undefined, byOrder);
+    assert.equal(gas.pay["クレジットカード"]?.sale ?? 0, 0);
+    assert.equal(gas.pay["クレジットカード"]?.saleTx ?? 0, 0);
+    assert.equal(gas.saleOrderSet.size, 0);
+    // 取り消しに失敗した VOID は取り消しになっていないので、オーソリを数える
+    const gas2 = aggregateGasStyleForOrders([voidFailed], inDay, undefined, undefined, byOrder);
+    assert.equal(gas2.pay["クレジットカード"]?.sale, 3000);
+    assert.equal(gas2.pay["クレジットカード"]?.saleTx, 1);
   });
 });
 

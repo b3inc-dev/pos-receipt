@@ -168,6 +168,13 @@ Shopify 返金の状態（`shopifyRefundStatus`）による扱い:
 
 マスタに登録して「更新」すれば、次の集計から正しい行に入る。確定済みの精算の行は変わらない。
 
+「マスタで分かる」の決め方は、登録と精算で違う（わざと）:
+
+- 登録（POS・`POST /api/special-refunds`）: 有効で「特殊返金で選べる」のマスタだけ（値 `rawGatewayPattern` の一致）
+- 精算の受け皿（`isKnownRefundMethod`）: 有効なマスタ全部（`rawGatewayPattern`・`formattedGatewayPattern`・表示名の一致、集計キーに寄せた名前でも）と既定の名前（`cash`・`shopify_payments`・`manual` など）。前の登録をなるべく正しい行に入れ、どこにも当たらないものだけを「未分類」にするため
+
+精算履歴の「未分類あり」は、保存した `paymentSectionsJson` の「未分類」の行（金額が 0 でない）で出す。前の形（行の配列）と #22 の形（`{ format, snapshot, sections }`）のどちらも読む。
+
 `pending` を止める理由: 数えると Shopify 側で返金ができていたとき二重（監査の合成データで 1,000 円が 2,000 円）、数えないとできていなかったとき抜ける。Shopify 側の返金ノートには `[POS_RECEIPT_EVENT:<イベントID>]` が入るが、精算の注文取得は返金ノートを読んでいないため、精算の中では成否を確かめていない。
 
 ---

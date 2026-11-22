@@ -166,6 +166,7 @@ interface ShopifyTransaction {
   createdAt?: string;
   kind: string;
   status: string;
+  parentTransaction?: { id: string } | null;
   amountSet: { shopMoney: { amount: string; currencyCode: string } };
   gateway: string;
   /** GAS normalizeGatewayLabel の formatted 側 */
@@ -269,6 +270,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
           createdAt
           kind
           status
+          parentTransaction { id }
           amountSet { shopMoney { amount currencyCode } }
           gateway
           formattedGateway
@@ -755,9 +757,12 @@ async function buildSettlementPreviewImpl(
   }
 
   // ギフトカードで払い出した返金（「精算の数え方」で ON の店だけ）。読めなければ精算を止める
+  // 旧ギフトカード API 集計が ON のあいだは数えない（返金のカードが売上にも足されて二重になるため。
+  // 「精算の数え方」の画面は保存で断るが、あとから精算設定で旧集計を ON にした店もここで守る）
   let giftCardRefundAmount = 0;
   let giftCardRefundCount = 0;
-  if (calcSettings.giftCardRefundEnabled) {
+  const giftCardRefundOn = calcSettings.giftCardRefundEnabled && !legacyGiftOn;
+  if (giftCardRefundOn) {
     const locRow = await prisma.location.findFirst({
       where: { shopId, shopifyLocationGid: { in: [locationId, `gid://shopify/Location/${locIdRaw}`] } },
       select: { name: true, displayName: true, shortName: true },
@@ -962,7 +967,7 @@ async function buildSettlementPreviewImpl(
     settlementTxLastHm,
     taxShopify,
     ...(legacyGiftOn ? { legacyGiftCardsAddedAmount, legacyGiftCardsAddedCount } : {}),
-    ...(calcSettings.giftCardRefundEnabled ? { giftCardRefundAmount, giftCardRefundCount } : {}),
+    ...(giftCardRefundOn ? { giftCardRefundAmount, giftCardRefundCount } : {}),
     ...(unmatchedRefundMethods.length > 0
       ? {
           unmatchedRefundMethods: unmatchedRefundMethods.map((w) => ({
