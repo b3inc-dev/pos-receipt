@@ -1,6 +1,6 @@
 /**
  * 売上に含めない手数料の明細（`_lsi_fee="1"` かつ `_lsi_fee_sales="0"`）の見分け方と、
- * 精算集計（aggregateGasStyleForOrders）・領収書の金額・保存済み精算の印字での扱い。
+ * 精算集計（aggregateGasStyleForOrders）・保存済み精算の印字での扱い。
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -8,7 +8,6 @@ import {
   isNonSalesFeeLine,
   nonSalesFeeForOrder,
   nonSalesFeeTotalFromSaved,
-  receiptAmountExcludingNonSalesFees,
 } from "./nonSalesFeeLines";
 import {
   aggregateGasStyleForOrders,
@@ -207,17 +206,10 @@ describe("aggregateGasStyleForOrders — 売上に含めない送料の行", () 
   });
 });
 
-describe("領収書の金額", () => {
-  it("_lsi_fee_sales=0 の送料を引く", () => {
-    assert.equal(receiptAmountExcludingNonSalesFees(orderWithFee("0")), 2000);
+describe("nonSalesFeeForOrder", () => {
+  it("_lsi_fee_sales=0 の送料の行だけを合計する", () => {
     assert.deepEqual(nonSalesFeeForOrder(orderWithFee("0")), { amount: 500, tax: 45, quantity: 1 });
-  });
-  it("_lsi_fee_sales=1・印なしは注文の合計のまま", () => {
-    assert.equal(receiptAmountExcludingNonSalesFees(orderWithFee("1")), 2500);
-    assert.equal(receiptAmountExcludingNonSalesFees(orderWithFee(null)), 2500);
-  });
-  it("明細を取れなかった注文は注文の合計のまま", () => {
-    assert.equal(receiptAmountExcludingNonSalesFees({ totalPriceSet: money(1234) }), 1234);
+    assert.deepEqual(nonSalesFeeForOrder(orderWithFee("1")), { amount: 0, tax: 0, quantity: 0 });
   });
 });
 

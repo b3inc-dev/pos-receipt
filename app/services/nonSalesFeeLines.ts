@@ -4,7 +4,8 @@
  * 見分け方は明細の属性（GraphQL `LineItem.customAttributes` / REST `line_items[].properties`）だけで行う。
  * 明細の名前（「送料」など）では見分けない（店ごとに名前を変えられるため）。
  *
- * - `_lsi_fee = "1"` かつ `_lsi_fee_sales = "0"` → 売上に含めない（この明細を精算・売上サマリー・領収書から外す）
+ * - `_lsi_fee = "1"` かつ `_lsi_fee_sales = "0"` → 売上に含めない（この明細を精算・売上サマリーから外す）
+ *   領収書は受け取った全額のまま（T 2026-11-23）
  * - `_lsi_fee = "1"` かつ `_lsi_fee_sales` が `"0"` 以外（`"1"`・無し） → 今までどおり売上に含める
  * - `_lsi_fee` が無い明細 → 普通の明細
  *
@@ -98,7 +99,7 @@ export function nonSalesFeeLineIds(lines: FeeLineItemLike[] | null | undefined):
 
 /**
  * 注文の「売上に含めない手数料の明細」の合計（金額・税・点数）。
- * 返金は見ない（会計のときの金額）。領収書の金額から引くときに使う。
+ * 返金は見ない（会計のときの金額）。
  */
 export function nonSalesFeeForOrder(order: {
   taxesIncluded?: boolean | null;
@@ -116,7 +117,7 @@ export function nonSalesFeeForOrder(order: {
   return { amount, tax, quantity };
 }
 
-/** GraphQL の LineItem に足すフィールド（精算・領収書の注文取得で共通） */
+/** GraphQL の LineItem に足すフィールド（精算の注文取得） */
 export const FEE_LINE_ITEM_GRAPHQL_FIELDS = `
             id
             customAttributes { key value }
@@ -143,25 +144,3 @@ export function nonSalesFeeTotalFromSaved(
   return Math.abs(diff) <= 1 ? 0 : diff;
 }
 
-/** 領収書の注文取得に足すフィールド（order { ... } の中） */
-export const RECEIPT_ORDER_FEE_LINES_GRAPHQL = `      taxesIncluded
-      lineItems(first: 250) {
-        nodes {
-          quantity${FEE_LINE_ITEM_GRAPHQL_FIELDS}
-          discountAllocations { allocatedAmountSet { shopMoney { amount } } }
-        }
-      }`;
-
-export type ReceiptOrderFeeLines = {
-  taxesIncluded?: boolean | null;
-  lineItems?: { nodes?: FeeLineItemLike[] | null } | null;
-};
-
-/** 領収書の金額: 注文の合計 − 売上に含めない手数料の明細（会計のときの金額。マイナスにはしない） */
-export function receiptAmountExcludingNonSalesFees(
-  order: ReceiptOrderFeeLines & { totalPriceSet: { shopMoney: { amount: string } } },
-): number {
-  const total = Number(order.totalPriceSet?.shopMoney?.amount ?? 0);
-  const fee = nonSalesFeeForOrder(order).amount;
-  return Math.max(0, Math.round((total - fee) * 100) / 100);
-}
