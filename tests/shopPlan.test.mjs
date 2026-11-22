@@ -49,6 +49,8 @@ function deps(over = {}) {
       saved.push({ id, planCode });
     },
     getUsageStore: async () => ({}),
+    // 既定: どのロケーションも直近に POS で使った（数え方の試験は下で別に）
+    listUsedLocationIds: async () => Array.from({ length: 50 }, (_, i) => `gid://shopify/Location/${i}`),
     reportUsage: async (input) => {
       reports.push(input);
       return { outcome: "skipped", reason: "recently_checked" };

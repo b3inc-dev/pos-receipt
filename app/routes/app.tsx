@@ -6,9 +6,28 @@ import "@shopify/polaris/build/esm/styles.css";
 import { authenticate } from "../shopify.server";
 import { AppNavBar } from "../components/AppNavBar";
 import { isInhouseMode } from "../utils/planFeatures.server";
+import { checkSubscriptionGate, isSubscriptionRequired } from "../utils/shopPlan.server";
+import { resolveShop } from "../utils/shopResolver.server";
+
+/** 未契約でも開ける画面（料金プランと、その古い戻り先） */
+function isPlanPath(pathname: string): boolean {
+  return pathname === "/app/plan" || pathname.startsWith("/app/plan/");
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin, session, redirect } = await authenticate.admin(request);
+
+  // 未契約の店は料金プラン画面だけ開ける（PLAN_REQUIRE_SUBSCRIPTION=1 のときだけ。2026-11-22 T の決定: POS Stock と同じ）。
+  // 自社用・スイッチオフは Shopify に聞かずに通す。契約を読めなかったときは止めない
+  if (!isInhouseMode() && isSubscriptionRequired()) {
+    const url = new URL(request.url);
+    if (!isPlanPath(url.pathname)) {
+      const shop = await resolveShop(session.shop, admin);
+      const gate = await checkSubscriptionGate(admin, shop);
+      if (gate.blocked) throw redirect(`/app/plan${url.search}`);
+    }
+  }
+
   return {
     shop: new URL(request.url).searchParams.get("shop") ?? "",
     apiKey: process.env.SHOPIFY_API_KEY ?? "",

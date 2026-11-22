@@ -497,7 +497,7 @@ describe("つなぎ方（ソースの確認）", () => {
   });
   test("報告は全機能の例外でない店・契約が Lite/Pro のときだけ・待たない", () => {
     const src = code("app/utils/shopPlan.server.ts");
-    assert.match(src, /if \(!fullAccess && decided\.fromSubscription && \(plan === "lite" \|\| plan === "pro"\)/);
+    assert.match(src, /!fullAccess && decided\.fromSubscription && \(plan === "lite" \|\| plan === "pro"\) && decided\.planCode === plan/);
     assert.match(src, /void \(deps\.getUsageStore \?\? defaultUsageStore\)\(\)/);
     assert.match(src, /if \(isInhouseMode\(\)\) return inhouseState\(shop\);/);
   });
