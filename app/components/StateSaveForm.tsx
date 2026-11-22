@@ -6,8 +6,10 @@
  * - 状態を 1 つの隠し欄（JSON）に写し、SaveBar はその欄で「保存したときと違うか」を比べる（formSnapshot）。
  * - 「破棄」は最後に保存した値（開いた時点の値）に戻す。保存に失敗したときは帯をもう一度出す。
  * - 欄の中で Enter を押してもフォームを送らない（今までの画面と同じく、保存は帯の「保存」だけ）。
+ * - 送ったあと画面の読み込みが終わっても新しい結果が来ない（サーバーの例外・通信の失敗など）ときも、失敗として帯を出し直す。
  */
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useNavigation } from "react-router";
 import { SaveBar, markFormDirty } from "./admin-ui";
 
 const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
@@ -34,6 +36,9 @@ export function StateSaveForm<T>({
   const saved = useRef<T>(values);
   const previousSaved = useRef<T>(values);
   const [failed, setFailed] = useState(false);
+  const navigation = useNavigation();
+  // 送ったあとの結果待ち。送った時点の result と、読み込み中になったかを覚えておく
+  const awaiting = useRef<{ resultAtSubmit: unknown; sawBusy: boolean } | null>(null);
 
   // 状態が変わったら、隠し欄の値が描き直されたあとで帯に知らせる
   useIsoLayoutEffect(() => {
@@ -62,12 +67,30 @@ export function StateSaveForm<T>({
     }
   }, [result]);
 
+  // 読み込みが終わったのに新しい結果が無い = 保存できたか分からない。保存できなかったとして帯を出し直す
+  useEffect(() => {
+    const wait = awaiting.current;
+    if (!wait) return;
+    if (navigation.state !== "idle") {
+      wait.sawBusy = true;
+      return;
+    }
+    if (!wait.sawBusy) return;
+    awaiting.current = null;
+    if (result === wait.resultAtSubmit) {
+      saved.current = previousSaved.current;
+      setFailed(true);
+    }
+  }, [navigation.state, result]);
+
   const submit = (event: { preventDefault: () => void }) => {
     event.preventDefault();
     setFailed(false);
     previousSaved.current = saved.current;
     saved.current = values;
+    awaiting.current = { resultAtSubmit: result, sawBusy: false };
     if (onSave() === false) {
+      awaiting.current = null;
       saved.current = previousSaved.current;
       // 送らなかったときも、そのまま直して保存し直せるよう帯を出し直す
       window.setTimeout(() => setFailed(true), 0);
