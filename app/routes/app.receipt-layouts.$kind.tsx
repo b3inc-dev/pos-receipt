@@ -17,6 +17,7 @@ import {
   isReceiptKind,
   RECEIPT_KIND_LABELS,
   receiptLayoutSettingKey,
+  canonicalLayout,
   type ReceiptLayout,
 } from "../services/receiptLayoutSchema";
 import { normalizeLayout, validateLayoutInput } from "../services/receiptLayoutValidate";
@@ -70,14 +71,18 @@ export default function ReceiptLayoutEdit() {
     }
   }, [actionData]);
   const hidden = useRef<HTMLInputElement | null>(null);
+  // 「破棄」したら前の保存の失敗の枠も消す
+  const [errorsDismissed, setErrorsDismissed] = useState(false);
+  useEffect(() => setErrorsDismissed(false), [actionData]);
   const onDiscard = useCallback(() => {
+    setErrorsDismissed(true);
     // baseline を作り直してエディタに戻させる
     setBaseline((b) => ({ ...b }));
     setCurrent(baseline);
   }, [baseline]);
 
   const saving = navigation.state === "submitting";
-  const errors = actionData && !actionData.ok ? actionData.errors : null;
+  const errors = actionData && !actionData.ok && !errorsDismissed ? actionData.errors : null;
 
   return (
     <PolarisPageWrapper>
@@ -101,7 +106,7 @@ export default function ReceiptLayoutEdit() {
           ) : null}
           <Layout.Section>
             <Form method="post">
-              <input ref={hidden} type="hidden" name="layout" value={JSON.stringify(current)} readOnly />
+              <input ref={hidden} type="hidden" name="layout" value={JSON.stringify(canonicalLayout(current))} readOnly />
               <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
               <SaveBar
                 failed={Boolean(errors) && !saving}

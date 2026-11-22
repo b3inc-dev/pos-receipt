@@ -13,9 +13,10 @@ import {
   blocksToCode,
   isSafeImageUrl,
   renderReceiptLayout,
+  textSettingProblem,
   textSettingToLiquid,
 } from "./receiptLayoutRender";
-import { RECEIPT_KINDS, type ReceiptLayout } from "./receiptLayoutSchema";
+import { canonicalLayout, RECEIPT_KINDS, type ReceiptLayout } from "./receiptLayoutSchema";
 import { normalizeLayout, validateLayoutInput } from "./receiptLayoutValidate";
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -154,7 +155,7 @@ describe("receiptLayout: 保存前の確認", () => {
     const msg = r.ok ? "" : r.errors.join("\n");
     assert.match(msg, /1 番目のブロック「見出し」に受け取れない設定「unknown」/);
     assert.match(msg, /は領収書では使えません/);
-    assert.match(msg, /「会社名」に \{% %\} のタグは書けません/);
+    assert.match(msg, /「会社名」: \{% %\} のタグは書けません/);
   });
 
   it("コードの誤りは保存しない", () => {
@@ -208,5 +209,52 @@ describe("receiptLayout: Ciara 風のひな形（参考画像 2026-11-22）", ()
       assert.ok(t.includes(s), `「${s}」がない: ${t}`);
     }
     assert.ok(!t.includes("商品券釣有り差額"), "0 のときは出さない");
+  });
+});
+
+describe("receiptLayout: 独立レビューの指摘（2026-11-22）", () => {
+  it("文言の欄: | raw・組にならない {{ }}・}} を含む文字・壊れた差し込みは断る", () => {
+    assert.match(textSettingProblem("{{ order.note | raw }}") ?? "", /raw/);
+    assert.match(textSettingProblem("a {{ b") ?? "", /組が合っていません/);
+    assert.match(textSettingProblem('{{ "a}}b" }}') ?? "", /\}\}/);
+    assert.match(textSettingProblem("{{ a | nofilter }}") ?? "", /書き方が正しくありません/);
+    assert.equal(textSettingProblem("スタッフ：{{ staff.name }}"), null);
+  });
+
+  it("保存したレイアウトは画面が送る形と同じ（保存の帯が出直さない）", () => {
+    const l = clone(defaultLayout("sales"));
+    l.blocks.push({ id: "text-99", type: "text", settings: { ...defaultSettings(BLOCK_DEFS.find((d) => d.type === "text")!), text: "x" } });
+    const sent = JSON.stringify(canonicalLayout(l));
+    const r = validateLayoutInput(JSON.parse(sent), "sales");
+    assert.ok(r.ok);
+    assert.equal(JSON.stringify(r.ok ? canonicalLayout(r.layout) : null), sent);
+  });
+
+  it("読み込み: 使えない ID は付け直し、そのまま保存できる", () => {
+    const l = clone(defaultLayout("gift")) as any;
+    l.blocks[0].id = "a".repeat(64);
+    l.blocks[1].id = "a".repeat(64);
+    l.blocks[2].id = "has.dot";
+    l.blocks[3].settings = { text: "{% endcapture %}" };
+    const n = normalizeLayout(l, "gift");
+    assert.ok(validateLayoutInput(clone(n), "gift").ok);
+  });
+
+  it("追加の CSS: @import と外の url() は断る（data: は使える）", () => {
+    const l = clone(defaultLayout("gift"));
+    l.style.customCss = "@import url(https://x.example/a.css);";
+    assert.equal(validateLayoutInput(clone(l), "gift").ok, false);
+    l.style.customCss = ".a{background:url(https://x.example/a.png)}";
+    assert.equal(validateLayoutInput(clone(l), "gift").ok, false);
+    l.style.customCss = ".a{background:url(data:image/png;base64,AAAA)}";
+    assert.ok(validateLayoutInput(clone(l), "gift").ok);
+  });
+
+  it("画像の URL が長すぎるときは、その欄の理由で断る", () => {
+    const l = clone(defaultLayout("receipt"));
+    l.blocks.unshift({ id: "logo", type: "logo", settings: { ...defaultSettings(BLOCK_DEFS[0]), image_url: "data:image/png;base64," + "A".repeat(300_000) } });
+    const r = validateLayoutInput(l, "receipt");
+    assert.equal(r.ok, false);
+    assert.match(r.ok ? "" : r.errors.join(), /「画像の URL」が長すぎます/);
   });
 });

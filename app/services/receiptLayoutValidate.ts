@@ -9,9 +9,12 @@ import {
   isSafeImageUrl,
   receiptLiquid,
   renderReceiptLayout,
+  textSettingProblem,
   describeLiquidError,
 } from "./receiptLayoutRender";
 import {
+  BLOCK_ID_PATTERN,
+  canonicalLayout,
   DEFAULT_LAYOUT_STYLE,
   LAYOUT_LIMITS,
   RECEIPT_KIND_LABELS,
@@ -55,8 +58,8 @@ export function normalizeLayout(raw: unknown, kind: ReceiptKind): ReceiptLayout 
   for (const b of raw.blocks.slice(0, LAYOUT_LIMITS.maxBlocks)) {
     if (!isObj(b) || typeof b.type !== "string" || !allowed.has(b.type)) continue;
     const def = getBlockDef(b.type)!;
-    let id = typeof b.id === "string" && b.id ? b.id.slice(0, 64) : `${b.type}-${blocks.length + 1}`;
-    while (ids.has(id)) id = `${id}-x`;
+    let id = typeof b.id === "string" && BLOCK_ID_PATTERN.test(b.id) ? b.id : "";
+    for (let n = blocks.length + 1; !id || ids.has(id); n++) id = `${b.type}-${n}`.slice(0, 64);
     ids.add(id);
     const settings = defaultSettings(def);
     const given = isObj(b.settings) ? b.settings : {};
@@ -65,12 +68,12 @@ export function normalizeLayout(raw: unknown, kind: ReceiptKind): ReceiptLayout 
       if (s.type === "checkbox" && typeof v === "boolean") settings[s.key] = v;
       else if (s.type === "number" && typeof v === "number") settings[s.key] = clamp(v, s.min, s.max, s.default);
       else if (s.type === "select" && s.options.some((o) => o.value === v)) settings[s.key] = v as string;
-      else if (s.type === "url" && typeof v === "string" && isSafeImageUrl(v)) settings[s.key] = v;
-      else if ((s.type === "text" || s.type === "textarea") && typeof v === "string") settings[s.key] = v.slice(0, LAYOUT_LIMITS.maxTextLength);
+      else if (s.type === "url" && typeof v === "string" && v.length <= LAYOUT_LIMITS.maxUrlLength && isSafeImageUrl(v)) settings[s.key] = v;
+      else if ((s.type === "text" || s.type === "textarea") && typeof v === "string" && v.length <= LAYOUT_LIMITS.maxTextLength && !textSettingProblem(v)) settings[s.key] = v;
     }
     blocks.push({ id, type: b.type, hidden: b.hidden === true, settings });
   }
-  return {
+  return canonicalLayout({
     version: 1,
     kind,
     mode: raw.mode === "code" ? "code" : "blocks",
@@ -78,7 +81,7 @@ export function normalizeLayout(raw: unknown, kind: ReceiptKind): ReceiptLayout 
     style: normalizeStyle(raw.style),
     blocks,
     code: typeof raw.code === "string" ? raw.code.slice(0, LAYOUT_LIMITS.maxCodeLength) : "",
-  };
+  });
 }
 
 export type ValidateResult = { ok: true; layout: ReceiptLayout } | { ok: false; errors: string[] };
@@ -118,7 +121,7 @@ export function validateLayoutInput(raw: unknown, kind: ReceiptKind): ValidateRe
     if (!["sans", "serif", "mono"].includes(st.fontFamily as string)) errors.push("書体が正しくありません。");
     if (typeof st.customCss !== "string") errors.push("追加の CSS が正しくありません。");
     else if (st.customCss.length > L.maxCssLength) errors.push(`追加の CSS は ${L.maxCssLength.toLocaleString()} 文字までです。`);
-    else if (!isSafeCss(st.customCss)) errors.push("追加の CSS に </style> や endraw は書けません。");
+    else if (!isSafeCss(st.customCss)) errors.push("追加の CSS に </style>・endraw・@import・外の url() は書けません。");
   }
 
   const allowed = new Set(blockDefsForKind(kind).map((d) => d.type));
@@ -133,7 +136,7 @@ export function validateLayoutInput(raw: unknown, kind: ReceiptKind): ValidateRe
       const def = getBlockDef(b.type);
       if (!def || !allowed.has(b.type)) return void errors.push(`${at}（${b.type}）は${RECEIPT_KIND_LABELS[kind]}では使えません。`);
       const name = `${at}「${def.label}」`;
-      if (typeof b.id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(b.id) || ids.has(b.id)) errors.push(`${name}の ID が正しくありません。`);
+      if (typeof b.id !== "string" || !BLOCK_ID_PATTERN.test(b.id) || ids.has(b.id)) errors.push(`${name}の ID が正しくありません。`);
       else ids.add(b.id);
       const given = isObj(b.settings) ? b.settings : {};
       const known = new Set(def.settings.map((s) => s.key));
@@ -154,15 +157,13 @@ export function validateLayoutInput(raw: unknown, kind: ReceiptKind): ValidateRe
             break;
           case "url":
             if (typeof v !== "string" || !isSafeImageUrl(v)) errors.push(`${field}は https:// で始まる画像の URL にしてください。`);
+            else if (v.length > L.maxUrlLength) errors.push(`${field}が長すぎます（${L.maxUrlLength.toLocaleString()} 文字まで）。画像は Shopify の「ファイル」に上げて、その URL を入れてください。`);
             break;
           default: {
             if (typeof v !== "string") { errors.push(`${field}が正しくありません。`); break; }
             if (v.length > L.maxTextLength) errors.push(`${field}は ${L.maxTextLength} 文字までです。`);
-            if (/\{%/.test(v)) errors.push(`${field}に {% %} のタグは書けません（{{ }} の差し込みだけ使えます）。`);
-            else {
-              const err = checkLiquid(v);
-              if (err) errors.push(`${field}: ${err}`);
-            }
+            const problem = textSettingProblem(v);
+            if (problem) errors.push(`${field}: ${problem}`);
           }
         }
         settings[s.key] = v as BlockSettingValue;
@@ -182,7 +183,7 @@ export function validateLayoutInput(raw: unknown, kind: ReceiptKind): ValidateRe
   }
 
   if (errors.length) return { ok: false, errors };
-  const layout: ReceiptLayout = {
+  const layout: ReceiptLayout = canonicalLayout({
     version: 1,
     kind,
     mode: raw.mode as ReceiptLayout["mode"],
@@ -190,9 +191,18 @@ export function validateLayoutInput(raw: unknown, kind: ReceiptKind): ValidateRe
     style: normalizeStyle(raw.style),
     blocks,
     code: raw.code as string,
-  };
+  });
   // 見本のデータで描けるか（描くときの誤りも保存の前に止める）
   const rendered = renderReceiptLayout(layout, sampleTemplateData(kind));
-  if (!rendered.ok) return { ok: false, errors: [`見本のデータで描けませんでした: ${rendered.error}`] };
+  if (!rendered.ok) {
+    return {
+      ok: false,
+      errors: [
+        layout.mode === "code"
+          ? `見本のデータで描けませんでした: ${rendered.error}`
+          : `見本のデータで描けませんでした（ブロックの文言の差し込みを確かめてください）: ${rendered.error.replace(/^\d+ 行目 \d+ 文字目: /, "")}`,
+      ],
+    };
+  }
   return { ok: true, layout };
 }

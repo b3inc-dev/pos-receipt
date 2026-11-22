@@ -150,9 +150,40 @@ export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style">): 
   ].join("\n");
 }
 
-/** CSS は {% raw %} で囲んで出すので、raw を閉じる文字と </style> は入れさせない */
+/**
+ * CSS は {% raw %} で囲んで出すので、raw を閉じる文字と </style> は入れさせない。
+ * 印字のときに外へ読みに行かないよう、@import と data: 以外の url() も入れさせない。
+ */
 export function isSafeCss(css: string): boolean {
-  return !/\{%-?\s*endraw/i.test(css) && !/<\/style/i.test(css);
+  return (
+    !/\{%-?\s*endraw/i.test(css) &&
+    !/<\/style/i.test(css) &&
+    !/@import/i.test(css) &&
+    !/url\(\s*['"]?\s*(?!data:)/i.test(css)
+  );
+}
+
+/**
+ * 文言の欄に書けるかを確かめる。書けないときは理由を返す。
+ * - {% %} のタグは書けない（{{ }} の差し込みだけ）
+ * - {{ と }} は組で使う（組にならないと、作るテンプレートが壊れる）
+ * - | raw は使えない（注文のメモなどお客様が入れた値をそのまま出さないため）
+ */
+export function textSettingProblem(text: string): string | null {
+  if (/\{%/.test(text)) return "{% %} のタグは書けません（{{ }} の差し込みだけ使えます）。";
+  const tags = [...text.matchAll(OUTPUT_TAG)].map((m) => m[0]);
+  const rest = text.replace(OUTPUT_TAG, "");
+  if (/\{\{|\}\}/.test(rest)) return "{{ と }} の組が合っていません。";
+  for (const tag of tags) {
+    if (/\|\s*raw\b/.test(tag)) return "文言の欄では | raw は使えません。";
+    if (/["'][^"']*\}\}/.test(tag.slice(0, -2))) return "差し込みの中の文字に }} は書けません。";
+    try {
+      receiptLiquid().parse(tag);
+    } catch (e) {
+      return `差し込み ${tag} の書き方が正しくありません（${describeLiquidError(e).replace(/^\d+ 行目 \d+ 文字目: /, "")}）。`;
+    }
+  }
+  return null;
 }
 
 /**

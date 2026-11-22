@@ -298,7 +298,7 @@ export const BLOCK_DEFS: BlockDef[] = [
       format: SETTLEMENT_FIELDS.find((f) => f.value === s.field)?.format ?? "money",
     }),
     template:
-      `{% assign v = settlement[s_field] | default: 0 %}{% unless s_hide_zero and v == 0 %}<div class="row{% if s_bold %} b{% endif %}"><span>{{ s_label | raw }}</span><span>{% if s_format == "money" %}{{ v | money }}{% else %}{{ v | number }}{{ s_unit | raw }}{% endif %}</span></div>{% endunless %}`,
+      `{% assign s__v = settlement[s_field] | default: 0 %}{% unless s_hide_zero and s__v == 0 %}<div class="row{% if s_bold %} b{% endif %}"><span>{{ s_label | raw }}</span><span>{% if s_format == "money" %}{{ s__v | money }}{% else %}{{ s__v | number }}{{ s_unit | raw }}{% endif %}</span></div>{% endunless %}`,
     summaryKey: "label",
   },
   {

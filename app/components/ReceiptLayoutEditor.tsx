@@ -32,6 +32,7 @@ import {
   isSafeImageUrl,
   paperWidthPx,
   renderReceiptLayout,
+  textSettingProblem,
 } from "../services/receiptLayoutRender";
 import {
   LAYOUT_LIMITS,
@@ -58,6 +59,58 @@ function blockSummary(block: LayoutBlock): string {
   return v.length > 24 ? `${v.slice(0, 24)}…` : v;
 }
 
+/**
+ * 数の欄。打っている途中（空・「1.」など）は文字のまま持ち、数として読めたときだけ親へ渡す。
+ * 範囲の外・空は欄の下に赤い文字で出す（保存の前の確認でも止まる）。
+ */
+function NumField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  suffix,
+  helpText,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  suffix?: string;
+  helpText?: string;
+  onChange: (v: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  // 外から値が変わったとき（ひな形・破棄）は欄も合わせる
+  useEffect(() => {
+    if (Number(draft) !== value) setDraft(String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  const n = draft.trim() === "" ? NaN : Number(draft);
+  const error = !Number.isFinite(n) ? "数を入れてください" : n < min || n > max ? `${min}〜${max} にしてください` : undefined;
+  return (
+    <TextField
+      label={label}
+      type="number"
+      autoComplete="off"
+      value={draft}
+      min={min}
+      max={max}
+      step={step}
+      suffix={suffix}
+      helpText={helpText}
+      error={error}
+      onChange={(v) => {
+        setDraft(v);
+        const parsed = v.trim() === "" ? NaN : Number(v);
+        if (Number.isFinite(parsed) && !v.endsWith(".")) onChange(parsed);
+      }}
+    />
+  );
+}
+
 function SettingField({ def, value, onChange }: { def: SettingDef; value: BlockSettingValue; onChange: (v: BlockSettingValue) => void }) {
   switch (def.type) {
     case "checkbox":
@@ -76,17 +129,14 @@ function SettingField({ def, value, onChange }: { def: SettingDef; value: BlockS
       return <Select label={def.label} options={def.options} value={String(value)} onChange={(v) => onChange(v)} helpText={def.help} />;
     case "number":
       return (
-        <TextField
+        <NumField
           label={def.label}
-          type="number"
-          autoComplete="off"
-          value={String(value)}
+          value={Number(value)}
           min={def.min}
           max={def.max}
           suffix={def.unit}
           helpText={def.help}
-          onChange={(v) => onChange(v === "" ? def.min : Number(v))}
-          error={Number(value) < def.min || Number(value) > def.max ? `${def.min}〜${def.max} にしてください` : undefined}
+          onChange={(v) => onChange(v)}
         />
       );
     case "url":
@@ -104,8 +154,8 @@ function SettingField({ def, value, onChange }: { def: SettingDef; value: BlockS
     case "textarea":
     case "text": {
       const v = String(value);
-      const error = /\{%/.test(v)
-        ? "{% %} のタグは書けません（{{ }} の差し込みだけ使えます）"
+      const error = textSettingProblem(v)
+        ? textSettingProblem(v)!
         : v.length > LAYOUT_LIMITS.maxTextLength
           ? `${LAYOUT_LIMITS.maxTextLength} 文字までです`
           : undefined;
@@ -216,7 +266,7 @@ export function ReceiptLayoutEditor({
   const addBlock = () => {
     const def = getBlockDef(addType);
     if (!def || layout.blocks.length >= LAYOUT_LIMITS.maxBlocks) return;
-    const block: LayoutBlock = { id: newBlockId(def.type, layout.blocks), type: def.type, settings: defaultSettings(def) };
+    const block: LayoutBlock = { id: newBlockId(def.type, layout.blocks), type: def.type, hidden: false, settings: defaultSettings(def) };
     const at = selected ? layout.blocks.findIndex((b) => b.id === selected) + 1 : layout.blocks.length;
     const blocks = [...layout.blocks];
     blocks.splice(at, 0, block);
@@ -369,15 +419,13 @@ export function ReceiptLayoutEditor({
                   selected={[String(layout.paperWidthMm)]}
                   onChange={(v) => update({ ...layout, paperWidthMm: v[0] === "58" ? 58 : 80 })}
                 />
-                <TextField
+                <NumField
                   label="文字の大きさ"
-                  type="number"
-                  autoComplete="off"
                   suffix="px"
                   min={LAYOUT_LIMITS.fontSizePx.min}
                   max={LAYOUT_LIMITS.fontSizePx.max}
-                  value={String(layout.style.fontSizePx)}
-                  onChange={(v) => update({ ...layout, style: { ...layout.style, fontSizePx: Number(v) } })}
+                  value={layout.style.fontSizePx}
+                  onChange={(v) => update({ ...layout, style: { ...layout.style, fontSizePx: v } })}
                 />
                 <ChoiceList
                   title="文字の太さ"
@@ -399,25 +447,22 @@ export function ReceiptLayoutEditor({
                   selected={[layout.style.fontFamily]}
                   onChange={(v) => update({ ...layout, style: { ...layout.style, fontFamily: v[0] as ReceiptLayout["style"]["fontFamily"] } })}
                 />
-                <TextField
+                <NumField
                   label="行の高さ"
-                  type="number"
-                  autoComplete="off"
+                  
                   step={0.05}
                   min={LAYOUT_LIMITS.lineHeight.min}
                   max={LAYOUT_LIMITS.lineHeight.max}
-                  value={String(layout.style.lineHeight)}
-                  onChange={(v) => update({ ...layout, style: { ...layout.style, lineHeight: Number(v) } })}
+                  value={layout.style.lineHeight}
+                  onChange={(v) => update({ ...layout, style: { ...layout.style, lineHeight: v } })}
                 />
-                <TextField
+                <NumField
                   label="余白"
-                  type="number"
-                  autoComplete="off"
                   suffix="px"
                   min={LAYOUT_LIMITS.paddingPx.min}
                   max={LAYOUT_LIMITS.paddingPx.max}
-                  value={String(layout.style.paddingPx)}
-                  onChange={(v) => update({ ...layout, style: { ...layout.style, paddingPx: Number(v) } })}
+                  value={layout.style.paddingPx}
+                  onChange={(v) => update({ ...layout, style: { ...layout.style, paddingPx: v } })}
                 />
                 <TextField
                   label="追加の CSS"
@@ -475,7 +520,7 @@ export function ReceiptLayoutEditor({
                         </div>
                       ))}
                       <div>
-                        フィルター: <code>{"| money"}</code>（¥1,234）、<code>{"| number"}</code>（1,234）、ほか Liquid の標準のフィルター。値は自動で HTML エスケープされます（そのまま出すときは <code>{"| raw"}</code>）。
+                        フィルター: <code>{"| money"}</code>（¥1,234）、<code>{"| number"}</code>（1,234）、ほか Liquid の標準のフィルター。値は自動で HTML エスケープされます。<code>{"| raw"}</code> はそのまま出すので、お客様が入れた値（メモ・宛名・属性）には使わないでください。
                       </div>
                     </BlockStack>
                   </Box>

@@ -78,7 +78,34 @@ export const LAYOUT_LIMITS = {
   maxTextLength: 2000,
   maxCodeLength: 100_000,
   maxCssLength: 20_000,
+  /** 画像の URL（data:image を含む） */
+  maxUrlLength: 200_000,
   fontSizePx: { min: 8, max: 32 },
   lineHeight: { min: 1, max: 2.5 },
   paddingPx: { min: 0, max: 40 },
 } as const;
+
+export const BLOCK_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * キーの順をそろえた形にする。画面が送る値・サーバーが返す値を同じ文字列にし、
+ * 保存したあとに保存の帯が出直さないようにする。
+ */
+export function canonicalLayout(l: ReceiptLayout): ReceiptLayout {
+  return {
+    version: 1,
+    kind: l.kind,
+    mode: l.mode,
+    paperWidthMm: l.paperWidthMm,
+    style: {
+      fontSizePx: l.style.fontSizePx,
+      lineHeight: l.style.lineHeight,
+      fontWeight: l.style.fontWeight,
+      fontFamily: l.style.fontFamily,
+      paddingPx: l.style.paddingPx,
+      customCss: l.style.customCss,
+    },
+    blocks: l.blocks.map((b) => ({ id: b.id, type: b.type, hidden: b.hidden === true, settings: Object.fromEntries(Object.keys(b.settings).sort().map((k) => [k, b.settings[k]])) })),
+    code: l.code,
+  };
+}
