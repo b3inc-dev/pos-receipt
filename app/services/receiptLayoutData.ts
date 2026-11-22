@@ -11,11 +11,19 @@ export type NamedAmount = { label: string; amount: number };
 export type TaxLine = { title: string; rate_label: string; amount: number };
 export type KeyValue = { key: string; value: string };
 
-export type ShopData = { name: string; currency: string };
+export type ShopData = {
+  name: string;
+  currency: string;
+  /** ストアのロゴ（Shopify のブランドの設定）。無ければ "" */
+  logo_url: string;
+};
 export type LocationData = {
   name: string;
   zip: string;
-  /** 住所を 1 行ずつ */
+  /**
+   * 住所を 1 行ずつ。日本の住所は「都道府県＋市区町村＋番地」「建物」の順に、県名は日本語にして渡す
+   * （Ciara の header.liquid と同じ。電話番号も +81 を 0 にして渡す）
+   */
   address_lines: string[];
   phone: string;
 };
@@ -27,14 +35,32 @@ export type OrderLineItem = {
   quantity: number;
   unit_price: number;
   line_total: number;
+  /** 通常価格（セール前）。無ければ 0 */
+  compare_at_price: number;
   discount: number;
   discount_label: string;
   properties: KeyValue[];
 };
 
+export type ShippingAddress = {
+  zip: string;
+  /** 住所を 1 行ずつ（会社名は company） */
+  lines: string[];
+  company: string;
+  name: string;
+  phone: string;
+};
+
 export type OrderData = {
   name: string;
   created_at_label: string;
+  /** 注文日（店のタイムゾーン）"YYYY-MM-DD"。発送予定日の計算に使う */
+  created_date: string;
+  /** 配送先がある・配送グループがある注文 */
+  is_shipping_order: boolean;
+  shipping_address: ShippingAddress | null;
+  /** 送料 */
+  shipping: number;
   line_items: OrderLineItem[];
   subtotal: number;
   discounts: number;
@@ -57,6 +83,8 @@ export type SettlementPayment = {
 export type SettlementData = {
   title: string;
   is_inspection: boolean;
+  /** 「精算」か「点検」 */
+  kind_label: string;
   period_label: string;
   location_label: string;
   as_of: string;
@@ -71,6 +99,11 @@ export type SettlementData = {
   order_count: number;
   refund_count: number;
   item_count: number;
+  /** 合計額（返品含む）= total + refund_total（Ciara の gift-receipt.liquid と同じ） */
+  total_including_returns: number;
+  /** 納金額（現金の取引額 − 特例の返金 − 商品券釣り ＋ 事後調整）。計算は精算エンジン */
+  cash_deposit: number;
+  /** 表示する順に並べた支払方法（電子マネーの合計などの行も精算側で入れる） */
   payments: SettlementPayment[];
 };
 
@@ -101,7 +134,7 @@ export type ReceiptTemplateData =
   | (Common & { kind: "receipt"; receipt: ReceiptData });
 
 const SAMPLE_COMMON: Common = {
-  shop: { name: "サンプルストア", currency: "JPY" },
+  shop: { name: "サンプルストア", currency: "JPY", logo_url: "" },
   location: {
     name: "サンプルストア 渋谷店",
     zip: "150-0001",
@@ -116,6 +149,16 @@ const SAMPLE_COMMON: Common = {
 const SAMPLE_ORDER: OrderData = {
   name: "#1042",
   created_at_label: "2026年11月22日 20:58",
+  created_date: "2026-11-20",
+  is_shipping_order: true,
+  shipping_address: {
+    zip: "530-0001",
+    lines: ["大阪府大阪市北区梅田1-2-3", "梅田ハイツ 101"],
+    company: "",
+    name: "山田 花子",
+    phone: "090-1234-5678",
+  },
+  shipping: 0,
   line_items: [
     {
       title: "シェルインナーシート",
@@ -124,6 +167,7 @@ const SAMPLE_ORDER: OrderData = {
       quantity: 1,
       unit_price: 990,
       line_total: 990,
+      compare_at_price: 0,
       discount: 0,
       discount_label: "",
       properties: [],
@@ -135,6 +179,7 @@ const SAMPLE_ORDER: OrderData = {
       quantity: 2,
       unit_price: 2200,
       line_total: 3960,
+      compare_at_price: 2750,
       discount: 440,
       discount_label: "セット割",
       properties: [{ key: "ギフト包装", value: "あり" }],
@@ -168,6 +213,7 @@ export function sampleTemplateData(kind: ReceiptKind): ReceiptTemplateData {
         settlement: {
           title: "【精算レシート】",
           is_inspection: false,
+          kind_label: "精算",
           period_label: "2026-11-22",
           location_label: "サンプルストア 渋谷店",
           as_of: "2026-11-22 21:05",
@@ -182,6 +228,8 @@ export function sampleTemplateData(kind: ReceiptKind): ReceiptTemplateData {
           order_count: 42,
           refund_count: 1,
           item_count: 57,
+          total_including_returns: 133350,
+          cash_deposit: 40350,
           payments: [
             { label: "現金", net: 45300, count: 18, refund: 4950, refund_count: 1 },
             { label: "クレジットカード", net: 61200, count: 16, refund: 0, refund_count: 0 },

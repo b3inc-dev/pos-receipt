@@ -12,6 +12,7 @@
  * - プレビューは sandbox の iframe（スクリプトは動かない）に出す
  */
 import { Liquid } from "liquidjs";
+import qrcodeGenerator from "qrcode-generator";
 import { getBlockDef, type SettingDef } from "./receiptLayoutBlocks";
 import {
   LAYOUT_LIMITS,
@@ -45,6 +46,39 @@ function formatMoney(v: unknown, currency: string): string {
   return `${value.toLocaleString("ja-JP", { maximumFractionDigits: 2 })} ${currency}`;
 }
 
+/** 文字列を QR コードの SVG にする（印字・プレビューで同じ。外へ読みに行かない） */
+export function qrSvg(value: unknown): string {
+  const text = String(value ?? "").slice(0, 1000);
+  if (!text) return "";
+  // 日本語の URL・文も読めるよう UTF-8 にする
+  qrcodeGenerator.stringToBytes = qrcodeGenerator.stringToBytesFuncs["UTF-8"];
+  const qr = qrcodeGenerator(0, "M");
+  qr.addData(text, "Byte");
+  qr.make();
+  return qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+}
+
+/**
+ * "YYYY-MM-DD" から土日と休みの日（"YYYY-MM-DD" を , ・改行・| で区切った一覧）を除いて n 営業日あとの日を
+ * 「2026年11月27日」の形で返す。数えるのは次の日から（Ciara の sales-receipt.liquid と同じ）。
+ */
+export function businessDayLabel(start: unknown, days: unknown, holidays: unknown): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(start ?? ""));
+  const n = Math.floor(Number(days));
+  if (!m || !Number.isFinite(n) || n < 1 || n > 60) return "";
+  const off = new Set(String(holidays ?? "").split(/(?:<br\/>|[\s,|])+/).filter(Boolean));
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  let counted = 0;
+  for (let i = 0; i < 200; i++) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const ymd = d.toISOString().slice(0, 10);
+    const wd = d.getUTCDay();
+    if (wd === 0 || wd === 6 || off.has(ymd)) continue;
+    if (++counted === n) return `${ymd.slice(0, 4)}年${ymd.slice(5, 7)}月${ymd.slice(8, 10)}日`;
+  }
+  return "";
+}
+
 let engine: Liquid | null = null;
 
 export function receiptLiquid(): Liquid {
@@ -64,6 +98,9 @@ export function receiptLiquid(): Liquid {
     return formatMoney(v, String(currency || fromData || "JPY"));
   });
   liquid.registerFilter("number", (v: unknown) => formatNumber(v));
+  // 出すときは | qrcode | raw（SVG なのでエスケープしない）
+  liquid.registerFilter("qrcode", (v: unknown) => qrSvg(v));
+  liquid.registerFilter("business_day_label", (v: unknown, days: unknown, holidays: unknown) => businessDayLabel(v, days, holidays));
   engine = liquid;
   return liquid;
 }
@@ -147,6 +184,10 @@ export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style">): 
     `.ul-solid{border-bottom:1px solid #000;padding-bottom:4px}.ul-thick{border-bottom:3px solid #000;padding-bottom:6px}.ul-dashed{border-bottom:1px dashed #000;padding-bottom:4px}.ul-dotted{border-bottom:2px dotted #000;padding-bottom:4px}`,
     `.amount{padding:8px 0}`,
     `.stamp{display:inline-flex;align-items:center;justify-content:center;border:1px solid #000;font-size:.85em}`,
+    `.stamps{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}`,
+    `.qr{margin:0 auto}.qr svg{width:100%;height:auto;display:block}`,
+    `.thin{font-weight:300}.muted{opacity:.8}.strike{text-decoration:line-through}`,
+    `.lines>div+div{margin-top:2px}`,
   ].join("\n");
 }
 

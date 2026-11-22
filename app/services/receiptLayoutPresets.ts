@@ -3,8 +3,8 @@
  *
  * - 標準: 一般の店向け。今の印字（printReceiptHtml.ts）と同じ項目・順番
  * - Ciara 風: Ciara が Shopify の「印刷用レシートのコード」で作っている見た目を、ブロックだけで作ったもの
- *   （T さんの参考画像 2026-11-22 から。会社名・住所・登録番号などは店ごとの値なので空にしてある）
- *   精算レシートは画像に写っていないので、gift-receipt.liquid のメタフィールドの順に並べた仮の形（未確認）
+ *   会社名・住所・登録番号などは店ごとの値なので空にしてある
+ *   （T さんの liquid の全文 2026-11-22 から。精算は gift-receipt.liquid の精算の部分）
  */
 import { defaultSettings, getBlockDef } from "./receiptLayoutBlocks";
 import {
@@ -87,12 +87,23 @@ export function defaultLayout(kind: ReceiptKind): ReceiptLayout {
 }
 
 // ── Ciara 風 ────────────────────────────────────────────
+// T さんの sales-receipt.liquid・gift-receipt.liquid（header / footer / line-items / transactions を含む。2026-11-22）から。
+// 会社名・住所・登録番号・ロゴの URL・お問い合わせの URL は店の値なので空にしてある（管理画面で入れる）。
+// 文字の大きさは、Shopify の印字（本文 1.5rem・太さ 600・system-ui）と用紙に対する比が同じになるようにした。
 
-const CIARA_STYLE: Partial<LayoutStyle> = { fontWeight: 600, fontSizePx: 14, lineHeight: 1.35, paddingPx: 16 };
-const CIARA_LOGO_CSS = ".logo-text{font-family:\"Didot\",\"Bodoni 72\",\"Times New Roman\",serif;font-weight:400;font-size:3.4em;line-height:1.1}";
+const CIARA_STYLE: Partial<LayoutStyle> = { fontWeight: 600, fontSizePx: 22, lineHeight: 1.35, paddingPx: 16 };
+
+/** 2026・2027 年の日本の祝日・休日（Ciara の sales-receipt.liquid と同じ一覧） */
+export const JP_HOLIDAYS_2026_2027 = [
+  "2026-01-01", "2026-01-12", "2026-02-11", "2026-02-23", "2026-03-20", "2026-04-29", "2026-05-03", "2026-05-04",
+  "2026-05-05", "2026-05-06", "2026-07-20", "2026-08-11", "2026-09-21", "2026-09-22", "2026-09-23", "2026-10-12",
+  "2026-11-03", "2026-11-23", "2027-01-01", "2027-01-11", "2027-02-11", "2027-02-23", "2027-03-21", "2027-03-22",
+  "2027-04-29", "2027-05-03", "2027-05-04", "2027-05-05", "2027-07-19", "2027-08-11", "2027-09-20", "2027-09-23",
+  "2027-10-11", "2027-11-03", "2027-11-23",
+].join("\n");
 
 function ciaraLogo(): LayoutBlock {
-  return block("logo", "logo", { image_url: "", text: "Ciara", width_percent: 50, bold: false, align: "center" });
+  return block("logo", "logo", { image_url: "", use_shop_logo: true, text: "{{ shop.name }}", width_percent: 60, bold: true, align: "center" });
 }
 
 export function ciaraSalesLayout(): ReceiptLayout {
@@ -100,28 +111,35 @@ export function ciaraSalesLayout(): ReceiptLayout {
     "sales",
     [
       ciaraLogo(),
-      block("title", "heading", { text: "領収書", size: "m", bold: true }),
+      block("title", "heading", { text: "領収書", size: "m", bold: false }),
       block("store", "store_info", { name_bold: true, size: "m" }),
       block("items", "line_items", {
         header_left: "アイテム",
         header_right: "商品価格",
         header_line: "solid",
+        title_bold: true,
         show_variant: true,
         show_sku: true,
         quantity: "multiple",
+        quantity_parens: true,
+        show_compare_at: true,
+        show_discounts: true,
       }),
       block("hr1", "divider", { style: "dotted" }),
       block("totals", "totals", {
         subtotal_label: "小計",
+        discount_label: "値引き合計",
+        shipping_label: "送料",
         tax_label: "CT",
         tax_note: "商品価格に含まれています",
         total_label: "合計",
         total_size: "m",
-        total_bold: false,
+        total_bold: true,
       }),
       block("hr2", "divider", { style: "thick" }),
       block("payments", "payments"),
       block("hr3", "divider", { style: "thick" }),
+      block("shipping", "shipping_address"),
       block("order", "order_info", {
         show_date: true,
         show_staff: true,
@@ -130,9 +148,22 @@ export function ciaraSalesLayout(): ReceiptLayout {
         order_label: "領収書: ",
         align: "center",
       }),
-      block("registration", "text", { text: "", align: "center" }),
+      block("registration", "text", { text: "", align: "center", size: "s" }),
+      block("notice", "shipping_notice", {
+        title: "土日祝を除く4〜7営業日後の発送予定",
+        start_days: 4,
+        end_days: 7,
+        holidays: JP_HOLIDAYS_2026_2027,
+        date_prefix: "発送予定日：",
+        date_suffix: "頃",
+        note: "※在庫状況等により、店舗スタッフより別途ご案内がある場合は、\n上記の発送予定と異なる場合がございます。\n発送はメールにてお知らせいたします。",
+        contact_label: "お問い合わせはこちら",
+        contact_url: "",
+        show_url: true,
+        qr_width_percent: 30,
+      }),
     ],
-    { ...CIARA_STYLE, customCss: CIARA_LOGO_CSS },
+    CIARA_STYLE,
   );
 }
 
@@ -141,47 +172,73 @@ export function ciaraReceiptLayout(): ReceiptLayout {
     "receipt",
     [
       ciaraLogo(),
-      block("title", "heading", { text: "領収書", size: "l", bold: false }),
-      block("sp1", "spacer", { height: 16 }),
+      block("title", "heading", { text: "領収書", size: "xl", bold: false, thin: true }),
+      block("sp1", "spacer", { height: 72 }),
       block("recipient", "receipt_recipient", { suffix: "様", underline: "solid" }),
-      block("amount", "receipt_amount", { suffix: "-", size: "xl", underline: "solid" }),
+      block("amount", "receipt_amount", { suffix: "-", size: "xl", underline: "thick", padding: 28 }),
       block("breakdown", "receipt_breakdown", { tax_label: "消費税", separator: "：", align: "right" }),
-      block("statement", "text", { text: "上記金額を正に領収いたしました。", align: "center", size: "s" }),
-      block("sp2", "spacer", { height: 16 }),
+      block("statement", "text", { text: "上記金額を正に領収いたしました。", align: "center", size: "m" }),
+      block("sp2", "spacer", { height: 72 }),
       block("proviso", "receipt_proviso", { prefix: "但", suffix: "として", underline: "solid" }),
-      block("stamp", "stamp_box", { label: "担当印", size: 80, align: "right" }),
-      block("issuer", "issuer", { name: "", align: "center", bold: true }),
-      block("meta", "receipt_meta", { show_date: true, show_order: true }, true),
+      block("stamp", "stamp_box", {
+        label: "担当印",
+        size: 140,
+        align: "right",
+        show_revenue_stamp: true,
+        revenue_stamp_label: "収入印紙",
+        revenue_stamp_from: 50000,
+      }),
+      block("hr1", "divider", { style: "thick" }),
+      block("issuer", "issuer", { name: "", align: "center", bold: false }),
+      block("meta", "receipt_meta", {
+        show_date: true,
+        date_label: "",
+        show_number: true,
+        number_label: "領収書:",
+        show_order: false,
+        style: "center",
+      }),
+      block("registration", "text", { text: "", align: "center" }),
     ],
-    { ...CIARA_STYLE, customCss: CIARA_LOGO_CSS },
+    CIARA_STYLE,
   );
 }
 
-/** 精算レシート（Ciara 風・仮）: gift-receipt.liquid が読むメタフィールドの順 */
+/** 精算・点検（gift-receipt.liquid の精算レシートの部分） */
 export function ciaraSettlementLayout(): ReceiptLayout {
+  const unit = { unit: "" };
   return layout(
     "settlement",
     [
       ciaraLogo(),
-      block("title", "heading", { text: "{{ settlement.title }}", size: "l" }),
-      block("meta", "settlement_meta", { show_as_of: true }),
+      block("title", "heading", { text: "{{ settlement.kind_label }}", size: "xl", bold: true }),
+      block("asof", "text", { text: "{{ settlement.as_of }} 発行", align: "center", muted: true }),
       block("hr1", "divider", { style: "thick" }),
-      row("net", "net_sales", "純売上", { bold: true }),
-      row("total", "total", "総売上"),
-      row("disc", "discounts", "割引"),
-      row("points", "vip_points_used", "ポイント利用", { hide_zero: true }),
-      row("tax", "tax", "消費税"),
-      row("orders", "order_count", "件数", { unit: "件" }),
-      row("refunds", "refund_count", "返金件数", { unit: "件" }),
-      row("items", "item_count", "点数", { unit: "点" }),
+      block("meta", "settlement_meta", { show_period: false, show_location: true, location_label: "店舗", show_as_of: false }),
+      row("total", "total", "合計額"),
       row("refund", "refund_total", "返金額"),
-      row("voucher", "voucher_change", "商品券釣有り差額", { hide_zero: true }),
-      row("cash_delta", "receipt_cash_manual_delta", "領収書現金調整", { hide_zero: true }),
+      row("net", "net_sales", "純売上"),
+      row("tax", "tax", "消費税"),
+      row("disc", "discounts", "値引額"),
+      row("points", "vip_points_used", "ポイント利用"),
+      row("orders", "order_count", "販売件数", unit),
+      row("refunds", "refund_count", "返金件数", unit),
+      row("items", "item_count", "販売点数", unit),
+      row("with_returns", "total_including_returns", "合計額（返品含む）"),
       block("hr2", "divider", { style: "thick" }),
-      block("payments", "settlement_payments", { heading: "支払方法別" }),
-      block("stamp", "stamp_box", { label: "確認印", align: "right" }),
+      block("deposit", "settlement_deposit", { label: "納金額", voucher_label: "商品券釣り" }),
+      block("payments", "settlement_payments", {
+        heading: "",
+        style: "detailed",
+        count_unit: "",
+        net_label: "\u2002取引額",
+        refund_amount_label: "\u2002返金額",
+        count_label: "\u2002取引件数",
+        refund_count_label: "\u2002返金件数",
+      }),
+      block("hr3", "divider", { style: "thick" }),
     ],
-    { ...CIARA_STYLE, customCss: CIARA_LOGO_CSS },
+    CIARA_STYLE,
   );
 }
 
@@ -191,7 +248,7 @@ export const LAYOUT_PRESETS: LayoutPreset[] = [
   { id: "standard", label: "標準", kinds: ["settlement", "sales", "gift", "receipt"], build: defaultLayout },
   { id: "ciara-sales", label: "Ciara 風", kinds: ["sales"], build: () => ciaraSalesLayout() },
   { id: "ciara-receipt", label: "Ciara 風", kinds: ["receipt"], build: () => ciaraReceiptLayout() },
-  { id: "ciara-settlement", label: "Ciara 風（仮）", kinds: ["settlement"], build: () => ciaraSettlementLayout() },
+  { id: "ciara-settlement", label: "Ciara 風", kinds: ["settlement"], build: () => ciaraSettlementLayout() },
 ];
 
 export function presetsForKind(kind: ReceiptKind): LayoutPreset[] {

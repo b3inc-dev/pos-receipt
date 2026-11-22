@@ -11,6 +11,7 @@ import {
 } from "./receiptLayoutPresets";
 import {
   blocksToCode,
+  businessDayLabel,
   isSafeImageUrl,
   renderReceiptLayout,
   textSettingProblem,
@@ -181,34 +182,76 @@ describe("receiptLayout: 保存前の確認", () => {
   });
 });
 
-describe("receiptLayout: Ciara 風のひな形（参考画像 2026-11-22）", () => {
-  it("販売レシート: ロゴ・領収書・店舗・明細の見出し・CT の注記・スタッフの順", () => {
-    const t = text(html(ciaraSalesLayout()));
-    const order = ["Ciara", "領収書", "サンプルストア 渋谷店", "150-0001", "03-1234-5678", "アイテム 商品価格", "シェルインナーシート ¥990", "ShellBlue / iPhone15", "小計 ¥4,950", "CT (10%) 商品価格に含まれています ¥450", "合計 ¥4,950", "現金 ¥5,000", "2026年11月22日 20:58", "スタッフ：山田", "領収書: #1042"];
+describe("receiptLayout: Ciara 風のひな形（T さんの liquid 2026-11-22）", () => {
+  function inOrder(t: string, order: string[]) {
     let at = -1;
     for (const s of order) {
       const i = t.indexOf(s, at + 1);
       assert.ok(i > at, `「${s}」が順に出ていない: ${t}`);
       at = i;
     }
-    // 1 個の商品は数量を出さない、2 個以上は出す
-    assert.ok(!t.includes("1 x ¥990"));
-    assert.ok(t.includes("2 x ¥2,200"));
+  }
+
+  it("販売レシート: header・line-items・transactions・footer・発送予定の順と文言", () => {
+    const t = text(html(ciaraSalesLayout()));
+    inOrder(t, [
+      "サンプルストア", "領収書", "サンプルストア 渋谷店", "150-0001", "03-1234-5678",
+      "アイテム 商品価格", "シェルインナーシート ¥990", "ShellBlue / iPhone15", "SKU-0001-BL-15",
+      "(2 x ¥2,200)", "通常価格 ¥2,750", "セット割 -¥440",
+      "小計 ¥4,950", "送料 ¥0", "CT (10%) 商品価格に含まれています ¥450", "合計 ¥4,950",
+      "現金 ¥5,000", "配送先： 〒530-0001", "山田 花子 様", "TEL：090-1234-5678",
+      "2026年11月22日 20:58", "スタッフ：山田", "領収書: #1042",
+      "土日祝を除く4〜7営業日後の発送予定", "発送予定日：2026年11月27日〜2026年12月02日頃", "発送はメールにてお知らせいたします。",
+    ]);
+    assert.ok(!t.includes("1 x ¥990"), "1 個の商品は数量を出さない");
   });
 
-  it("領収書: 様・金額のあとのハイフン・税と支払方法・但し書き・担当印", () => {
+  it("販売レシート: 配送でない注文は配送先・発送予定・送料を出さない", () => {
+    const data = sampleTemplateData("sales") as Record<string, any>;
+    data.order = { ...data.order, is_shipping_order: false, shipping_address: null };
+    const t = text(html(ciaraSalesLayout(), data));
+    for (const s of ["配送先", "発送予定", "送料"]) assert.ok(!t.includes(s), s);
+  });
+
+  it("販売レシート: お問い合わせの URL を入れると QR コード（SVG）と URL を出す", () => {
+    const l = ciaraSalesLayout();
+    l.blocks.find((b) => b.id === "notice")!.settings.contact_url = "https://example.com/pages/contact";
+    const h = html(l);
+    assert.match(h, /<svg[^>]*viewBox/);
+    assert.ok(text(h).includes("お問い合わせはこちら https://example.com/pages/contact"));
+  });
+
+  it("領収書: 様・金額のハイフン・税と支払方法・領収文・但し書き・担当印・日付と番号", () => {
     const t = text(html(ciaraReceiptLayout()));
-    for (const s of ["Ciara", "領収書", "山田 太郎 様", "¥4,950-", "消費税 (10%)：¥450", "現金：¥4,950", "上記金額を正に領収いたしました。", "但 お品代 として", "担当印"]) {
-      assert.ok(t.includes(s), `「${s}」がない: ${t}`);
-    }
+    inOrder(t, ["サンプルストア", "領収書", "山田 太郎 様", "¥4,950-", "消費税 (10%)：¥450", "現金：¥4,950", "上記金額を正に領収いたしました。", "但 お品代 として", "担当印", "2026年11月22日", "領収書: R-000123"]);
+    assert.ok(!t.includes("収入印紙"), "5 万円未満は収入印紙の枠を出さない");
+    const data = sampleTemplateData("receipt") as Record<string, any>;
+    data.receipt = { ...data.receipt, amount: 55000 };
+    assert.ok(text(html(ciaraReceiptLayout(), data)).includes("収入印紙 担当印"));
   });
 
-  it("精算（仮）: Ciara のメタフィールドの値を全部出せる", () => {
+  it("精算: gift-receipt.liquid の精算の項目・順・支払方法ごとの 4 行", () => {
     const t = text(html(ciaraSettlementLayout()));
-    for (const s of ["【精算レシート】", "純売上 ¥116,728", "総売上 ¥128,400", "ポイント利用 ¥500", "返金件数 1件", "点数 57点", "電子マネー(QR) (8件) ¥21,900", "確認印"]) {
-      assert.ok(t.includes(s), `「${s}」がない: ${t}`);
-    }
-    assert.ok(!t.includes("商品券釣有り差額"), "0 のときは出さない");
+    inOrder(t, [
+      "サンプルストア", "精算", "2026-11-22 21:05 発行", "店舗 サンプルストア 渋谷店",
+      "合計額 ¥128,400", "返金額 ¥4,950", "純売上 ¥116,728", "消費税 ¥11,672", "値引額 ¥3,200", "ポイント利用 ¥500",
+      "販売件数 42", "返金件数 1", "販売点数 57", "合計額（返品含む） ¥133,350",
+      "納金額 ¥40,350", "現金", "取引額 ¥45,300", "返金額 ¥4,950", "取引件数 18", "返金件数 1",
+      "クレジットカード", "取引額 ¥61,200", "返金額 ¥0",
+    ]);
+    assert.ok(!t.includes("商品券釣り"), "商品券釣りが 0 のときは出さない");
+    const data = sampleTemplateData("settlement") as Record<string, any>;
+    data.settlement = { ...data.settlement, kind_label: "点検", voucher_change: 300 };
+    const t2 = text(html(ciaraSettlementLayout(), data));
+    assert.ok(t2.includes("点検"));
+    assert.ok(t2.includes("商品券釣り -¥300"));
+  });
+
+  it("発送予定日は土日と休みの日を除いて数える", () => {
+    // 2026-11-20(金) の次の日から: 21 土・22 日・23 祝 を除き 24,25,26,27
+    assert.equal(businessDayLabel("2026-11-20", 4, "2026-11-23"), "2026年11月27日");
+    assert.equal(businessDayLabel("2026-11-20", 1, ""), "2026年11月23日");
+    assert.equal(businessDayLabel("bad", 4, ""), "");
   });
 });
 

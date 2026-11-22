@@ -520,7 +520,7 @@ export function ReceiptLayoutEditor({
                         </div>
                       ))}
                       <div>
-                        フィルター: <code>{"| money"}</code>（¥1,234）、<code>{"| number"}</code>（1,234）、ほか Liquid の標準のフィルター。値は自動で HTML エスケープされます。<code>{"| raw"}</code> はそのまま出すので、お客様が入れた値（メモ・宛名・属性）には使わないでください。
+                        フィルター: <code>{"| money"}</code>（¥1,234）、<code>{"| number"}</code>（1,234）、<code>{"| qrcode | raw"}</code>（QR コード）、<code>{"| business_day_label: 4, \"2026-01-01,2026-01-12\""}</code>（土日と休みを除いた 4 営業日後）、ほか Liquid の標準のフィルター。値は自動で HTML エスケープされます。<code>{"| raw"}</code> はそのまま出すので、お客様が入れた値（メモ・宛名・属性）には使わないでください。
                       </div>
                     </BlockStack>
                   </Box>

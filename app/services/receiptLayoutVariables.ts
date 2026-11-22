@@ -7,6 +7,7 @@ export type TemplateVariable = { name: string; label: string };
 
 const COMMON: TemplateVariable[] = [
   { name: "shop.name", label: "ストア名" },
+  { name: "shop.logo_url", label: "ストアのロゴの URL" },
   { name: "location.name", label: "ロケーション名" },
   { name: "location.zip", label: "郵便番号" },
   { name: "location.address_lines", label: "住所（1 行ずつの一覧。for で回す）" },
@@ -18,7 +19,8 @@ const COMMON: TemplateVariable[] = [
 const ORDER: TemplateVariable[] = [
   { name: "order.name", label: "注文番号" },
   { name: "order.created_at_label", label: "注文の日時" },
-  { name: "order.line_items", label: "明細の一覧（title・variant_title・sku・quantity・unit_price・line_total・discount・discount_label・properties）" },
+  { name: "order.line_items", label: "明細の一覧（title・variant_title・sku・quantity・unit_price・line_total・compare_at_price・discount・discount_label・properties）" },
+  { name: "order.created_date", label: "注文日（YYYY-MM-DD）" },
 ];
 
 export const TEMPLATE_VARIABLES: Record<ReceiptKind, TemplateVariable[]> = {
@@ -28,6 +30,9 @@ export const TEMPLATE_VARIABLES: Record<ReceiptKind, TemplateVariable[]> = {
     { name: "order.subtotal", label: "小計" },
     { name: "order.discounts", label: "割引" },
     { name: "order.tax_lines", label: "税の一覧（title・rate_label・amount）" },
+    { name: "order.shipping", label: "送料" },
+    { name: "order.is_shipping_order", label: "配送の注文なら true" },
+    { name: "order.shipping_address", label: "配送先（zip・lines・company・name・phone）" },
     { name: "order.total", label: "合計" },
     { name: "order.payments", label: "支払方法の一覧（label・amount）" },
     { name: "order.change", label: "お釣り" },
@@ -39,6 +44,7 @@ export const TEMPLATE_VARIABLES: Record<ReceiptKind, TemplateVariable[]> = {
     ...COMMON,
     { name: "settlement.title", label: "表題（【精算レシート】／【点検レシート】）" },
     { name: "settlement.is_inspection", label: "点検なら true" },
+    { name: "settlement.kind_label", label: "「精算」か「点検」" },
     { name: "settlement.period_label", label: "対象の日" },
     { name: "settlement.location_label", label: "ロケーション" },
     { name: "settlement.as_of", label: "集計した時刻" },
@@ -53,6 +59,8 @@ export const TEMPLATE_VARIABLES: Record<ReceiptKind, TemplateVariable[]> = {
     { name: "settlement.order_count", label: "件数" },
     { name: "settlement.refund_count", label: "返金件数" },
     { name: "settlement.item_count", label: "点数" },
+    { name: "settlement.total_including_returns", label: "合計額（返品含む）" },
+    { name: "settlement.cash_deposit", label: "納金額" },
     { name: "settlement.payments", label: "支払方法別の一覧（label・net・count・refund・refund_count）" },
   ],
   receipt: [
