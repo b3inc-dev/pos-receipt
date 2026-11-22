@@ -47,7 +47,21 @@
 - 呼ぶのは `getShopPlan`（待たない）。全機能の例外（自社用・`CUSTOM_APP_STORE_IDS`・開発ストア）と DB `unlimited` の店は報告しない。
 - 守りの二重化: `reportExtraLocationUsage` の中でも `APP_DISTRIBUTION=inhouse`・`CUSTOM_APP_STORE_IDS` の店なら DB も Shopify も触らずに返す（`isInhouseForUsage`。ほかから呼ばれても自社用は送らない。2026-11-22 レビュー #41 の P2-4）。
 - 料金プラン画面の「超えたロケーション」の文は、数えなかった理由（`extraLocationStatus`: 範囲内・契約なし・読めない・例外）で分ける。契約が無い・読めない店に「プランの範囲内です」と出さない（P2-2）。設定・診断の画面のプラン表示も門番と同じ `checkShopPlanAccess` から読む（P2-3）。
-- **残り**: 期間の途中で増えた分は取らない。shop/redact で `AppUsageReport` を消すかは未決（個人情報は入っていない）。migration `20261122120000_add_app_usage_report` はマージ直前に main の最新より後の時刻へ付け直す。
+- **残り**: 期間の途中で増えた分は取らない。shop/redact では `AppUsageReport` もその店の分を消す（2026-11-23 T の決定。POS Stock と同じ。`app/services/shopRedact.server.ts`）。アンインストール（`app/uninstalled`）では消さない（48 時間のうちに入れ直したとき、同じ期間を二重に報告しないため）。migration `20261122120000_add_app_usage_report` はマージ直前に main の最新より後の時刻へ付け直す。
+
+### D17. 処理待ちに置いた注文の通知を 30 日で消す（2026-11-23 T の決定）
+
+- `orders/updated` の中身（お客様の情報が入ることがある）は、売上サマリーのキュー（pg-boss・スキーマ `pgboss` の `job` と `archive`）に置かれる。このキュー（`pos-receipt-sales-summary-orders-updated`）の行で、作られてから 30 日を過ぎたものを消す（`app/services/orderWebhookQueueRetention.server.ts`）。処理中（`active`）の行は消さない。
+- スイッチ `ORDER_WEBHOOK_QUEUE_PURGE`（**既定オフ**）: `preview`（数えるだけ）→ `one`（いちばん古い 1 件）→ `all`（すべて）の順に T が進める。日数は `ORDER_WEBHOOK_QUEUE_RETENTION_DAYS`（既定 30。1〜30 にそろえ、30 日より長くはできない）。
+- 動くのはキューのワーカーを動かしているプロセスだけ（起動の 1 分後に 1 回、その後 24 時間ごと）。記録（ログ）には表ごとの件数だけを出し、中身は読まない。pg-boss の表や列が思った形でないときは何も消さずに `skip` と理由を出す。
+- 推測（確かめていない）: pg-boss 10 は自分でも古い行を片づける（既定の日数はこの PR では確かめていない）。このスイッチは「30 日を超えて残らない」ことをアプリ側で守るためのもの。
+- `SALES_SUMMARY_WEBHOOK_QUEUE=0` でキューを止めた店では新しく積まれないが、止める前に積まれた行は、このタイマーが動かないので残る（キューを動かして消すか、手で消す）。
+
+### D18. customers/redact で消すもの（2026-11-23）
+
+- 今の main: 指定の注文の領収書の宛名（`ReceiptIssue.recipientName`）を `[redacted]` にする。
+- 特殊返金のメモ（`SpecialRefundEvent.note`。自由に書けるので、お客様の名前などが入ることがある）も `[redacted]` にする直しは **#13（`cursor/decision-audit-p2-debt-docs-0059`）に入っている**。同じ行を二重に直してぶつからないよう、この PR では触らない。#13 が入らないときは、別の PR で同じ直しをする。
+- `createdBy`（スタッフ）や金額・支払方法はお客様の情報ではないので残す。
 
 ## 2. 古い docs との差分（注意）
 
