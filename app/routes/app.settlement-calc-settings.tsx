@@ -5,7 +5,7 @@
  * 初めの値は今の数え方のまま。保存先は AppSetting の settlement_calc_settings（app/utils/settlementCalcSettings.ts）。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate, useNavigation } from "react-router";
 import {
   Page,
   Layout,
@@ -135,6 +135,9 @@ export default function SettlementCalcSettingsPage() {
   const navigate = useNavigate();
   const q = location.search || "";
   const actionData = useActionData<{ ok: boolean; error?: string; at?: number }>();
+  // 押してから終わるまで保存ボタンを処理中にし、二重に押せないようにする（UI ルール v1.1）
+  const navigation = useNavigation();
+  const saving = navigation.state !== "idle" && navigation.formMethod?.toLowerCase() === "post";
 
   const [form, setForm] = useState<SettlementCalcSettings>({ ...initial });
   const [skuText, setSkuText] = useState(initial.itemCountExcludedSkus.join("\n"));
@@ -169,8 +172,13 @@ export default function SettlementCalcSettingsPage() {
     <PolarisPageWrapper>
       <Page
         title="精算の数え方"
-        backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
+        backAction={{ content: "精算設定", onAction: () => navigate("/app/settlement-settings" + q) }}
+        primaryAction={{
+          content: saving ? "処理中…" : "保存",
+          onAction: handleSave,
+          loading: saving,
+          disabled: saving,
+        }}
       >
         <BlockStack gap="400">
           <Card padding="0">

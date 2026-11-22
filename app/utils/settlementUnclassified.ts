@@ -13,11 +13,17 @@ export function hasUnclassifiedPaymentSection(paymentSectionsJson: string | null
   } catch {
     return false;
   }
+  // 前の形は行の配列。#22（印字の一本化）の形は { format, snapshot, sections }。どちらも読む。
+  // #22 が入ったら settlementPrintSnapshot.server.ts の parsePaymentSectionsJson に寄せる。
+  if (rows && typeof rows === "object" && !Array.isArray(rows)) {
+    rows = (rows as { sections?: unknown }).sections;
+  }
   if (!Array.isArray(rows)) return false;
   return rows.some((r) => {
     if (!r || typeof r !== "object") return false;
-    const row = r as { gateway?: unknown; net?: unknown; refund?: unknown };
-    if (String(row.gateway ?? "").trim() !== UNCLASSIFIED_PAYMENT_SECTION_KEY) return false;
+    const row = r as { gateway?: unknown; label?: unknown; net?: unknown; refund?: unknown };
+    const gateway = String(row.gateway ?? row.label ?? "").trim();
+    if (gateway !== UNCLASSIFIED_PAYMENT_SECTION_KEY) return false;
     return Number(row.net ?? 0) !== 0 || Number(row.refund ?? 0) !== 0;
   });
 }
