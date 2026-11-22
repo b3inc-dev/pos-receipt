@@ -95,3 +95,13 @@ export async function createVoucherAdjustment(data) {
 export async function voidSpecialRefund(id) {
   return apiPost(`/api/special-refunds/${id}/void`, {});
 }
+
+/**
+ * POST /api/special-refunds/:id/recheck
+ * 前からある pending の登録を、Shopify の返金を読み直して決める（返金は実行しない）。
+ * @param {string} id
+ * @param {{ resolution?: "link" | "no_refund", refundId?: string }} [body]
+ */
+export async function recheckLegacySpecialRefund(id, body = {}) {
+  return apiPost(`/api/special-refunds/${encodeURIComponent(id)}/recheck`, body);
+}
