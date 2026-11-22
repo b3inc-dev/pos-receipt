@@ -85,6 +85,16 @@ describe("契約の名前からプランを読む", () => {
     assert.equal(planFromSubscriptionName("product bundle"), null);
     assert.equal(planFromSubscriptionName(""), null);
   });
+  test("語の区切りを見る（pro と lite は同じ決まり）", () => {
+    assert.equal(planFromSubscriptionName("Elite"), null);
+    assert.equal(planFromSubscriptionName("POS Receipt Elite"), null);
+    assert.equal(planFromSubscriptionName("Lite"), "lite");
+    assert.equal(planFromSubscriptionName("lite-plan"), "lite");
+    assert.equal(planFromSubscriptionName("Pro"), "pro");
+    assert.equal(planFromSubscriptionName("Professional"), null);
+    assert.equal(planFromSubscriptionName("substandard"), null);
+    assert.equal(planFromSubscriptionName("standard_monthly"), "lite");
+  });
   test("ACTIVE だけを見て、Pro と Lite があれば Pro", () => {
     assert.equal(planFromSubscriptions([sub("Lite"), sub("Pro")]), "pro");
     assert.equal(planFromSubscriptions([sub("Pro", "CANCELLED"), sub("Lite")]), "lite");

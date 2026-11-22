@@ -135,12 +135,13 @@ const SHOP_PLAN_QUERY = `#graphql
  * 契約（App Pricing のプラン名、または Partner API の項目の handle）からプランを読む。
  * 「pro」「プロ」が入っていれば Pro、「lite」「standard」「ライト」「スタンダード」が入っていれば Lite。
  * 「product」などの一部の pro は Pro にしない（英字が前後に続かない pro だけ）。
+ * lite・standard も同じで、「Elite」などの一部の lite は Lite にしない（英字が前後に続かないものだけ）。
  */
 export function planFromSubscriptionName(name: string): "lite" | "pro" | null {
   const s = String(name ?? "").toLowerCase();
   if (!s.trim()) return null;
   if (/(^|[^a-z])pro([^a-z]|$)/.test(s) || s.includes("プロ")) return "pro";
-  if (/lite|standard/.test(s) || s.includes("ライト") || s.includes("スタンダード")) return "lite";
+  if (/(^|[^a-z])(lite|standard)([^a-z]|$)/.test(s) || s.includes("ライト") || s.includes("スタンダード")) return "lite";
   return null;
 }
 

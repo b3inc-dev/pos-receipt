@@ -104,7 +104,7 @@ Admin API で契約が読めていれば要りません（手順 5 の 6 で「�
 
 ## 7. 超えたロケーションの報告をオンにする
 
-1. Dev Dashboard で公開用アプリの API キーを取り、公開用の Render に `APP_EVENTS_CLIENT_ID` / `APP_EVENTS_CLIENT_SECRET`（秘密）を入れる。
+1. 鍵は**新しく入れなくてよい**。報告には公開用アプリ自身の client ID / client secret を使い、これは公開用の Render に入っている `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` と同じ値（#44。無いときはそれを使う）。公開用の Render に `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` が入っていることだけ確かめる。`APP_EVENTS_CLIENT_ID` / `APP_EVENTS_CLIENT_SECRET` は入れない（入れるなら両方。片方だけだと送らずに理由を残す）。自社用（Ciara）の Render には何も入れない（自社用は鍵があっても送らない）。
 2. まず開発ストアで: `PLAN_TEST_DEV_STORE_AS_PUBLIC=1` のまま、開発ストアのロケーションを 4 か所以上にして Lite を選ぶ。
 3. `APP_EVENTS_USAGE_ENABLED=1` を入れて再起動し、料金プラン画面を開く。「ロケーション 5 か所のうち、3 か所を超えた 2 か所 × $20 ＝ $40」と、報告の状態が出る。
 4. Dev Dashboard の Logs で、そのイベントが受け付けられたことを確かめる（Shopify の 202 は「受け取った」だけなので、請求に載ったかは Logs で見る）。

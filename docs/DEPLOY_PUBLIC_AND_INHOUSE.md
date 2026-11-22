@@ -55,7 +55,7 @@ POS Stock と同様に、**自社用**と**公開用**で **別々の Shopify �
   - `SHOPIFY_APP_HANDLE`: Shopify の料金プラン画面の URL に使う app handle（未設定は `pos-receipt`。2026-11-22 T が Partner Dashboard の handle は `pos-receipt` と確認したので入れなくてよい）
   - `PARTNER_API_SUBSCRIPTION_ENABLED=1`・`PARTNER_API_TOKEN`（秘密。権限は Manage apps だけ）・`PARTNER_API_ORG_ID`（Partner Dashboard の URL の数字）・`PARTNER_API_APP_ID`・`PARTNER_API_VERSION`（省略可、既定 `2026-10`）: Partner API で契約を読む（既定オフ）
   - `PLAN_TEST_DEV_STORE_AS_PUBLIC=1`: 開発ストアを全機能の例外にせず、契約からプランを決める（App Pricing を開発ストアで確かめる間だけ。既定オフ。終わったら消す）
-  - `APP_EVENTS_USAGE_ENABLED=1`・`APP_EVENTS_CLIENT_ID`・`APP_EVENTS_CLIENT_SECRET`（秘密）: 超えたロケーションを App Events API で報告する（既定オフ）。`APP_EVENTS_HANDLE_LITE` / `APP_EVENTS_HANDLE_PRO`（既定 `extra_location_lite` / `extra_location_pro`）・`APP_EVENTS_USAGE_MAX_UNITS`（既定 50）・`APP_EVENTS_API_VERSION`（既定 `2026-10`）
+  - `APP_EVENTS_USAGE_ENABLED=1`・`APP_EVENTS_CLIENT_ID`・`APP_EVENTS_CLIENT_SECRET`（秘密）: 超えたロケーションを App Events API で報告する（既定オフ）。鍵は**公開用アプリ自身の client ID と client secret**（client_credentials。[shopify.dev](https://shopify.dev/docs/apps/build/app-events/send-events)）で、別に API キーを作るものではない。`SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` と同じ値なので、**`APP_EVENTS_CLIENT_*` は入れなくてよい**（無いときはそれを使う。入れるなら両方）。自社用（`APP_DISTRIBUTION=inhouse`）では鍵があっても送らない。`APP_EVENTS_HANDLE_LITE` / `APP_EVENTS_HANDLE_PRO`（既定 `extra_location_lite` / `extra_location_pro`）・`APP_EVENTS_USAGE_MAX_UNITS`（既定 50）・`APP_EVENTS_API_VERSION`（既定 `2026-10`）
 - **APP_DISTRIBUTION** が未設定や typo だと「公開用」扱いになり、プランによる制限がかかります。値は大文字小文字どちらでも構いません（`inhouse` / `INHOUSE` など）。
 - **起動時ガード**（`server.js` → `scripts/lib/deployGuard.mjs`）:
   - `APP_DISTRIBUTION` が `inhouse` / `public` / 未設定以外（typo）→ **起動失敗**
