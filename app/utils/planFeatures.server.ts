@@ -137,8 +137,9 @@ export const PLAN_FEATURES_LEGACY = { standard: PLAN_FEATURES.lite } as const;
 
 // ── 料金プラン（Shopify App Pricing。2026-11-21 T の決定） ───
 // 店は Shopify の料金プラン画面でプランを選ぶ。アプリは契約を作らない（appSubscriptionCreate は使わない）。
-// 金額は Partner Dashboard の App Pricing で決まる。ここの金額は画面に見せる目安で、未確定（T がまだ決めていない）。
-// プランは契約から読む（shopPlan.server.ts）。maxLocations を超えた分は 1 か所 $20/月（未確定）を
+// 料金は確定（2026-11-22 T の決定）: Lite $100/月（3 ロケーションまで）・Pro $200/月（10 ロケーションまで）・
+// 超えた 1 か所 +$20/月。請求そのものは Partner Dashboard の App Pricing の設定で行うので、そちらもこの金額にそろえる。
+// プランは契約から読む（shopPlan.server.ts）。maxLocations を超えた分は 1 か所 $20/月を
 // App Events API で報告する（appEventsUsage.server.ts、APP_EVENTS_USAGE_ENABLED=1 のときだけ。既定オフ）。
 
 export const BILLING_PLANS = {
@@ -160,7 +161,7 @@ export const BILLING_PLANS = {
   },
 } as const;
 
-/** プランに含まれる数を超えたロケーション 1 か所あたりの単価（USD/月）。未確定。appEventsUsage.server.ts と同じ値 */
+/** プランに含まれる数を超えたロケーション 1 か所あたりの単価（USD/月）。確定（2026-11-22 T）。appEventsUsage.server.ts と同じ値（tests/pricing.test.mjs で確かめる） */
 export const EXTRA_LOCATION_PRICE_USD = 20;
 
 /**

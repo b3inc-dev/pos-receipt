@@ -2,7 +2,7 @@
  * プランに含まれるロケーション数（Lite 3 / Pro 10）を超えた分の従量を Shopify App Events API で報告する（公開用だけ）。
  *
  * T の決定（2026-11-21）: 公開用の料金は Shopify App Pricing（Billing API ではない）。
- * 超えたロケーション 1 か所につき $20/月（未確定。T がまだ決めていない）を App Events API の使用量イベントで送る。
+ * 超えたロケーション 1 か所につき $20/月（2026-11-22 T が確定）を App Events API の使用量イベントで送る。
  * POS Stock（b3inc-dev/stock-transfer-pos の app/utils/app-events-usage.server.ts、PR #80・#82）と同じ形。直すときは両方を同じように直す。
  * 上限は Shopify 側に無い（App Pricing は usage cap 非対応）ので、アプリ側の上限（APP_EVENTS_USAGE_MAX_UNITS）で止める。
  *
@@ -68,8 +68,8 @@ type FetchLike = (url: string, init: { method: string; headers: Record<string, s
 export const INCLUDED_LOCATIONS: Record<UsagePlan, number> = { lite: 3, pro: 10 };
 
 /**
- * 超えた 1 か所あたりの単価（USD/月）。画面に見せる目安だけで、請求の金額は Partner Dashboard のメーターで決まる。
- * 未確定（T がまだ決めていない。2026-11-22）。
+ * 超えた 1 か所あたりの単価（USD/月）。Lite・Pro とも $20 で確定（2026-11-22 T の決定）。
+ * 請求の金額は Partner Dashboard のメーターの設定で決まるので、メーターも $20 にそろえる。
  */
 export const EXTRA_LOCATION_PRICE_USD: Record<UsagePlan, number> = { lite: 20, pro: 20 };
 

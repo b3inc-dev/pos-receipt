@@ -31,13 +31,13 @@
   - 読めたプランは DB `Shop.planCode` に書く（変わったときだけ）。契約なしは `lite`（今まで通り Lite の機能は使える）。読めなかったら DB の値のまま。DB の `unlimited` は上書きしない。
   - 門番は `checkShopPlanAccess(admin, shop, feature)` に一本化（今までの `getFullAccess` ＋ `checkPlanAccess(shop.planCode, …)`）。契約を読めた結果は店ごとに 60 秒覚える（ホーム・料金プラン画面などで読み直すと、その結果に置きかわる。プランを変えて戻った店を古いプランで断らない）。
   - 自社用（`APP_DISTRIBUTION=inhouse`・Ciara）は今まで通り: Shopify に聞かず全機能・請求なし。`CUSTOM_APP_STORE_IDS`・開発ストアも今まで通り全機能（POS Stock は開発ストアもプランを選ぶ形にしたが、ここでは変えていない）。
-- **料金（未確定）**: Lite $100/月（3 ロケーションまで）・Pro $200/月（10 ロケーションまで）・超えた 1 か所 +$20/月。**T はまだ金額を確定していない**。画面の金額は目安で、請求は Partner Dashboard の App Pricing の設定で決まる。
+- **料金（確定・2026-11-22 T の決定）**: Lite $100/月（3 ロケーションまで）・Pro $200/月（10 ロケーションまで）・超えた 1 か所 +$20/月（Lite・Pro とも）。コードの値は `planFeatures.server.ts` の `BILLING_PLANS`・`EXTRA_LOCATION_PRICE_USD` と `appEventsUsage.server.ts` の `INCLUDED_LOCATIONS`・`EXTRA_LOCATION_PRICE_USD`（`tests/pricing.test.mjs` で数と両方の一致を確かめる）。請求そのものは Partner Dashboard の App Pricing の設定（プランの月額とメーターの単価）で行うので、そちらも同じ金額にする。
 - **残り**: 未契約の店を止めるか（POS Stock #78 の形）は決めていない。Admin API に App Pricing の契約が出るかは未確認（出なければ Partner API のスイッチで読む）。
 
 ### D16. 超えたロケーション（+$20）は App Events API で 1 請求期間に 1 回報告する（既定オフ・2026-11-22）
 
 - POS Stock の D15・D16（PR #80・#82）と同じ決まり。処理は `app/utils/appEventsUsage.server.ts`（POS Stock の `app-events-usage.server.ts` と同じ中身で、数と単価だけ違う）。
-- 送る数は `max(0, ロケーション数 − プランに含まれる数)`（Lite 3・Pro 10）。ロケーション数は Admin API の `locations(first: 250)`（有効なロケーション。POS で使うかどうかでは絞らない。**T の確認待ち**）。単価 $20 は画面の目安（**未確定**）で、請求の金額は Partner Dashboard のメーター。メーターの handle は既定 `extra_location_lite` / `extra_location_pro`（`APP_EVENTS_HANDLE_LITE` / `APP_EVENTS_HANDLE_PRO` で変えられる）。
+- 送る数は `max(0, ロケーション数 − プランに含まれる数)`（Lite 3・Pro 10）。ロケーション数は Admin API の `locations(first: 250)`（有効なロケーション。POS で使うかどうかでは絞らない。**T の確認待ち**）。単価は $20 で確定（2026-11-22 T）。請求の金額は Partner Dashboard のメーターで決まるので、メーターも $20 にする。メーターの handle は既定 `extra_location_lite` / `extra_location_pro`（`APP_EVENTS_HANDLE_LITE` / `APP_EVENTS_HANDLE_PRO` で変えられる）。
 - 外へ送るのは `APP_EVENTS_USAGE_ENABLED=1` のときだけ（**既定オフ**）。オフでも数は DB `AppUsageReport` に `disabled` で残す。鍵は `APP_EVENTS_CLIENT_ID` / `APP_EVENTS_CLIENT_SECRET`。
 - 1 店・1 請求期間に 1 回: DB `AppUsageReport` の `(shop, periodEnd)` 一意 ＋ Shopify の `idempotency_key`（`posr-xloc-<店の番号>-<YYYYMMDD>`）。`periodEnd` はプランを決めた契約の今の請求期間の終わり（Partner で決めたら `currentBillingCycle.endTime`、無ければ Admin の `currentPeriodEnd`）の **UTC の日付**。Admin の期間は、ACTIVE な契約の先頭ではなく**プランを決めた契約**のものだけを使う（`selectPlanSubscription`。Partner の `legacySubscriptionId` と同じ契約 → プランの名前に合う契約 → 2 件あれば `createdAt` が新しい方。決まらず期間も違えば送らず `missing_period`）。古い Billing API の契約と App Pricing の契約が同時に ACTIVE の店（切りかえの途中）で、別の契約の期間とキーを使わないため（2026-11-22 レビュー #41 の P2-1）。同じ日付の行が無くても前後 1 日の行があれば同じ期間としてその行のキーで続ける（Partner と Admin のずれで 2 回送らない）。
 - 期間の終わり 10 分前を過ぎたら送らない（次の期間の請求に入って 2 重になるため）。期間が分からないときは送らず `missing_period` で数と理由を残す。

@@ -87,7 +87,7 @@ beforeEach(() => {
 });
 
 describe("数の計算とキー", () => {
-  test("Lite は 3 か所・Pro は 10 か所まで 0、超えた分 × $20（未確定）", () => {
+  test("Lite は 3 か所・Pro は 10 か所まで 0、超えた分 × $20", () => {
     assert.deepEqual(computeExtraLocationUsage("lite", 3), { locationsCount: 3, includedLocations: 3, units: 0, unitPriceUsd: 20, amountUsd: 0 });
     assert.deepEqual(computeExtraLocationUsage("lite", 5), { locationsCount: 5, includedLocations: 3, units: 2, unitPriceUsd: 20, amountUsd: 40 });
     assert.deepEqual(computeExtraLocationUsage("pro", 10), { locationsCount: 10, includedLocations: 10, units: 0, unitPriceUsd: 20, amountUsd: 0 });
