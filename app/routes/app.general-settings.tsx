@@ -31,6 +31,7 @@ import {
   isAllowedPrivacyPolicyUrl,
   resolvePrivacyPolicyUrl,
 } from "../utils/privacyPolicyUrl";
+import { isDevelopmentStore, keepDevOnlySettings } from "../utils/devStore.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SystemPageNav } from "../components/SystemPageNav";
 
@@ -48,7 +49,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const effectivePrivacyPolicyUrl = resolvePrivacyPolicyUrl(settings.privacyPolicyUrl);
   const privacyPolicyFromEnvOnly =
     !settings.privacyPolicyUrl?.trim() && Boolean(effectivePrivacyPolicyUrl);
-  return { settings, effectivePrivacyPolicyUrl, privacyPolicyFromEnvOnly };
+  // デバッグ・診断の欄は開発ストアだけに出す（T さんの決定 2026-11-22。読めなければ出さない）
+  const isDevStore = await isDevelopmentStore(admin);
+  return { settings, effectivePrivacyPolicyUrl, privacyPolicyFromEnvOnly, isDevStore };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -65,7 +68,7 @@ export async function action({ request }: ActionFunctionArgs) {
       { status: 400 }
     );
   }
-  const settings: GeneralSettings = {
+  const submitted: GeneralSettings = {
     ...DEFAULT_GENERAL_SETTINGS,
     appDisplayName: str("appDisplayName", ""),
     supportContactEmail: str("supportContactEmail", ""),
@@ -80,6 +83,13 @@ export async function action({ request }: ActionFunctionArgs) {
     diagnosticsPanelEnabled: bool("diagnosticsPanelEnabled", true),
     verboseCalcLogEnabled: bool("verboseCalcLogEnabled", false),
   };
+  // 開発ストアでない店では、画面に出していないデバッグ・診断の欄を保存済みの値のままにする
+  const isDevStore = await isDevelopmentStore(admin);
+  const saved: GeneralSettings = {
+    ...DEFAULT_GENERAL_SETTINGS,
+    ...(await getAppSetting<Partial<GeneralSettings>>(shop.id, GENERAL_SETTINGS_KEY)),
+  };
+  const settings = keepDevOnlySettings(submitted, saved, isDevStore);
   await setAppSetting(shop.id, GENERAL_SETTINGS_KEY, settings);
   return Response.json({ ok: true });
 }
@@ -89,6 +99,7 @@ export default function GeneralSettingsPage() {
     settings: initial,
     effectivePrivacyPolicyUrl,
     privacyPolicyFromEnvOnly,
+    isDevStore,
   } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const actionData = useActionData<{ ok?: boolean }>();
@@ -122,14 +133,14 @@ export default function GeneralSettingsPage() {
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
-        <SystemPageNav memberCardEnabled={false} />
+        <SystemPageNav memberCardEnabled={false} isDevStore={isDevStore} />
         <Layout>
           {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
           <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
           {saveError && <Layout.Section><Banner tone="critical">{saveError}</Banner></Layout.Section>}
           <Layout.Section>
             {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-            <AdminIntro><p>アプリ全体の基本情報・タイムゾーン・デバッグ表示を設定します。</p></AdminIntro>
+            <AdminIntro><p>{isDevStore ? "アプリ全体の基本情報・タイムゾーン・デバッグ表示を設定します。" : "アプリ全体の基本情報・タイムゾーンを設定します。"}</p></AdminIntro>
           </Layout.Section>
 
           <Layout.AnnotatedSection title="アプリ基本情報">
@@ -160,17 +171,24 @@ export default function GeneralSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="プラン・表示言語">
+          <Layout.AnnotatedSection title={isDevStore ? "プラン・表示言語" : "表示言語"}>
             <Card>
               <BlockStack gap="400">
-                <Select label="プラン（表示用）" options={PLAN_OPTIONS} value={form.currentPlanCode} onChange={(v) => set("currentPlanCode", v)} />
-                <TextField label="有効機能 JSON（表示用）" value={form.enabledFeaturesJson} onChange={(v) => set("enabledFeaturesJson", v)} multiline={2} autoComplete="off" />
+                {/* 「プラン（表示用）」「有効機能 JSON（表示用）」は開発ストアだけに出す（客先の店には出さない） */}
+                {isDevStore && (
+                  <>
+                    <Select label="プラン（表示用）" options={PLAN_OPTIONS} value={form.currentPlanCode} onChange={(v) => set("currentPlanCode", v)} />
+                    <TextField label="有効機能 JSON（表示用）" value={form.enabledFeaturesJson} onChange={(v) => set("enabledFeaturesJson", v)} multiline={2} autoComplete="off" />
+                  </>
+                )}
                 <Select label="管理画面言語" options={LANG_OPTIONS} value={form.adminLanguage} onChange={(v) => set("adminLanguage", v)} />
                 <Select label="POS 言語" options={LANG_OPTIONS} value={form.posLanguage} onChange={(v) => set("posLanguage", v)} />
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
 
+          {/* 開発ストアだけに出す（客先の店には出さない） */}
+          {isDevStore && (
           <Layout.AnnotatedSection title="ログ・デバッグ">
             <Card>
               <BlockStack gap="300">
@@ -180,6 +198,7 @@ export default function GeneralSettingsPage() {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
+          )}
         </Layout>
       </Page>
     </PolarisPageWrapper>
