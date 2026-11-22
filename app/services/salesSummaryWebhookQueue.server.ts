@@ -7,6 +7,8 @@
 import prisma from "../db.server";
 import PgBoss from "pg-boss";
 import { executeSalesSummaryOrderWebhookJob } from "./salesSummaryWebhookRefresh.server";
+import { syncRefundAggregationFromWebhookPayload } from "./refundAggregation.server";
+import { syncRefundAggregationForQueuedWebhook } from "./refundAggregationWebhookSync.server";
 
 export const SALES_SUMMARY_WEBHOOK_QUEUE_NAME = "pos-receipt-sales-summary-orders-updated";
 
@@ -60,6 +62,17 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
           }
           const disabled = process.env.SALES_SUMMARY_WEBHOOK_REFRESH_DISABLED;
           if (disabled === "1" || disabled === "true") continue;
+
+          // 同期経路と同じく返金計上店（pos.refund_aggregation_location_gid）を書く。
+          // 売上サマリーの再計算より先に行い、再計算が失敗・再試行になっても書かれるようにする。
+          // 失敗はログのみ（ジョブは失敗にしない）。
+          await syncRefundAggregationForQueuedWebhook(
+            syncRefundAggregationFromWebhookPayload,
+            admin,
+            dbShop.id,
+            shopDomain,
+            payload,
+          );
 
           const { targetDates, errors } = await executeSalesSummaryOrderWebhookJob(
             admin,
