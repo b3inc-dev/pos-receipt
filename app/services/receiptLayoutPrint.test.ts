@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   addressLines,
   domesticPhone,
+  LAYOUT_ORDER_QUERY,
   japanesePrefecture,
   orderData,
   orderLevelDiscount,
@@ -112,6 +113,12 @@ describe("住所・電話の整え方（Ciara の header.liquid と同じ）", (
   it("日本の住所は「県＋市区町村＋住所1」「住所2」", () => {
     assert.deepEqual(addressLines(ORDER.retailLocation.address), ["東京都渋谷区神宮前1-2-3", "2F"]);
     assert.deepEqual(addressLines({ address1: "1 Main St", city: "Austin", province: "TX", countryCode: "US" }), ["1 Main St", "Austin TX"]);
+  });
+});
+
+describe("注文の読み方", () => {
+  it("明細の staffMember を読まない（read_users の無い店で取得ごと失敗し、前の印字に戻るため）", () => {
+    assert.equal(/staffMember/.test(LAYOUT_ORDER_QUERY), false);
   });
 });
 

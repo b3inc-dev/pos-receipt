@@ -167,7 +167,12 @@ type MoneyBag = { shopMoney?: { amount?: string | number | null; currencyCode?: 
 const money = (m: MoneyBag) => Number(m?.shopMoney?.amount ?? 0) || 0;
 const currencyOf = (m: MoneyBag) => String(m?.shopMoney?.currencyCode ?? "") || "JPY";
 
-/** レイアウトの販売レシート・ギフトレシートで読む注文の項目 */
+/**
+ * レイアウトの販売レシート・ギフトレシートで読む注文の項目。
+ * 明細の `staffMember` は読まない: read_users の無い店（Ciara も）では注文の取得ごと失敗し、
+ * 販売・ギフトがいつも前の印字に戻ってしまう（#83 の見直し P1。#84 と同じ理由）。
+ * スタッフ名は明細のプロパティ（staffPropertyKeys）から出す。
+ */
 export const LAYOUT_ORDER_QUERY = `#graphql
   query ReceiptLayoutOrder($id: ID!) {
     shop { name currencyCode }
@@ -201,7 +206,6 @@ export const LAYOUT_ORDER_QUERY = `#graphql
           discountedUnitPriceSet { shopMoney { amount currencyCode } }
           variant { compareAtPrice }
           customAttributes { key value }
-          staffMember { name }
           discountAllocations {
             allocatedAmountSet { shopMoney { amount currencyCode } }
             discountApplication {
@@ -281,7 +285,7 @@ function lineItem(li: RawLine): OrderLineItem {
   };
 }
 
-/** 明細のプロパティからスタッフ名を集める（重複は 1 回、" / " でつなぐ）。無ければ明細の担当者 */
+/** 明細のプロパティからスタッフ名を集める（重複は 1 回、" / " でつなぐ）。無ければ明細の担当者（今は注文の取得で読まないので、渡されたときだけ） */
 export function staffNames(lines: RawLine[], keys: string[]): string {
   const want = new Set(keys.map((k) => k.trim().toLowerCase()).filter(Boolean));
   const fromProps: string[] = [];
