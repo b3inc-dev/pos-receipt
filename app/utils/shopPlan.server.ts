@@ -61,6 +61,12 @@ export type ShopPlanState = {
   subscriptionsRead: boolean;
   activeSubscriptions: SubscriptionSummary[];
   locationsCount: number;
+  /**
+   * 超えたロケーションの料金で数える「POS で使うロケーション」の数（2026-11-22 T の決定）。
+   * 直近 POS_LOCATION_WINDOW_DAYS 日に、精算・領収書・特殊返金をこのアプリで使った、今も有効なロケーション。
+   * 数えなかった（契約なし・全機能の例外など）・数えられなかったときは null
+   */
+  posLocationsCount: number | null;
   isDevelopmentStore: boolean;
   /** Partner API を使えなかった理由（スイッチオフ・設定不足・失敗の理由・契約なし） */
   partnerStatus?: string;
@@ -83,7 +89,14 @@ export type ShopPlanState = {
   };
 };
 
-export type ExtraLocationStatus = "counted" | "within_plan" | "no_subscription" | "unread" | "full_access" | "not_counted";
+export type ExtraLocationStatus =
+  | "counted"
+  | "within_plan"
+  | "no_subscription"
+  | "unread"
+  | "full_access"
+  | "not_counted"
+  | "count_failed";
 
 /**
  * 超えたロケーションを数える店か・数えない理由（純粋な関数）。
@@ -96,11 +109,14 @@ export function decideExtraLocationStatus(args: {
   planCode: string;
   fromSubscription: boolean;
   extraUnits: number;
+  /** POS で使うロケーションを DB から数えられなかった */
+  countFailed?: boolean;
 }): ExtraLocationStatus {
   if (args.fullAccess) return "full_access";
   if (!args.subscriptionsRead) return "unread";
   if (args.plan === null) return "no_subscription";
   if (!args.fromSubscription || args.planCode !== args.plan) return "not_counted";
+  if (args.countFailed) return "count_failed";
   return args.extraUnits > 0 ? "counted" : "within_plan";
 }
 
@@ -116,7 +132,34 @@ export type ShopPlanDeps = {
   reportUsage?: typeof reportExtraLocationUsage;
   /** 門番の覚えの時刻（テスト用。既定は Date.now） */
   now?: () => number;
+  /** POS で使ったロケーションの ID（Location の GID）を DB から読む（テスト用。既定は prisma） */
+  listUsedLocationIds?: (shopId: string, since: Date) => Promise<string[]>;
 };
+
+/** 「POS で使うロケーション」を見る日数（2026-11-23 T がカードで確定。docs/DECISIONS.md D16） */
+export const POS_LOCATION_WINDOW_DAYS = 30;
+
+/**
+ * POS で使うロケーションの数（純粋な関数）: 直近に使った ID のうち、今 Shopify で有効なロケーションだけ・重なりなし。
+ * 消した・止めたロケーションは数えない。
+ */
+export function countPosLocations(usedLocationIds: ReadonlyArray<string>, activeLocationIds: ReadonlyArray<string>): number {
+  const active = new Set(activeLocationIds.map((id) => String(id)));
+  const used = new Set(usedLocationIds.map((id) => String(id)).filter((id) => active.has(id)));
+  return used.size;
+}
+
+/** 精算・領収書・特殊返金を直近に使ったロケーションの ID（Shopify の Location GID） */
+async function defaultListUsedLocationIds(shopId: string, since: Date): Promise<string[]> {
+  const { default: prisma } = await import("../db.server");
+  const where = { shopId, createdAt: { gte: since } };
+  const [settlements, receipts, refunds] = await Promise.all([
+    prisma.settlement.findMany({ where, select: { locationId: true }, distinct: ["locationId"] }),
+    prisma.receiptIssue.findMany({ where, select: { locationId: true }, distinct: ["locationId"] }),
+    prisma.specialRefundEvent.findMany({ where, select: { locationId: true }, distinct: ["locationId"] }),
+  ]);
+  return [...settlements, ...receipts, ...refunds].map((r) => r.locationId);
+}
 
 const SHOP_PLAN_QUERY = `#graphql
   query ShopPlanAndSubscriptions($first: Int!) {
@@ -199,9 +242,18 @@ function inhouseState(shop: ShopRecordForPlan): ShopPlanState {
     subscriptionsRead: false,
     activeSubscriptions: [],
     locationsCount: 0,
+    posLocationsCount: null,
     isDevelopmentStore: false,
     extraLocationStatus: "full_access",
   };
+}
+
+/**
+ * PLAN_TEST_DEV_STORE_AS_PUBLIC=1 のとき、開発ストアを全機能の例外にしない（App Pricing の確かめ用・既定オフ）。
+ * 自社用（inhouse）には効かない（getShopPlan の先頭で返る）。
+ */
+export function isDevStoreTreatedAsPublic(env: Record<string, string | undefined> = process.env): boolean {
+  return String(env.PLAN_TEST_DEV_STORE_AS_PUBLIC ?? "").trim() === "1";
 }
 
 /**
@@ -220,6 +272,7 @@ export async function getShopPlan(
   const customStore = shopDomain !== "" && getCustomAppStoreIds().includes(shopDomain);
 
   let locationsCount = 0;
+  let activeLocationIds: string[] = [];
   let isDevelopmentStore = false;
   let shopGid: string | null = null;
   let subscriptionsRead = false;
@@ -234,7 +287,11 @@ export async function getShopPlan(
       };
     };
     const d = json?.data;
-    locationsCount = Array.isArray(d?.locations?.nodes) ? d!.locations!.nodes!.length : 0;
+    const locationNodes = Array.isArray(d?.locations?.nodes) ? d!.locations!.nodes! : [];
+    locationsCount = locationNodes.length;
+    activeLocationIds = locationNodes
+      .map((n) => String(((n ?? {}) as { id?: unknown }).id ?? ""))
+      .filter(Boolean);
     isDevelopmentStore = d?.shop?.plan?.partnerDevelopment === true;
     shopGid = typeof d?.shop?.id === "string" ? d.shop.id : null;
     const subs = d?.currentAppInstallation?.activeSubscriptions;
@@ -309,9 +366,12 @@ export async function getShopPlan(
     }
   }
 
+  // 開発ストアは今まで通り全機能。ただし PLAN_TEST_DEV_STORE_AS_PUBLIC=1（公開用の Render だけ・既定オフ）のときは、
+  // 開発ストアもふつうの店と同じく契約からプランを決める（Partner Dashboard の App Pricing を開発ストアで確かめるため。
+  // 開発ストアの請求は Shopify のテスト扱い。docs/PARTNER_DASHBOARD_PRICING_SETUP.md）
   const fullAccessReason: ShopPlanState["fullAccessReason"] = customStore
     ? "custom_store"
-    : isDevelopmentStore
+    : isDevelopmentStore && !isDevStoreTreatedAsPublic(env)
       ? "development_store"
       : null;
   const fullAccess = fullAccessReason !== null;
@@ -320,8 +380,23 @@ export async function getShopPlan(
   // 送るかどうか・1 期間 1 回・失敗の記録は appEventsUsage.server.ts。ここでは待たない（画面と POS の API を遅くしない）。
   let extraLocationUsage: ShopPlanState["extraLocationUsage"];
   let extraUnits = 0;
-  if (!fullAccess && decided.fromSubscription && (plan === "lite" || plan === "pro") && decided.planCode === plan) {
-    const usage = computeExtraLocationUsage(plan, locationsCount);
+  let posLocationsCount: number | null = null;
+  let countFailed = false;
+  const countsExtraLocations =
+    !fullAccess && decided.fromSubscription && (plan === "lite" || plan === "pro") && decided.planCode === plan;
+  if (countsExtraLocations) {
+    // 数えるのは POS で使うロケーションだけ（2026-11-22 T の決定）。DB を読めなければ数えず、報告もしない
+    try {
+      const since = new Date((deps.now ?? Date.now)() - POS_LOCATION_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+      const used = await (deps.listUsedLocationIds ?? defaultListUsedLocationIds)(shop.id, since);
+      posLocationsCount = countPosLocations(used, activeLocationIds);
+    } catch (e) {
+      countFailed = true;
+      console.warn("[shopPlan] POS location count failed:", e instanceof Error ? e.message : String(e), "shop=", shopDomain);
+    }
+  }
+  if (countsExtraLocations && posLocationsCount !== null && (plan === "lite" || plan === "pro")) {
+    const usage = computeExtraLocationUsage(plan, posLocationsCount);
     extraUnits = usage.units;
     if (usage.units > 0) {
       // 期間はプランを決めた契約から取る（古い Billing API の契約が同時に ACTIVE でも、そちらの期間を使わない）
@@ -346,9 +421,10 @@ export async function getShopPlan(
       if (shopDomain) {
         const report = deps.reportUsage ?? reportExtraLocationUsage;
         const reportPlan = plan;
+        const reportCount = posLocationsCount;
         void (deps.getUsageStore ?? defaultUsageStore)()
           .then((store) =>
-            report({ shop: shopDomain, shopGid, plan: reportPlan, locationsCount, periodEnd }, { store, env })
+            report({ shop: shopDomain, shopGid, plan: reportPlan, locationsCount: reportCount, periodEnd }, { store, env })
           )
           .catch((e) => {
             console.error("[shopPlan] extra location usage report crashed:", e instanceof Error ? e.message : String(e));
@@ -367,6 +443,7 @@ export async function getShopPlan(
     subscriptionsRead,
     activeSubscriptions,
     locationsCount,
+    posLocationsCount,
     isDevelopmentStore,
     extraLocationStatus: decideExtraLocationStatus({
       fullAccess,
@@ -375,6 +452,7 @@ export async function getShopPlan(
       planCode: decided.planCode,
       fromSubscription: decided.fromSubscription,
       extraUnits,
+      countFailed,
     }),
     ...(partnerStatus ? { partnerStatus } : {}),
     ...(extraLocationUsage ? { extraLocationUsage } : {}),
@@ -424,4 +502,51 @@ export async function checkShopPlanAccess(
     state = await getShopPlan(admin, shop, { ...deps, now }); // 覚えるのは getShopPlan の中（rememberGateState）
   }
   return { ...checkPlanAccess(state.planCode, feature, state.fullAccess), state };
+}
+
+// ── 未契約の店を止める（2026-11-22 T の決定: POS Stock と同じ）───────────────────
+
+/**
+ * 未契約の店を止めるスイッチ PLAN_REQUIRE_SUBSCRIPTION=1（公開用の Render だけ・既定オフ）。
+ * Admin API に App Pricing の契約が出ることを開発ストアで確かめてからオンにする
+ * （出ないまま入れると、払っている店まで「未契約」と読んで止めてしまうため）。
+ */
+export function isSubscriptionRequired(env: Record<string, string | undefined> = process.env): boolean {
+  return String(env.PLAN_REQUIRE_SUBSCRIPTION ?? "").trim() === "1";
+}
+
+/**
+ * この店を止めるか（純粋な関数）。止めるのは、公開用・全機能の例外でない・契約を読めて有効な契約が無い・DB が unlimited でない店だけ。
+ * 契約を読めなかったときは止めない（払っている店を止めない）。
+ */
+export function shouldBlockForNoSubscription(
+  state: Pick<ShopPlanState, "distribution" | "fullAccess" | "subscriptionsRead" | "plan" | "planCode">,
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  if (!isSubscriptionRequired(env)) return false;
+  if (state.distribution !== "public" || state.fullAccess) return false;
+  if (!state.subscriptionsRead) return false;
+  if (state.planCode === "unlimited") return false;
+  return state.plan === null;
+}
+
+/** POS の API が未契約の店に返す文（POS の画面にそのまま出る） */
+export const PLAN_REQUIRED_MESSAGE = "プランが選ばれていません。Shopify 管理画面のアプリの「料金プラン」でプランを選んでください。";
+
+/**
+ * 未契約の店を止めるかを、門番と同じ覚え（60 秒）を使って調べる。自社用は Shopify に聞かずに通す。
+ * スイッチがオフなら Shopify に聞かずに通す（今までの速さのまま）。
+ */
+export async function checkSubscriptionGate(
+  admin: AdminGraphql,
+  shop: ShopRecordForPlan,
+  deps: ShopPlanDeps = {}
+): Promise<{ blocked: boolean; state: ShopPlanState | null }> {
+  const env = deps.env ?? process.env;
+  if (isInhouseMode() || !isSubscriptionRequired(env)) return { blocked: false, state: null };
+  const now = deps.now ?? Date.now;
+  const key = String(shop.shopDomain ?? "").trim().toLowerCase();
+  const hit = key ? gateCache.get(key) : undefined;
+  const state = hit && now() - hit.at < GATE_CACHE_MS ? hit.state : await getShopPlan(admin, shop, { ...deps, now });
+  return { blocked: shouldBlockForNoSubscription(state, env), state };
 }

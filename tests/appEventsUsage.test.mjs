@@ -88,7 +88,7 @@ beforeEach(() => {
 });
 
 describe("数の計算とキー", () => {
-  test("Lite は 3 か所・Pro は 10 か所まで 0、超えた分 × $20（未確定）", () => {
+  test("Lite は 3 か所・Pro は 10 か所まで 0、超えた分 × $20", () => {
     assert.deepEqual(computeExtraLocationUsage("lite", 3), { locationsCount: 3, includedLocations: 3, units: 0, unitPriceUsd: 20, amountUsd: 0 });
     assert.deepEqual(computeExtraLocationUsage("lite", 5), { locationsCount: 5, includedLocations: 3, units: 2, unitPriceUsd: 20, amountUsd: 40 });
     assert.deepEqual(computeExtraLocationUsage("pro", 10), { locationsCount: 10, includedLocations: 10, units: 0, unitPriceUsd: 20, amountUsd: 0 });
@@ -497,7 +497,7 @@ describe("つなぎ方（ソースの確認）", () => {
   });
   test("報告は全機能の例外でない店・契約が Lite/Pro のときだけ・待たない", () => {
     const src = code("app/utils/shopPlan.server.ts");
-    assert.match(src, /if \(!fullAccess && decided\.fromSubscription && \(plan === "lite" \|\| plan === "pro"\)/);
+    assert.match(src, /!fullAccess && decided\.fromSubscription && \(plan === "lite" \|\| plan === "pro"\) && decided\.planCode === plan/);
     assert.match(src, /void \(deps\.getUsageStore \?\? defaultUsageStore\)\(\)/);
     assert.match(src, /if \(isInhouseMode\(\)\) return inhouseState\(shop\);/);
   });

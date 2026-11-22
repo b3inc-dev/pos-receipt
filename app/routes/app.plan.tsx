@@ -1,5 +1,5 @@
 /**
- * /app/plan — 料金プラン（POS Stock / location-stock-indicator と同様のフラット構造）
+ * /app/plan — 料金プラン（UI_RULES 2章の形3: カード1列、見出しと説明はカードの中）
  * 要件書 §3 / §Epic G
  *
  * 2026-11-21 T の決定: 公開用の料金は Shopify App Pricing（Billing API ではない）。
@@ -18,9 +18,11 @@ import {
   Button,
   BlockStack,
   InlineStack,
+  InlineGrid,
   List,
   Banner,
   Divider,
+  Box,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { SystemPageNav } from "../components/SystemPageNav";
@@ -34,7 +36,7 @@ import {
   EXTRA_LOCATION_PRICE_USD,
   buildPricingPlansUrl,
 } from "../utils/planFeatures.server";
-import { getShopPlan } from "../utils/shopPlan.server";
+import { getShopPlan, POS_LOCATION_WINDOW_DAYS } from "../utils/shopPlan.server";
 import {
   describeUsageReportForMerchant,
   findUsageReportForPeriod,
@@ -81,7 +83,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     hasSubscription: state.plan !== null,
     subscriptionsRead: state.subscriptionsRead,
     activeSubscriptions: state.activeSubscriptions,
-    locationsCount: state.locationsCount,
+    posLocationsCount: state.posLocationsCount,
+    posLocationWindowDays: POS_LOCATION_WINDOW_DAYS,
     extraLocationUsage: usage ?? null,
     extraLocationStatus: state.extraLocationStatus,
     usageReportingEnabled: isUsageReportingEnabled(),
@@ -109,7 +112,8 @@ export default function PlanPage() {
     hasSubscription,
     subscriptionsRead,
     activeSubscriptions,
-    locationsCount,
+    posLocationsCount,
+    posLocationWindowDays,
     extraLocationUsage,
     extraLocationStatus,
     usageReportingEnabled,
@@ -128,14 +132,24 @@ export default function PlanPage() {
   const q = location.search || "";
   const isPro = isInhouse || planCode === "pro" || planCode === "unlimited";
   const isLite = !isPro;
+  const liteKeys = new Set(liteFeatures.map((f) => f.key as string));
+  const proOnlyKeys = new Set(proFeatures.map((f) => f.key as string).filter((k) => !liteKeys.has(k)));
   const openPricingPlans = () => {
     if (pricingPlansUrl) window.open(pricingPlansUrl, "_top");
   };
+
+  // 今のプランのバッジ（5章: 有効は緑、人が見る必要があるものは黄）
+  const planBadge = isInhouse || hasSubscription
+    ? { tone: "success" as const, text: label }
+    : subscriptionsRead
+      ? { tone: "attention" as const, text: "未契約" }
+      : { tone: "attention" as const, text: "要確認" };
 
   return (
     <PolarisPageWrapper>
     <Page title="料金プラン" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
       <SystemPageNav memberCardEnabled={memberCardEnabled} />
+      {/* 形3（UI_RULES 2章）: カード1列、見出しと説明はカードの中 */}
       <Layout>
         {/* お知らせ枠は 1 つまで（契約を読めなかったときだけ） */}
         {!isInhouse && !subscriptionsRead && (
@@ -147,58 +161,63 @@ export default function PlanPage() {
         )}
 
         {/* ── 現在のプラン ── */}
-        <Layout.AnnotatedSection
-          title="現在のプラン"
-          description="ご契約中のプランを確認できます。プランの選択・変更・解約は Shopify の料金プラン画面で行います。"
-        >
+        <Layout.Section>
           <Card>
             <BlockStack gap="300">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text variant="headingMd" as="h2">プラン</Text>
-                <Badge tone={isPro ? "success" : "info"}>{label}</Badge>
+              <InlineStack align="space-between" blockAlign="center" gap="200">
+                <BlockStack gap="100">
+                  <Text variant="headingMd" as="h2">現在のプラン</Text>
+                  <Text tone="subdued" as="p">
+                    {isInhouse
+                      ? "自社用のため課金はありません。全機能を使えます。"
+                      : "プランの選択・変更・解約は Shopify の料金プラン画面で行います。"}
+                  </Text>
+                </BlockStack>
+                <Badge tone={planBadge.tone}>{planBadge.text}</Badge>
               </InlineStack>
-
-              {isInhouse && (
-                <Text tone="subdued" as="p">自社用モードのため課金は不要です。全機能が利用可能です。</Text>
-              )}
 
               {!isInhouse && activeSubscriptions.length > 0 && (
                 <BlockStack gap="100">
                   {activeSubscriptions.map((sub) => (
                     <Text key={sub.id || sub.name} tone="subdued" as="p">
-                      {sub.name}（{sub.status}）- 次回更新: {sub.currentPeriodEnd?.slice(0, 10).replace(/-/g, "/") ?? "—"}
+                      {sub.name}・次回更新 {formatDate(sub.currentPeriodEnd)}
                     </Text>
                   ))}
                 </BlockStack>
               )}
 
               {!isInhouse && subscriptionsRead && !hasSubscription && (
-                <Text tone="subdued" as="p">有効な契約がありません。Shopify の料金プラン画面でプランを選んでください。</Text>
+                <Text tone="subdued" as="p">有効な契約がありません。Lite の機能は使えます。売上サマリー・入店数報告・予算管理は Pro を選ぶと使えます。</Text>
               )}
 
               {!isInhouse && pricingPlansUrl && (
                 <InlineStack>
                   <Button variant="primary" onClick={openPricingPlans}>
-                    {hasSubscription ? "プランを変更" : "プランを選ぶ"}
+                    {hasSubscription ? "プランを変更" : subscriptionsRead ? "プランを選ぶ" : "プランを確かめる"}
                   </Button>
                 </InlineStack>
               )}
             </BlockStack>
           </Card>
-        </Layout.AnnotatedSection>
+        </Layout.Section>
 
-        {/* ── 料金プラン ── */}
-        <Layout.AnnotatedSection
-          title="料金プラン"
-          description={`Lite は${litePlan.maxLocations}ロケーション、Pro は${proPlan.maxLocations}ロケーションまで含みます。金額は Shopify の料金プラン画面に出るものが正です。`}
-        >
-          <BlockStack gap="400">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
+        {/* ── プランと料金 ── */}
+        <Layout.Section>
+          <BlockStack gap="300">
+            {/* カードの外の見出しは、スマホでもカードと同じ左右 16px の余白にそろえる */}
+            <Box paddingInline={{ xs: "400", sm: "0" }}>
+            <BlockStack gap="100">
+              <Text variant="headingMd" as="h2">プランと料金</Text>
+              <Text tone="subdued" as="p">
+                {`Lite は${litePlan.maxLocations}ロケーション、Pro は${proPlan.maxLocations}ロケーションまで含みます。超えた分は 1 か所 $${extraLocationPriceUsd}/月です。`}
+              </Text>
+            </BlockStack>
+            </Box>
+            <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
               <PlanCard
                 name={litePlan.name}
                 priceSummary={`$${litePlan.amount}/月`}
                 priceDetail={litePlan.priceNote}
-                summary={liteFeatures.map((f) => f.label).join("・")}
                 features={liteFeatures}
                 isCurrent={!isInhouse && hasSubscription && isLite}
               />
@@ -206,145 +225,120 @@ export default function PlanPage() {
                 name={proPlan.name}
                 priceSummary={`$${proPlan.amount}/月`}
                 priceDetail={proPlan.priceNote}
-                summary="全機能（売上サマリー・入店数報告・予算管理 含む）"
                 features={proFeatures}
+                proOnlyKeys={proOnlyKeys}
                 isCurrent={!isInhouse && hasSubscription && isPro}
               />
-            </div>
-            {!isInhouse && (
-              <Card>
-                <BlockStack gap="100">
-                  <Text variant="headingSm" as="h3">プランに含まれる数を超えたロケーション</Text>
-                  {extraLocationUsage && usageReportingEnabled ? (
-                    <>
-                      <Text as="p">
-                        ロケーション {locationsCount} か所のうち、{extraLocationUsage.includedLocations} か所を超えた{" "}
-                        <strong>{extraLocationUsage.units} か所</strong> × ${extraLocationUsage.unitPriceUsd} ＝{" "}
-                        <strong>${extraLocationUsage.amountUsd}</strong>／請求期間（月額とは別に Shopify の請求に載ります）
-                      </Text>
-                      <Text as="p" tone="subdued" variant="bodySm">
-                        請求期間ごとに 1 回、その時点のロケーション数で数えます。{usageReportNote ?? ""}
-                      </Text>
-                    </>
-                  ) : usageReportingEnabled ? (
-                    <Text as="p" tone="subdued">
-                      {extraLocationNotCountedText(extraLocationStatus, locationsCount, extraLocationPriceUsd)}
-                    </Text>
-                  ) : (
-                    <Text as="p" tone="subdued">
-                      今は、プランに含まれる数を超えたロケーションの料金を請求していません（今のロケーション数: {locationsCount} か所）。
-                    </Text>
-                  )}
-                </BlockStack>
-              </Card>
-            )}
-          </BlockStack>
-        </Layout.AnnotatedSection>
-
-        {/* ── Lite で利用可能な機能 ── */}
-        <Layout.Section>
-          <BlockStack gap="300">
-            <Text variant="headingMd" as="h2">Lite プランで利用可能な機能</Text>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
-              {liteFeatures.map((f) => (
-                <FeatureCard key={f.key} title={f.label} />
-              ))}
-            </div>
+            </InlineGrid>
           </BlockStack>
         </Layout.Section>
 
-        {/* ── Pro で利用可能な機能 ── */}
-        <Layout.Section>
-          <BlockStack gap="300">
-            <InlineStack align="center" gap="200">
-              <Text variant="headingMd" as="h2">Pro プランで利用可能な機能</Text>
-              <Badge tone="info">Pro</Badge>
-            </InlineStack>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
-              {proFeatures.map((f) => (
-                <FeatureCard key={f.key} title={f.label} pro />
-              ))}
-            </div>
-          </BlockStack>
-        </Layout.Section>
+        {!isInhouse && (
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="100">
+                <Text variant="headingMd" as="h2">プランに含まれる数を超えたロケーション</Text>
+                {extraLocationUsage && usageReportingEnabled ? (
+                  <>
+                    <Text as="p">
+                      POS で使うロケーション {posLocationsCount ?? 0} か所のうち、{extraLocationUsage.includedLocations} か所を超えた{" "}
+                      <strong>{extraLocationUsage.units} か所</strong> × ${extraLocationUsage.unitPriceUsd} ＝{" "}
+                      <strong>${extraLocationUsage.amountUsd}</strong>／請求期間（月額とは別に Shopify の請求に載ります）
+                    </Text>
+                    <Text as="p" tone="subdued" variant="bodySm">
+                      {posLocationNote(posLocationWindowDays)}請求期間ごとに 1 回、その時点の数で数えます。{usageReportNote ?? ""}
+                    </Text>
+                  </>
+                ) : usageReportingEnabled ? (
+                  <Text as="p" tone="subdued">
+                    {extraLocationNotCountedText(extraLocationStatus, posLocationsCount, extraLocationPriceUsd, posLocationWindowDays)}
+                  </Text>
+                ) : (
+                  <Text as="p" tone="subdued">
+                    今は、プランに含まれる数を超えたロケーションの料金を請求していません{posLocationsCount !== null ? `（POS で使うロケーション: ${posLocationsCount} か所）` : ""}。
+                  </Text>
+                )}
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        )}
       </Layout>
     </Page>
     </PolarisPageWrapper>
   );
 }
 
+/** 「2026-12-21T…」→「2026/12/21」。無ければ「—」（8章の形式） */
+function formatDate(iso: string | null | undefined): string {
+  return iso ? iso.slice(0, 10).replace(/-/g, "/") : "—";
+}
+
 /**
  * 超えたロケーションを数えていないときの文（スイッチがオンのとき）。
  * 契約が無い・読めない店に「プランの範囲内です」と出さない（レビュー #41 の P2-2）。
  */
-function extraLocationNotCountedText(status: string, locationsCount: number, priceUsd: number): string {
+function extraLocationNotCountedText(
+  status: string,
+  posLocationsCount: number | null,
+  priceUsd: number,
+  windowDays: number
+): string {
   switch (status) {
     case "within_plan":
-      return `超えた分は 1 か所 $${priceUsd}/月です。今のロケーション数（${locationsCount} か所）はプランの範囲内です。`;
+      return `超えた分は 1 か所 $${priceUsd}/月です。POS で使うロケーション（${posLocationsCount ?? 0} か所）はプランの範囲内です。${posLocationNote(windowDays)}`;
     case "no_subscription":
-      return `有効な契約が無いため、超えたロケーションは数えていません（今のロケーション数: ${locationsCount} か所）。プランを選ぶと、プランに含まれる数を超えた分は 1 か所 $${priceUsd}/月です。`;
+      return `有効な契約が無いため、超えたロケーションは数えていません。プランを選ぶと、プランに含まれる数を超えた分は 1 か所 $${priceUsd}/月です。${posLocationNote(windowDays)}`;
     case "unread":
-      return `契約の状態を Shopify から読めないため、超えたロケーションをまだ数えていません（今のロケーション数: ${locationsCount} か所）。少し待ってから再読み込みしてください。`;
+      return "契約の状態を Shopify から読めないため、超えたロケーションをまだ数えていません。少し待ってから再読み込みしてください。";
+    case "count_failed":
+      return "POS で使うロケーションを数えられませんでした。少し待ってから再読み込みしてください。数えられない間は請求しません。";
     default:
-      return `今のプランでは、超えたロケーションの料金はかかりません（今のロケーション数: ${locationsCount} か所）。`;
+      return "今のプランでは、超えたロケーションの料金はかかりません。";
   }
 }
 
-// ── サブコンポーネント（POS Stock の PlanCard / FeatureCard 風） ─────────────────────
+/** 「POS で使うロケーション」の説明（1 文） */
+function posLocationNote(windowDays: number): string {
+  return `POS で使うロケーションは、直近 ${windowDays} 日にこのアプリで精算・領収書・特殊返金を使ったロケーションです。`;
+}
+
+// ── サブコンポーネント ─────────────────────────────────────────────────────────
 
 function PlanCard({
   name,
   priceSummary,
   priceDetail,
-  summary,
   features,
+  proOnlyKeys,
   isCurrent,
 }: {
   name: string;
   priceSummary: string;
   priceDetail: string;
-  summary: string;
   features: { key: string; label: string }[];
+  proOnlyKeys?: Set<string>;
   isCurrent: boolean;
 }) {
   return (
     <Card>
       <BlockStack gap="300">
         <InlineStack align="space-between" blockAlign="center">
-          <Text variant="headingMd" as="h2">{name}</Text>
+          <Text variant="headingMd" as="h3">{name}</Text>
           {isCurrent && <Badge tone="success">ご契約中</Badge>}
         </InlineStack>
-        <Text variant="headingLg" as="p">{priceSummary}</Text>
-        <Text as="p" tone="subdued" variant="bodySm">{priceDetail}</Text>
-        <Text as="p" tone="subdued" variant="bodySm">{summary}</Text>
+        <BlockStack gap="050">
+          <Text variant="headingLg" as="p">{priceSummary}</Text>
+          <Text as="p" tone="subdued" variant="bodySm">{priceDetail}</Text>
+        </BlockStack>
         <Divider />
         <List type="bullet">
           {features.map((f) => (
-            <List.Item key={f.key}>{f.label}</List.Item>
+            <List.Item key={f.key}>
+              {f.label}
+              {proOnlyKeys?.has(f.key) ? "（Pro のみ）" : ""}
+            </List.Item>
           ))}
         </List>
-      </BlockStack>
-    </Card>
-  );
-}
-
-function FeatureCard({
-  title,
-  description,
-  pro,
-}: {
-  title: string;
-  description?: string;
-  pro?: boolean;
-}) {
-  return (
-    <Card>
-      <BlockStack gap="200">
-        <InlineStack align="center" gap="200">
-          <Text variant="headingSm" as="h3">{title}</Text>
-          {pro && <Badge tone="info">Pro</Badge>}
-        </InlineStack>
-        {description ? <Text as="p" tone="subdued" variant="bodySm">{description}</Text> : null}
       </BlockStack>
     </Card>
   );

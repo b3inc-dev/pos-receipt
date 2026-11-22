@@ -48,9 +48,15 @@ POS Stock と同様に、**自社用**と**公開用**で **別々の Shopify �
 
 - **重要**: 自社用の Render では、必ず **SHOPIFY_API_KEY** と **SHOPIFY_API_SECRET** を「POS Receipt - Ciara」用の値にしてください。公開用アプリの値のままにすると認証エラーになります。
 - **SHOPIFY_APP_URL** が空や違う URL のままだと、管理画面からアプリを開いたときに **何も表示されない（真っ白）** になります。必ず自社用の URL に設定してください。
+- **公開用の料金を本番に出すときの確認表**: `docs/PRICING_RELEASE_CHECKLIST.md`（プランの名前・スイッチ・マージの直前と本番のすぐあとに見ること）。
+- **公開用の料金（確定・2026-11-22 T の決定）**: Partner Dashboard の App Pricing を次の金額にする（設定の手順は `docs/PARTNER_DASHBOARD_PRICING_SETUP.md`）。アプリの画面の金額（`planFeatures.server.ts`）と同じにそろえる。自社用（Ciara）は請求なしのまま。
+  - Lite: $100/月（3 ロケーションまで）。メーター `extra_location_lite`: 1 単位 $20
+  - Pro: $200/月（10 ロケーションまで）。メーター `extra_location_pro`: 1 単位 $20
 - **公開用だけ**の料金の環境変数（どれも任意。未設定なら今の動きのまま。自社用の Render には入れない）:
-  - `SHOPIFY_APP_HANDLE`: Shopify の料金プラン画面の URL に使う app handle（未設定は `pos-receipt`。Partner Dashboard の handle と同じか未確認）
+  - `SHOPIFY_APP_HANDLE`: Shopify の料金プラン画面の URL に使う app handle（未設定は `pos-receipt`。2026-11-22 T が Partner Dashboard の handle は `pos-receipt` と確認したので入れなくてよい）
   - `PARTNER_API_SUBSCRIPTION_ENABLED=1`・`PARTNER_API_TOKEN`（秘密。権限は Manage apps だけ）・`PARTNER_API_ORG_ID`（Partner Dashboard の URL の数字）・`PARTNER_API_APP_ID`・`PARTNER_API_VERSION`（省略可、既定 `2026-10`）: Partner API で契約を読む（既定オフ）
+  - `PLAN_REQUIRE_SUBSCRIPTION=1`: 有効な契約が無い店を止める（管理画面は料金プラン画面だけ、POS の API は 402）。Admin API で契約が読めることを開発ストアで確かめてから入れる（既定オフ）
+  - `PLAN_TEST_DEV_STORE_AS_PUBLIC=1`: 開発ストアを全機能の例外にせず、契約からプランを決める（App Pricing を開発ストアで確かめる間だけ。既定オフ。終わったら消す）
   - `APP_EVENTS_USAGE_ENABLED=1`・`APP_EVENTS_CLIENT_ID`・`APP_EVENTS_CLIENT_SECRET`（秘密）: 超えたロケーションを App Events API で報告する（既定オフ）。鍵は**公開用アプリ自身の client ID と client secret**（client_credentials。[shopify.dev](https://shopify.dev/docs/apps/build/app-events/send-events)）で、別に API キーを作るものではない。`SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` と同じ値なので、**`APP_EVENTS_CLIENT_*` は入れなくてよい**（無いときはそれを使う。入れるなら両方）。自社用（`APP_DISTRIBUTION=inhouse`）では鍵があっても送らない。`APP_EVENTS_HANDLE_LITE` / `APP_EVENTS_HANDLE_PRO`（既定 `extra_location_lite` / `extra_location_pro`）・`APP_EVENTS_USAGE_MAX_UNITS`（既定 50）・`APP_EVENTS_API_VERSION`（既定 `2026-10`）
 - **APP_DISTRIBUTION** が未設定や typo だと「公開用」扱いになり、プランによる制限がかかります。値は大文字小文字どちらでも構いません（`inhouse` / `INHOUSE` など）。
 - **起動時ガード**（`server.js` → `scripts/lib/deployGuard.mjs`）:

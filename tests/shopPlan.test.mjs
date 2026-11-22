@@ -49,6 +49,8 @@ function deps(over = {}) {
       saved.push({ id, planCode });
     },
     getUsageStore: async () => ({}),
+    // 既定: どのロケーションも直近に POS で使った（数え方の試験は下で別に）
+    listUsedLocationIds: async () => Array.from({ length: 50 }, (_, i) => `gid://shopify/Location/${i}`),
     reportUsage: async (input) => {
       reports.push(input);
       return { outcome: "skipped", reason: "recently_checked" };
@@ -229,6 +231,24 @@ describe("getShopPlan", () => {
     assert.equal(custom.fullAccessReason, "custom_store");
     await flush();
     assert.equal(d.reports.length, 0);
+  });
+
+  test("PLAN_TEST_DEV_STORE_AS_PUBLIC=1 なら開発ストアも契約から決め、超えた分を報告に回す（既定オフでは今まで通り）", async () => {
+    const d = deps({ env: { PLAN_TEST_DEV_STORE_AS_PUBLIC: "1" } });
+    const dev = await getShopPlan(fakeAdmin({ subs: [sub("Lite")], locations: 5, dev: true }), SHOP, d);
+    assert.equal(dev.fullAccess, false);
+    assert.equal(dev.fullAccessReason, null);
+    assert.equal(dev.planCode, "lite");
+    assert.equal(dev.extraLocationUsage?.units, 2);
+    await flush();
+    assert.equal(d.reports.length, 1);
+    const none = await getShopPlan(fakeAdmin({ subs: [], locations: 1, dev: true }), SHOP, deps({ env: { PLAN_TEST_DEV_STORE_AS_PUBLIC: "1" } }));
+    assert.equal(none.fullAccess, false);
+    assert.equal(none.planCode, "lite");
+    for (const value of ["", "0", "true", undefined]) {
+      const off = await getShopPlan(fakeAdmin({ subs: [sub("Lite")], locations: 5, dev: true }), SHOP, deps({ env: { PLAN_TEST_DEV_STORE_AS_PUBLIC: value } }));
+      assert.equal(off.fullAccessReason, "development_store", String(value));
+    }
   });
 
   test("報告が失敗しても getShopPlan は投げない", async () => {

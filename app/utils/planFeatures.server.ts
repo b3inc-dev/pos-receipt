@@ -5,7 +5,7 @@
  * 以下は常に全機能を解放する（POS Stock と同様）:
  * - APP_DISTRIBUTION=inhouse（自社用）
  * - CUSTOM_APP_STORE_IDS に含まれるショップドメイン（カスタム／開発用）
- * - Shopify の開発ストア（shop.plan.partnerDevelopment）
+ * - Shopify の開発ストア（shop.plan.partnerDevelopment）。ただし PLAN_TEST_DEV_STORE_AS_PUBLIC=1 のときは除く（shopPlan.server.ts）
  */
 
 export type PlanCode = "lite" | "pro" | "unlimited" | "standard"; // standard は後方互換のため残す（Lite 相当）
@@ -137,8 +137,9 @@ export const PLAN_FEATURES_LEGACY = { standard: PLAN_FEATURES.lite } as const;
 
 // ── 料金プラン（Shopify App Pricing。2026-11-21 T の決定） ───
 // 店は Shopify の料金プラン画面でプランを選ぶ。アプリは契約を作らない（appSubscriptionCreate は使わない）。
-// 金額は Partner Dashboard の App Pricing で決まる。ここの金額は画面に見せる目安で、未確定（T がまだ決めていない）。
-// プランは契約から読む（shopPlan.server.ts）。maxLocations を超えた分は 1 か所 $20/月（未確定）を
+// 料金は確定（2026-11-22 T の決定）: Lite $100/月（3 ロケーションまで）・Pro $200/月（10 ロケーションまで）・
+// 超えた 1 か所 +$20/月。請求そのものは Partner Dashboard の App Pricing の設定で行うので、そちらもこの金額にそろえる。
+// プランは契約から読む（shopPlan.server.ts）。maxLocations を超えた分は 1 か所 $20/月を
 // App Events API で報告する（appEventsUsage.server.ts、APP_EVENTS_USAGE_ENABLED=1 のときだけ。既定オフ）。
 
 export const BILLING_PLANS = {
@@ -160,12 +161,12 @@ export const BILLING_PLANS = {
   },
 } as const;
 
-/** プランに含まれる数を超えたロケーション 1 か所あたりの単価（USD/月）。未確定。appEventsUsage.server.ts と同じ値 */
+/** プランに含まれる数を超えたロケーション 1 か所あたりの単価（USD/月）。確定（2026-11-22 T）。appEventsUsage.server.ts と同じ値（tests/pricing.test.mjs で確かめる） */
 export const EXTRA_LOCATION_PRICE_USD = 20;
 
 /**
  * 公開アプリの App Handle（Shopify の料金プラン画面の URL 用）。
- * SHOPIFY_APP_HANDLE を優先し、無ければ "pos-receipt"（Partner Dashboard の handle と同じかは未確認。違えば env で入れる）。
+ * SHOPIFY_APP_HANDLE を優先し、無ければ "pos-receipt"（2026-11-22 T が Partner Dashboard の handle は pos-receipt と確認）。
  */
 export function getPublicAppHandle(env: Record<string, string | undefined> = process.env): string {
   return String(env.SHOPIFY_APP_HANDLE ?? "").trim() || "pos-receipt";

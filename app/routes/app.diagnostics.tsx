@@ -1,5 +1,6 @@
 /**
  * /app/diagnostics — システム診断ページ（管理者向け）
+ * 開発ストア（shop.plan.partnerDevelopment）だけ。ほかの店は 404（T さんの決定 2026-11-22）
  * Epic H: 運用品質
  *
  * - DB 接続・テーブル件数
@@ -8,6 +9,7 @@
  * - 直近のエラー傾向（settlements / receipts の件数）
  */
 import type { LoaderFunctionArgs } from "react-router";
+import { requireDevelopmentStore } from "../utils/devStore.server";
 import { useLoaderData, useLocation, useNavigate } from "react-router";
 import {
   Page,
@@ -46,6 +48,8 @@ const OPTIONAL_ENV_VARS = [
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
+  // 開発ストアだけ（T さんの決定 2026-11-22）。客先の店（Ciara を含む）・読めないときは 404。DB も読まない
+  await requireDevelopmentStore(admin);
   const shop = await resolveShop(session.shop, admin);
 
   // ── DB カウント ────────────────────────────────────────────────────────────
@@ -150,7 +154,7 @@ export default function DiagnosticsPage() {
       subtitle={`確認日時: ${new Date(checkedAt).toLocaleString("ja-JP")}`}
       backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
     >
-      <SystemPageNav memberCardEnabled={memberCardEnabled} />
+      <SystemPageNav memberCardEnabled={memberCardEnabled} isDevStore />
       <Layout>
         {/* ── 環境変数エラー ── */}
         {!allEnvOk && (

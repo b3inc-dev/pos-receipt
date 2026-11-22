@@ -3,7 +3,8 @@
  * 要件 §7: 商品券機能・額面読取・精算反映
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { SuccessToast, AdminIntro } from "../components/admin-ui";
 import {
   Page,
   Layout,
@@ -69,10 +70,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function VoucherSettingsPage() {
   const { settings: initial } = useLoaderData<typeof loader>();
   const submit = useSubmit();
+  const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<VoucherSettings>({ ...initial });
 
   const handleSave = () => {
@@ -88,8 +89,6 @@ export default function VoucherSettingsPage() {
     fd.set("reflectVoucherChangeInReceiptDisplay", form.reflectVoucherChangeInReceiptDisplay ? "true" : "false");
     fd.set("voucherChangeDisplayLabel", form.voucherChangeDisplayLabel);
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = <K extends keyof VoucherSettings>(key: K, value: VoucherSettings[K]) => {
@@ -107,14 +106,14 @@ export default function VoucherSettingsPage() {
           <TabGroupBar tabs={SETTLEMENT_TABS} />
         </Card>
         <Layout>
-          {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
+          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
           <Layout.Section>
-            <Banner tone="info">
-              商品券の有効化・額面読取ルール・精算への反映を設定します。
-            </Banner>
+            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+            <AdminIntro><p>商品券の有効化・額面読取ルール・精算への反映を設定します。</p></AdminIntro>
           </Layout.Section>
 
-          <Layout.AnnotatedSection title="商品券機能全体" description="§7.2.1">
+          <Layout.AnnotatedSection title="商品券機能全体">
             <Card>
               <BlockStack gap="300">
                 <Checkbox label="商品券機能を有効にする" checked={form.voucherFeatureEnabled} onChange={(v) => set("voucherFeatureEnabled", v)} />
@@ -124,7 +123,7 @@ export default function VoucherSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="額面読取ルール" description="§7.2.2">
+          <Layout.AnnotatedSection title="額面読取ルール">
             <Card>
               <BlockStack gap="400">
                 <Checkbox label="注文ノートから額面を読取る" checked={form.voucherNoteParseEnabled} onChange={(v) => set("voucherNoteParseEnabled", v)} />
@@ -134,7 +133,7 @@ export default function VoucherSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="判定優先順位・精算反映" description="§7.2.3, §7.2.4">
+          <Layout.AnnotatedSection title="判定優先順位・精算反映">
             <Card>
               <BlockStack gap="400">
                 <Select label="判定優先順位" options={PRIORITY_OPTIONS} value={form.voucherAdjustmentPriority} onChange={(v) => set("voucherAdjustmentPriority", v as "manual_first" | "auto_first")} />
@@ -144,10 +143,6 @@ export default function VoucherSettingsPage() {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end"><Button variant="primary" onClick={handleSave}>保存</Button></InlineStack>
-          </Layout.Section>
         </Layout>
       </Page>
     </PolarisPageWrapper>

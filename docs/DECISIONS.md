@@ -25,20 +25,21 @@
 
 - **T の決定（2026-11-21）**: 公開用の料金は Shopify App Pricing（Billing API ではない）。POS Stock（stock-transfer-pos の main ＋ PR #82）と同じ形にする。
 - **判断**:
-  - アプリは契約を作らない。`app.plan.tsx` の `appSubscriptionCreate`（action）は消した。「プランを選ぶ／プランを変更」は Shopify の料金プラン画面 `https://admin.shopify.com/store/<店>/charges/<app handle>/pricing_plans` を `_top` で開くだけ。app handle は `SHOPIFY_APP_HANDLE`、無ければ `pos-receipt`（Partner Dashboard の handle と同じかは**未確認**）。
+  - アプリは契約を作らない。`app.plan.tsx` の `appSubscriptionCreate`（action）は消した。「プランを選ぶ／プランを変更」は Shopify の料金プラン画面 `https://admin.shopify.com/store/<店>/charges/<app handle>/pricing_plans` を `_top` で開くだけ。app handle は `SHOPIFY_APP_HANDLE`、無ければ `pos-receipt`（2026-11-22 T が Partner Dashboard の handle は `pos-receipt` と確認）。
   - `app.plan.callback.tsx` は planCode を書かない（URL の `?plan=` でプランを変えられた穴をふさぐ）。古いリンクのために料金プラン画面へ戻すだけ。
   - プランは `app/utils/shopPlan.server.ts` の `getShopPlan` が読む: Admin API `currentAppInstallation.activeSubscriptions`（ACTIVE で名前に Pro/プロ → Pro、Lite/Standard/ライト/スタンダード → Lite）。`PARTNER_API_SUBSCRIPTION_ENABLED=1` と `PARTNER_API_TOKEN`・`PARTNER_API_ORG_ID`・`PARTNER_API_APP_ID`（任意で `PARTNER_API_VERSION`、既定 `2026-10`）がそろったときだけ Partner API の `activeSubscription` も読む（**既定オフ**。処理は `partnerSubscription.server.ts`、POS Stock と同じ中身）。Partner で見つかればそれを正、「契約なし」なら Admin の結果、失敗なら Admin の結果だけ。
   - 読めたプランは DB `Shop.planCode` に書く（変わったときだけ）。契約なしは `lite`（今まで通り Lite の機能は使える）。読めなかったら DB の値のまま。DB の `unlimited` は上書きしない。
   - 門番は `checkShopPlanAccess(admin, shop, feature)` に一本化（今までの `getFullAccess` ＋ `checkPlanAccess(shop.planCode, …)`）。契約を読めた結果は店ごとに 60 秒覚える（ホーム・料金プラン画面などで読み直すと、その結果に置きかわる。プランを変えて戻った店を古いプランで断らない）。
-  - 自社用（`APP_DISTRIBUTION=inhouse`・Ciara）は今まで通り: Shopify に聞かず全機能・請求なし。`CUSTOM_APP_STORE_IDS`・開発ストアも今まで通り全機能（POS Stock は開発ストアもプランを選ぶ形にしたが、ここでは変えていない）。
-- **料金（未確定）**: Lite $100/月（3 ロケーションまで）・Pro $200/月（10 ロケーションまで）・超えた 1 か所 +$20/月。**T はまだ金額を確定していない**。画面の金額は目安で、請求は Partner Dashboard の App Pricing の設定で決まる。
+  - 自社用（`APP_DISTRIBUTION=inhouse`・Ciara）は今まで通り: Shopify に聞かず全機能・請求なし。`CUSTOM_APP_STORE_IDS`・開発ストアも今まで通り全機能（POS Stock は開発ストアもプランを選ぶ形にしたが、ここでは変えていない）。ただし公開用の Render に `PLAN_TEST_DEV_STORE_AS_PUBLIC=1`（既定オフ）を入れた間は、開発ストアもふつうの店と同じく契約から決める（App Pricing の流れを開発ストアで確かめるため。手順は `docs/PARTNER_DASHBOARD_PRICING_SETUP.md`）。
+- **料金（確定・2026-11-22 T の決定）**: Lite $100/月（3 ロケーションまで）・Pro $200/月（10 ロケーションまで）・超えた 1 か所 +$20/月（Lite・Pro とも）。コードの値は `planFeatures.server.ts` の `BILLING_PLANS`・`EXTRA_LOCATION_PRICE_USD` と `appEventsUsage.server.ts` の `INCLUDED_LOCATIONS`・`EXTRA_LOCATION_PRICE_USD`（`tests/pricing.test.mjs` で数と両方の一致を確かめる）。請求そのものは Partner Dashboard の App Pricing の設定（プランの月額とメーターの単価）で行うので、そちらも同じ金額にする。
 - **前の穴で Pro のままの店**: 読むだけの一覧 `npm run report:plan-mismatch`（`docs/PLAN_MISMATCH_REPORT.md`、レビュー P2-5）。扱いは T が決める（未決定）。
-- **残り**: 未契約の店を止めるか（POS Stock #78 の形）は決めていない。Admin API に App Pricing の契約が出るかは未確認（出なければ Partner API のスイッチで読む）。
+- **未契約の店を止める（2026-11-22 T の決定: POS Stock と同じ）**: 公開用の Render に `PLAN_REQUIRE_SUBSCRIPTION=1`（**既定オフ**）を入れると、契約を読めて有効な契約が無い店は、管理画面では料金プラン画面へ移し（`app.tsx` の loader。`/app/plan` とその下は開ける）、POS の API は 402・`PLAN_REQUIRED` と決まった文を返す（`posAuth.server.ts` の `authenticatePosRequest`）。契約を読めなかった店・自社用・`CUSTOM_APP_STORE_IDS`・開発ストア・DB の `unlimited` は止めない。判定は `shouldBlockForNoSubscription`、門番と同じ 60 秒の覚えを使う（`checkSubscriptionGate`）。スイッチを既定オフにしたのは、Admin API に App Pricing の契約が出ることを開発ストアで確かめる前に入れると、払っている店まで止めるため。
+- **残り**: Admin API に App Pricing の契約が出るかは未確認（出なければ Partner API のスイッチで読む）。
 
 ### D16. 超えたロケーション（+$20）は App Events API で 1 請求期間に 1 回報告する（既定オフ・2026-11-22）
 
 - POS Stock の D15・D16（PR #80・#82）と同じ決まり。処理は `app/utils/appEventsUsage.server.ts`（POS Stock の `app-events-usage.server.ts` と同じ中身で、数と単価だけ違う）。
-- 送る数は `max(0, ロケーション数 − プランに含まれる数)`（Lite 3・Pro 10）。ロケーション数は Admin API の `locations(first: 250)`（有効なロケーション。POS で使うかどうかでは絞らない。**T の確認待ち**）。単価 $20 は画面の目安（**未確定**）で、請求の金額は Partner Dashboard のメーター。メーターの handle は既定 `extra_location_lite` / `extra_location_pro`（`APP_EVENTS_HANDLE_LITE` / `APP_EVENTS_HANDLE_PRO` で変えられる）。
+- 送る数は `max(0, ロケーション数 − プランに含まれる数)`（Lite 3・Pro 10）。数えるのは **POS で使うロケーションだけ**（2026-11-22 T の決定）。見分け方（2026-11-23 T がカードで確定）: 直近 30 日（`POS_LOCATION_WINDOW_DAYS`）に、このアプリで精算（`Settlement`）・領収書（`ReceiptIssue`）・特殊返金（`SpecialRefundEvent`）のどれかを使ったロケーションのうち、今 Admin API の `locations(first: 250)` に出る（有効な）もの（`countPosLocations`）。倉庫など POS で使わない所は数えない。DB を読めなければ数えず報告もしない（`count_failed`）。単価は $20 で確定（2026-11-22 T）。請求の金額は Partner Dashboard のメーターで決まるので、メーターも $20 にする。メーターの handle は既定 `extra_location_lite` / `extra_location_pro`（`APP_EVENTS_HANDLE_LITE` / `APP_EVENTS_HANDLE_PRO` で変えられる）。
 - 外へ送るのは `APP_EVENTS_USAGE_ENABLED=1` のときだけ（**既定オフ**）。オフでも数は DB `AppUsageReport` に `disabled` で残す。鍵は公開用アプリ自身の client ID / client secret（client_credentials。shopify.dev の send-events のとおり）。`APP_EVENTS_CLIENT_ID` / `APP_EVENTS_CLIENT_SECRET` があればそれ、無ければ `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET`。自社用（`APP_DISTRIBUTION=inhouse`）は鍵を返さない（`resolveAppEventsCredentials`）。
 - 1 店・1 請求期間に 1 回: DB `AppUsageReport` の `(shop, periodEnd)` 一意 ＋ Shopify の `idempotency_key`（`posr-xloc-<店の番号>-<YYYYMMDD>`）。`periodEnd` はプランを決めた契約の今の請求期間の終わり（Partner で決めたら `currentBillingCycle.endTime`、無ければ Admin の `currentPeriodEnd`）の **UTC の日付**。Admin の期間は、ACTIVE な契約の先頭ではなく**プランを決めた契約**のものだけを使う（`selectPlanSubscription`。Partner の `legacySubscriptionId` と同じ契約 → プランの名前に合う契約 → 2 件あれば `createdAt` が新しい方。決まらず期間も違えば送らず `missing_period`）。古い Billing API の契約と App Pricing の契約が同時に ACTIVE の店（切りかえの途中）で、別の契約の期間とキーを使わないため（2026-11-22 レビュー #41 の P2-1）。同じ日付の行が無くても前後 1 日の行があれば同じ期間としてその行のキーで続ける（Partner と Admin のずれで 2 回送らない）。
 - 期間の終わり 10 分前を過ぎたら送らない（次の期間の請求に入って 2 重になるため）。期間が分からないときは送らず `missing_period` で数と理由を残す。
@@ -120,3 +121,7 @@
 - 売上サマリーが同一プレビューを読むこと
 - 冪等キーとロック
 - order_based / cloudprnt_direct の分岐
+
+## 8. 開発ストアだけに出すもの（2026-11-22）
+
+- **一般設定のデバッグ・診断の欄とシステム診断は開発ストアだけ**（T さんの決定 2026-11-22）: 一般設定の「デバッグモード」「診断パネルを有効にする」「詳細計算ログ」「プラン（表示用）」「有効機能 JSON（表示用）」、店舗設定とホームの「システム診断」の枠、高度な設定の「システム診断」ボタン、`/app/diagnostics` の画面は、Shopify の `shop.plan.partnerDevelopment` が true の店だけに出す。店の名前はコードに書かない。読めない・失敗したときは出さない（`/app/diagnostics` は 404。店と DB を読む前に止める）。開発ストアでない店から保存が来ても、一般設定のこの 5 つは保存済みの値のまま（`app/utils/devStore.server.ts`）。自社用（inhouse）や `CUSTOM_APP_STORE_IDS` は本番の Ciara も入るので、この判定には使わない。
