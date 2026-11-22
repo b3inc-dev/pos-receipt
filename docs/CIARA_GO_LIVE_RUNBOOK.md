@@ -29,16 +29,16 @@
 
 | 順 | PR | 何のため | 状態（2026-11-22） |
 |---|---|---|---|
-| 1 | #11 | 特殊返金・返金の計上先の直し | open。POS 実機の確認（#46 の手順）待ち |
+| 1 | #11 | 特殊返金・返金の計上先の直し | open。POS 実機の確認（#46 の手順。#46 は draft でまだ main に無い）待ち |
 | 2 | #16 | 上流ページの取りこぼし対策 | open。#54 を取り込んでから |
 | 3 | #13 | 旧ギフトカード集計の初めの値を OFF など | open。#55 を取り込んでから |
 | 4 | #57 | 精算の数え方（ciara-system と同じ数え方を選べる） | Ready。#11 とぶつかる所を合わせ直す |
-| 5 | （PR まだ無い） | 返金方法が支払方法マスタに無いとき「未分類」と警告 | #11・#57 のあと。今は 1 行目の支払方法に載るか、どこにも載らない |
-| 6 | （PR まだ無い） | pg-boss のキューでも返金の計上先メタフィールドを書く（§7-1） | 並行運用の前に入れたい |
+| 5 | #81 | 返金方法が支払方法マスタに無いとき「未分類」と警告（POS ではマスタからだけ選べる） | draft。#11・#57 のあと |
+| 6 | #74 | pg-boss のキューでも返金の計上先メタフィールドを書く（§7-1） | **済み**（main `184e4c7`・2026-11-22） |
 | 7 | #68 | 照合用 CSV（API だけ。ボタンは #22 のあと） | draft。並行運用で使うので B の前に入れる |
 | 8 | #22 | 印字を `shopify.printing` に一本化・精算注文を作らない | open。#53 で main を取り込み直す |
 | 9 | #69 | レシート 4 種のレイアウト編集 | draft |
-| 10 | （PR まだ無い） | #69 のレイアウトを印字の道（`api.print.*`・POS）につなぐ | #22 のあと。#69 の「まだやらないこと」 |
+| 10 | #83 | #69 のレイアウトを印字の道（`api.print.*`・POS）につなぐ | draft。#53（#22）の上 |
 
 1〜7 は段 A・B、8〜10 は段 D でいっしょに出す。
 
@@ -65,7 +65,7 @@
 
 | 設定 | Ciara の値 | 済 |
 |---|---|---|
-| 売上を数える日 | 注文の日（オーソリも売上に数える） | |
+| 売上を数える日 | 注文の日（オーソリも売上に数える） | #57 の `5b6687b` より前の版では失敗・VOID のオーソリも数えて差が出る。`5b6687b` 以降の #57 で選ぶ |
 | 点数に数えない商品 | ノベルティの SKU（一覧は【T】） | |
 | 返金の支払方法の付け替え | 店＝梅田エスト店・天王寺ミオ店、含む文字＝wespo、付け替え先＝現金 | |
 | ギフトカードの返金 | ON（付け替え先＝現金）。旧ギフトカード集計を OFF にしてから | |
@@ -200,7 +200,7 @@ CSV（#68）の 1 店 × 1 日 = 「精算合計」の行 1 つ ＋「支払方�
 
 ## 5. 紙の確認（段 C）
 
-開発ストア `bbbincbbb` で、`/mnt/project-files/print-unification/PRINT_PAPER_TEST.md`（#22 の紙の手順）を **#22 ＋ #69 ＋ つなぐ PR を重ねた版** でやる。mPOP（58mm）と mC-Print3（80mm、あれば 58mm も）の両方。
+開発ストア `bbbincbbb` で、`docs/PRINT_PAPER_TEST.md`（#22 の紙の手順。#53 のブランチにある）を **#22 ＋ #69 ＋ つなぐ PR を重ねた版** でやる。mPOP（58mm）と mC-Print3（80mm、あれば 58mm も）の両方。
 
 上の手順に加えて、Ciara の見た目の確認をする:
 
@@ -260,14 +260,12 @@ CSV（#68）の 1 店 × 1 日 = 「精算合計」の行 1 つ ＋「支払方�
 
 ## 7. まだ確かめていないこと
 
-### 7-1. pg-boss のキューが返金の計上先メタフィールドを書いていない
+### 7-1. pg-boss のキューが返金の計上先メタフィールドを書いていない（**済み**・#74）
 
-- コード（main 8c195bf）: `webhooks.orders.updated.tsx` はキューに積めたらすぐ 200 を返す。`syncRefundAggregationFromWebhookPayload` を呼ぶのは、積めなかったときの同期の道だけ。pg-boss のワーカー（`salesSummaryWebhookQueue.server.ts`）は売上サマリーを作り直すだけで、これを呼ばない
-- キューは `DATABASE_URL` があって `SALES_SUMMARY_WEBHOOK_QUEUE` が 0・false でなければ動く。Render では **ほぼいつも積む道** を通るので、`pos.refund_aggregation_location_gid` を書くのは特殊返金の API（`api.special-refunds`）だけのはず（Render の環境変数は未確認）
-- このアプリの精算・売上サマリーへの影響: **無い**。精算は返金の計上先をその場で決めていて（`loadRefundAggregationContext`）、メタフィールドを読まない
-- ciara-system への影響: **ある**。ciara-system は注文を取り込むとき `pos.refund_aggregation_location_gid` を読む（`lib/shopify/sync/upsert-order.ts`）。なので並行運用で「返金の計上先」の差が出たら、まずこれを疑う
-- わざとかどうか: 未確認（コメントも DECISIONS も無い）
-- 進め方の案: ワーカーでも同じ関数を呼ぶ PR を並行運用の前に入れる（§1 の 6）。T さんの判断が要る仕様の変更ではなく、同期の道と同じにするだけ
+- main の #74（`184e4c7`、2026-11-22）で、キュー（pg-boss）経由の orders/updated でも `syncRefundAggregationFromWebhookPayload` を呼び、`pos.refund_aggregation_location_gid` を書くようにした（売上サマリーの作り直しの前。失敗はログだけ）
+- 本番（Render）に `SALES_SUMMARY_WEBHOOK_DEBOUNCE_SECONDS` は無い（T さん 2026-11-22 確認）ので、続いた Webhook が 1 件にまとめられて書かれない心配は無い
+- 過去の注文の書き直しはしていない。#74 より前の返金の注文で ciara-system との差が出たら、まずこれを疑う
+- このアプリの精算・売上サマリーへの影響は無い（精算は返金の計上先をその場で決め、メタフィールドを読まない）
 
 ### 7-2. 精算注文を読んでいるもの（確認済み）
 
@@ -285,9 +283,9 @@ CSV（#68）の 1 店 × 1 日 = 「精算合計」の行 1 つ ＋「支払方�
 
 ## 関連
 
-- 進め方と順番: `/mnt/project-files/progress/feature-progress-2026-11-22.md` の「第 1 のゴール」
-- お金の直しの出し方: #46 `docs/RELEASE_2026-11_MONEY.md`
+- 進め方と順番: 第 1 のゴールは Ciara で自社用として運用を始めること。必ず要るものは §1 の表の順（連絡帳 #39 の 2026-11-23 02:24・02:26 の決定）
+- お金の直しの出し方: #46 `docs/RELEASE_2026-11_MONEY.md`（#46 は draft。入ったら main から読める）
 - 精算の数え方: #57 `docs/SETTLEMENT_CALC_SETTINGS.md`
-- 紙の手順: `/mnt/project-files/print-unification/PRINT_PAPER_TEST.md`
+- 紙の手順: `docs/PRINT_PAPER_TEST.md`（#53 のブランチ）
 - 公開用と自社用: `docs/DEPLOY_PUBLIC_AND_INHOUSE.md`
 - 本番に出す境界: `docs/DEV_FIRST_THEN_DEPLOY.md`
