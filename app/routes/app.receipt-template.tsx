@@ -3,8 +3,9 @@
  * 要件書 §9 領収書設定: §9.2 全項目対応・プレビュー一致（§9.3）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
-import { SuccessToast } from "../components/admin-ui";
+import { useActionData, useLoaderData, useSubmit, useLocation } from "react-router";
+import { SuccessToast, useGuardedNavigate } from "../components/admin-ui";
+import { StateSaveForm } from "../components/StateSaveForm";
 import {
   Page,
   Layout,
@@ -177,7 +178,8 @@ export default function ReceiptTemplatePage() {
   const submit = useSubmit();
   const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
-  const navigate = useNavigate();
+  // 「←」とタブは、未保存の変更があれば Shopify の確認を出してから移る（UI ルール v1.1 7章）
+  const navigate = useGuardedNavigate();
   const q = location.search || "";
   const [form, setForm] = useState<ReceiptTemplateData>({ ...template });
 
@@ -195,218 +197,220 @@ export default function ReceiptTemplatePage() {
         title="領収書テンプレート設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         subtitle={`バージョン: ${version}`}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
           <TabGroupBar tabs={RECEIPT_TABS} />
         </Card>
-        <Layout>
-          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
-          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
+        {/* 保存は Shopify の保存の帯（値が保存したときと違うときだけ「破棄」「保存」）。画面の中に保存ボタンを置かない（UI ルール v1.1 7章） */}
+        <StateSaveForm values={form} onSave={handleSave} onDiscard={(saved) => setForm(saved)} result={actionData}>
+          <Layout>
+            {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+            <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
 
-          {/* §9.2.1 基本情報 */}
-          <Layout.AnnotatedSection
-            title="基本情報"
-            description="テンプレート名・ロゴ・発行者（会社）情報。領収書のフッターに表示されます。"
-          >
-            <Card>
-              <BlockStack gap="400">
-                <TextField
-                  label="テンプレート名"
-                  value={form.receiptTemplateName}
-                  onChange={(v) => set("receiptTemplateName", v)}
-                  placeholder="デフォルトテンプレート"
-                  autoComplete="off"
-                />
-                <TextField
-                  label="ロゴ画像URL（任意）"
-                  value={form.logoUrl ?? ""}
-                  onChange={(v) => set("logoUrl", v || null)}
-                  helpText="https://... で始まる画像URL"
-                  autoComplete="off"
-                />
-                <TextField
-                  label="会社名・店舗名"
-                  value={form.companyName}
-                  onChange={(v) => set("companyName", v)}
-                  autoComplete="off"
-                />
-                <TextField
-                  label="郵便番号"
-                  value={form.postalCode}
-                  onChange={(v) => set("postalCode", v)}
-                  autoComplete="off"
-                />
-                <TextField
-                  label="住所1"
-                  value={form.address}
-                  onChange={(v) => set("address", v)}
-                  autoComplete="off"
-                />
-                <TextField
-                  label="住所2（建物名等）"
-                  value={form.address2}
-                  onChange={(v) => set("address2", v)}
-                  autoComplete="off"
-                />
-                <TextField
-                  label="電話番号"
-                  value={form.phone}
-                  onChange={(v) => set("phone", v)}
-                  autoComplete="off"
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            {/* §9.2.1 基本情報 */}
+            <Layout.AnnotatedSection
+              title="基本情報"
+              description="テンプレート名・ロゴ・発行者（会社）情報。領収書のフッターに表示されます。"
+            >
+              <Card>
+                <BlockStack gap="400">
+                  <TextField
+                    label="テンプレート名"
+                    value={form.receiptTemplateName}
+                    onChange={(v) => set("receiptTemplateName", v)}
+                    placeholder="デフォルトテンプレート"
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="ロゴ画像URL（任意）"
+                    value={form.logoUrl ?? ""}
+                    onChange={(v) => set("logoUrl", v || null)}
+                    helpText="https://... で始まる画像URL"
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="会社名・店舗名"
+                    value={form.companyName}
+                    onChange={(v) => set("companyName", v)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="郵便番号"
+                    value={form.postalCode}
+                    onChange={(v) => set("postalCode", v)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="住所1"
+                    value={form.address}
+                    onChange={(v) => set("address", v)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="住所2（建物名等）"
+                    value={form.address2}
+                    onChange={(v) => set("address2", v)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="電話番号"
+                    value={form.phone}
+                    onChange={(v) => set("phone", v)}
+                    autoComplete="off"
+                  />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          {/* §9.2.2 表示項目 */}
-          <Layout.AnnotatedSection
-            title="表示項目"
-            description="領収書に表示する項目のON/OFFを設定します。"
-          >
-            <Card>
-              <BlockStack gap="300">
-                <InlineStack gap="400" wrap>
-                  <Checkbox
-                    label="発行日"
-                    checked={form.showIssueDate}
-                    onChange={(v) => set("showIssueDate", v)}
-                  />
-                  <Checkbox
-                    label="注文番号"
-                    checked={form.showOrderName}
-                    onChange={(v) => set("showOrderName", v)}
-                  />
-                  <Checkbox
-                    label="ロケーション名"
-                    checked={form.showLocationName}
-                    onChange={(v) => set("showLocationName", v)}
-                  />
-                  <Checkbox
-                    label="宛名（顧客名）"
-                    checked={form.showCustomerName}
-                    onChange={(v) => set("showCustomerName", v)}
-                  />
-                  <Checkbox
-                    label="但し書き"
-                    checked={form.showProviso}
-                    onChange={(v) => set("showProviso", v)}
-                  />
-                  <Checkbox
-                    label="金額"
-                    checked={form.showAmount}
-                    onChange={(v) => set("showAmount", v)}
-                  />
-                  <Checkbox
-                    label="税注記"
-                    checked={form.showTaxNote}
-                    onChange={(v) => set("showTaxNote", v)}
-                  />
-                  <Checkbox
-                    label="再発行マーク"
-                    checked={form.showReissueMark}
-                    onChange={(v) => set("showReissueMark", v)}
-                  />
-                </InlineStack>
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            {/* §9.2.2 表示項目 */}
+            <Layout.AnnotatedSection
+              title="表示項目"
+              description="領収書に表示する項目のON/OFFを設定します。"
+            >
+              <Card>
+                <BlockStack gap="300">
+                  <InlineStack gap="400" wrap>
+                    <Checkbox
+                      label="発行日"
+                      checked={form.showIssueDate}
+                      onChange={(v) => set("showIssueDate", v)}
+                    />
+                    <Checkbox
+                      label="注文番号"
+                      checked={form.showOrderName}
+                      onChange={(v) => set("showOrderName", v)}
+                    />
+                    <Checkbox
+                      label="ロケーション名"
+                      checked={form.showLocationName}
+                      onChange={(v) => set("showLocationName", v)}
+                    />
+                    <Checkbox
+                      label="宛名（顧客名）"
+                      checked={form.showCustomerName}
+                      onChange={(v) => set("showCustomerName", v)}
+                    />
+                    <Checkbox
+                      label="但し書き"
+                      checked={form.showProviso}
+                      onChange={(v) => set("showProviso", v)}
+                    />
+                    <Checkbox
+                      label="金額"
+                      checked={form.showAmount}
+                      onChange={(v) => set("showAmount", v)}
+                    />
+                    <Checkbox
+                      label="税注記"
+                      checked={form.showTaxNote}
+                      onChange={(v) => set("showTaxNote", v)}
+                    />
+                    <Checkbox
+                      label="再発行マーク"
+                      checked={form.showReissueMark}
+                      onChange={(v) => set("showReissueMark", v)}
+                    />
+                  </InlineStack>
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          {/* §9.2.3 デフォルト値 */}
-          <Layout.AnnotatedSection
-            title="デフォルト値"
-            description="但し書きと宛名のデフォルト表記。"
-          >
-            <Card>
-              <BlockStack gap="400">
-                <TextField
-                  label="但し書きデフォルト"
-                  value={form.defaultProviso}
-                  onChange={(v) => set("defaultProviso", v)}
-                  helpText="発行時に入力が空のときに使用"
-                  autoComplete="off"
-                />
-                <TextField
-                  label="宛名の後ろに付ける文字"
-                  value={form.defaultRecipientSuffix}
-                  onChange={(v) => set("defaultRecipientSuffix", v)}
-                  helpText="例: 様"
-                  autoComplete="off"
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            {/* §9.2.3 デフォルト値 */}
+            <Layout.AnnotatedSection
+              title="デフォルト値"
+              description="但し書きと宛名のデフォルト表記。"
+            >
+              <Card>
+                <BlockStack gap="400">
+                  <TextField
+                    label="但し書きデフォルト"
+                    value={form.defaultProviso}
+                    onChange={(v) => set("defaultProviso", v)}
+                    helpText="発行時に入力が空のときに使用"
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="宛名の後ろに付ける文字"
+                    value={form.defaultRecipientSuffix}
+                    onChange={(v) => set("defaultRecipientSuffix", v)}
+                    helpText="例: 様"
+                    autoComplete="off"
+                  />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          {/* §9.2.4 レイアウト・§9.2.5 文言 */}
-          <Layout.AnnotatedSection
-            title="レイアウト・文言"
-            description="見出しの揃え、タイトル・ラベルの文言を設定します。"
-          >
-            <Card>
-              <BlockStack gap="400">
-                <Select
-                  label="見出しの揃え"
-                  options={HEADER_ALIGN_OPTIONS}
-                  value={form.headerAlignment}
-                  onChange={(v) => set("headerAlignment", v as "left" | "center" | "right")}
-                />
-                <Select
-                  label="ロゴの位置"
-                  options={LOGO_POS_OPTIONS}
-                  value={form.logoPosition}
-                  onChange={(v) => set("logoPosition", v as "top" | "inline")}
-                />
-                <Select
-                  label="会社情報の位置"
-                  options={COMPANY_POS_OPTIONS}
-                  value={form.companyInfoPosition}
-                  onChange={(v) => set("companyInfoPosition", v as "top" | "bottom")}
-                />
-                <Select
-                  label="本文の間隔"
-                  options={BODY_SPACING_OPTIONS}
-                  value={form.bodySpacing}
-                  onChange={(v) => set("bodySpacing", v as "compact" | "normal" | "relaxed")}
-                />
-                <TextField
-                  label="領収書タイトル"
-                  value={form.receiptTitle}
-                  onChange={(v) => set("receiptTitle", v)}
-                  autoComplete="off"
-                />
-                <TextField
-                  label="再発行時のラベル"
-                  value={form.reissueLabel}
-                  onChange={(v) => set("reissueLabel", v)}
-                  autoComplete="off"
-                />
-                <TextField
-                  label="税注記の文言"
-                  value={form.taxNoteLabel}
-                  onChange={(v) => set("taxNoteLabel", v)}
-                  autoComplete="off"
-                />
-                <TextField
-                  label="通貨プレフィックス"
-                  value={form.currencyPrefix}
-                  onChange={(v) => set("currencyPrefix", v)}
-                  helpText="例: ¥"
-                  autoComplete="off"
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            {/* §9.2.4 レイアウト・§9.2.5 文言 */}
+            <Layout.AnnotatedSection
+              title="レイアウト・文言"
+              description="見出しの揃え、タイトル・ラベルの文言を設定します。"
+            >
+              <Card>
+                <BlockStack gap="400">
+                  <Select
+                    label="見出しの揃え"
+                    options={HEADER_ALIGN_OPTIONS}
+                    value={form.headerAlignment}
+                    onChange={(v) => set("headerAlignment", v as "left" | "center" | "right")}
+                  />
+                  <Select
+                    label="ロゴの位置"
+                    options={LOGO_POS_OPTIONS}
+                    value={form.logoPosition}
+                    onChange={(v) => set("logoPosition", v as "top" | "inline")}
+                  />
+                  <Select
+                    label="会社情報の位置"
+                    options={COMPANY_POS_OPTIONS}
+                    value={form.companyInfoPosition}
+                    onChange={(v) => set("companyInfoPosition", v as "top" | "bottom")}
+                  />
+                  <Select
+                    label="本文の間隔"
+                    options={BODY_SPACING_OPTIONS}
+                    value={form.bodySpacing}
+                    onChange={(v) => set("bodySpacing", v as "compact" | "normal" | "relaxed")}
+                  />
+                  <TextField
+                    label="領収書タイトル"
+                    value={form.receiptTitle}
+                    onChange={(v) => set("receiptTitle", v)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="再発行時のラベル"
+                    value={form.reissueLabel}
+                    onChange={(v) => set("reissueLabel", v)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="税注記の文言"
+                    value={form.taxNoteLabel}
+                    onChange={(v) => set("taxNoteLabel", v)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="通貨プレフィックス"
+                    value={form.currencyPrefix}
+                    onChange={(v) => set("currencyPrefix", v)}
+                    helpText="例: ¥"
+                    autoComplete="off"
+                  />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          {/* §9.3 プレビュー（保存前・保存後で同じ表示になるよう同一ロジック） */}
-          <Layout.AnnotatedSection
-            title="プレビュー"
-            description="現在の設定で発行される領収書のイメージです。保存後も同じ内容で表示されます。"
-          >
-            <Card>
-              <ReceiptPreview template={form} />
-            </Card>
-          </Layout.AnnotatedSection>
-        </Layout>
+            {/* §9.3 プレビュー（保存前・保存後で同じ表示になるよう同一ロジック） */}
+            <Layout.AnnotatedSection
+              title="プレビュー"
+              description="現在の設定で発行される領収書のイメージです。保存後も同じ内容で表示されます。"
+            >
+              <Card>
+                <ReceiptPreview template={form} />
+              </Card>
+            </Layout.AnnotatedSection>
+          </Layout>
+        </StateSaveForm>
       </Page>
     </PolarisPageWrapper>
   );

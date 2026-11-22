@@ -3,7 +3,8 @@
  * diagnostics / backfill は日常タブから外し、ここから遷移する。
  */
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useLocation } from "react-router";
+import { useGuardedNavigate } from "./admin-ui";
 import { BlockStack, Box, Button, Card, Collapsible, InlineStack, Text } from "@shopify/polaris";
 
 const ADVANCED_LINKS = [
@@ -16,7 +17,7 @@ const ADVANCED_LINKS = [
  */
 export function SystemAdvancedNav({ showDiagnostics = false }: { showDiagnostics?: boolean }) {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGuardedNavigate();
   const search = location.search || "";
   const links = ADVANCED_LINKS.filter((l) => !l.devStoreOnly || showDiagnostics);
   const onAdvancedPage = links.some((l) => l.path === location.pathname);

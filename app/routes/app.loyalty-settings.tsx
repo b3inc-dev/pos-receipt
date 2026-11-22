@@ -3,8 +3,9 @@
  * 要件 §9A: loyalty_usage の表示名・抽出元（discount_code_prefix / manual_off 等）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
-import { SuccessToast, AdminIntro } from "../components/admin-ui";
+import { useActionData, useLoaderData, useSubmit, useLocation } from "react-router";
+import { SuccessToast, AdminIntro, useGuardedNavigate } from "../components/admin-ui";
+import { StateSaveForm } from "../components/StateSaveForm";
 import {
   Page,
   Layout,
@@ -118,7 +119,8 @@ export default function LoyaltySettingsPage() {
   const { settings: initial } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
-  const navigate = useNavigate();
+  // 「←」とタブは、未保存の変更があれば Shopify の確認を出してから移る（UI ルール v1.1 7章）
+  const navigate = useGuardedNavigate();
   const q = location.search || "";
   const actionData = useActionData<{ ok: boolean; error?: string; at?: number }>();
   const [form, setForm] = useState<LoyaltySettings>({ ...initial });
@@ -161,153 +163,155 @@ export default function LoyaltySettingsPage() {
       <Page
         title="ポイント/会員施策設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <SystemPageNav memberCardEnabled={false} />
-        <Layout>
-          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
-          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
-          {actionData?.ok === false && actionData.error && (
+        {/* 保存は Shopify の保存の帯（値が保存したときと違うときだけ「破棄」「保存」）。画面の中に保存ボタンを置かない（UI ルール v1.1 7章） */}
+        <StateSaveForm values={{ form, pointPrefixText, pointTitleText }} onSave={handleSave} onDiscard={(saved) => { setForm(saved.form); setPointPrefixText(saved.pointPrefixText); setPointTitleText(saved.pointTitleText); }} result={actionData}>
+          <Layout>
+            {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+            <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
+            {actionData?.ok === false && actionData.error && (
+              <Layout.Section>
+                <Banner tone="critical">保存していません。{actionData.error}</Banner>
+              </Layout.Section>
+            )}
+
             <Layout.Section>
-              <Banner tone="critical">保存していません。{actionData.error}</Banner>
+              {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+              <AdminIntro><p>精算・売上サマリーで表示する「ポイント利用額」の表示名と抽出方法を設定します。特定のポイントアプリに依存せず、割引コードのプレフィックスやメタフィールドで判定できます。</p></AdminIntro>
             </Layout.Section>
-          )}
 
-          <Layout.Section>
-            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-            <AdminIntro><p>精算・売上サマリーで表示する「ポイント利用額」の表示名と抽出方法を設定します。特定のポイントアプリに依存せず、割引コードのプレフィックスやメタフィールドで判定できます。</p></AdminIntro>
-          </Layout.Section>
-
-          <Layout.AnnotatedSection
-            title="ポイント利用額の有無・表示名"
-            description="機能を有効にすると、精算・サマリーにポイント利用額が表示されます。"
-          >
-            <Card>
-              <BlockStack gap="400">
-                <Checkbox
-                  label="ポイント利用額を有効にする"
-                  checked={form.loyaltyUsageFeatureEnabled}
-                  onChange={(v) => set("loyaltyUsageFeatureEnabled", v)}
-                />
-                <TextField
-                  label="表示名"
-                  value={form.loyaltyUsageDisplayLabel}
-                  onChange={(v) => set("loyaltyUsageDisplayLabel", v)}
-                  helpText="精算レシート・売上サマリーで表示するラベル（例: ポイント利用額）"
-                  autoComplete="off"
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-          <Layout.AnnotatedSection
-            title="抽出元（source_type）"
-            description="どこからポイント利用額を取得するか。MVP では「使用しない」または「割引コードのプレフィックス」を推奨します。"
-          >
-            <Card>
-              <BlockStack gap="400">
-                <Select
-                  label="抽出元"
-                  options={SOURCE_TYPE_OPTIONS}
-                  value={form.loyaltyUsageSourceType}
-                  onChange={(v) => set("loyaltyUsageSourceType", v as LoyaltyUsageSourceType)}
-                />
-                {form.loyaltyUsageSourceType === "discount_code_prefix" && (
+            <Layout.AnnotatedSection
+              title="ポイント利用額の有無・表示名"
+              description="機能を有効にすると、精算・サマリーにポイント利用額が表示されます。"
+            >
+              <Card>
+                <BlockStack gap="400">
+                  <Checkbox
+                    label="ポイント利用額を有効にする"
+                    checked={form.loyaltyUsageFeatureEnabled}
+                    onChange={(v) => set("loyaltyUsageFeatureEnabled", v)}
+                  />
                   <TextField
-                    label="割引コードのプレフィックス（カンマ区切り）"
-                    value={prefixText}
-                    onChange={setPrefixText}
-                    helpText="この欄は今は精算に使われていません。精算で数える割引は下の「精算のポイント利用額に数える割引」で決めます。"
+                    label="表示名"
+                    value={form.loyaltyUsageDisplayLabel}
+                    onChange={(v) => set("loyaltyUsageDisplayLabel", v)}
+                    helpText="精算レシート・売上サマリーで表示するラベル（例: ポイント利用額）"
                     autoComplete="off"
                   />
-                )}
-                {(form.loyaltyUsageSourceType === "order_metafield" || form.loyaltyUsageSourceType === "order_attribute") && (
-                  <BlockStack gap="300">
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
+
+            <Layout.AnnotatedSection
+              title="抽出元（source_type）"
+              description="どこからポイント利用額を取得するか。MVP では「使用しない」または「割引コードのプレフィックス」を推奨します。"
+            >
+              <Card>
+                <BlockStack gap="400">
+                  <Select
+                    label="抽出元"
+                    options={SOURCE_TYPE_OPTIONS}
+                    value={form.loyaltyUsageSourceType}
+                    onChange={(v) => set("loyaltyUsageSourceType", v as LoyaltyUsageSourceType)}
+                  />
+                  {form.loyaltyUsageSourceType === "discount_code_prefix" && (
                     <TextField
-                      label="メタフィールド namespace（order_metafield 時）"
-                      value={form.loyaltyUsageOrderMetafieldNamespace ?? ""}
-                      onChange={(v) => set("loyaltyUsageOrderMetafieldNamespace", v || null)}
+                      label="割引コードのプレフィックス（カンマ区切り）"
+                      value={prefixText}
+                      onChange={setPrefixText}
+                      helpText="この欄は今は精算に使われていません。精算で数える割引は下の「精算のポイント利用額に数える割引」で決めます。"
                       autoComplete="off"
                     />
+                  )}
+                  {(form.loyaltyUsageSourceType === "order_metafield" || form.loyaltyUsageSourceType === "order_attribute") && (
+                    <BlockStack gap="300">
+                      <TextField
+                        label="メタフィールド namespace（order_metafield 時）"
+                        value={form.loyaltyUsageOrderMetafieldNamespace ?? ""}
+                        onChange={(v) => set("loyaltyUsageOrderMetafieldNamespace", v || null)}
+                        autoComplete="off"
+                      />
+                      <TextField
+                        label="メタフィールド key（order_metafield 時）"
+                        value={form.loyaltyUsageOrderMetafieldKey ?? ""}
+                        onChange={(v) => set("loyaltyUsageOrderMetafieldKey", v || null)}
+                        autoComplete="off"
+                      />
+                      <TextField
+                        label="注文属性の key（order_attribute 時）"
+                        value={form.loyaltyUsageOrderAttributeKey ?? ""}
+                        onChange={(v) => set("loyaltyUsageOrderAttributeKey", v || null)}
+                        autoComplete="off"
+                      />
+                    </BlockStack>
+                  )}
+                  {form.loyaltyUsageSourceType === "custom_app_event" && (
                     <TextField
-                      label="メタフィールド key（order_metafield 時）"
-                      value={form.loyaltyUsageOrderMetafieldKey ?? ""}
-                      onChange={(v) => set("loyaltyUsageOrderMetafieldKey", v || null)}
+                      label="設定 JSON（任意）"
+                      value={form.loyaltyUsageSourceConfigJson}
+                      onChange={(v) => set("loyaltyUsageSourceConfigJson", v)}
+                      multiline={2}
                       autoComplete="off"
                     />
-                    <TextField
-                      label="注文属性の key（order_attribute 時）"
-                      value={form.loyaltyUsageOrderAttributeKey ?? ""}
-                      onChange={(v) => set("loyaltyUsageOrderAttributeKey", v || null)}
-                      autoComplete="off"
-                    />
-                  </BlockStack>
-                )}
-                {form.loyaltyUsageSourceType === "custom_app_event" && (
+                  )}
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
+
+            <Layout.AnnotatedSection
+              title="精算のポイント利用額に数える割引"
+              description="ここに当てはまる割引は、精算・売上サマリーで「割引」ではなく「ポイント利用額」に入ります。上の「ポイント利用額を有効にする」に関係なく使います。前の注文の VIP- も数えるので消さないでください。Shop Point の設定でコードの頭を変えたら、ここと ciara-system の「会員ポイントの設定」も合わせてください。"
+            >
+              <Card>
+                <BlockStack gap="400">
                   <TextField
-                    label="設定 JSON（任意）"
-                    value={form.loyaltyUsageSourceConfigJson}
-                    onChange={(v) => set("loyaltyUsageSourceConfigJson", v)}
+                    label="割引コードの頭（1 行に 1 つ）"
+                    value={pointPrefixText}
+                    onChange={setPointPrefixText}
+                    multiline={3}
+                    helpText="この文字で始まる割引コードを数えます。最後はハイフンにします（例: VIP-、SP-POINT-）。大文字と小文字は区別しません。"
+                    autoComplete="off"
+                  />
+                  <Checkbox
+                    label="Shop Point の前の形のコード（SP ＋ 16 桁の英数字、ハイフンなし）も数える"
+                    checked={form.pointRedemptionLegacyShopPointHexCode}
+                    onChange={(v) => set("pointRedemptionLegacyShopPointHexCode", v)}
+                  />
+                  <TextField
+                    label="コードの無い割引の名前（1 行に 1 つ）"
+                    value={pointTitleText}
+                    onChange={setPointTitleText}
                     multiline={2}
+                    helpText="POS で Shop Point を使うと、この名前の割引がカートに入ります（例: Shop Point）。自動割引は同じ名前でも数えません。"
                     autoComplete="off"
                   />
-                )}
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection
-            title="精算のポイント利用額に数える割引"
-            description="ここに当てはまる割引は、精算・売上サマリーで「割引」ではなく「ポイント利用額」に入ります。上の「ポイント利用額を有効にする」に関係なく使います。前の注文の VIP- も数えるので消さないでください。Shop Point の設定でコードの頭を変えたら、ここと ciara-system の「会員ポイントの設定」も合わせてください。"
-          >
-            <Card>
-              <BlockStack gap="400">
-                <TextField
-                  label="割引コードの頭（1 行に 1 つ）"
-                  value={pointPrefixText}
-                  onChange={setPointPrefixText}
-                  multiline={3}
-                  helpText="この文字で始まる割引コードを数えます。最後はハイフンにします（例: VIP-、SP-POINT-）。大文字と小文字は区別しません。"
-                  autoComplete="off"
-                />
-                <Checkbox
-                  label="Shop Point の前の形のコード（SP ＋ 16 桁の英数字、ハイフンなし）も数える"
-                  checked={form.pointRedemptionLegacyShopPointHexCode}
-                  onChange={(v) => set("pointRedemptionLegacyShopPointHexCode", v)}
-                />
-                <TextField
-                  label="コードの無い割引の名前（1 行に 1 つ）"
-                  value={pointTitleText}
-                  onChange={setPointTitleText}
-                  multiline={2}
-                  helpText="POS で Shop Point を使うと、この名前の割引がカートに入ります（例: Shop Point）。自動割引は同じ名前でも数えません。"
-                  autoComplete="off"
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            <Layout.AnnotatedSection
+              title="表示対象"
+              description="サマリー・精算のどちらにポイント利用額を含めるか"
+            >
+              <Card>
+                <BlockStack gap="300">
+                  <Checkbox
+                    label="売上サマリーに含める"
+                    checked={form.loyaltyUsageIncludeInSummary}
+                    onChange={(v) => set("loyaltyUsageIncludeInSummary", v)}
+                  />
+                  <Checkbox
+                    label="精算レシートに含める"
+                    checked={form.loyaltyUsageIncludeInSettlement}
+                    onChange={(v) => set("loyaltyUsageIncludeInSettlement", v)}
+                  />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection
-            title="表示対象"
-            description="サマリー・精算のどちらにポイント利用額を含めるか"
-          >
-            <Card>
-              <BlockStack gap="300">
-                <Checkbox
-                  label="売上サマリーに含める"
-                  checked={form.loyaltyUsageIncludeInSummary}
-                  onChange={(v) => set("loyaltyUsageIncludeInSummary", v)}
-                />
-                <Checkbox
-                  label="精算レシートに含める"
-                  checked={form.loyaltyUsageIncludeInSettlement}
-                  onChange={(v) => set("loyaltyUsageIncludeInSettlement", v)}
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-        </Layout>
+          </Layout>
+        </StateSaveForm>
       </Page>
     </PolarisPageWrapper>
   );

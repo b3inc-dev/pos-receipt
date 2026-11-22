@@ -3,8 +3,9 @@
  * 要件 §7: 商品券機能・額面読取・精算反映
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
-import { SuccessToast, AdminIntro } from "../components/admin-ui";
+import { useActionData, useLoaderData, useSubmit, useLocation } from "react-router";
+import { SuccessToast, AdminIntro, useGuardedNavigate } from "../components/admin-ui";
+import { StateSaveForm } from "../components/StateSaveForm";
 import {
   Page,
   Layout,
@@ -72,7 +73,8 @@ export default function VoucherSettingsPage() {
   const submit = useSubmit();
   const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
-  const navigate = useNavigate();
+  // 「←」とタブは、未保存の変更があれば Shopify の確認を出してから移る（UI ルール v1.1 7章）
+  const navigate = useGuardedNavigate();
   const q = location.search || "";
   const [form, setForm] = useState<VoucherSettings>({ ...initial });
 
@@ -100,50 +102,52 @@ export default function VoucherSettingsPage() {
       <Page
         title="商品券設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
           <TabGroupBar tabs={SETTLEMENT_TABS} />
         </Card>
-        <Layout>
-          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
-          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
-          <Layout.Section>
-            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-            <AdminIntro><p>商品券の有効化・額面読取ルール・精算への反映を設定します。</p></AdminIntro>
-          </Layout.Section>
+        {/* 保存は Shopify の保存の帯（値が保存したときと違うときだけ「破棄」「保存」）。画面の中に保存ボタンを置かない（UI ルール v1.1 7章） */}
+        <StateSaveForm values={form} onSave={handleSave} onDiscard={(saved) => setForm(saved)} result={actionData}>
+          <Layout>
+            {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+            <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
+            <Layout.Section>
+              {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+              <AdminIntro><p>商品券の有効化・額面読取ルール・精算への反映を設定します。</p></AdminIntro>
+            </Layout.Section>
 
-          <Layout.AnnotatedSection title="商品券機能全体">
-            <Card>
-              <BlockStack gap="300">
-                <Checkbox label="商品券機能を有効にする" checked={form.voucherFeatureEnabled} onChange={(v) => set("voucherFeatureEnabled", v)} />
-                <Checkbox label="自動判定を有効にする" checked={form.voucherAutoDetectionEnabled} onChange={(v) => set("voucherAutoDetectionEnabled", v)} />
-                <Checkbox label="手動調整を有効にする" checked={form.voucherManualAdjustmentEnabled} onChange={(v) => set("voucherManualAdjustmentEnabled", v)} />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            <Layout.AnnotatedSection title="商品券機能全体">
+              <Card>
+                <BlockStack gap="300">
+                  <Checkbox label="商品券機能を有効にする" checked={form.voucherFeatureEnabled} onChange={(v) => set("voucherFeatureEnabled", v)} />
+                  <Checkbox label="自動判定を有効にする" checked={form.voucherAutoDetectionEnabled} onChange={(v) => set("voucherAutoDetectionEnabled", v)} />
+                  <Checkbox label="手動調整を有効にする" checked={form.voucherManualAdjustmentEnabled} onChange={(v) => set("voucherManualAdjustmentEnabled", v)} />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="額面読取ルール">
-            <Card>
-              <BlockStack gap="400">
-                <Checkbox label="注文ノートから額面を読取る" checked={form.voucherNoteParseEnabled} onChange={(v) => set("voucherNoteParseEnabled", v)} />
-                <TextField label="読取用正規表現" value={form.voucherNoteParseRegex} onChange={(v) => set("voucherNoteParseRegex", v)} autoComplete="off" />
-                <TextField label="デフォルトラベル" value={form.voucherDefaultLabel} onChange={(v) => set("voucherDefaultLabel", v)} autoComplete="off" />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            <Layout.AnnotatedSection title="額面読取ルール">
+              <Card>
+                <BlockStack gap="400">
+                  <Checkbox label="注文ノートから額面を読取る" checked={form.voucherNoteParseEnabled} onChange={(v) => set("voucherNoteParseEnabled", v)} />
+                  <TextField label="読取用正規表現" value={form.voucherNoteParseRegex} onChange={(v) => set("voucherNoteParseRegex", v)} autoComplete="off" />
+                  <TextField label="デフォルトラベル" value={form.voucherDefaultLabel} onChange={(v) => set("voucherDefaultLabel", v)} autoComplete="off" />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="判定優先順位・精算反映">
-            <Card>
-              <BlockStack gap="400">
-                <Select label="判定優先順位" options={PRIORITY_OPTIONS} value={form.voucherAdjustmentPriority} onChange={(v) => set("voucherAdjustmentPriority", v as "manual_first" | "auto_first")} />
-                <Checkbox label="精算に商品券おつりを反映する" checked={form.reflectVoucherChangeInSettlement} onChange={(v) => set("reflectVoucherChangeInSettlement", v)} />
-                <Checkbox label="レシート表示に商品券おつりを反映する" checked={form.reflectVoucherChangeInReceiptDisplay} onChange={(v) => set("reflectVoucherChangeInReceiptDisplay", v)} />
-                <TextField label="商品券おつりの表示ラベル" value={form.voucherChangeDisplayLabel} onChange={(v) => set("voucherChangeDisplayLabel", v)} autoComplete="off" />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-        </Layout>
+            <Layout.AnnotatedSection title="判定優先順位・精算反映">
+              <Card>
+                <BlockStack gap="400">
+                  <Select label="判定優先順位" options={PRIORITY_OPTIONS} value={form.voucherAdjustmentPriority} onChange={(v) => set("voucherAdjustmentPriority", v as "manual_first" | "auto_first")} />
+                  <Checkbox label="精算に商品券おつりを反映する" checked={form.reflectVoucherChangeInSettlement} onChange={(v) => set("reflectVoucherChangeInSettlement", v)} />
+                  <Checkbox label="レシート表示に商品券おつりを反映する" checked={form.reflectVoucherChangeInReceiptDisplay} onChange={(v) => set("reflectVoucherChangeInReceiptDisplay", v)} />
+                  <TextField label="商品券おつりの表示ラベル" value={form.voucherChangeDisplayLabel} onChange={(v) => set("voucherChangeDisplayLabel", v)} autoComplete="off" />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
+          </Layout>
+        </StateSaveForm>
       </Page>
     </PolarisPageWrapper>
   );

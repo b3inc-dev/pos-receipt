@@ -1005,6 +1005,21 @@ export function GuardedLink({ to, className, children, ...rest }: { to: string; 
   return <Link to={to} className={className} onClick={onClick} {...rest}>{children}</Link>;
 }
 
+/**
+ * POS Receipt で足したもの（Shop Point には無い）。Polaris の Page の「←」（backAction）やタブなど、
+ * リンクでなくボタンから移るときに使う。未保存の変更があれば Shopify の確認を出してから移る（GuardedLink と同じ）。
+ */
+export function useGuardedNavigate() {
+  const navigate = useNavigate();
+  return (to: string) => {
+    if (dirtyForms.size === 0) {
+      navigate(to);
+      return;
+    }
+    void confirmLeave().then(() => navigate(to));
+  };
+}
+
 export function PrimaryLink({ to, children, icon }: { to: string; children: ReactNode; icon?: string }) {
   return (
     <GuardedLink to={to} className="Admin-primary">

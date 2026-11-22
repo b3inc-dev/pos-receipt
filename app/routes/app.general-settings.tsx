@@ -2,8 +2,9 @@
  * /app/general-settings — 一般設定（要件 §3）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
-import { SuccessToast, AdminIntro } from "../components/admin-ui";
+import { useActionData, useLoaderData, useSubmit, useLocation } from "react-router";
+import { SuccessToast, AdminIntro, useGuardedNavigate } from "../components/admin-ui";
+import { StateSaveForm } from "../components/StateSaveForm";
 import {
   Page,
   Layout,
@@ -102,9 +103,10 @@ export default function GeneralSettingsPage() {
     isDevStore,
   } = useLoaderData<typeof loader>();
   const submit = useSubmit();
-  const actionData = useActionData<{ ok?: boolean }>();
+  const actionData = useActionData<{ ok?: boolean; error?: string }>();
   const location = useLocation();
-  const navigate = useNavigate();
+  // 「←」とタブは、未保存の変更があれば Shopify の確認を出してから移る（UI ルール v1.1 7章）
+  const navigate = useGuardedNavigate();
   const q = location.search || "";
   const [saveError, setSaveError] = useState<string | null>(null);
   const [form, setForm] = useState<GeneralSettings>({ ...initial });
@@ -113,7 +115,7 @@ export default function GeneralSettingsPage() {
     setSaveError(null);
     if (form.privacyPolicyUrl.trim() && !isAllowedPrivacyPolicyUrl(form.privacyPolicyUrl)) {
       setSaveError("プライバシーポリシー URL は http(s) で始まる有効な URL を指定してください。");
-      return;
+      return false;
     }
     const fd = new FormData();
     Object.entries(form).forEach(([k, v]) => {
@@ -131,75 +133,80 @@ export default function GeneralSettingsPage() {
       <Page
         title="一般設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <SystemPageNav memberCardEnabled={false} isDevStore={isDevStore} />
-        <Layout>
-          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
-          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
-          {saveError && <Layout.Section><Banner tone="critical">{saveError}</Banner></Layout.Section>}
-          <Layout.Section>
-            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-            <AdminIntro><p>{isDevStore ? "アプリ全体の基本情報・タイムゾーン・デバッグ表示を設定します。" : "アプリ全体の基本情報・タイムゾーンを設定します。"}</p></AdminIntro>
-          </Layout.Section>
+        {/* 保存は Shopify の保存の帯（値が保存したときと違うときだけ「破棄」「保存」）。画面の中に保存ボタンを置かない（UI ルール v1.1 7章） */}
+        <StateSaveForm values={form} onSave={handleSave} onDiscard={(saved) => { setForm(saved); setSaveError(null); }} result={actionData}>
+          <Layout>
+            {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+            <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
+            {/* 保存の失敗は理由を赤いお知らせ 1 つで残す（UI ルール v1.1 7章） */}
+            {(saveError || actionData?.ok === false) && (
+              <Layout.Section>
+                <Banner tone="critical">保存していません。{saveError ?? actionData?.error ?? "もう一度保存してください。"}</Banner>
+              </Layout.Section>
+            )}
+            <Layout.Section>
+              {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+              <AdminIntro><p>{isDevStore ? "アプリ全体の基本情報・タイムゾーン・デバッグ表示を設定します。" : "アプリ全体の基本情報・タイムゾーンを設定します。"}</p></AdminIntro>
+            </Layout.Section>
 
-          <Layout.AnnotatedSection title="アプリ基本情報">
-            <Card>
-              <BlockStack gap="400">
-                <TextField label="アプリ表示名" value={form.appDisplayName} onChange={(v) => set("appDisplayName", v)} autoComplete="off" />
-                <TextField label="サポート連絡先メール" value={form.supportContactEmail} onChange={(v) => set("supportContactEmail", v)} type="email" autoComplete="off" />
-                <TextField
-                  label="プライバシーポリシー URL"
-                  value={form.privacyPolicyUrl}
-                  onChange={(v) => set("privacyPolicyUrl", v)}
-                  type="url"
-                  autoComplete="off"
-                  helpText="https で始まる公開 URL。未設定時はサーバー環境変数 PRIVACY_POLICY_URL があればそれを使います。ダミー URL は置かないでください。"
-                />
-                {effectivePrivacyPolicyUrl && (
-                  <Text as="p" tone="subdued">
-                    現在有効:{" "}
-                    <a href={effectivePrivacyPolicyUrl} target="_blank" rel="noopener noreferrer">
-                      {effectivePrivacyPolicyUrl}
-                    </a>
-                    {privacyPolicyFromEnvOnly ? "（環境変数）" : ""}
-                  </Text>
-                )}
-                <TextField label="デフォルトタイムゾーン" value={form.defaultTimezone} onChange={(v) => set("defaultTimezone", v)} helpText="例: Asia/Tokyo" autoComplete="off" />
-                <TextField label="デフォルト通貨" value={form.defaultCurrency} onChange={(v) => set("defaultCurrency", v)} autoComplete="off" />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            <Layout.AnnotatedSection title="アプリ基本情報">
+              <Card>
+                <BlockStack gap="400">
+                  <TextField label="アプリ表示名" value={form.appDisplayName} onChange={(v) => set("appDisplayName", v)} autoComplete="off" />
+                  <TextField label="サポート連絡先メール" value={form.supportContactEmail} onChange={(v) => set("supportContactEmail", v)} type="email" autoComplete="off" />
+                  <TextField
+                    label="プライバシーポリシー URL"
+                    value={form.privacyPolicyUrl}
+                    onChange={(v) => set("privacyPolicyUrl", v)}
+                    type="url"
+                    autoComplete="off"
+                    helpText="https で始まる公開 URL。未設定時はサーバー環境変数 PRIVACY_POLICY_URL があればそれを使います。ダミー URL は置かないでください。"
+                  />
+                  {effectivePrivacyPolicyUrl && (
+                    <Text as="p" tone="subdued">
+                      {/* 下線の文字リンクにしない（UI ルール v1.1 4章）。URL は文字だけで出す */}
+                      現在有効: {effectivePrivacyPolicyUrl}
+                      {privacyPolicyFromEnvOnly ? "（環境変数）" : ""}
+                    </Text>
+                  )}
+                  <TextField label="デフォルトタイムゾーン" value={form.defaultTimezone} onChange={(v) => set("defaultTimezone", v)} helpText="例: Asia/Tokyo" autoComplete="off" />
+                  <TextField label="デフォルト通貨" value={form.defaultCurrency} onChange={(v) => set("defaultCurrency", v)} autoComplete="off" />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title={isDevStore ? "プラン・表示言語" : "表示言語"}>
-            <Card>
-              <BlockStack gap="400">
-                {/* 「プラン（表示用）」「有効機能 JSON（表示用）」は開発ストアだけに出す（客先の店には出さない） */}
-                {isDevStore && (
-                  <>
-                    <Select label="プラン（表示用）" options={PLAN_OPTIONS} value={form.currentPlanCode} onChange={(v) => set("currentPlanCode", v)} />
-                    <TextField label="有効機能 JSON（表示用）" value={form.enabledFeaturesJson} onChange={(v) => set("enabledFeaturesJson", v)} multiline={2} autoComplete="off" />
-                  </>
-                )}
-                <Select label="管理画面言語" options={LANG_OPTIONS} value={form.adminLanguage} onChange={(v) => set("adminLanguage", v)} />
-                <Select label="POS 言語" options={LANG_OPTIONS} value={form.posLanguage} onChange={(v) => set("posLanguage", v)} />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            <Layout.AnnotatedSection title={isDevStore ? "プラン・表示言語" : "表示言語"}>
+              <Card>
+                <BlockStack gap="400">
+                  {/* 「プラン（表示用）」「有効機能 JSON（表示用）」は開発ストアだけに出す（客先の店には出さない） */}
+                  {isDevStore && (
+                    <>
+                      <Select label="プラン（表示用）" options={PLAN_OPTIONS} value={form.currentPlanCode} onChange={(v) => set("currentPlanCode", v)} />
+                      <TextField label="有効機能 JSON（表示用）" value={form.enabledFeaturesJson} onChange={(v) => set("enabledFeaturesJson", v)} multiline={2} autoComplete="off" />
+                    </>
+                  )}
+                  <Select label="管理画面言語" options={LANG_OPTIONS} value={form.adminLanguage} onChange={(v) => set("adminLanguage", v)} />
+                  <Select label="POS 言語" options={LANG_OPTIONS} value={form.posLanguage} onChange={(v) => set("posLanguage", v)} />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          {/* 開発ストアだけに出す（客先の店には出さない） */}
-          {isDevStore && (
-          <Layout.AnnotatedSection title="ログ・デバッグ">
-            <Card>
-              <BlockStack gap="300">
-                <Checkbox label="デバッグモード" checked={form.debugModeEnabled} onChange={(v) => set("debugModeEnabled", v)} helpText="ON 時のみ診断情報を増やす" />
-                <Checkbox label="診断パネルを有効にする" checked={form.diagnosticsPanelEnabled} onChange={(v) => set("diagnosticsPanelEnabled", v)} />
-                <Checkbox label="詳細計算ログ" checked={form.verboseCalcLogEnabled} onChange={(v) => set("verboseCalcLogEnabled", v)} />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-          )}
-        </Layout>
+            {/* 開発ストアだけに出す（客先の店には出さない） */}
+            {isDevStore && (
+            <Layout.AnnotatedSection title="ログ・デバッグ">
+              <Card>
+                <BlockStack gap="300">
+                  <Checkbox label="デバッグモード" checked={form.debugModeEnabled} onChange={(v) => set("debugModeEnabled", v)} helpText="ON 時のみ診断情報を増やす" />
+                  <Checkbox label="診断パネルを有効にする" checked={form.diagnosticsPanelEnabled} onChange={(v) => set("diagnosticsPanelEnabled", v)} />
+                  <Checkbox label="詳細計算ログ" checked={form.verboseCalcLogEnabled} onChange={(v) => set("verboseCalcLogEnabled", v)} />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
+            )}
+          </Layout>
+        </StateSaveForm>
       </Page>
     </PolarisPageWrapper>
   );
