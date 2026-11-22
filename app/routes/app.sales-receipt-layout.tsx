@@ -3,7 +3,8 @@
  * プレビュー HTML は印字と同じ renderPrintReceiptHtml を使用。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useFetcher, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useLoaderData, useFetcher, useSubmit, useLocation, useNavigate } from "react-router";
+import { SuccessToast, AdminIntro } from "../components/admin-ui";
 import {
   Page,
   Layout,
@@ -156,10 +157,10 @@ function buildSampleHtml(settings: SalesReceiptSettings, gift: boolean, layout: 
 export default function SalesReceiptLayoutPage() {
   const { settings: initial, giftLayout: initialGift } = useLoaderData<typeof loader>();
   const submit = useSubmit();
+  const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
   const [form, setForm] = useState(initial);
 
   const [gift, setGift] = useState(false);
@@ -179,8 +180,6 @@ export default function SalesReceiptLayoutPage() {
     fd.set("showPayments", form.layoutJson.showPayments ? "true" : "false");
     fd.set("showLocation", form.layoutJson.showLocation ? "true" : "false");
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   return (
@@ -194,15 +193,11 @@ export default function SalesReceiptLayoutPage() {
           <TabGroupBar tabs={RECEIPT_TABS} />
         </Card>
         <Layout>
-          {saved && (
-            <Layout.Section>
-              <Banner tone="success">保存しました。プレビューは印字 HTML と同一レンダラです。</Banner>
-            </Layout.Section>
-          )}
+          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
           <Layout.Section>
-            <Banner tone="info">
-              精算・領収書も同一 HTML レンダラ（printReceiptHtml）を利用します。販売レシートの見た目をここで調整し、印字結果と一致させます。
-            </Banner>
+            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+            <AdminIntro><p>精算・領収書も同一 HTML レンダラ（printReceiptHtml）を利用します。販売レシートの見た目をここで調整し、印字結果と一致させます。</p></AdminIntro>
           </Layout.Section>
           <Layout.Section variant="oneHalf">
             <Card>
@@ -278,11 +273,6 @@ export default function SalesReceiptLayoutPage() {
                     }))
                   }
                 />
-                <InlineStack align="end">
-                  <Button variant="primary" onClick={handleSave}>
-                    保存
-                  </Button>
-                </InlineStack>
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -305,9 +295,11 @@ export default function SalesReceiptLayoutPage() {
                       onClick={() => giftSave.submit({ intent: "gift", title: giftLayout.title, footer: giftLayout.footer,
                         showOrderNumber: String(giftLayout.showOrderNumber) }, { method: "post" })}>ギフト設定を保存</Button>
                     {giftSave.state === "idle" && giftSave.data?.error && <Banner tone="critical">{giftSave.data.error}</Banner>}
-                    {giftSave.state === "idle" && giftSave.data?.ok && giftLayout.title === initialGift.title &&
-                      giftLayout.footer === initialGift.footer && giftLayout.showOrderNumber === initialGift.showOrderNumber &&
-                      <Banner tone="success">ギフト設定を保存しました。</Banner>}
+                    {/* 保存の成功はトーストで出す（UI ルール v1.1 7章。main 2262b1d に合わせる） */}
+                    <SuccessToast
+                      message={giftSave.state === "idle" && giftSave.data?.ok ? "ギフト設定を保存しました" : null}
+                      trigger={giftSave.data}
+                    />
                   </BlockStack>
                 )}
                 <Box

@@ -78,7 +78,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const verifyResult = await verifyLineIdToken(idToken);
   if (!verifyResult.ok) {
-    console.error("[member-card] id_token verify failed for shop:", shop);
+    // 理由は verifyLineIdToken がもうログに出している（LINE の本文は出さない）
+    if (verifyResult.error === "LINE_UNAVAILABLE") {
+      // LINE の混雑・障害。トークンが悪いとは限らないので 401 にしない（画面は「混雑しています」）
+      return jsonResponse({ ok: false, message: "THROTTLED" }, { status: 503 });
+    }
     const message = verifyResult.error === "ID_TOKEN_EXPIRED" ? "ID_TOKEN_EXPIRED" : "LINE_AUTH_FAILED";
     return jsonResponse({ ok: false, message }, { status: 401 });
   }
@@ -98,7 +102,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const memberResult = await ((): Promise<GetMemberIdResponse> => {
     const prev = shopMemberCardQueue.get(shop) ?? Promise.resolve();
     const task = prev
-      .then(() => getMemberIdByLineId(admin, verifyResult.sub))
+      .then(() => getMemberIdByLineId(admin, verifyResult.sub, { shop }))
       .finally(() => {
         if (shopMemberCardQueue.get(shop) === task) shopMemberCardQueue.delete(shop);
       });

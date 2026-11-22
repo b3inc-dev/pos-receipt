@@ -12,7 +12,7 @@
 | 特殊返金・商品券調整 | 注文に紐づくイベントを DB に保存し、精算へ反映（設定により Shopify 返金実行もあり） |
 | 領収書 | 注文の合計金額ベースで領収書発行履歴を DB に保存（印字 API 呼び出しなし） |
 | 売上サマリー | 精算と同系の集計結果を日次／期間キャッシュし、予算・入店数と合わせて表示 |
-| 会員証（LIFF） | 自社用（`APP_DISTRIBUTION=inhouse`）のみ。本調査の精算中核からは独立 |
+| 会員証（LIFF） | 自社用（`APP_DISTRIBUTION=inhouse`）のみ。本調査の精算中核からは独立。LINE は LINE CRM、ポイントは Shop Point が持ち、POS Receipt は読むだけ（要件書 §0.2） |
 
 要件の詳細正本は `docs/posreceipt_requirements_spec.md`。実装進捗メモは `docs/PROGRESS_SUMMARY.md`（日付が古い箇所あり。現行挙動は本ファイル群を優先）。
 
@@ -43,7 +43,7 @@
 | 点検レシート | ゼロ相当の点検用。`isInspection`。冪等キー対象外 |
 | 領収書 | `ReceiptIssue`。Shopify の Gift Receipt（ギフトレシート）とは別。コードにギフトレシート実装は **なし** |
 | SETTLEMENT 注文 | タグ `SETTLEMENT` の内部注文。集計対象から除外 |
-| VIP | 割引コードが `VIP-` で始まる `DiscountCodeApplication` の割当額を `vipPointsUsed` に集計 |
+| VIP / ポイント利用額 | ポイント利用の割引（初めの値: コード `VIP-`・`SP-POINT-`・Shop Point 旧形式 `SP`＋16 進、POS の手動割引「Shop Point」）の割当額を `vipPointsUsed` に集計。設定で変えられる（BUSINESS_RULES §4） |
 | 特殊返金 | `SpecialRefundEvent`（cash_refund / payment_method_override / receipt_cash_adjustment / voucher_change_adjustment） |
 | printMode | 実行時は常に `shopify_printing`。Location の旧値は出力に使わない |
 

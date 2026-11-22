@@ -1,8 +1,11 @@
 /**
  * 管理画面用の常時表示ナビゲーション（5グループ）。
  * レシート / 精算 / 店舗 / レポート / システム
+ * 見た目は共通の部品（admin-ui.tsx の AppNavBarView）。選択中は灰色の角丸、スマホは1行の横スライド（UI ルール v1.1 3章）。
+ * グループの中の画面でも親を選択中にする（match）。共通の CSS（AdminStyle）は、レイアウトで1回だけ描かれるこのメニューと一緒に描く（13章）。
  */
-import { Link, useLocation } from "react-router";
+import { useLocation } from "react-router";
+import { AdminStyle, AppNavBarView } from "./admin-ui";
 
 /** グループに属するパス（アクティブ判定用） */
 const GROUP_PATHS: Record<string, string[]> = {
@@ -58,45 +61,12 @@ export function AppNavBar() {
   const location = useLocation();
   const search = location.search || "";
 
+  const items = NAV_ITEMS.map((item) => ({ ...item, match: GROUP_PATHS[item.path] }));
+
   return (
-    <nav
-      data-app-nav="pos-receipt"
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "4px 16px",
-        alignItems: "center",
-        padding: "12px 20px",
-        marginBottom: "16px",
-        background: "#f6f6f7",
-        borderBottom: "1px solid #e1e3e5",
-        fontSize: "14px",
-        position: "relative",
-        zIndex: 100,
-        minHeight: "44px",
-        boxSizing: "border-box",
-      }}
-    >
-      {NAV_ITEMS.map(({ path, label }) => {
-        const to = path + search;
-        const groupPaths = GROUP_PATHS[path];
-        const isActive =
-          location.pathname === path ||
-          (groupPaths !== undefined && groupPaths.includes(location.pathname));
-        return (
-          <Link
-            key={path}
-            to={to}
-            style={{
-              color: isActive ? "#2c6ecb" : "#202223",
-              fontWeight: isActive ? 600 : 400,
-              textDecoration: "none",
-            }}
-          >
-            {label}
-          </Link>
-        );
-      })}
-    </nav>
+    <>
+      <AdminStyle />
+      <AppNavBarView items={items} pathname={location.pathname} search={search} />
+    </>
   );
 }

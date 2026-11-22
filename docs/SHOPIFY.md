@@ -72,6 +72,24 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 
 定義 ensure: OAuth / `POST /api/admin/settlement-metafields/ensure`
 
+### 6.3 顧客の LINE ユーザー ID（LIFF 会員証が読む。書かない）
+
+| 順 | 項目 | 書くアプリ |
+|----|------|------------|
+| 1 | `line_crm.line_user_id` | LINE CRM（Shop CRM for LINE）。定義も LINE CRM が作る |
+| 2 | `socialplus.line` | SocialPlus。LINE CRM も店の設定がオンなら互換のために書く |
+
+- 順番は環境変数 `MEMBER_CARD_LINE_ID_METAFIELDS`（例 `line_crm.line_user_id,socialplus.line`）で変えられる。空なら上の既定（DECISIONS の D14）。
+- 顧客の LINE ユーザー ID は、並べた順で最初に値が入っている項目の値。値は生の `U…` でも JSON（`{"uid":"U…"}` など）でも読む。
+- 見つけ方: タグ `line:<小文字の id>` で 1 回探す（ファストパス）→ 無ければ項目ごとに `metafields.<namespace>.<key>:*` で全件を見る。見つけた人にはタグを付ける。
+- 全件を見るのは、絞り込みが効く項目だけ（`app/lib/memberCardFieldFilter.server.ts`）。Shopify は、定義が無い・定義の絞り込み（`capabilities.adminFilterable`）がオフのメタフィールドで絞ると、2026-07 までの API では条件を黙って無視してすべての顧客を返し、2026-10 からはエラーを返す（Shopify changelog「Invalid metafield queries now return errors in the GraphQL Admin API」）。そのため `socialplus.line` 以外の項目は、先に `metafieldDefinitions(ownerType: CUSTOMER, namespace, key)` を読み、定義があって `adminFilterable.enabled = true` かつ `status = FILTERABLE` のときだけ全件を見る（店ごと・項目ごとに 5 分覚える。読めなかったときは覚えない）。定義がオンでも、値の空の顧客が返ってきたら絞り込みが効いていないと見て、その項目は打ち切る（5 分見ない）。
+- 定義が無い・定義の絞り込みがオフの項目は「確かめた。この項目は見ない」として次の項目へ進む（エラーではない）。今の本番（`line_crm.line_user_id` の定義が無い）は、この形で main と同じ答えになる。
+- その項目を見られなかったとき（定義を読めない・検索のエラー）は、**後の項目へ進まずに `API_ERROR` を返す**（タグも付けない）。後の項目で見つけた人を返すと、同じ LINE ID が 2 人に付いているとき（例: C1 は `line_crm.line_user_id`、C9 は `socialplus.line` だけ）に先の項目にいる本人（C1）ではなく別の人（C9）を返し、タグ `line:` を付けてファストパスで返し続けるため（PR #36 のレビューの P2-1）。検索のエラーは、本文の `errors` で返っても、client が投げても同じに扱う（`@shopify/shopify-api` の client は、GraphQL の `errors` があると `GraphqlQueryError` を投げ、5xx・通信の切断でも投げる）。
+- Throttled は、検索も定義の読み込みも `adminGraphqlWithRetry`（`app/lib/shopifyGraphqlThrottle.server.ts`）で待ってやり直す（2s → 4s → 8s → 16s、5 回まで）。一時の Throttled は「見られなかった」にならない。使い切ったら次の項目へ進まずに `THROTTLED` を返す。
+- 未確認: 同じ LINE ID が 2 人に付くことが実際にあるか（LINE CRM が連携するときに重複を防ぐか）。main の時代に `socialplus.line` で見つけた人にはもうタグが付いているので、2 人いる店では正常なときでもファストパスで後の人が返る。ありうるなら、ファストパスも含めて別に考える。
+- `socialplus.line` は前と同じ動き（定義を確かめずに `metafields.socialplus.line:*` で全件を見る。その検索がエラーで、ほかの項目でも見つからなければ `API_ERROR`。既定の順では最後なので main と同じ答え）。
+- 未確認: 開発ストアで `line_crm.line_user_id` の定義の絞り込みがオン／オフのときに、全件の検索が何件返すか（オフなら全顧客が返り、上の打ち切りが働くはず）。定義の絞り込みは LINE CRM が定義を作るときにオンにする（line-crm 側の PR）。
+
 ## 7. Printing（shopify.printing 一本化）
 
 ### 7.1 現状フロー
@@ -90,7 +108,8 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 
 ### 7.2 ギフトレシート
 
-- 要件・コードともに Shopify Gift Receipt 連携は **未実装**
+- 金額なしのギフトレシートは、本アプリの販売レシートの印字（`GET /api/print/sales/:orderId`）で出す。見出し・末尾文・注文番号の表示は管理画面「販売レイアウト編集」で変える（`docs/POS_PRINTING_OPERATOR.md`）
+- Shopify 標準の Gift Receipt との連携は **未実装**
 - 本アプリの「レシート」は精算レシート・点検・領収書・販売レシート帳票を指す
 
 ### 7.3 機種・未確認
