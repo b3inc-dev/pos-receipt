@@ -6,6 +6,11 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
+import {
+  RECEIPT_ORDER_FEE_LINES_GRAPHQL,
+  receiptAmountExcludingNonSalesFees,
+  type ReceiptOrderFeeLines,
+} from "../services/nonSalesFeeLines";
 
 const ORDER_QUERY = `#graphql
   query ReceiptOrder($id: ID!) {
@@ -15,6 +20,7 @@ const ORDER_QUERY = `#graphql
       createdAt
       totalPriceSet { shopMoney { amount currencyCode } }
       retailLocation { id name }
+${RECEIPT_ORDER_FEE_LINES_GRAPHQL}
     }
   }
 `;
@@ -49,7 +55,7 @@ export async function action({ request }: ActionFunctionArgs) {
           createdAt: string;
           totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
           retailLocation?: { id: string; name: string } | null;
-        } | null;
+        } & ReceiptOrderFeeLines | null;
       };
     };
 
@@ -57,6 +63,9 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!order) {
       return corsJson({ ok: false, error: "Order not found" }, { status: 404 });
     }
+
+    // 領収書の金額は売上に含めない送料等（`_lsi_fee="1"` かつ `_lsi_fee_sales="0"` の明細）を引く
+    const receiptAmount = receiptAmountExcludingNonSalesFees(order);
 
     // アクティブテンプレート取得
     const tmpl = await prisma.receiptTemplate.findFirst({
@@ -76,7 +85,7 @@ export async function action({ request }: ActionFunctionArgs) {
       orderName: order.name,
       recipientName: String(recipientName || ""),
       proviso: effectiveProviso,
-      amount: Number(order.totalPriceSet.shopMoney.amount),
+      amount: receiptAmount,
       currency: order.totalPriceSet.shopMoney.currencyCode,
       issueDate,
       locationName: order.retailLocation?.name ?? "",
