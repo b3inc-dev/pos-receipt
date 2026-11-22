@@ -67,10 +67,15 @@ export function withDayResult(run: BackfillRun, targetDate: string, status: Back
   };
 }
 
-/** 続きから再開: 失敗した日と途中の日をもう一度取り込む。済んだ・飛ばした日はそのまま。 */
-export function resumedRun(run: BackfillRun, now: string): BackfillRun {
+/**
+ * 続きから再開: 失敗した日と途中の日をもう一度取り込む。済んだ・飛ばした日はそのまま。
+ * runId は新しくする。前の鎖のジョブが pg-boss のやり直し待ちで残っていても、runId が違うので何もせずに止まり、
+ * 同じ取り込みの鎖が 2 本になって同じ日を 2 回集計することがない。
+ */
+export function resumedRun(run: BackfillRun, now: string, runId: string): BackfillRun {
   return {
     ...run,
+    runId,
     state: "running",
     days: run.days.map((d) => (d.status === "error" || d.status === "processing" ? { targetDate: d.targetDate, status: "pending" } : d)),
     updatedAt: now,

@@ -85,7 +85,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   } else if (intent === "resume") {
     if (!current || (current.state === "running" && !stale)) return { ok: true };
-    run = resumedRun(current, now);
+    run = resumedRun(current, now, crypto.randomUUID());
   } else {
     return { ok: false, error: "操作が分かりません。" };
   }

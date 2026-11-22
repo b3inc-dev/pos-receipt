@@ -47,8 +47,12 @@ describe("進み具合", () => {
     let run = withDayResult(base(), "2026-11-01", "done", undefined, "t1");
     run = withDayResult(run, "2026-11-02", "error", "x", "t1");
     run = withDayResult(run, "2026-11-03", "processing", undefined, "t1");
-    run = resumedRun({ ...run, state: "stopped" }, "t2");
+    const before = run.runId;
+    run = resumedRun({ ...run, state: "stopped" }, "t2", "run-2");
     assert.equal(run.state, "running");
+    // 再開は新しい runId にする（やり直し待ちの前の鎖のジョブが動いても、runId が違うので止まる）
+    assert.notEqual(run.runId, before);
+    assert.equal(run.runId, "run-2");
     assert.deepEqual(run.days.map((d) => d.status), ["done", "pending", "pending"]);
     assert.equal(run.days[1].reason, undefined);
   });
