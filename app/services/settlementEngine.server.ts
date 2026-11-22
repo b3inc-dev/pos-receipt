@@ -8,7 +8,7 @@
  * - 支払方法マスタ・ポイント/会員施策設定を参照
  */
 import prisma from "../db.server";
-import { resolvePaymentSectionLabels } from "../utils/paymentMethod.server";
+import { loadRefundMethodResolver, resolvePaymentSectionLabels } from "../utils/paymentMethod.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { resolvePointRedemptionRules } from "../utils/pointRedemptionRules";
 import {
@@ -45,6 +45,8 @@ import { extractLocationNumericId } from "./refundAggregationPure.server";
 import {
   applySpecialRefundEventsToTotals,
   assertNoPendingSpecialRefunds,
+  unmatchedRefundWarningMessage,
+  type UnmatchedRefundMethodWarning,
 } from "./specialRefundOverlayPure.server";
 import { fetchGiftCardRefundsForDay } from "./settlementGiftCardRefunds.server";
 import {
@@ -96,6 +98,11 @@ export interface SettlementPreviewDTO {
    * 通常時は入れない（重くなるため）。
    */
   debug?: SettlementPreviewDebugDTO;
+  /**
+   * 特殊返金のうち支払方法の行にきちんと載せられなかったもの（無いときは入れない）。
+   * マスタに無い返金方法は「未分類」の行に入っている。精算は確定できる（合計は正しい）。
+   */
+  unmatchedRefundMethods?: (UnmatchedRefundMethodWarning & { message: string })[];
   appliedSpecialRefundEvents: {
     id: string;
     eventType: string;
@@ -851,7 +858,11 @@ async function buildSettlementPreviewImpl(
     calcSettings.paymentTxCountMode,
   );
   const eventTotals = { total, refundTotal };
-  applySpecialRefundEventsToTotals(
+  const refundMethodResolver =
+    otherEvents.length > 0
+      ? await loadRefundMethodResolver(shopId, (m) => gasNormalizeGatewayLabel(m))
+      : undefined;
+  const unmatchedRefundMethods = applySpecialRefundEventsToTotals(
     paymentSections,
     otherEvents.map((e) => ({
       eventType: e.eventType,
@@ -860,9 +871,16 @@ async function buildSettlementPreviewImpl(
       actualRefundMethod: e.actualRefundMethod,
       adjustKind: e.adjustKind,
       shopifyRefundStatus: e.shopifyRefundStatus,
+      sourceOrderName: e.sourceOrderName,
     })),
     eventTotals,
+    refundMethodResolver,
   );
+  if (unmatchedRefundMethods.length > 0) {
+    console.warn(
+      `[settlement] special refund method unmatched count=${unmatchedRefundMethods.length} reasons=${unmatchedRefundMethods.map((w) => w.reason).join(",")} shop=${shopId} location=${locationId} date=${targetDate}`,
+    );
+  }
   total = eventTotals.total;
   refundTotal = eventTotals.refundTotal;
 
@@ -945,6 +963,15 @@ async function buildSettlementPreviewImpl(
     taxShopify,
     ...(legacyGiftOn ? { legacyGiftCardsAddedAmount, legacyGiftCardsAddedCount } : {}),
     ...(calcSettings.giftCardRefundEnabled ? { giftCardRefundAmount, giftCardRefundCount } : {}),
+    ...(unmatchedRefundMethods.length > 0
+      ? {
+          unmatchedRefundMethods: unmatchedRefundMethods.map((w) => ({
+            ...w,
+            amount: roundInt(w.amount),
+            message: unmatchedRefundWarningMessage(w),
+          })),
+        }
+      : {}),
   };
 }
 

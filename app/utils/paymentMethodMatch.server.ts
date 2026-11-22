@@ -83,3 +83,22 @@ export function hasVoucherLikeGatewayHeuristic(
   if (gateways.some((g) => /gift|voucher|商品券|ギフト/i.test(g))) return true;
   return gateways.some((g) => matchPaymentMethodMaster(g, masters)?.isVoucher === true);
 }
+
+/**
+ * 特殊返金の返金方法が支払方法マスタ（または既定の名前）で分かるか。
+ * 分からない手段は精算で「未分類」の行に載せる（specialRefundOverlayPure）。
+ * normalize には集計キーへの寄せ方（gasNormalizeGatewayLabel）を渡す。
+ */
+export function isKnownRefundMethod(
+  method: string,
+  masters: PaymentMethodMatchInput[],
+  normalize?: (method: string) => string,
+): boolean {
+  const key = String(method ?? "").trim();
+  if (!key) return false;
+  if (matchPaymentMethodMaster(key, masters)) return true;
+  if (key.toLowerCase() in PAYMENT_METHOD_FALLBACK_LABELS) return true;
+  const normalized = normalize ? String(normalize(key) ?? "").trim() : "";
+  if (normalized && normalized !== key && matchPaymentMethodMaster(normalized, masters)) return true;
+  return false;
+}

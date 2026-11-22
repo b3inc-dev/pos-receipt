@@ -24,6 +24,7 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
+import { hasUnclassifiedPaymentSection } from "../utils/settlementUnclassified";
 
 const PAGE_SIZE = 30;
 
@@ -96,6 +97,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         sourceOrderName: true,
         printedAt: true,
         createdAt: true,
+        paymentSectionsJson: true,
       },
     }),
   ]);
@@ -117,6 +119,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       printedAt: s.printedAt?.toISOString() ?? null,
       createdAt: s.createdAt.toISOString(),
       isInspection: s.periodLabel?.startsWith("点検_") ?? false,
+      hasUnclassifiedPayment: hasUnclassifiedPaymentSection(s.paymentSectionsJson),
     })),
     total,
     page,
@@ -245,7 +248,12 @@ export default function SettlementHistoryPage() {
                       {item.orderCount}件 / {item.refundCount}返 / {item.itemCount}点
                     </IndexTable.Cell>
                     <IndexTable.Cell>{printModeLabel(item.printMode)}</IndexTable.Cell>
-                    <IndexTable.Cell>{statusBadge(item.status, item.isInspection)}</IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <InlineStack gap="100" wrap={false}>
+                        {statusBadge(item.status, item.isInspection)}
+                        {item.hasUnclassifiedPayment && <Badge tone="warning">未分類あり</Badge>}
+                      </InlineStack>
+                    </IndexTable.Cell>
                     <IndexTable.Cell>
                       <Text as="span" variant="bodySm" tone="subdued">
                         {new Date(item.createdAt).toLocaleString("ja-JP", {
