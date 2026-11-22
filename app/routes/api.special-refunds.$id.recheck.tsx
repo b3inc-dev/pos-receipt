@@ -26,6 +26,7 @@ import {
   LEGACY_RECHECK_NO_REFUND_NOTE,
   type OrderRefundForRecheck,
 } from "../services/specialRefundLegacyRecheck.server";
+import { normalizeLocationGid } from "../utils/locationGid";
 
 const ORDER_REFUNDS_QUERY = `#graphql
   query OrderRefundsForSpecialRefundRecheck($id: ID!) {
@@ -49,15 +50,6 @@ function orderGidOf(sourceOrderId: string): string {
   const s = String(sourceOrderId).trim();
   if (s.startsWith("gid://")) return s;
   return `gid://shopify/Order/${s.replace(/\D/g, "")}`;
-}
-
-function normalizeLocationIdToGid(locationId: string): string | null {
-  const s = String(locationId || "").trim();
-  if (!s) return null;
-  if (s.startsWith("gid://shopify/Location/")) return s;
-  if (/^\d+$/.test(s)) return `gid://shopify/Location/${s}`;
-  const m = s.match(/\/(\d+)$/);
-  return m?.[1] ? `gid://shopify/Location/${m[1]}` : null;
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -191,7 +183,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     // POST /api/special-refunds で pending 以外になったときと同じあとの処理
     try {
-      const processingGid = normalizeLocationIdToGid(event.locationId);
+      const processingGid = normalizeLocationGid(event.locationId);
       const orderGid = orderGidOf(event.sourceOrderId);
       if (processingGid) {
         await setOrderRefundAggregationLocationGid(admin, orderGid, processingGid);
@@ -201,7 +193,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     } catch {
       // メタフィールド同期失敗でも確かめ直し自体は成功させる
     }
-    const locationGid = normalizeLocationIdToGid(event.locationId);
+    const locationGid = normalizeLocationGid(event.locationId);
     if (locationGid) {
       try {
         const timezone = await getShopTimezoneForDaily(admin, shop.id);
