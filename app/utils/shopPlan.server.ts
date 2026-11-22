@@ -204,6 +204,14 @@ function inhouseState(shop: ShopRecordForPlan): ShopPlanState {
 }
 
 /**
+ * PLAN_TEST_DEV_STORE_AS_PUBLIC=1 のとき、開発ストアを全機能の例外にしない（App Pricing の確かめ用・既定オフ）。
+ * 自社用（inhouse）には効かない（getShopPlan の先頭で返る）。
+ */
+export function isDevStoreTreatedAsPublic(env: Record<string, string | undefined> = process.env): boolean {
+  return String(env.PLAN_TEST_DEV_STORE_AS_PUBLIC ?? "").trim() === "1";
+}
+
+/**
  * 店のプランを Shopify の契約から読む。投げない（読めなければ DB の値のまま）。
  * 自社用は Shopify に聞かない（Ciara の速さと請求を変えない）。
  */
@@ -308,9 +316,12 @@ export async function getShopPlan(
     }
   }
 
+  // 開発ストアは今まで通り全機能。ただし PLAN_TEST_DEV_STORE_AS_PUBLIC=1（公開用の Render だけ・既定オフ）のときは、
+  // 開発ストアもふつうの店と同じく契約からプランを決める（Partner Dashboard の App Pricing を開発ストアで確かめるため。
+  // 開発ストアの請求は Shopify のテスト扱い。docs/PARTNER_DASHBOARD_PRICING_SETUP.md）
   const fullAccessReason: ShopPlanState["fullAccessReason"] = customStore
     ? "custom_store"
-    : isDevelopmentStore
+    : isDevelopmentStore && !isDevStoreTreatedAsPublic(env)
       ? "development_store"
       : null;
   const fullAccess = fullAccessReason !== null;

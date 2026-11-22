@@ -9,10 +9,10 @@ const routes = readdirSync("app/routes")
   .filter((name) => /^app\..*\.tsx$/.test(name))
   .map((name) => ({ name, source: readFileSync(`app/routes/${name}`, "utf8") }));
 
-// 料金（#41）・お金の直し（#11・#13・#16）の PR が直している画面。その PR が main に入ったら直して、ここから外す（docs/UI_RULES.md の表）
+// お金の直し（#11・#13・#16）の PR が直している画面。その PR が main に入ったら直して、ここから外す（docs/UI_RULES.md の表）
 const OPEN_PR_SCREENS = new Set([
   "app._index.tsx", "app.budget-management.tsx", "app.budget-template-csv.tsx", "app.channel-budget-management.tsx",
-  "app.channel-budget-template-csv.tsx", "app.diagnostics.tsx", "app.plan.callback.tsx", "app.plan.tsx",
+  "app.channel-budget-template-csv.tsx", "app.diagnostics.tsx",
   "app.sales-summary-settings.tsx", "app.sales-summary.tsx", "app.settings.tsx", "app.print-settings.tsx",
   "app.receipt-print-layout.tsx", "app.settlement-print-layout.tsx", "app.settlement-settings.tsx",
 ]);
@@ -71,4 +71,13 @@ test("自前の日付欄は共通の CSS（Admin-input）を付ける（6章・1
       assert.match(match[0], /className="[^"]*Admin-input/, `${name} の日付欄に Admin-input がない`);
     }
   }
+});
+
+test("料金プランは形3（カード1列）で、主ボタン1つ・お知らせ枠1つまで・状態はバッジ（2章・4章・5章）", () => {
+  const source = readFileSync("app/routes/app.plan.tsx", "utf8");
+  assert.equal(/Layout\.AnnotatedSection/.test(source), false, "形1（左に見出し）になっている");
+  assert.equal((source.match(/variant="primary"/g) ?? []).length, 1, "主ボタンが1つでない");
+  assert.equal((source.match(/<Banner\b/g) ?? []).length, 1, "お知らせ枠が2つ以上");
+  assert.equal(/sub\.status/.test(source), false, "契約の状態を英字のまま出している");
+  assert.match(source, /<Badge tone=\{planBadge\.tone\}>/);
 });

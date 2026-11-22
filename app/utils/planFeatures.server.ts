@@ -5,7 +5,7 @@
  * 以下は常に全機能を解放する（POS Stock と同様）:
  * - APP_DISTRIBUTION=inhouse（自社用）
  * - CUSTOM_APP_STORE_IDS に含まれるショップドメイン（カスタム／開発用）
- * - Shopify の開発ストア（shop.plan.partnerDevelopment）
+ * - Shopify の開発ストア（shop.plan.partnerDevelopment）。ただし PLAN_TEST_DEV_STORE_AS_PUBLIC=1 のときは除く（shopPlan.server.ts）
  */
 
 export type PlanCode = "lite" | "pro" | "unlimited" | "standard"; // standard は後方互換のため残す（Lite 相当）
@@ -166,7 +166,7 @@ export const EXTRA_LOCATION_PRICE_USD = 20;
 
 /**
  * 公開アプリの App Handle（Shopify の料金プラン画面の URL 用）。
- * SHOPIFY_APP_HANDLE を優先し、無ければ "pos-receipt"（Partner Dashboard の handle と同じかは未確認。違えば env で入れる）。
+ * SHOPIFY_APP_HANDLE を優先し、無ければ "pos-receipt"（2026-11-22 T が Partner Dashboard の handle は pos-receipt と確認）。
  */
 export function getPublicAppHandle(env: Record<string, string | undefined> = process.env): string {
   return String(env.SHOPIFY_APP_HANDLE ?? "").trim() || "pos-receipt";
