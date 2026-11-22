@@ -40,7 +40,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 決済名称の二重系（軽減） | 集計バケットキーは依然 `gasNormalizeGatewayLabel`。表示は `resolvePaymentSectionLabel` で raw/formatted/displayLabel を単一マッチ（日本語キー含む）。集計キー自体のハードコードは残存 |
+| 決済名称の二重系（軽減・選べる） | 初めの値の集計バケットキーは依然 `gasNormalizeGatewayLabel`（今の精算を変えないため）。表示は `resolvePaymentSectionLabel` で raw/formatted/displayLabel を単一マッチ（日本語キー含む）。「精算の数え方」の「支払方法マスタで分ける」を選んだ店は、集計キーをマスタの表示名にする（`paymentKeyMasterPure.server.ts`）。決まった分け方では `paidy` が「id」を含んで電子マネーになるなど、文字の含み方での誤った分け方が残る |
 | ロケーション ID 正規化の重複 | `extractLocationNumericId` / `normalizeLocationGid` が複数ファイルに存在（返金照合は `refundAggregationPure` の数値 ID 比較に寄せた） |
 | 返金オーバーレイ死コード | `getRefundOverlayForDay` / `computeRefundsOnlyForDay` は定義・export されるが、プレビュー本体からの適用は無く、他ファイルからの import も見当たらない |
 | 表示と集計の混在（軽減） | payment section の `gateway` は集計キーのまま。`label` はマスタ解決。マスタ未登録の日本語キーはキー＝表示のまま |

@@ -43,6 +43,8 @@ import {
 } from "../utils/settlementCalcSettings";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
+import { loadPaymentKeyMasters } from "../utils/paymentMethod.server";
+import { comparePaymentKeysForMasters } from "../services/paymentKeyMasterPure.server";
 
 function locationNumericId(gid: string): string {
   const m = String(gid).match(/(\d+)$/);
@@ -68,13 +70,22 @@ async function loadLocations(shopId: string): Promise<{ id: string; name: string
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
-  const [saved, legacyGiftOn, locations] = await Promise.all([
+  const [saved, legacyGiftOn, locations, masters] = await Promise.all([
     getAppSetting<unknown>(shop.id, SETTLEMENT_CALC_SETTINGS_KEY),
     loadLegacyGiftOn(shop.id),
     loadLocations(shop.id),
+    loadPaymentKeyMasters(shop.id),
   ]);
+  // 「支払方法の分け方」を切り替えると行の名前が変わるマスタ（切り替える前に見る）
+  const paymentKeyChanges = comparePaymentKeysForMasters(masters).filter((r) => r.changes);
   // 精算で今使っている値（壊れた値は初めの値）をそのまま見せる
-  return { settings: resolveSettlementCalcSettings(saved), legacyGiftOn, locations };
+  return {
+    settings: resolveSettlementCalcSettings(saved),
+    legacyGiftOn,
+    locations,
+    paymentKeyChanges,
+    masterCount: masters.length,
+  };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -102,6 +113,7 @@ export async function action({ request }: ActionFunctionArgs) {
       refundRemapRules: rules,
       paymentTxCountMode: formData.get("paymentTxCountMode"),
       clampTotalAtZero: formData.get("clampTotalAtZero") !== "false",
+      paymentKeySource: formData.get("paymentKeySource") ?? undefined,
     },
     {
       legacyGiftCardAggregationEnabled: legacyGiftOn,
@@ -116,7 +128,8 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function SettlementCalcSettingsPage() {
-  const { settings: initial, legacyGiftOn, locations } = useLoaderData<typeof loader>();
+  const { settings: initial, legacyGiftOn, locations, paymentKeyChanges, masterCount } =
+    useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
@@ -143,6 +156,7 @@ export default function SettlementCalcSettingsPage() {
     fd.set("refundRemapRules", JSON.stringify(rules));
     fd.set("paymentTxCountMode", form.paymentTxCountMode);
     fd.set("clampTotalAtZero", form.clampTotalAtZero ? "true" : "false");
+    fd.set("paymentKeySource", form.paymentKeySource);
     submit(fd, { method: "post" });
   };
 
@@ -196,6 +210,64 @@ export default function SettlementCalcSettingsPage() {
                   selected={[form.saleDateBasis]}
                   onChange={(v) => set("saleDateBasis", (v[0] as SettlementCalcSettings["saleDateBasis"]) ?? "transaction")}
                 />
+              </Card>
+            </Layout.AnnotatedSection>
+
+            <Layout.AnnotatedSection
+              title="支払方法の分け方"
+              description="精算と売上サマリーで、取引をどの支払方法の行に入れるかの決め方です。"
+            >
+              <Card>
+                <BlockStack gap="300">
+                  <ChoiceList
+                    title="支払方法の分け方"
+                    titleHidden
+                    choices={[
+                      {
+                        label: "決まった分け方",
+                        value: "builtin",
+                        helpText: "決済の名前から、現金・クレジットカード・電子マネー・交通系 IC・商品券などに分けます。",
+                      },
+                      {
+                        label: "支払方法マスタで分ける",
+                        value: "master",
+                        helpText:
+                          "支払方法マスタの上から順に見て、当てはまった支払方法の表示名の行に入れます。どれにも当てはまらない取引は決まった分け方の行に入れます。",
+                      },
+                    ]}
+                    selected={[form.paymentKeySource]}
+                    onChange={(v) =>
+                      set("paymentKeySource", (v[0] as SettlementCalcSettings["paymentKeySource"]) ?? "builtin")
+                    }
+                  />
+                  {form.paymentKeySource === "master" && (
+                    <BlockStack gap="200">
+                      {masterCount === 0 ? (
+                        <Text as="p" variant="bodySm" tone="caution">
+                          支払方法マスタがまだありません。すべての取引が決まった分け方の行に入ります。
+                        </Text>
+                      ) : paymentKeyChanges.length === 0 ? (
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          登録した支払方法では、行の名前は今と変わりません。
+                        </Text>
+                      ) : (
+                        <>
+                          <Text as="p" variant="bodySm" tone="caution">
+                            保存すると、次の支払方法の行の名前が変わります。確定済みの精算は変わりません。
+                          </Text>
+                          {paymentKeyChanges.map((r) => (
+                            <Text as="p" variant="bodySm" key={r.rawGatewayPattern}>
+                              {r.rawGatewayPattern}: {r.builtinKey} → {r.masterKey}
+                            </Text>
+                          ))}
+                        </>
+                      )}
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        現金の上限（おつりを売上に入れない）は種類が「現金」のマスタに、商品券のおつりの観測は「商品券として扱う」マスタに効きます。
+                      </Text>
+                    </BlockStack>
+                  )}
+                </BlockStack>
               </Card>
             </Layout.AnnotatedSection>
 

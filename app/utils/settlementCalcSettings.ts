@@ -47,6 +47,12 @@ export type SettlementCalcSettings = {
   paymentTxCountMode: "sales" | "sales_minus_refunds";
   /** 合計がマイナスになる日（返金が売上より多い日）は 0 にする（今の動き） */
   clampTotalAtZero: boolean;
+  /**
+   * 支払方法の分け方（精算の支払方法の行の名前の決め方）。
+   * - builtin: 決まった分け方（gateway の名前から現金・クレジットカード・商品券などに分ける。今の動き）
+   * - master: 支払方法マスタで分ける（当たったマスタの表示名を行の名前にする。当たらない取引は決まった分け方）
+   */
+  paymentKeySource: "builtin" | "master";
 };
 
 export const DEFAULT_SETTLEMENT_CALC_SETTINGS: SettlementCalcSettings = {
@@ -57,6 +63,7 @@ export const DEFAULT_SETTLEMENT_CALC_SETTINGS: SettlementCalcSettings = {
   refundRemapRules: [],
   paymentTxCountMode: "sales",
   clampTotalAtZero: true,
+  paymentKeySource: "builtin",
 };
 
 export const ITEM_COUNT_EXCLUDED_SKUS_MAX = 200;
@@ -120,6 +127,7 @@ export function resolveSettlementCalcSettings(saved: unknown): SettlementCalcSet
     paymentTxCountMode:
       s.paymentTxCountMode === "sales_minus_refunds" ? "sales_minus_refunds" : d.paymentTxCountMode,
     clampTotalAtZero: s.clampTotalAtZero === false ? false : d.clampTotalAtZero,
+    paymentKeySource: s.paymentKeySource === "master" ? "master" : d.paymentKeySource,
   };
 }
 
@@ -131,6 +139,8 @@ export type SettlementCalcSettingsInput = {
   refundRemapRules: unknown;
   paymentTxCountMode: unknown;
   clampTotalAtZero: unknown;
+  /** 古い画面から来たときは無い。無ければ初めの値 */
+  paymentKeySource?: unknown;
 };
 
 /**
@@ -146,6 +156,10 @@ export function validateSettlementCalcSettings(
   }
   if (input.paymentTxCountMode !== "sales" && input.paymentTxCountMode !== "sales_minus_refunds") {
     return { ok: false, error: "「支払方法ごとの取引件数」を選んでください。" };
+  }
+  const paymentKeySource = input.paymentKeySource ?? DEFAULT_SETTLEMENT_CALC_SETTINGS.paymentKeySource;
+  if (paymentKeySource !== "builtin" && paymentKeySource !== "master") {
+    return { ok: false, error: "「支払方法の分け方」を選んでください。" };
   }
   const giftCardRefundEnabled = input.giftCardRefundEnabled === true;
   const giftCardRefundLabel = str(input.giftCardRefundLabel);
@@ -208,13 +222,14 @@ export function validateSettlementCalcSettings(
       refundRemapRules: rules,
       paymentTxCountMode: input.paymentTxCountMode,
       clampTotalAtZero: input.clampTotalAtZero !== false,
+      paymentKeySource,
     },
   };
 }
 
 /**
  * 返金の支払方法の名前を、付け替えの決まりで変える。当てはまらなければそのまま。
- * @param label 精算の支払方法の名前（gasNormalizeGatewayLabel の結果）
+ * @param label 精算の支払方法の名前（「支払方法の分け方」で決めた集計キー。初めは gasNormalizeGatewayLabel の結果）
  * @param raw 元の gateway・formattedGateway（名前に出ない文字でも当てられるように）
  */
 export function remapRefundLabel(

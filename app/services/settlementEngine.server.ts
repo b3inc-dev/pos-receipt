@@ -8,7 +8,12 @@
  * - 支払方法マスタ・ポイント/会員施策設定を参照
  */
 import prisma from "../db.server";
-import { loadRefundMethodResolver, resolvePaymentSectionLabels } from "../utils/paymentMethod.server";
+import {
+  loadPaymentKeyMasters,
+  loadRefundMethodResolver,
+  resolvePaymentSectionLabels,
+} from "../utils/paymentMethod.server";
+import { paymentKeyResolverFor } from "./paymentKeyMasterPure.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { resolvePointRedemptionRules } from "../utils/pointRedemptionRules";
 import {
@@ -36,7 +41,6 @@ import {
 import {
   aggregateGasStyleForOrders,
   ensurePayBucket,
-  gasNormalizeGatewayLabel,
   mergeCrossLocationRefundOrders,
   totalFromPayBuckets,
   type GasAggregateAttributionOpts,
@@ -557,12 +561,14 @@ async function payBucketsToPaymentSections(
   pay: Record<string, { sale: number; refund: number; saleTx: number; refundTx: number }>,
   shopId: string,
   txCountMode: SettlementCalcSettings["paymentTxCountMode"] = "sales",
+  paymentKeySource: SettlementCalcSettings["paymentKeySource"] = "builtin",
 ): Promise<PaymentSectionDTO[]> {
   const entries = Object.entries(pay);
   entries.sort((a, b) => a[0].localeCompare(b[0], "ja"));
   const labels = await resolvePaymentSectionLabels(
     shopId,
     entries.map(([key]) => key),
+    paymentKeySource === "master" ? { preferExactDisplayLabel: true } : undefined,
   );
   const out: PaymentSectionDTO[] = [];
   for (const [key, p] of entries) {
@@ -720,11 +726,18 @@ async function buildSettlementPreviewImpl(
     await getAppSetting<unknown>(shopId, SETTLEMENT_CALC_SETTINGS_KEY),
   );
 
+  // 支払方法の分け方。初めは決まった分け方（今の動き）。マスタで分ける店だけマスタを読む
+  const paymentKey = paymentKeyResolverFor(
+    calcSettings.paymentKeySource,
+    calcSettings.paymentKeySource === "master" ? await loadPaymentKeyMasters(shopId) : [],
+  );
+
   const gas = aggregateGasStyleForOrders(ordersUnion, inDay, attributionOpts, pointRules, {
     saleDateBasis: calcSettings.saleDateBasis,
     itemCountExcludedSkuKeys: new Set(calcSettings.itemCountExcludedSkus),
     refundRemapRules: calcSettings.refundRemapRules,
     locIdRaw,
+    paymentKey,
   });
 
   const settlementSettings = await getAppSetting<Partial<SettlementSettings>>(shopId, SETTLEMENT_SETTINGS_KEY);
@@ -747,7 +760,7 @@ async function buildSettlementPreviewImpl(
     legacyGiftCardsAddedAmount = leg.amount;
     legacyGiftCardsAddedCount = leg.count;
     if (leg.amount > 0) {
-      const bucket = gasNormalizeGatewayLabel("gift_card", null);
+      const bucket = paymentKey("gift_card", null).key;
       ensurePayBucket(gas.pay, bucket);
       gas.pay[bucket].sale += leg.amount;
       gas.pay[bucket].saleTx += leg.count;
@@ -856,11 +869,12 @@ async function buildSettlementPreviewImpl(
     gas.pay,
     shopId,
     calcSettings.paymentTxCountMode,
+    calcSettings.paymentKeySource,
   );
   const eventTotals = { total, refundTotal };
   const refundMethodResolver =
     otherEvents.length > 0
-      ? await loadRefundMethodResolver(shopId, (m) => gasNormalizeGatewayLabel(m))
+      ? await loadRefundMethodResolver(shopId, (m) => paymentKey(m, null).key)
       : undefined;
   const unmatchedRefundMethods = applySpecialRefundEventsToTotals(
     paymentSections,
@@ -874,7 +888,13 @@ async function buildSettlementPreviewImpl(
       sourceOrderName: e.sourceOrderName,
     })),
     eventTotals,
-    refundMethodResolver,
+    refundMethodResolver && {
+      ...refundMethodResolver,
+      // マスタで分ける店: 特殊返金の手段（マスタの gateway の名前）を、精算の行の名前に直して探す
+      ...(calcSettings.paymentKeySource === "master"
+        ? { resolveKey: (m: string) => paymentKey(m, null).key }
+        : {}),
+    },
   );
   if (unmatchedRefundMethods.length > 0) {
     console.warn(

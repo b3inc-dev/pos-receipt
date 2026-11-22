@@ -50,12 +50,12 @@
 
 1. 当日対象 TX: `tx.createdAt` が当日、または当日 refund オブジェクトにリンクする REFUND
 2. `SALE` / `CAPTURE` → sale、`REFUND` → refund（計上ロケーション一致時のみ）
-3. 集計バケットキーは `gasNormalizeGatewayLabel` で日本語ラベル化（現金・クレジット・QR・交通系 IC・商品券系・PayPal・それ以外）
+3. 集計バケットキーは「精算の数え方」の「支払方法の分け方」で決める。初めの値は `gasNormalizeGatewayLabel` で日本語ラベル化（現金・クレジット・QR・交通系 IC・商品券系・PayPal・それ以外）。「支払方法マスタで分ける」店は、当たったマスタの表示名がキー（当たらない取引は `gasNormalizeGatewayLabel`。`docs/SETTLEMENT_CALC_SETTINGS.md`）
 4. 表示ラベルは `resolvePaymentSectionLabel`（`paymentMethodMatch.server.ts`）で `PaymentMethodMaster` を参照。raw / formatted / displayLabel のいずれかに一致すれば `displayLabel` に差し替え（英数字キーに限らない）
-5. 現金は **cash cap**: `effectiveCashSale = min(生現金, max(0, 注文合計 − 非現金))`
+5. 現金は **cash cap**: `effectiveCashSale = min(生現金, max(0, 注文合計 − 非現金))`。現金の行は、決まった分け方では「現金」、マスタで分ける店では種類が現金のマスタの行
 6. REFUND TX が無く refund オブジェクト金額のみある場合 → バケット `"未分類"` に加算
 
-カスタム決済: マスタ未一致時は `formattedGateway` または raw gateway、それも無ければ未分類ラベル。集計キー自体のハードコード日本語は残る（表示のみマスタ単一化）。
+カスタム決済: マスタ未一致時は `formattedGateway` または raw gateway、それも無ければ未分類ラベル。初めの値（決まった分け方）では集計キー自体のハードコード日本語は残る（表示のみマスタ単一化）。「支払方法マスタで分ける」を選んだ店は、集計キーも表示もマスタの表示名に一本化される。
 
 ---
 

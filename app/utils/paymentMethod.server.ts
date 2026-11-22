@@ -11,6 +11,7 @@ import {
   resolvePaymentSectionLabel,
   type PaymentMethodMatchInput,
 } from "./paymentMethodMatch.server";
+import type { PaymentKeyMaster } from "../services/paymentKeyMasterPure.server";
 
 async function loadEnabledMasters(shopId: string): Promise<PaymentMethodMatchInput[]> {
   return prisma.paymentMethodMaster.findMany({
@@ -46,13 +47,33 @@ export async function getPaymentMethodDisplayLabel(
 export async function resolvePaymentSectionLabels(
   shopId: string,
   bucketKeys: string[],
+  opts?: { preferExactDisplayLabel?: boolean },
 ): Promise<Map<string, string>> {
   const masters = await loadEnabledMasters(shopId);
   const out = new Map<string, string>();
   for (const key of bucketKeys) {
-    out.set(key, resolvePaymentSectionLabel(key, masters));
+    out.set(key, resolvePaymentSectionLabel(key, masters, opts));
   }
   return out;
+}
+
+/**
+ * 「支払方法マスタで分ける」店の集計キーに使うマスタ（有効なものを sortOrder の順）。
+ */
+export async function loadPaymentKeyMasters(shopId: string): Promise<PaymentKeyMaster[]> {
+  return prisma.paymentMethodMaster.findMany({
+    where: { shopId, enabled: true },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    select: {
+      rawGatewayPattern: true,
+      formattedGatewayPattern: true,
+      matchType: true,
+      displayLabel: true,
+      category: true,
+      isVoucher: true,
+      enabled: true,
+    },
+  });
 }
 
 /**
