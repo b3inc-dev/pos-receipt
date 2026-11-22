@@ -32,6 +32,7 @@
   - 門番は `checkShopPlanAccess(admin, shop, feature)` に一本化（今までの `getFullAccess` ＋ `checkPlanAccess(shop.planCode, …)`）。契約を読めた結果は店ごとに 60 秒覚える（ホーム・料金プラン画面などで読み直すと、その結果に置きかわる。プランを変えて戻った店を古いプランで断らない）。
   - 自社用（`APP_DISTRIBUTION=inhouse`・Ciara）は今まで通り: Shopify に聞かず全機能・請求なし。`CUSTOM_APP_STORE_IDS`・開発ストアも今まで通り全機能（POS Stock は開発ストアもプランを選ぶ形にしたが、ここでは変えていない）。
 - **料金（未確定）**: Lite $100/月（3 ロケーションまで）・Pro $200/月（10 ロケーションまで）・超えた 1 か所 +$20/月。**T はまだ金額を確定していない**。画面の金額は目安で、請求は Partner Dashboard の App Pricing の設定で決まる。
+- **前の穴で Pro のままの店**: 読むだけの一覧 `npm run report:plan-mismatch`（`docs/PLAN_MISMATCH_REPORT.md`、レビュー P2-5）。扱いは T が決める（未決定）。
 - **残り**: 未契約の店を止めるか（POS Stock #78 の形）は決めていない。Admin API に App Pricing の契約が出るかは未確認（出なければ Partner API のスイッチで読む）。
 
 ### D16. 超えたロケーション（+$20）は App Events API で 1 請求期間に 1 回報告する（既定オフ・2026-11-22）
