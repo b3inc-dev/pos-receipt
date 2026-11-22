@@ -1583,31 +1583,53 @@ Fields:
 
 ## 25. バッチ / ジョブ仕様
 
-### 25.1 Daily Sales Cache Refresh Job
-Frequency:
-- 5分ごと（営業時間内）
+> **2026-11-22 現状（コードで確認）**: 当初案（25.1〜25.4 の定期ジョブ）は実装していない。cron・Render の Cron Job は無く、売上サマリーのキャッシュは **orders/updated の Webhook と pg-boss のキュー** で更新している。当初案は 25.6 に残す。
 
-Responsibility:
-- 当日分サマリー再集計
-- `sales_summary_cache_daily` 更新
+### 25.1 キャッシュ更新の流れ（現行）
 
-### 25.2 Daily Archive Job
-Frequency:
-- 毎日深夜
+1. Shopify が `orders/updated` を `/webhooks/orders/updated` に送る（`shopify.app.toml`・`shopify.app.public.toml` の両方に登録）。`app/routes/webhooks.orders.updated.tsx` が HMAC を確かめる。
+2. キューが使えるときは pg-boss のキュー `pos-receipt-sales-summary-orders-updated` にジョブを積み、すぐ 200 を返す（`app/services/salesSummaryWebhookQueue.server.ts`）。pg-boss は同じ PostgreSQL（`DATABASE_URL`）を使い、Redis は要らない。ワーカーはアプリのプロセスの中で起動する（`app/shopify.server.ts`）。
+3. ワーカー（または同期の処理）が `executeSalesSummaryOrderWebhookJob`（`app/services/salesSummaryWebhookRefresh.server.ts`）を実行する。
+   - 注文の `created_at`・`updated_at`・`processed_at` とフルフィルメントの `created_at`・`updated_at` から、店舗のタイムゾーンで対象の暦日を出す（今日から既定 3 日前まで・最大 30 日。範囲内の日が無ければ今日だけ）。返金の日時そのものは見ていないが、返金すると注文の `updated_at` が変わるので、返金した日は対象に入る。
+   - 売上サマリー設定が ON のショップだけ、売上サマリーが有効な店舗（`Location.salesSummaryEnabled`）と有効な販売チャネルごとに、対象日の日次キャッシュ（`SalesSummaryCacheDaily`・販売チャネル別 `SalesChannelCacheDaily`）を計算し直す。数字は精算プレビュー（`buildSettlementPreview`）と同じ集計を使う。
+   - そのあと月次ロールアップ（`SalesSummaryCachePeriod`・`SalesChannelCachePeriod`）を日次キャッシュから作り直す（`app/services/salesSummaryPeriodRollup.server.ts`）。
+4. ジョブが失敗したら pg-boss が最大 5 回、間をあけてやり直す。
 
-Responsibility:
-- 前日分を確定値として保存
+### 25.2 画面で読むときの動き
 
-### 25.3 Monthly Cache Job
-Frequency:
-- 毎日深夜
+- **今日**: 毎回その場で計算し、キャッシュに書く。
+- **過去日**: キャッシュがあればそれを読み、無ければ計算してキャッシュに書く（`app/services/salesSummaryDailyPayload.server.ts`）。`?recompute=1` で計算し直せる。
+- **期間・月**: 条件が合えば月次ロールアップを読む（高速パス）。合わなければ日次キャッシュから集計する。
 
-Responsibility:
-- 月次進捗キャッシュ更新
+### 25.3 作り直し（当初案の Rebuild Job に当たるもの）
 
-### 25.4 Optional Rebuild Job
-Responsibility:
-- 期間指定でキャッシュ再構築
+- 管理画面 `/app/backfill`（API `POST /api/admin/backfill`）で、店舗と日付を指定して日次キャッシュを取り込み直す。既定はキャッシュ済みの日を飛ばし、指定すれば強制で計算し直す。
+
+### 25.4 環境変数
+
+| 変数 | 意味 |
+|------|------|
+| `SALES_SUMMARY_WEBHOOK_QUEUE` | `0` か `false` でキューを使わず、Webhook の中で同期で計算する |
+| `SALES_SUMMARY_WEBHOOK_DEBOUNCE_SECONDS` | 1 以上で、同じ店の続けて来た Webhook をまとめる |
+| `SALES_SUMMARY_WEBHOOK_LOOKBACK_DAYS` | 対象日をさかのぼる日数（既定 3・1〜30） |
+| `SALES_SUMMARY_WEBHOOK_REFRESH_DISABLED` | `1` か `true` でキャッシュ更新をしない |
+
+本番の Render でそれぞれ何が設定されているかは未確認（`render.yaml` には書かれていない）。
+
+### 25.5 当初案との差・気づき
+
+- 「前日分を確定値として保存する」深夜のジョブは無い。過去日のキャッシュも、その日に関わる注文の Webhook が来れば計算し直される。
+- 営業時間中の 5 分ごとの再集計は無い。代わりに注文が更新されるたびに Webhook で更新し、今日の分は画面を開くたびに計算する。
+- 気づき（未確認・本書では仕様にしない）: Webhook の中で同期で計算するときは返金の計上ロケーションのメタフィールドも同期する（`syncRefundAggregationFromWebhookPayload`）が、キューに積んだときのワーカーはこれを呼んでいない。意図どおりかは未確認。返金の計上ロケーションの直しは PR #11 で扱っている。
+
+### 25.6 当初案（参考・未実装）
+
+| ジョブ | 頻度 | 役割 |
+|------|------|------|
+| Daily Sales Cache Refresh | 5 分ごと（営業時間内） | 当日分サマリー再集計・`sales_summary_cache_daily` 更新 |
+| Daily Archive | 毎日深夜 | 前日分を確定値として保存 |
+| Monthly Cache | 毎日深夜 | 月次進捗キャッシュ更新 |
+| Optional Rebuild | 随時 | 期間指定でキャッシュ再構築 |
 
 ---
 
@@ -1768,6 +1790,8 @@ Responsibility:
 
 本書の実装指示に沿って作業した結果を記録する。日付は完了した時点の目安。
 
+> **2026-11-22 更新**: 30.1・30.2 は 2026-03 の初期実装の記録としてそのまま残す。今の機能ごとの状態は `docs/PROGRESS_SUMMARY.md`、業務ルールは `docs/BUSINESS_RULES.md` を正本とする。30.3・30.4 は今のコードに合わせて書き直し、30.5 に初期実装のあと main に入った主なものを足した。
+
 ### 30.1 完了した作業
 
 | 項目 | 内容 |
@@ -1801,16 +1825,33 @@ Responsibility:
 - **設定**: `shopify.app.toml`（自社用）, `shopify.app.public.toml`（公開用）, `extensions/pos-smart-grid/shopify.extension.toml`
 - **ドキュメント**: `docs/PROJECT_STRUCTURE_PROPOSAL.md`, `docs/DB_MIGRATION.md`, `docs/PUBLIC_INHOUSE_APP_DEFINITION.md`, `docs/CLI_SETUP_AND_USAGE.md`, `docs/RENDER_SETUP.md`, `docs/NEXT_STEPS_AFTER_RENDER.md` 他
 
-### 30.3 既知の制約・注意事項
+### 30.3 既知の制約・注意事項（2026-11-22 時点）
 
-- **UID 未設定のタイル**: 領収書・売上サマリーは `shopify.extension.toml` にエントリ追加済みだが `uid` 未設定。`shopify app generate extension --type ui_extension --name "..."` を実行して UID を取得・追加すること。
+- **タイルの UID**: 特殊返金・商品券釣銭調整・精算・領収書・売上サマリーは `extensions/pos-smart-grid/shopify.extension.toml` に uid がある。販売レシート（`pos-sales-receipt`）は uid 行が無く、deploy 時に CLI が付ける想定（toml のコメント）。本番に出ているかは未確認。
 - **`.shopify/` キャッシュ**: `shopify app dev` でビルドエラーが出た場合は `.shopify/dev-bundle/` と `extensions/pos-smart-grid/dist/` を削除してから再起動する。
-- **売上サマリーのタイムゾーン**: Shopify注文クエリは UTC 基準。JST（UTC+9）では夜9時以降が翌日集計になる場合がある（MVP 許容）。
-- **売上サマリー有効化**: `Location.salesSummaryEnabled = true` の店舗のみ対象。管理画面で設定が必要。
+- **日付の区切り**: 精算・売上サマリー・特殊返金の「その日」は、Shopify の `shop.ianaTimezone`（取れなければ一般設定の既定タイムゾーン）の 0:00〜23:59。旧版に書いていた「UTC 基準で夜 9 時以降が翌日になる」は今はあてはまらない。
+- **売上サマリーの対象店舗**: 売上サマリー設定が ON で、かつ `Location.salesSummaryEnabled = true` の店舗だけ。管理画面で設定する。
+- **キャッシュの更新**: 定期ジョブは無く、orders/updated の Webhook と pg-boss のキューで更新する（§25）。
+- **印字**: main は Printing API を先に試し、精算注文（order_based）と CloudPRNT（データを作るだけ・実機アダプタなし）の旧経路も残る。一本化は PR #22。
 
 ### 30.4 次のステップ
 
-- **UID 発行**: `shopify app generate extension --type ui_extension --name "領収書発行"` および `--name "売上サマリー"` を実行し、TOML に `uid` を追加する。
-- **Prompt 8（Billing）**: スタンダード / プロプランのサブスクリプション、feature flag、機能制御。
-- **管理画面 UI**: 領収書テンプレート編集、予算管理、精算履歴、ロケーション設定など。
+進める順と本番待ちの PR は `docs/PROGRESS_SUMMARY.md` の「進める順」を正本とする。要点:
 
+- お金の直し（PR #11 → #16 → #13）を POS 実機の確認のあとに main へ。
+- 印字の一本化（PR #22）は、お金の直しの本番のあとに進める。
+- 公開用の料金を App Pricing に移す（PR #41・#47）。Partner Dashboard のプランとメーターの用意が先。
+- 2026-03 版にあった「UID 発行」「Billing（スタンダード / プロ）」「管理画面 UI（テンプレート・予算・精算履歴・ロケーション設定）」は実装済み。プランの名前は今は Lite / Pro（旧名 standard は Lite 扱い）。
+
+### 30.5 初期実装のあと main に入った主なもの
+
+| 領域 | 内容 |
+|------|------|
+| 精算 | GAS 型の集計（その日に起きた取引で数える・created/updated/cancelled のユニオン・processed_at の予備取得・割引とポイントの按分）、精算設定の消費税率、精算履歴（月ごと）、二重確定を防ぐ冪等キーとロック、返金の計上ロケーション（メタフィールド・設定） |
+| 印字 | Shopify Printing API での印字（精算・点検・領収書・販売レシート）、用紙幅・印字レイアウトの編集画面 |
+| 販売レシート | 5 つめのタイル（注文を選んで印字・取引詳細・購入後のメニュー）、レイアウト・設定画面 |
+| 売上サマリー | 販売チャネル別、チャネル別の予算、月の日別一覧、共有リンク（`/p/sales-summary/…`）、Webhook とキューでのキャッシュ更新、過去分の取り込み（`/app/backfill`） |
+| 料金 | Lite / Pro の機能の分け方、自社用は請求なし |
+| 会員証（自社用だけ） | LIFF の会員証、LINE ユーザー ID の読み方、期限切れの見分けと混雑時の文（#51） |
+| 管理画面・運用 | UI ルール v1.1（#48・#49）、デバッグ・診断は開発ストアだけ（#50）、GDPR の Webhook、公開用・自社用の取り違え防止、CI |
+| 要件 | §0.2 LINE・会員証・ポイントの担当（#52） |
