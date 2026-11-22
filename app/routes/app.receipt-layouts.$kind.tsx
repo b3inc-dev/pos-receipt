@@ -89,7 +89,7 @@ export default function ReceiptLayoutEdit() {
       <Page
         fullWidth
         title={RECEIPT_KIND_LABELS[kind]}
-        subtitle="ブロックを並べ替えて、右のプレビューで印字の見た目を確かめます。"
+        subtitle="ブロックを並べ替えて、プレビューで印字の見た目を確かめます。"
         backAction={{ content: "レシートのレイアウト", onAction: () => navigate("/app/receipt-layouts" + q) }}
       >
         <Layout>

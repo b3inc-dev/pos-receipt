@@ -177,30 +177,58 @@ function SettingField({ def, value, onChange }: { def: SettingDef; value: BlockS
 
 function Preview({ html, widthPx }: { html: string; widthPx: number }) {
   const frame = useRef<HTMLIFrameElement | null>(null);
+  const box = useRef<HTMLDivElement | null>(null);
   const [height, setHeight] = useState(600);
+  // 幅の狭い画面（iPhone など）では、用紙の幅のまま縮めて全体を見せる（右が切れないように）
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => {
+      const avail = el.clientWidth;
+      setScale(avail > 0 && avail < widthPx + 2 ? avail / (widthPx + 2) : 1);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [widthPx]);
   const fit = () => {
     // スクリプトは動かさない（sandbox に allow-scripts を付けない）。高さを読むため同じ origin だけ許す
     const doc = frame.current?.contentDocument;
     if (doc?.body) setHeight(Math.max(200, doc.documentElement.scrollHeight + 4));
   };
   return (
-    <div className="RL-preview-paper" style={{ width: widthPx + 2 }}>
-      <iframe
-        ref={frame}
-        title="レシートのプレビュー"
-        sandbox="allow-same-origin"
-        srcDoc={html}
-        onLoad={fit}
-        style={{ width: widthPx, height, border: 0, display: "block", background: "#fff" }}
-      />
+    <div ref={box} className="RL-preview-box">
+      <div style={{ width: (widthPx + 2) * scale, height: height * scale, margin: "0 auto", overflow: "hidden" }}>
+        <div
+          className="RL-preview-paper"
+          style={{ width: widthPx + 2, transform: scale < 1 ? `scale(${scale})` : undefined, transformOrigin: "top left" }}
+        >
+          <iframe
+            ref={frame}
+            title="レシートのプレビュー"
+            sandbox="allow-same-origin"
+            srcDoc={html}
+            onLoad={fit}
+            style={{ width: widthPx, height, border: 0, display: "block", background: "#fff" }}
+          />
+        </div>
+      </div>
     </div>
   );
 }
 
 const EDITOR_CSS = `
-.RL-grid{display:grid;grid-template-columns:minmax(320px,420px) 1fr;gap:16px;align-items:start}
+.RL-grid{display:grid;grid-template-columns:minmax(320px,420px) minmax(0,1fr);gap:16px;align-items:start}
 .RL-preview{position:sticky;top:16px;display:flex;flex-direction:column;align-items:center;gap:8px;background:#f1f1f1;border-radius:12px;padding:16px;overflow:auto;max-height:calc(100vh - 32px)}
-.RL-preview-paper{box-shadow:0 1px 4px rgba(0,0,0,.18);background:#fff;max-width:100%;overflow:auto}
+.RL-preview-box{width:100%;min-width:0}
+.RL-preview-paper{box-shadow:0 1px 4px rgba(0,0,0,.18);background:#fff}
+.RL-jump{display:none}
 .RL-row{display:flex;align-items:center;gap:4px;padding:6px 8px;border-radius:8px;cursor:pointer}
 .RL-row:hover{background:#f6f6f6}
 .RL-row[aria-current=true]{background:#ebebeb}
@@ -210,7 +238,7 @@ const EDITOR_CSS = `
 .RL-code{width:100%;min-height:480px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.5;border:1px solid #8a8a8a;border-radius:8px;padding:8px;resize:vertical;tab-size:2;white-space:pre;overflow:auto}
 .RL-vars{font-size:12px}
 .RL-vars code{font-size:12px}
-@media (max-width: 900px){.RL-grid{grid-template-columns:1fr}.RL-preview{position:static;max-height:none}.RL-code{font-size:16px}}
+@media (max-width: 900px){.RL-grid{grid-template-columns:minmax(0,1fr)}.RL-preview{position:static;max-height:none;padding:8px}.RL-jump{display:block}.RL-code{font-size:16px}}
 `;
 
 export function ReceiptLayoutEditor({
@@ -297,6 +325,9 @@ export function ReceiptLayoutEditor({
       <style>{EDITOR_CSS}</style>
       <div className="RL-grid">
         <BlockStack gap="400">
+          <div className="RL-jump">
+            <a href="#rl-preview">プレビューを見る</a>
+          </div>
           <SectionTabs
             label="編集すること"
             items={[
@@ -530,7 +561,7 @@ export function ReceiptLayoutEditor({
           ) : null}
         </BlockStack>
 
-        <div className="RL-preview" aria-label="プレビュー">
+        <div className="RL-preview" id="rl-preview" aria-label="プレビュー">
           <Text as="p" tone="subdued">{`プレビュー（見本のデータ・${layout.paperWidthMm}mm）`}</Text>
           {rendered.ok ? null : (
             <div role="alert" style={{ color: "#8e1f0b", maxWidth: paperWidthPx(layout.paperWidthMm) }}>
