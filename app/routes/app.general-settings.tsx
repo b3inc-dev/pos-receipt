@@ -31,6 +31,7 @@ import {
   isAllowedPrivacyPolicyUrl,
   resolvePrivacyPolicyUrl,
 } from "../utils/privacyPolicyUrl";
+import { isDevelopmentStore, keepDevOnlySettings } from "../utils/devStore.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SystemPageNav } from "../components/SystemPageNav";
 
@@ -48,7 +49,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const effectivePrivacyPolicyUrl = resolvePrivacyPolicyUrl(settings.privacyPolicyUrl);
   const privacyPolicyFromEnvOnly =
     !settings.privacyPolicyUrl?.trim() && Boolean(effectivePrivacyPolicyUrl);
-  return { settings, effectivePrivacyPolicyUrl, privacyPolicyFromEnvOnly };
+  // デバッグ・診断の欄は開発ストアだけに出す（T さんの決定 2026-11-22。読めなければ出さない）
+  const isDevStore = await isDevelopmentStore(admin);
+  return { settings, effectivePrivacyPolicyUrl, privacyPolicyFromEnvOnly, isDevStore };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -65,7 +68,7 @@ export async function action({ request }: ActionFunctionArgs) {
       { status: 400 }
     );
   }
-  const settings: GeneralSettings = {
+  const submitted: GeneralSettings = {
     ...DEFAULT_GENERAL_SETTINGS,
     appDisplayName: str("appDisplayName", ""),
     supportContactEmail: str("supportContactEmail", ""),
@@ -80,6 +83,13 @@ export async function action({ request }: ActionFunctionArgs) {
     diagnosticsPanelEnabled: bool("diagnosticsPanelEnabled", true),
     verboseCalcLogEnabled: bool("verboseCalcLogEnabled", false),
   };
+  // 開発ストアでない店では、画面に出していないデバッグ・診断の欄を保存済みの値のままにする
+  const isDevStore = await isDevelopmentStore(admin);
+  const saved: GeneralSettings = {
+    ...DEFAULT_GENERAL_SETTINGS,
+    ...(await getAppSetting<Partial<GeneralSettings>>(shop.id, GENERAL_SETTINGS_KEY)),
+  };
+  const settings = keepDevOnlySettings(submitted, saved, isDevStore);
   await setAppSetting(shop.id, GENERAL_SETTINGS_KEY, settings);
   return Response.json({ ok: true });
 }
@@ -89,6 +99,7 @@ export default function GeneralSettingsPage() {
     settings: initial,
     effectivePrivacyPolicyUrl,
     privacyPolicyFromEnvOnly,
+    isDevStore,
   } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const actionData = useActionData<{ ok?: boolean }>();
@@ -129,7 +140,7 @@ export default function GeneralSettingsPage() {
           {saveError && <Layout.Section><Banner tone="critical">{saveError}</Banner></Layout.Section>}
           <Layout.Section>
             {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-            <AdminIntro><p>アプリ全体の基本情報・タイムゾーン・デバッグ表示を設定します。</p></AdminIntro>
+            <AdminIntro><p>{isDevStore ? "アプリ全体の基本情報・タイムゾーン・デバッグ表示を設定します。" : "アプリ全体の基本情報・タイムゾーンを設定します。"}</p></AdminIntro>
           </Layout.Section>
 
           <Layout.AnnotatedSection title="アプリ基本情報">
@@ -171,6 +182,8 @@ export default function GeneralSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
+          {/* 開発ストアだけに出す（客先の店には出さない） */}
+          {isDevStore && (
           <Layout.AnnotatedSection title="ログ・デバッグ">
             <Card>
               <BlockStack gap="300">
@@ -180,6 +193,7 @@ export default function GeneralSettingsPage() {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
+          )}
         </Layout>
       </Page>
     </PolarisPageWrapper>
