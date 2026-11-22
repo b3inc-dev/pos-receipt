@@ -62,11 +62,13 @@
   - つまりふだんは、いちばん長くても 14 日＋7 日＝およそ 21 日で消え、30 日より前に無くなる。このスイッチは「プロセスが止まっていて片づけが動かなかったときも、30 日を超えて残らない」ことをアプリ側で守るための保険。preview の件数はふだん 0 になるはず。
 - `SALES_SUMMARY_WEBHOOK_QUEUE=0` でキューを止めた店では新しく積まれないが、止める前に積まれた行は、このタイマーが動かないので残る（キューを動かして消すか、手で消す）。
 
-### D18. customers/redact で消すもの（2026-11-23）
+### D18. customers/redact で消すもの（2026-11-23・T さん 11/23 2:35 の決定で更新）
 
-- 今の main: 指定の注文の領収書の宛名（`ReceiptIssue.recipientName`）を `[redacted]` にする。
-- 特殊返金のメモ（`SpecialRefundEvent.note`。自由に書けるので、お客様の名前などが入ることがある）も `[redacted]` にする直しは **#13（`cursor/decision-audit-p2-debt-docs-0059`）に入っている**。同じ行を二重に直してぶつからないよう、この PR では触らない。#13 が入らないときは、別の PR で同じ直しをする。
+- 指定の注文の領収書の宛名（`ReceiptIssue.recipientName`）は **空（`""`）** にする。再印字・同じキーの再発行では宛名の欄が空で出る（前は `[redacted]` の文字を入れていて、それが紙に出た）。
+- その注文の特殊返金のメモ（`SpecialRefundEvent.note`。自由に書けるので、お客様の名前などが入ることがある）は **消す（null）**。金額・日時・支払方法・状態は残す（note は精算の集計に使っていないので、数字は変わらない）。
+- 処理は `app/services/customerRedact.server.ts`（`redactCustomerData`）。記録（ログ）には件数だけを出す。
 - `createdBy`（スタッフ）や金額・支払方法はお客様の情報ではないので残す。
+- #13（`cursor/decision-audit-p2-debt-docs-0059`）にも特殊返金のメモを消す直しがあるが、topic を `"customers/redact"` と比べる古い形のままで動かず、`[redacted]` の文字を入れる。**こちら（#41 の枝）を正とする**。#13 を main 向けに入れ直す（取り込み直す）ときは、`webhooks.compliance.tsx` の customers/redact の部分は #41 の側を採り、#13 の同じ部分は捨てる（二重に作らない）。
 
 ### D19. shop/redact は「入れ直した店」なら消さない・失敗は 500（2026-11-23）
 
@@ -75,7 +77,22 @@
   - セッションが無い・401（トークンが無効）→ 入っていない → 消す。
   - それ以外（DB・通信・5xx・403）→ 分からないので消さず、500 を返す。Shopify は 2xx 以外ならもう一度送るので、消し残しにはならない。
 - ルートは、HMAC の確かめ（`authenticate.webhook`）だけを try の外に置き、不正なら 401 のまま。そのあとの DB の失敗は前は 401 を返していたが、500 にした。
-- 事実: `authenticate.webhook()` の `topic` は `SHOP_REDACT` の形で来る（`@shopify/shopify-api` 12.3.0 の `topicForStorage` が大文字にして `/` を `_` にする）。前のルートは `"shop/redact"` などと比べていたので、**3 つの必須 webhook のどれも中の処理が動かず 200 だけ返していた**。`normalizeWebhookTopic` でそろえて直した。これで customers/data_request（件数の記録）と customers/redact（領収書の宛名を `[redacted]` にする）も動き始める。
+- 事実: `authenticate.webhook()` の `topic` は `SHOP_REDACT` の形で来る（`@shopify/shopify-api` 12.3.0 の `topicForStorage` が大文字にして `/` を `_` にする）。前のルートは `"shop/redact"` などと比べていたので、**3 つの必須 webhook のどれも中の処理が動かず 200 だけ返していた**。`normalizeWebhookTopic` でそろえて直した。これで customers/data_request（件数の記録）と customers/redact（D18）も動き始める。
+- 補足（D20）: そのあと、この 2 つのルートは `authenticate.webhook()` をやめ、HMAC を自分で確かめる形にした（topic は `X-Shopify-Topic` を同じ関数でそろえる）。
+
+### D20. アンインストールと必須 webhook は、トークンの refresh をせずに HMAC だけ自分で確かめる（2026-11-23）
+
+- 事実: このアプリは `future.expiringOfflineAccessTokens: true`。`@shopify/shopify-app-react-router` 1.1.1 の `authenticate.webhook()` は HMAC のあと必ずオフラインのセッションを読み、期限が切れていれば refresh する。アンインストールした店では refresh が失敗し、`Response(500)` を投げる（ルートの try より前）。そのため、
+  - app/uninstalled: 最後の refresh から約 1 時間より後にアンインストールした店では 500 になり、セッションが消えなかった。
+  - shop/redact（48 時間後）: 残ったセッションの refresh が失敗して毎回 500 になり、何も消えなかった。
+- Shopify は 4.0.3（`ecbcb1b`）で直した。ただし 1.1.1 → 4.x は大きな版の上げ（2.0.0 で Node 22 必須・`isEmbeddedApp` の廃止など、3.0.0 で events の型、4.0.0 で Polaris 2 が既定になり画面の見た目が変わる、セッションの保存の部品も 7 系へ）なので、今回は上げない。
+- 直し: `webhooks.app.uninstalled.tsx` と `webhooks.compliance.tsx` は `authenticate.webhook()` を使わず、`app/services/webhookHmac.server.ts`（`verifyShopifyWebhookRequest`）で HMAC を自分で確かめる（`X-Shopify-Hmac-Sha256`・`SHOPIFY_API_SECRET`・`timingSafeEqual`）。セッションは読まない・refresh しない。
+  - POST 以外は 405、HMAC・topic・店のヘッダーが無い／本文が JSON でないは 400、HMAC が合わない（秘密が空のときも）は 401。ライブラリと同じ答え方。
+  - app/uninstalled はセッションを必ず消す（`deleteMany`。何度来ても同じ）。DB の失敗は 500（Shopify がもう一度送る）。
+- これで D19 の前提「アンインストールの webhook でセッションを消すので、shop/redact のときにセッションが残っていれば入れ直した」が成り立つ。
+- 残ること（推測）: shop/redact で入れ直したかを確かめる `unauthenticated.admin()` も同じ refresh を通る。入れ直した店ならトークンは有効なので通る。app/uninstalled が 48 時間ずっと失敗して古いセッションが残った店だけは、refresh の失敗（500）になり消せない（記録に `Response 500 (token refresh or Admin API failed)` と出る）。めったに起きないので、出たら手で確かめる。
+- `webhooks.orders.updated.tsx` は今までどおり `authenticate.webhook()`（Admin API が要るため。アンインストールした店には来ない）。
+- あとで shopify-app-react-router を 4.0.3 以上に上げたら、この 2 つのルートを `authenticate.webhook()` に戻してもよい（そのときは Polaris の版の固定を忘れない）。
 
 ## 2. 古い docs との差分（注意）
 

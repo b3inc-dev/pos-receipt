@@ -6,9 +6,13 @@
  * - customers/redact:       顧客データの削除要求
  * - shop/redact:            ショップデータの削除要求（アンインストール 48 時間後）
  *
- * HMAC 検証は authenticate.webhook(request) 内で実施され、不正な場合は 401 を返す。
+ * HMAC は verifyShopifyWebhookRequest で自分で確かめる（不正なら 401、ヘッダーが足りなければ 400）。
+ * authenticate.webhook() は使わない（事実）: @shopify/shopify-app-react-router 1.1.1 は
+ * expiringOfflineAccessTokens のとき期限の切れたトークンを refresh しようとし、アンインストールした店では
+ * 失敗して 500 を投げる（ルートの try より前）。shop/redact はアンインストールの 48 時間後に来るので、
+ * そのままでは毎回 500 で何も消えなかった（#72 の独立レビューの P1。Shopify は 4.0.3 / ecbcb1b で直した）。
  * それより後の失敗（DB・入っているかの確かめ）は 500 を返す（Shopify はもう一度送る。どの処理も何度来ても安全）。
- * topic は "SHOP_REDACT" の形で来るので normalizeWebhookTopic でそろえてから分ける。
+ * topic は "SHOP_REDACT" の形にそろえてから分ける（normalizeWebhookTopic）。
  *
  * customers/data_request 方針:
  * - Shopify への必須応答は 200（受理）。開示データ本体は webhook レスポンスに載せない。
@@ -19,7 +23,7 @@
  *   またはサポート連絡先）で対応する。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { authenticate, unauthenticated } from "../shopify.server";
+import { unauthenticated, webhookSecret } from "../shopify.server";
 import prisma from "../db.server";
 import {
   buildCustomerDataInventory,
@@ -28,11 +32,12 @@ import {
   type CustomerDataRequestPayload,
 } from "../services/gdprCustomerDataRequest.server";
 import { redactShopData, type ShopRedactDb } from "../services/shopRedact.server";
+import { redactCustomerData, type CustomerRedactDb } from "../services/customerRedact.server";
 import {
   INSTALL_PROBE_QUERY,
-  normalizeWebhookTopic,
   probeShopStillInstalled,
 } from "../services/shopInstallProbe.server";
+import { verifyShopifyWebhookRequest } from "../services/webhookHmac.server";
 
 /** 入れ直した店か（オフラインのセッションがあり、Admin API を呼べる） */
 async function isShopStillInstalled(shop: string): Promise<boolean> {
@@ -60,9 +65,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
-  // HMAC が不正なら authenticate.webhook が 401 の Response を投げる（try の外に置いて 401 のまま返す）
-  const { payload, topic, shop } = await authenticate.webhook(request);
-  const topicStr = normalizeWebhookTopic(topic);
+  // HMAC が不正なら 401（ヘッダーが足りなければ 400）の Response が投げられる（try の外に置いてそのまま返す）
+  const { payload, topic: topicStr, shop } = await verifyShopifyWebhookRequest(request, webhookSecret);
 
   try {
     if (topicStr === "CUSTOMERS_DATA_REQUEST") {
@@ -127,24 +131,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (topicStr === "CUSTOMERS_REDACT") {
-      // 顧客データの削除要求。
-      // 指定注文 ID に紐づく領収書発行履歴の宛名を匿名化する。
+      // 顧客データの削除要求（T さん 11/23 2:35）。
+      // 指定注文の領収書の宛名を空にし（再印字で空）、特殊返金のメモを消す（金額・日時は残す）。
       const body = payload as {
         shop_domain?: string;
-        orders_to_redact?: number[];
+        orders_to_redact?: Array<number | string>;
       };
-      const shopDomain = body.shop_domain ?? shop;
-      const orderIds = expandOrderIdVariants(body.orders_to_redact);
-
-      if (orderIds.length > 0) {
-        const dbShop = await prisma.shop.findFirst({ where: { shopDomain } });
-        if (dbShop) {
-          await prisma.receiptIssue.updateMany({
-            where: { shopId: dbShop.id, orderId: { in: orderIds } },
-            data: { recipientName: "[redacted]" },
-          });
-        }
-      }
+      await redactCustomerData({
+        db: prisma as unknown as CustomerRedactDb,
+        shopDomain: body.shop_domain ?? shop,
+        ordersToRedact: body.orders_to_redact,
+      });
       return new Response(null, { status: 200 });
     }
 
@@ -167,10 +164,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response(null, { status: 200 });
   } catch (err) {
     // DB の失敗・入っているか確かめられないとき。500 を返し、Shopify にもう一度送ってもらう。
-    console.error(
-      `[webhooks.compliance] ${topicStr} failed:`,
-      err instanceof Error ? err.message : String(err),
-    );
+    // ライブラリの refresh の失敗は Response(500) で来る（入れ直した店の確かめ unauthenticated.admin の中）
+    const reason =
+      err instanceof Response
+        ? `Response ${err.status} (token refresh or Admin API failed)`
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    console.error(`[webhooks.compliance] ${topicStr} shop=${shop} failed:`, reason);
     return new Response(null, { status: 500 });
   }
 };
