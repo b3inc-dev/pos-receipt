@@ -1,11 +1,14 @@
 /**
- * /app/plan — プラン・課金管理ページ（POS Stock / location-stock-indicator と同様のフラット構造）
+ * /app/plan — 料金プラン（POS Stock / location-stock-indicator と同様のフラット構造）
  * 要件書 §3 / §Epic G
  *
- * 「アップグレード」ボタン → action → Shopify 課金承認 URL へリダイレクト
+ * 2026-11-21 T の決定: 公開用の料金は Shopify App Pricing（Billing API ではない）。
+ * - アプリは契約を作らない。「プランを選ぶ」は Shopify の料金プラン画面（app handle の pricing_plans）を開くだけ。
+ * - 今のプランは契約から読む（shopPlan.server.ts。Admin API、設定があれば Partner API も）。
+ * - 自社用（Ciara）は今まで通り課金なし・全機能。
  */
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { redirect, useLoaderData, useFetcher, useLocation, useNavigate } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
+import { useLoaderData, useLocation, useNavigate } from "react-router";
 import {
   Page,
   Layout,
@@ -17,7 +20,6 @@ import {
   InlineStack,
   List,
   Banner,
-  Box,
   Divider,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
@@ -27,141 +29,74 @@ import { resolveShop } from "../utils/shopResolver.server";
 import {
   isInhouseMode,
   planLabel,
-  getFullAccess,
   PLAN_FEATURES,
   BILLING_PLANS,
   EXTRA_LOCATION_PRICE_USD,
-  EXTRA_LOCATION_USAGE_BILLING_ENABLED,
+  buildPricingPlansUrl,
 } from "../utils/planFeatures.server";
+import { getShopPlan } from "../utils/shopPlan.server";
+import {
+  describeUsageReportForMerchant,
+  findUsageReportForPeriod,
+  isUsageReportingEnabled,
+  usagePeriodKey,
+  type UsageReportStore,
+} from "../utils/appEventsUsage.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-
-const SUBSCRIPTION_QUERY = `#graphql
-  query CurrentSubscription {
-    currentAppInstallation {
-      activeSubscriptions {
-        id name status currentPeriodEnd trialDays
-      }
-    }
-  }
-`;
-
-const APP_SUBSCRIPTION_CREATE = `#graphql
-  mutation AppSubscriptionCreate(
-    $name: String!
-    $returnUrl: String!
-    $lineItems: [AppSubscriptionLineItemInput!]!
-    $test: Boolean
-  ) {
-    appSubscriptionCreate(name: $name, returnUrl: $returnUrl, lineItems: $lineItems, test: $test) {
-      userErrors { field message }
-      confirmationUrl
-      appSubscription { id status }
-    }
-  }
-`;
 
 // ── Loader ────────────────────────────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
-  const fullAccess = await getFullAccess(admin, session);
+  const state = await getShopPlan(admin, shop);
+  const isInhouse = state.fullAccess;
 
-  let activeSubscriptions: { id: string; name: string; status: string; currentPeriodEnd: string }[] = [];
-  if (!fullAccess) {
+  // 超えたロケーションの報告の状態（App Events API）。読めなくても画面は出す
+  let usageReportNote: string | null = null;
+  const usage = state.extraLocationUsage;
+  if (usage && isUsageReportingEnabled()) {
     try {
-      const res = await admin.graphql(SUBSCRIPTION_QUERY);
-      const json = await res.json() as {
-        data?: {
-          currentAppInstallation?: { activeSubscriptions?: typeof activeSubscriptions };
-        };
-      };
-      activeSubscriptions = json.data?.currentAppInstallation?.activeSubscriptions ?? [];
-    } catch {}
+      const periodKey = usagePeriodKey(usage.periodEnd);
+      const row = periodKey
+        ? await findUsageReportForPeriod(
+            prisma.appUsageReport as unknown as UsageReportStore,
+            session.shop.trim().toLowerCase(),
+            periodKey
+          )
+        : { status: "missing_period" };
+      usageReportNote = describeUsageReportForMerchant(row);
+    } catch (e) {
+      console.warn("[app.plan] usage report read failed:", e instanceof Error ? e.message : String(e));
+      usageReportNote = "報告の状態を読めませんでした。少し待ってから再読み込みしてください。";
+    }
   }
 
-  const planCode = shop.planCode === "standard" ? "lite" : (shop.planCode ?? "lite");
   return {
-    planCode,
-    planLabel: fullAccess
+    planCode: state.planCode,
+    planLabel: isInhouse
       ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
-      : planLabel(shop.planCode ?? planCode),
-    isInhouse: fullAccess,
-    activeSubscriptions,
+      : planLabel(state.planCode),
+    isInhouse,
+    hasSubscription: state.plan !== null,
+    subscriptionsRead: state.subscriptionsRead,
+    activeSubscriptions: state.activeSubscriptions,
+    locationsCount: state.locationsCount,
+    extraLocationUsage: usage ?? null,
+    usageReportingEnabled: isUsageReportingEnabled(),
+    usageReportNote,
+    pricingPlansUrl: isInhouseMode() ? null : buildPricingPlansUrl(session.shop),
     litePlan: BILLING_PLANS.lite,
     proPlan: BILLING_PLANS.pro,
     liteFeatures: PLAN_FEATURES.lite,
     proFeatures: PLAN_FEATURES.pro,
     extraLocationPriceUsd: EXTRA_LOCATION_PRICE_USD,
-    extraLocationUsageBillingEnabled: EXTRA_LOCATION_USAGE_BILLING_ENABLED,
     memberCardEnabled: isInhouseMode(),
   };
 }
 
-// ── Action（サブスクリプション作成 → confirmationUrl へリダイレクト） ──────────
-
-export async function action({ request }: ActionFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
-  const shop = await resolveShop(session.shop, admin);
-
-  if (isInhouseMode()) {
-    return { ok: false, error: "自社用モードでは課金不要です" };
-  }
-
-  const formData = await request.formData();
-  const planKey = formData.get("plan") === "pro" ? "pro" : "lite";
-  const planConfig = BILLING_PLANS[planKey];
-
-  const appUrl = process.env.SHOPIFY_APP_URL ?? "";
-  const returnUrl = `${appUrl}/app/plan/callback?plan=${planKey}&shop=${session.shop}`;
-
-  const res = await admin.graphql(APP_SUBSCRIPTION_CREATE, {
-    variables: {
-      name: planConfig.name,
-      returnUrl,
-      test: process.env.NODE_ENV !== "production",
-      lineItems: [
-        {
-          plan: {
-            appRecurringPricingDetails: {
-              price: { amount: String(planConfig.amount), currencyCode: planConfig.currencyCode },
-              interval: "EVERY_30_DAYS",
-            },
-          },
-        },
-      ],
-    },
-  });
-
-  const json = await res.json() as {
-    data?: {
-      appSubscriptionCreate?: {
-        confirmationUrl?: string;
-        userErrors?: { field: string; message: string }[];
-      };
-    };
-  };
-
-  const result = json.data?.appSubscriptionCreate;
-  const userErrors = result?.userErrors ?? [];
-  if (userErrors.length > 0) {
-    return { ok: false, error: userErrors[0].message };
-  }
-
-  const confirmationUrl = result?.confirmationUrl;
-  if (!confirmationUrl) {
-    return { ok: false, error: "課金URLの取得に失敗しました" };
-  }
-
-  // planCode を仮更新
-  await prisma.shop.update({
-    where: { id: shop.id },
-    data: { planCode: planKey },
-  });
-
-  // Shopify の課金承認ページへリダイレクト
-  return redirect(confirmationUrl);
-}
+// 2026-11-21: action（appSubscriptionCreate で契約を作って承認 URL へ飛ばす）は消した。
+// プランの選択・変更・解約は Shopify の料金プラン画面で行う。
 
 // ── Page Component ────────────────────────────────────────────────────────────
 
@@ -170,40 +105,49 @@ export default function PlanPage() {
     planCode,
     planLabel: label,
     isInhouse,
+    hasSubscription,
+    subscriptionsRead,
     activeSubscriptions,
+    locationsCount,
+    extraLocationUsage,
+    usageReportingEnabled,
+    usageReportNote,
+    pricingPlansUrl,
     litePlan,
     proPlan,
     liteFeatures,
     proFeatures,
     extraLocationPriceUsd,
-    extraLocationUsageBillingEnabled,
     memberCardEnabled,
   } = useLoaderData<typeof loader>();
 
-  const fetcher = useFetcher<typeof action>();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
   const isPro = isInhouse || planCode === "pro" || planCode === "unlimited";
-  const isLite = planCode === "lite" || planCode === "standard";
-  const actionError = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
+  const isLite = !isPro;
+  const openPricingPlans = () => {
+    if (pricingPlansUrl) window.open(pricingPlansUrl, "_top");
+  };
 
   return (
     <PolarisPageWrapper>
     <Page title="料金プラン" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
       <SystemPageNav memberCardEnabled={memberCardEnabled} />
       <Layout>
-        {/* エラー */}
-        {actionError && (
+        {/* お知らせ枠は 1 つまで（契約を読めなかったときだけ） */}
+        {!isInhouse && !subscriptionsRead && (
           <Layout.Section>
-            <Banner tone="critical">{actionError}</Banner>
+            <Banner tone="warning" title="契約の状態を Shopify から読めませんでした">
+              <Text as="p">前に読めたプランのまま使えます。少し待ってから再読み込みしてください。</Text>
+            </Banner>
           </Layout.Section>
         )}
 
         {/* ── 現在のプラン ── */}
         <Layout.AnnotatedSection
           title="現在のプラン"
-          description="ご契約中のプランと次回更新日を確認できます。"
+          description="ご契約中のプランを確認できます。プランの選択・変更・解約は Shopify の料金プラン画面で行います。"
         >
           <Card>
             <BlockStack gap="300">
@@ -219,69 +163,79 @@ export default function PlanPage() {
               {!isInhouse && activeSubscriptions.length > 0 && (
                 <BlockStack gap="100">
                   {activeSubscriptions.map((sub) => (
-                    <Text key={sub.id} tone="subdued" as="p">
-                      {sub.name}（{sub.status}）- 次回更新: {sub.currentPeriodEnd?.slice(0, 10) ?? "—"}
+                    <Text key={sub.id || sub.name} tone="subdued" as="p">
+                      {sub.name}（{sub.status}）- 次回更新: {sub.currentPeriodEnd?.slice(0, 10).replace(/-/g, "/") ?? "—"}
                     </Text>
                   ))}
                 </BlockStack>
               )}
 
-              {!isInhouse && activeSubscriptions.length === 0 && (
-                <Text tone="subdued" as="p">有効なサブスクリプションがありません。下記からプランを選択してください。</Text>
+              {!isInhouse && subscriptionsRead && !hasSubscription && (
+                <Text tone="subdued" as="p">有効な契約がありません。Shopify の料金プラン画面でプランを選んでください。</Text>
+              )}
+
+              {!isInhouse && pricingPlansUrl && (
+                <InlineStack>
+                  <Button variant="primary" onClick={openPricingPlans}>
+                    {hasSubscription ? "プランを変更" : "プランを選ぶ"}
+                  </Button>
+                </InlineStack>
               )}
             </BlockStack>
           </Card>
         </Layout.AnnotatedSection>
 
-        {/* ── 料金プラン（定額 Billing のみ。追加ロケ従量は未実装） ── */}
+        {/* ── 料金プラン ── */}
         <Layout.AnnotatedSection
           title="料金プラン"
-          description={
-            extraLocationUsageBillingEnabled
-              ? `Lite は${litePlan.maxLocations}ロケーションまで、Pro は${proPlan.maxLocations}ロケーションまで。追加ロケーションは1件あたり $${extraLocationPriceUsd}/月です。`
-              : "現在の請求は下記の月額定額のみです（Shopify Billing の recurring charge）。"
-          }
+          description={`Lite は${litePlan.maxLocations}ロケーション、Pro は${proPlan.maxLocations}ロケーションまで含みます。金額は Shopify の料金プラン画面に出るものが正です。`}
         >
           <BlockStack gap="400">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
               <PlanCard
-                planKey="lite"
                 name={litePlan.name}
                 priceSummary={`$${litePlan.amount}/月`}
-                priceDetail={`${litePlan.priceNote}（$${litePlan.amount}）`}
+                priceDetail={litePlan.priceNote}
                 summary={liteFeatures.map((f) => f.label).join("・")}
                 features={liteFeatures}
-                isCurrent={!isInhouse && isLite}
-                isInhouse={isInhouse}
-                fetcher={fetcher}
+                isCurrent={!isInhouse && hasSubscription && isLite}
               />
               <PlanCard
-                planKey="pro"
                 name={proPlan.name}
                 priceSummary={`$${proPlan.amount}/月`}
-                priceDetail={`${proPlan.priceNote}（$${proPlan.amount}）`}
+                priceDetail={proPlan.priceNote}
                 summary="全機能（売上サマリー・入店数報告・予算管理 含む）"
                 features={proFeatures}
-                isCurrent={!isInhouse && isPro}
-                isInhouse={isInhouse}
-                fetcher={fetcher}
+                isCurrent={!isInhouse && hasSubscription && isPro}
               />
             </div>
-            <Box paddingBlockStart="200">
-              {extraLocationUsageBillingEnabled ? (
-                <Text as="p" tone="subdued">
-                  プラン上限を超えるロケーションは1件あたり <strong>${extraLocationPriceUsd}</strong>/月 の追加料金です。
-                </Text>
-              ) : (
-                <Banner tone="info">
-                  <Text as="p">
-                    ロケーション数の目安は Lite {litePlan.maxLocations} / Pro {proPlan.maxLocations} です。
-                    追加ロケーションの従量課金（予定単価 ${extraLocationPriceUsd}/月）は未実装のため、
-                    現状の Shopify 請求は上記定額のみです。上限の強制ゲートもありません。
-                  </Text>
-                </Banner>
-              )}
-            </Box>
+            {!isInhouse && (
+              <Card>
+                <BlockStack gap="100">
+                  <Text variant="headingSm" as="h3">プランに含まれる数を超えたロケーション</Text>
+                  {extraLocationUsage && usageReportingEnabled ? (
+                    <>
+                      <Text as="p">
+                        ロケーション {locationsCount} か所のうち、{extraLocationUsage.includedLocations} か所を超えた{" "}
+                        <strong>{extraLocationUsage.units} か所</strong> × ${extraLocationUsage.unitPriceUsd} ＝{" "}
+                        <strong>${extraLocationUsage.amountUsd}</strong>／請求期間（月額とは別に Shopify の請求に載ります）
+                      </Text>
+                      <Text as="p" tone="subdued" variant="bodySm">
+                        請求期間ごとに 1 回、その時点のロケーション数で数えます。{usageReportNote ?? ""}
+                      </Text>
+                    </>
+                  ) : usageReportingEnabled ? (
+                    <Text as="p" tone="subdued">
+                      超えた分は 1 か所 ${extraLocationPriceUsd}/月です。今のロケーション数（{locationsCount} か所）はプランの範囲内です。
+                    </Text>
+                  ) : (
+                    <Text as="p" tone="subdued">
+                      今は、プランに含まれる数を超えたロケーションの料金を請求していません（今のロケーション数: {locationsCount} か所）。
+                    </Text>
+                  )}
+                </BlockStack>
+              </Card>
+            )}
           </BlockStack>
         </Layout.AnnotatedSection>
 
@@ -320,32 +274,26 @@ export default function PlanPage() {
 // ── サブコンポーネント（POS Stock の PlanCard / FeatureCard 風） ─────────────────────
 
 function PlanCard({
-  planKey,
   name,
   priceSummary,
   priceDetail,
   summary,
   features,
   isCurrent,
-  isInhouse,
-  fetcher,
 }: {
-  planKey: "lite" | "pro";
   name: string;
   priceSummary: string;
   priceDetail: string;
   summary: string;
   features: { key: string; label: string }[];
   isCurrent: boolean;
-  isInhouse: boolean;
-  fetcher: ReturnType<typeof useFetcher<typeof action>>;
 }) {
   return (
     <Card>
       <BlockStack gap="300">
         <InlineStack align="space-between" blockAlign="center">
           <Text variant="headingMd" as="h2">{name}</Text>
-          {isCurrent && <Badge tone="info">現在のプラン</Badge>}
+          {isCurrent && <Badge tone="success">ご契約中</Badge>}
         </InlineStack>
         <Text variant="headingLg" as="p">{priceSummary}</Text>
         <Text as="p" tone="subdued" variant="bodySm">{priceDetail}</Text>
@@ -356,18 +304,6 @@ function PlanCard({
             <List.Item key={f.key}>{f.label}</List.Item>
           ))}
         </List>
-        {!isInhouse && (
-          isCurrent ? (
-            <Text as="p" tone="subdued">このプランを利用中です。</Text>
-          ) : (
-            <fetcher.Form method="post">
-              <input type="hidden" name="plan" value={planKey} />
-              <Button variant="primary" submit loading={fetcher.state === "submitting"}>
-                {planKey === "pro" ? "Proプランにアップグレード" : "このプランを選択する"}
-              </Button>
-            </fetcher.Form>
-          )
-        )}
       </BlockStack>
     </Card>
   );

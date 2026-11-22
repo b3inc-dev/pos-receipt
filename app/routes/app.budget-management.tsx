@@ -27,7 +27,7 @@ import { useEffect, useState } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
+import { checkShopPlanAccess } from "../utils/shopPlan.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
@@ -134,8 +134,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shopifyLocations = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
 
   // プランチェック（自社用 or Pro のみ）
-  const fullAccess = await getFullAccess(admin, session);
-  const access = checkPlanAccess(shop.planCode, "budget_management", fullAccess);
+  const access = await checkShopPlanAccess(admin, shop, "budget_management");
 
   // フィルタ条件
   const dateFrom = month ? `${month}-01` : undefined;
@@ -290,8 +289,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
 
-  const fullAccess = await getFullAccess(admin, session);
-  const access = checkPlanAccess(shop.planCode, "budget_management", fullAccess);
+  const access = await checkShopPlanAccess(admin, shop, "budget_management");
   if (!access.allowed) {
     return Response.json({ ok: false, error: access.message }, { status: 403 });
   }

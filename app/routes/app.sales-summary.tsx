@@ -20,7 +20,7 @@ import {
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
+import { checkShopPlanAccess } from "../utils/shopPlan.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import {
   autoDiscoverChannels,
@@ -361,8 +361,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const shop = await resolveShop(session.shop, admin);
     const shopIanaTz = await getShopTimezoneForDaily(admin, shop.id);
     const shopCalendarToday = getCalendarDateStringInTimeZone(new Date(), shopIanaTz);
-    const fullAccess = await getFullAccess(admin, session);
-    const access = checkPlanAccess(shop.planCode, "sales_summary", fullAccess);
+    const access = await checkShopPlanAccess(admin, shop, "sales_summary");
 
     const url = new URL(request.url);
     const view = url.searchParams.get("view") === "period" ? "period" : "daily";

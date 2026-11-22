@@ -135,9 +135,11 @@ export const PLAN_FEATURES: Record<"lite" | "pro", { key: FeatureKey; label: str
 /** 後方互換: standard を lite として参照 */
 export const PLAN_FEATURES_LEGACY = { standard: PLAN_FEATURES.lite } as const;
 
-// ── Shopify Billing プラン（POS Receipt: Lite $100、Pro $200） ───
-// maxLocations はプラン説明上の目安。アプリ側のハード上限ゲートは未実装。
-// 追加ロケーション従量（$20）の appUsageRecord / capped amount も未配線（D11）。
+// ── 料金プラン（Shopify App Pricing。2026-11-21 T の決定） ───
+// 店は Shopify の料金プラン画面でプランを選ぶ。アプリは契約を作らない（appSubscriptionCreate は使わない）。
+// 金額は Partner Dashboard の App Pricing で決まる。ここの金額は画面に見せる目安で、未確定（T がまだ決めていない）。
+// プランは契約から読む（shopPlan.server.ts）。maxLocations を超えた分は 1 か所 $20/月（未確定）を
+// App Events API で報告する（appEventsUsage.server.ts、APP_EVENTS_USAGE_ENABLED=1 のときだけ。既定オフ）。
 
 export const BILLING_PLANS = {
   lite: {
@@ -146,7 +148,7 @@ export const BILLING_PLANS = {
     currencyCode: "USD",
     planCode: "lite" as PlanCode,
     maxLocations: 3,
-    priceNote: "定額（目安: 3ロケーション）",
+    priceNote: "月額（3ロケーションまで）",
   },
   pro: {
     name: "Proプラン",
@@ -154,15 +156,32 @@ export const BILLING_PLANS = {
     currencyCode: "USD",
     planCode: "pro" as PlanCode,
     maxLocations: 10,
-    priceNote: "定額（目安: 10ロケーション）",
+    priceNote: "月額（10ロケーションまで）",
   },
 } as const;
 
-/**
- * 将来の追加ロケーション従量課金の予定単価（USD/月）。
- * 現状 Billing lineItems は定額のみ。UI で課金済みのように表示してはならない。
- */
+/** プランに含まれる数を超えたロケーション 1 か所あたりの単価（USD/月）。未確定。appEventsUsage.server.ts と同じ値 */
 export const EXTRA_LOCATION_PRICE_USD = 20;
 
-/** 追加ロケーション従量課金が実装済みか（false のあいだは定額のみ請求） */
-export const EXTRA_LOCATION_USAGE_BILLING_ENABLED = false;
+/**
+ * 公開アプリの App Handle（Shopify の料金プラン画面の URL 用）。
+ * SHOPIFY_APP_HANDLE を優先し、無ければ "pos-receipt"（Partner Dashboard の handle と同じかは未確認。違えば env で入れる）。
+ */
+export function getPublicAppHandle(env: Record<string, string | undefined> = process.env): string {
+  return String(env.SHOPIFY_APP_HANDLE ?? "").trim() || "pos-receipt";
+}
+
+/**
+ * Shopify の料金プラン画面（App Pricing のプラン選択）の URL。
+ * admin.shopify.com を使う（*.myshopify.com だと accounts.shopify.com へ飛び iframe で拒否される）。埋め込みからは target="_top" で開く。
+ */
+export function buildPricingPlansUrl(
+  shopDomain: string | null | undefined,
+  env: Record<string, string | undefined> = process.env
+): string | null {
+  const shop = String(shopDomain ?? "").trim().toLowerCase();
+  if (!shop) return null;
+  const storeHandle = shop.replace(/^https?:\/\//, "").replace(/\.myshopify\.com.*$/i, "").split("/")[0];
+  if (!storeHandle || storeHandle.includes(".") || storeHandle === "admin") return null;
+  return `https://admin.shopify.com/store/${encodeURIComponent(storeHandle)}/charges/${encodeURIComponent(getPublicAppHandle(env))}/pricing_plans`;
+}

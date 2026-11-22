@@ -6,7 +6,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
+import { checkShopPlanAccess } from "../utils/shopPlan.server";
 import {
   getAppSetting,
   SALES_SUMMARY_SETTINGS_KEY,
@@ -24,9 +24,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
     const { admin, shop, corsJson } = authResult;
-    const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
-
-    const access = checkPlanAccess(shop.planCode, "footfall_reporting", fullAccess);
+    const access = await checkShopPlanAccess(admin, shop, "footfall_reporting");
     if (!access.allowed) {
       return corsJson({ ok: false, error: access.message }, { status: 403 });
     }

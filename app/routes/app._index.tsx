@@ -16,7 +16,8 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { planLabel, getFullAccess, isInhouseMode } from "../utils/planFeatures.server";
+import { planLabel, isInhouseMode } from "../utils/planFeatures.server";
+import { getShopPlan } from "../utils/shopPlan.server";
 import {
   getAppSetting,
   GENERAL_SETTINGS_KEY,
@@ -28,14 +29,16 @@ import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
-  const fullAccess = await getFullAccess(admin, session);
+  // プランは Shopify の契約から読む（App Pricing でプランを選んだあと、最初に開くのがこの画面）
+  const planState = await getShopPlan(admin, shop);
+  const fullAccess = planState.fullAccess;
   const general = await getAppSetting<Partial<GeneralSettings>>(shop.id, GENERAL_SETTINGS_KEY);
   const privacyPolicyUrl = resolvePrivacyPolicyUrl(general?.privacyPolicyUrl);
   return {
-    planCode: shop.planCode === "standard" ? "lite" : (shop.planCode ?? "lite"),
+    planCode: planState.planCode,
     planLabel: fullAccess
       ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
-      : planLabel(shop.planCode),
+      : planLabel(planState.planCode),
     isInhouse: fullAccess,
     privacyPolicyUrl,
   };

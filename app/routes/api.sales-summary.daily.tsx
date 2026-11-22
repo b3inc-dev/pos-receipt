@@ -6,7 +6,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
-import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
+import { checkShopPlanAccess } from "../utils/shopPlan.server";
 import { buildDailySalesSummaryPayload } from "../services/salesSummaryDailyPayload.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -14,9 +14,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
     const { admin, shop, corsJson } = authResult;
-    const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
-
-    const access = checkPlanAccess(shop.planCode, "sales_summary", fullAccess);
+    const access = await checkShopPlanAccess(admin, shop, "sales_summary");
     if (!access.allowed) {
       return corsJson({ ok: false, error: access.message }, { status: 403 });
     }

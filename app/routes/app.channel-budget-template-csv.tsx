@@ -6,7 +6,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
+import { checkShopPlanAccess } from "../utils/shopPlan.server";
 
 function daysInMonthFromKey(monthKey: string) {
   const [y, m] = monthKey.split("-").map(Number);
@@ -26,8 +26,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
 
-  const fullAccess = await getFullAccess(admin, session);
-  const access = checkPlanAccess(shop.planCode, "budget_management", fullAccess);
+  const access = await checkShopPlanAccess(admin, shop, "budget_management");
   if (!access.allowed) {
     return Response.json({ ok: false, error: access.message }, { status: 403 });
   }

@@ -22,7 +22,7 @@ import { useState, useEffect } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
+import { checkShopPlanAccess } from "../utils/shopPlan.server";
 import {
   generateSalesSummaryPublicToken,
   hashSalesSummaryPublicToken,
@@ -123,8 +123,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = String(formData.get("intent") ?? "");
 
   if (intent === "issueSalesSummaryPublicLink") {
-    const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
-    const access = checkPlanAccess(shop.planCode, "sales_summary", fullAccess);
+    const access = await checkShopPlanAccess(admin, shop, "sales_summary");
     if (!access.allowed) {
       return Response.json({ ok: false, error: access.message });
     }
