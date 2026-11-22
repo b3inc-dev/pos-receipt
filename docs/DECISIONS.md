@@ -58,7 +58,7 @@
 | 返金ロケーション不一致 | その精算から除外 → **他店計上漏れ／過少**のリスク（設定依存） |
 | GraphQL エラー | リトライ／スロットルあり。同期失敗時 create は 500。キャッシュ失敗は精算成功を落とさない箇所あり |
 | 過去データ | 履歴は Settlement スナップショット。再計算 API はプレビュー中心 |
-| 領収書 | idempotencyKey。POS は createdBy 未送信 |
+| 領収書 | idempotencyKey。発行者は発行した人（POS のピン留め中スタッフ）の ID を createdByStaffId に保存 |
 
 ## 5. Printing API 一本化
 
@@ -74,7 +74,7 @@
 3. Shopify POS Pro / Lite プラン差分はコードで未検出（アプリ Lite/Pro とは別）
 4. 配送注文・送料を精算に含める／除外する業務ルールの正式決定（コード上は送料非集計）
 5. POS キャンセルと Admin キャンセルを件数上どう区別すべきか（コード上区別なし）
-6. `ReceiptIssue.createdBy` を運用で埋めるか
+6. ~~`ReceiptIssue.createdBy` を運用で埋めるか~~ → 決定（2026-11-23 4:20）: 領収書を発行した人 1 人を記録（販売担当とは別）
 7. line item properties を精算／領収書に出す要件の有無
 8. ギフトレシート（Shopify Gift Receipt）要件の有無（現行未実装）
 9. GitHub 上の CI / 必須チェックの有無（リポジトリ内 workflow なし）

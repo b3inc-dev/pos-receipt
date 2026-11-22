@@ -116,7 +116,8 @@
 - 注文詳細 API が lineItems の `staffMember` を `staffMemberName` として返す
 - POS 詳細 UI で「販売: …」表示
 - 精算集計・精算レシート文言・領収書金額計算には **未使用**
-- `ReceiptIssue.createdBy` は API で受け取れるが、POS `receiptApi.js` は送っていない
+- 領収書の発行者（T さん決定・2026-11-23 4:20）: 「領収書を発行した人 1 人」で、販売担当（帰属スタッフ）とは別。POS `receiptApi.js` が `currentSession.staffMemberId`（ピン留め中のスタッフ。無ければ `userId`）を `staffMemberId` として送り、サーバーが数字だけにそろえて `ReceiptIssue.createdByStaffId` に保存する。名前は管理画面「スタッフ名」の登録（AppSetting `staff_display_names_v1`）があれば発行時に `createdBy` に残す。POS からの自由入力の名前は受けない。`staffMember` は `read_users` が要るので読まない
+- 管理画面「領収書発行履歴」の「発行者」列は いまの登録名 → 発行時の名前 → `スタッフ ID n` → `—`（`app/utils/receiptIssuer.ts`）。印字に出すかは #69 のレイアウト編集で扱う
 
 ---
 
