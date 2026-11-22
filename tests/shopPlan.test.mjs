@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import {
   __clearShopPlanCacheForTest,
   checkShopPlanAccess,
+  decideExtraLocationStatus,
   decidePlanCode,
   getShopPlan,
   planFromSubscriptionName,
@@ -301,5 +302,107 @@ describe("Shopify の料金プラン画面の URL", () => {
     assert.equal(buildPricingPlansUrl("", {}), null);
     assert.equal(buildPricingPlansUrl("example.com", {}), null);
     assert.equal(getPublicAppHandle({ SHOPIFY_APP_HANDLE: "  " }), "pos-receipt");
+  });
+});
+
+describe("従量の請求期間は、プランを決めた契約から取る（レビュー #41 の P2-1）", () => {
+  const OLD_END = "2099-12-05T00:00:00Z";
+  const NEW_END = "2099-12-21T00:00:00Z";
+  const s2 = (id, name, end, createdAt) => ({ id: `gid://shopify/AppSubscription/${id}`, name, status: "ACTIVE", currentPeriodEnd: end, createdAt });
+
+  test("古い Billing API の Lite と App Pricing の Pro が両方 ACTIVE: Pro の契約の期間を使う（並び順に関係なく）", async () => {
+    const d = deps();
+    const subs = [s2(1, "Liteプラン", OLD_END, "2099-01-01T00:00:00Z"), s2(2, "Pro", NEW_END, "2099-11-21T00:00:00Z")];
+    const state = await getShopPlan(fakeAdmin({ subs, locations: 12 }), SHOP, d);
+    assert.equal(state.planCode, "pro");
+    assert.equal(state.extraLocationUsage.periodEnd, "2099-12-21T00:00:00.000Z");
+    assert.equal(state.extraLocationUsage.periodSource, "admin");
+    await flush();
+    assert.equal(d.reports[0].periodEnd, "2099-12-21T00:00:00.000Z");
+  });
+
+  test("同じプランの古い契約と新しい契約が両方 ACTIVE: 作られた日が新しい方（App Pricing）の期間", async () => {
+    const d = deps();
+    const subs = [s2(2, "Pro", NEW_END, "2099-11-21T00:00:00Z"), s2(1, "Proプラン", OLD_END, "2099-01-01T00:00:00Z")];
+    const state = await getShopPlan(fakeAdmin({ subs: [...subs].reverse(), locations: 12 }), SHOP, d);
+    assert.equal(state.extraLocationUsage.periodEnd, "2099-12-21T00:00:00.000Z");
+  });
+
+  test("どちらの契約か分からず期間も違う（作られた日が無い）: 送らず期間なし（missing_period に回る）", async () => {
+    const d = deps();
+    const subs = [s2(1, "Proプラン", OLD_END, null), s2(2, "Pro", NEW_END, null)];
+    const state = await getShopPlan(fakeAdmin({ subs, locations: 12 }), SHOP, d);
+    assert.equal(state.extraLocationUsage.periodEnd, null);
+    await flush();
+    assert.equal(d.reports[0].periodEnd, null);
+  });
+
+  test("Partner で決めて Partner に期間が無いとき: legacySubscriptionId と同じ Admin の契約の期間（古い契約の期間は使わない）", async () => {
+    const d = deps({
+      env: { PARTNER_API_SUBSCRIPTION_ENABLED: "1", PARTNER_API_TOKEN: "t", PARTNER_API_ORG_ID: "123", PARTNER_API_APP_ID: "456" },
+      partnerLookup: async () => ({
+        ok: true,
+        cached: false,
+        subscription: { handles: ["pro"], name: "pro", billingPeriod: "MONTHLY", cancelAtEndOfCycle: false, trialEndsAt: null, currentPeriodEnd: null, legacySubscriptionId: "2" },
+      }),
+    });
+    // 古い契約の方が新しく作られていても、Partner の契約と同じ id を先に使う
+    const subs = [s2(1, "Proプラン", OLD_END, "2099-11-30T00:00:00Z"), s2(2, "Pro", NEW_END, "2099-11-21T00:00:00Z")];
+    const state = await getShopPlan(fakeAdmin({ subs, locations: 12 }), SHOP, d);
+    assert.equal(state.planSource, "partner");
+    assert.equal(state.extraLocationUsage.periodEnd, "2099-12-21T00:00:00.000Z");
+    assert.equal(state.extraLocationUsage.periodSource, "admin");
+  });
+
+  test("Admin の問い合わせに createdAt を入れている", async () => {
+    const admin = fakeAdmin({ subs: [sub("Lite")] });
+    await getShopPlan(admin, SHOP, deps());
+    assert.match(admin.calls[0].query, /activeSubscriptions \{[^}]*createdAt/);
+  });
+});
+
+describe("超えたロケーションの状態（料金プラン画面の文言。レビュー #41 の P2-2）", () => {
+  test("契約なし・読めない店は「範囲内」にしない", async () => {
+    const none = await getShopPlan(fakeAdmin({ subs: [], locations: 12 }), SHOP, deps());
+    assert.equal(none.extraLocationStatus, "no_subscription");
+    const unread = await getShopPlan(fakeAdmin({ fail: true, locations: 12 }), { ...SHOP, planCode: "pro" }, deps());
+    assert.equal(unread.extraLocationStatus, "unread");
+    const within = await getShopPlan(fakeAdmin({ subs: [sub("Lite")], locations: 3 }), SHOP, deps());
+    assert.equal(within.extraLocationStatus, "within_plan");
+    const counted = await getShopPlan(fakeAdmin({ subs: [sub("Lite")], locations: 5 }), SHOP, deps());
+    assert.equal(counted.extraLocationStatus, "counted");
+    const unlimited = await getShopPlan(fakeAdmin({ subs: [sub("Lite")], locations: 5 }), { ...SHOP, planCode: "unlimited" }, deps());
+    assert.equal(unlimited.extraLocationStatus, "not_counted");
+    const dev = await getShopPlan(fakeAdmin({ subs: [], locations: 12, dev: true }), SHOP, deps());
+    assert.equal(dev.extraLocationStatus, "full_access");
+  });
+
+  test("自社用は full_access（今まで通り Shopify に聞かない）", async () => {
+    process.env.APP_DISTRIBUTION = "inhouse";
+    const admin = fakeAdmin({ subs: [] });
+    const state = await getShopPlan(admin, SHOP, deps());
+    assert.equal(state.extraLocationStatus, "full_access");
+    assert.equal(admin.calls.length, 0);
+  });
+
+  test("decideExtraLocationStatus（純粋な関数）", () => {
+    const base = { fullAccess: false, subscriptionsRead: true, plan: "lite", planCode: "lite", fromSubscription: true, extraUnits: 0 };
+    assert.equal(decideExtraLocationStatus(base), "within_plan");
+    assert.equal(decideExtraLocationStatus({ ...base, extraUnits: 1 }), "counted");
+    assert.equal(decideExtraLocationStatus({ ...base, plan: null }), "no_subscription");
+    assert.equal(decideExtraLocationStatus({ ...base, subscriptionsRead: false, fromSubscription: false }), "unread");
+    assert.equal(decideExtraLocationStatus({ ...base, fullAccess: true }), "full_access");
+  });
+});
+
+describe("設定・診断の画面も門番と同じ 1 か所から読む（レビュー #41 の P2-3）", () => {
+  test("app.settings.tsx・app.diagnostics.tsx は checkShopPlanAccess を使い、getFullAccess と DB の planCode を使わない", async () => {
+    const { readFileSync } = await import("node:fs");
+    for (const f of ["app/routes/app.settings.tsx", "app/routes/app.diagnostics.tsx"]) {
+      const src = readFileSync(new URL(`../${f}`, import.meta.url), "utf8");
+      assert.match(src, /checkShopPlanAccess\(admin, shop,/, f);
+      assert.doesNotMatch(src, /getFullAccess/, f);
+      assert.doesNotMatch(src, /planLabel\(shop\.planCode\)/, f);
+    }
   });
 });

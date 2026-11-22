@@ -25,6 +25,7 @@ import {
   computeExtraLocationUsage,
   pickUsagePeriodEnd,
   reportExtraLocationUsage,
+  selectPlanSubscription,
   type UsagePeriodSource,
   type UsageReportStore,
 } from "./appEventsUsage.server";
@@ -41,6 +42,8 @@ export type SubscriptionSummary = {
   name: string;
   status: string;
   currentPeriodEnd: string | null;
+  /** 契約が作られた日。古い Billing API の契約と App Pricing の契約が両方あるとき、どちらでプランを決めたかを選ぶのに使う */
+  createdAt?: string | null;
 };
 
 export type ShopPlanState = {
@@ -61,6 +64,13 @@ export type ShopPlanState = {
   isDevelopmentStore: boolean;
   /** Partner API を使えなかった理由（スイッチオフ・設定不足・失敗の理由・契約なし） */
   partnerStatus?: string;
+  /**
+   * 超えたロケーションを数えたか・数えなかった理由（料金プラン画面の文言を分ける）。
+   * counted = 超えた分を数えた（extraLocationUsage あり）、within_plan = 契約のプランの範囲内、
+   * no_subscription = 有効な契約が無い、unread = 契約を読めなかった、full_access = 全機能の例外（自社用・開発ストアなど）、
+   * not_counted = 契約と使っているプランが違う（DB の unlimited など）
+   */
+  extraLocationStatus: ExtraLocationStatus;
   /** プランに含まれる数（Lite 3 / Pro 10）を超えたロケーション（App Events API で 1 請求期間に 1 回報告する数） */
   extraLocationUsage?: {
     includedLocations: number;
@@ -72,6 +82,27 @@ export type ShopPlanState = {
     periodSource: UsagePeriodSource | null;
   };
 };
+
+export type ExtraLocationStatus = "counted" | "within_plan" | "no_subscription" | "unread" | "full_access" | "not_counted";
+
+/**
+ * 超えたロケーションを数える店か・数えない理由（純粋な関数）。
+ * 契約が無い・読めない店に「プランの範囲内です」と出さないため、理由を分ける。
+ */
+export function decideExtraLocationStatus(args: {
+  fullAccess: boolean;
+  subscriptionsRead: boolean;
+  plan: "lite" | "pro" | null;
+  planCode: string;
+  fromSubscription: boolean;
+  extraUnits: number;
+}): ExtraLocationStatus {
+  if (args.fullAccess) return "full_access";
+  if (!args.subscriptionsRead) return "unread";
+  if (args.plan === null) return "no_subscription";
+  if (!args.fromSubscription || args.planCode !== args.plan) return "not_counted";
+  return args.extraUnits > 0 ? "counted" : "within_plan";
+}
 
 export type ShopPlanDeps = {
   env?: Record<string, string | undefined>;
@@ -95,7 +126,7 @@ const SHOP_PLAN_QUERY = `#graphql
     }
     locations(first: $first) { nodes { id } }
     currentAppInstallation {
-      activeSubscriptions { id name status currentPeriodEnd }
+      activeSubscriptions { id name status currentPeriodEnd createdAt }
     }
   }
 `;
@@ -168,6 +199,7 @@ function inhouseState(shop: ShopRecordForPlan): ShopPlanState {
     activeSubscriptions: [],
     locationsCount: 0,
     isDevelopmentStore: false,
+    extraLocationStatus: "full_access",
   };
 }
 
@@ -214,6 +246,7 @@ export async function getShopPlan(
           name: String(r.name ?? ""),
           status: String(r.status ?? ""),
           currentPeriodEnd: typeof r.currentPeriodEnd === "string" ? r.currentPeriodEnd : null,
+          createdAt: typeof r.createdAt === "string" ? r.createdAt : null,
         };
       });
     }
@@ -225,6 +258,8 @@ export async function getShopPlan(
   let planSource: ShopPlanState["planSource"] = "admin";
   let partnerStatus: string | undefined;
   let partnerPeriodEnd: string | null = null;
+  /** Partner で契約が見つかったときの、その契約の Admin 側の id（legacySubscriptionId。Admin の契約と結びつける） */
+  let partnerSubscriptionId: string | null = null;
 
   // Partner API（既定オフ）。契約が見つかればそれを正にする。「契約なし」なら Admin API の結果を使う（払っている店を止めない）。
   // 失敗（429・timeout など）は Admin API の結果だけで決める。
@@ -246,6 +281,7 @@ export async function getShopPlan(
       planSource = "partner";
       subscriptionsRead = true;
       partnerPeriodEnd = partner.subscription.currentPeriodEnd;
+      partnerSubscriptionId = partner.subscription.legacySubscriptionId ?? null;
       plan = planFromSubscriptions([shaped]);
     } else {
       partnerStatus = "none";
@@ -282,13 +318,21 @@ export async function getShopPlan(
   // プランに含まれる数を超えたロケーションの従量（App Events API）。公開用・契約が Lite/Pro・全機能の例外でない店だけ。
   // 送るかどうか・1 期間 1 回・失敗の記録は appEventsUsage.server.ts。ここでは待たない（画面と POS の API を遅くしない）。
   let extraLocationUsage: ShopPlanState["extraLocationUsage"];
+  let extraUnits = 0;
   if (!fullAccess && decided.fromSubscription && (plan === "lite" || plan === "pro") && decided.planCode === plan) {
     const usage = computeExtraLocationUsage(plan, locationsCount);
+    extraUnits = usage.units;
     if (usage.units > 0) {
+      // 期間はプランを決めた契約から取る（古い Billing API の契約が同時に ACTIVE でも、そちらの期間を使わない）
+      const reportPlanForPick = plan;
+      const planSubscription = selectPlanSubscription(activeSubscriptions, {
+        preferId: planSource === "partner" ? partnerSubscriptionId : null,
+        matches: (s) => planFromSubscriptionName(s.name) === reportPlanForPick,
+      });
       const { periodEnd, periodSource } = pickUsagePeriodEnd({
         planSource: planSource === "partner" ? "partner" : "admin",
         partnerPeriodEnd,
-        adminSubscriptions: activeSubscriptions,
+        planSubscription,
       });
       extraLocationUsage = {
         includedLocations: usage.includedLocations,
@@ -323,6 +367,14 @@ export async function getShopPlan(
     activeSubscriptions,
     locationsCount,
     isDevelopmentStore,
+    extraLocationStatus: decideExtraLocationStatus({
+      fullAccess,
+      subscriptionsRead,
+      plan,
+      planCode: decided.planCode,
+      fromSubscription: decided.fromSubscription,
+      extraUnits,
+    }),
     ...(partnerStatus ? { partnerStatus } : {}),
     ...(extraLocationUsage ? { extraLocationUsage } : {}),
   };

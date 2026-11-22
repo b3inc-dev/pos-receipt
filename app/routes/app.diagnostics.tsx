@@ -25,8 +25,9 @@ import {
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { getFullAccess, isInhouseMode, planLabel } from "../utils/planFeatures.server";
+import { isInhouseMode, planLabel } from "../utils/planFeatures.server";
 import { SystemPageNav } from "../components/SystemPageNav";
+import { checkShopPlanAccess } from "../utils/shopPlan.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 
 // 環境変数の存在チェック（値は返さない）
@@ -92,15 +93,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     required: false,
   }));
 
-  const fullAccess = await getFullAccess(admin, session);
+  // プランの表示は門番と同じ 1 か所（checkShopPlanAccess）から読む。"settlement" は全プランの機能で、ここでは state だけを使う（表示だけ）
+  const { state: planState } = await checkShopPlanAccess(admin, shop, "settlement");
+  const fullAccess = planState.fullAccess;
   return {
     shop: {
       id: shop.id,
       domain: session.shop,
-      planCode: shop.planCode === "standard" ? "lite" : (shop.planCode ?? "lite"),
+      planCode: planState.planCode,
       planLabel: fullAccess
         ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
-        : planLabel(shop.planCode),
+        : planLabel(planState.planCode),
     },
     isInhouse: fullAccess,
     dbCounts: {

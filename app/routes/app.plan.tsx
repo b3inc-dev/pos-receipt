@@ -83,6 +83,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     activeSubscriptions: state.activeSubscriptions,
     locationsCount: state.locationsCount,
     extraLocationUsage: usage ?? null,
+    extraLocationStatus: state.extraLocationStatus,
     usageReportingEnabled: isUsageReportingEnabled(),
     usageReportNote,
     pricingPlansUrl: isInhouseMode() ? null : buildPricingPlansUrl(session.shop),
@@ -110,6 +111,7 @@ export default function PlanPage() {
     activeSubscriptions,
     locationsCount,
     extraLocationUsage,
+    extraLocationStatus,
     usageReportingEnabled,
     usageReportNote,
     pricingPlansUrl,
@@ -226,7 +228,7 @@ export default function PlanPage() {
                     </>
                   ) : usageReportingEnabled ? (
                     <Text as="p" tone="subdued">
-                      超えた分は 1 か所 ${extraLocationPriceUsd}/月です。今のロケーション数（{locationsCount} か所）はプランの範囲内です。
+                      {extraLocationNotCountedText(extraLocationStatus, locationsCount, extraLocationPriceUsd)}
                     </Text>
                   ) : (
                     <Text as="p" tone="subdued">
@@ -269,6 +271,23 @@ export default function PlanPage() {
     </Page>
     </PolarisPageWrapper>
   );
+}
+
+/**
+ * 超えたロケーションを数えていないときの文（スイッチがオンのとき）。
+ * 契約が無い・読めない店に「プランの範囲内です」と出さない（レビュー #41 の P2-2）。
+ */
+function extraLocationNotCountedText(status: string, locationsCount: number, priceUsd: number): string {
+  switch (status) {
+    case "within_plan":
+      return `超えた分は 1 か所 $${priceUsd}/月です。今のロケーション数（${locationsCount} か所）はプランの範囲内です。`;
+    case "no_subscription":
+      return `有効な契約が無いため、超えたロケーションは数えていません（今のロケーション数: ${locationsCount} か所）。プランを選ぶと、プランに含まれる数を超えた分は 1 か所 $${priceUsd}/月です。`;
+    case "unread":
+      return `契約の状態を Shopify から読めないため、超えたロケーションをまだ数えていません（今のロケーション数: ${locationsCount} か所）。少し待ってから再読み込みしてください。`;
+    default:
+      return `今のプランでは、超えたロケーションの料金はかかりません（今のロケーション数: ${locationsCount} か所）。`;
+  }
 }
 
 // ── サブコンポーネント（POS Stock の PlanCard / FeatureCard 風） ─────────────────────
