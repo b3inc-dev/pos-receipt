@@ -43,10 +43,13 @@ export function autoResolveAfterMs(env: Record<string, string | undefined> = pro
   return Math.round(minutes * 60 * 1000);
 }
 
-/** SPECIAL_REFUND_AUTO_RESOLVE=0 / false で自動の確定を止める（店の人の「確かめる」は動く） */
+/**
+ * 自動の確定は既定でオフ。SPECIAL_REFUND_AUTO_RESOLVE=1 / true / on のときだけ動く
+ * （開発ストアで確かめるまで本番はオフで出す。T 2026-11-23）。オフでも店の人の「確かめる」は動く。
+ */
 export function isAutoResolveDisabled(env: Record<string, string | undefined> = process.env): boolean {
   const v = String(env.SPECIAL_REFUND_AUTO_RESOLVE ?? "").trim().toLowerCase();
-  return v === "0" || v === "false" || v === "off";
+  return !(v === "1" || v === "true" || v === "on");
 }
 
 export type AutoResolveCandidateEvent = {
@@ -90,6 +93,24 @@ export function autoResolveFailedNote(afterMinutes: number): string {
     `${AUTO_RESOLVE_FAILED_NOTE_PREFIX} ${afterMinutes} 分たっても返金処理中だったため Shopify を読み直しました。` +
     "Shopify にこの登録の返金はありません（Shopify の返金は作られていません）。" +
     "精算では、ほかの Shopify 返金の失敗と同じく、この登録の金額をアプリの記録として数えます。"
+  );
+}
+
+/**
+ * 自動の確定で failed にした登録か（Shopify に返金が無かったので failed にしたもの）。
+ * POS の「もう一度実行」で同じキー・同じ内容が送られたら、pending に戻して同じ冪等キーで返金し直してよい
+ * （冪等キーが同じなので Shopify の返金は 1 回だけ。T 2026-11-23）。
+ */
+export function isAutoResolvedFailure(event: {
+  status: string;
+  shopifyRefundStatus: string;
+  shopifyRefundError: string | null;
+}): boolean {
+  return (
+    event.status === "active" &&
+    event.shopifyRefundStatus === "failed" &&
+    typeof event.shopifyRefundError === "string" &&
+    event.shopifyRefundError.startsWith(AUTO_RESOLVE_FAILED_NOTE_PREFIX)
   );
 }
 

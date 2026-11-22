@@ -9,6 +9,8 @@ import {
   autoResolveAfterMs,
   decideAutoResolve,
   isAutoResolveDisabled,
+  isAutoResolvedFailure,
+  autoResolveFailedNote,
   isStalePendingSpecialRefund,
   AUTO_RESOLVE_FAILED_NOTE_PREFIX,
 } from "./specialRefundAutoResolvePure.server";
@@ -96,12 +98,15 @@ describe("autoResolveAfterMs / isAutoResolveDisabled", () => {
     assert.equal(autoResolveAfterMs({ SPECIAL_REFUND_AUTO_RESOLVE_AFTER_MINUTES: "99999" }), 1440 * MIN);
     assert.equal(autoResolveAfterMs({ SPECIAL_REFUND_AUTO_RESOLVE_AFTER_MINUTES: "abc" }), 5 * MIN);
   });
-  it("0 / false / off で止まる。未設定は動く", () => {
-    assert.equal(isAutoResolveDisabled({}), false);
+  it("既定はオフ。1 / true / on のときだけ動く", () => {
+    assert.equal(isAutoResolveDisabled({}), true);
+    assert.equal(isAutoResolveDisabled({ SPECIAL_REFUND_AUTO_RESOLVE: "" }), true);
     assert.equal(isAutoResolveDisabled({ SPECIAL_REFUND_AUTO_RESOLVE: "0" }), true);
     assert.equal(isAutoResolveDisabled({ SPECIAL_REFUND_AUTO_RESOLVE: "false" }), true);
     assert.equal(isAutoResolveDisabled({ SPECIAL_REFUND_AUTO_RESOLVE: "off" }), true);
     assert.equal(isAutoResolveDisabled({ SPECIAL_REFUND_AUTO_RESOLVE: "1" }), false);
+    assert.equal(isAutoResolveDisabled({ SPECIAL_REFUND_AUTO_RESOLVE: "true" }), false);
+    assert.equal(isAutoResolveDisabled({ SPECIAL_REFUND_AUTO_RESOLVE: " ON " }), false);
   });
 });
 
@@ -460,5 +465,19 @@ describe("つなぎ込み", () => {
     assert.ok(src.includes("onlyKeyedEvents: true"));
     const queue = readFileSync(new URL("./salesSummaryWebhookQueue.server.ts", import.meta.url), "utf8");
     assert.ok(queue.includes("registerSpecialRefundAutoResolveSweep(boss)"));
+  });
+});
+
+describe("isAutoResolvedFailure（POS の送り直しで返金し直してよいか）", () => {
+  const base = { status: "active", shopifyRefundStatus: "failed", shopifyRefundError: autoResolveFailedNote(5) };
+  it("自動の確定で failed にした active の登録だけ true", () => {
+    assert.equal(isAutoResolvedFailure(base), true);
+  });
+  it("ほかの理由の failed・無効化済み・成功・処理中は false", () => {
+    assert.equal(isAutoResolvedFailure({ ...base, shopifyRefundError: "Shopify refund failed: x" }), false);
+    assert.equal(isAutoResolvedFailure({ ...base, shopifyRefundError: null }), false);
+    assert.equal(isAutoResolvedFailure({ ...base, status: "voided" }), false);
+    assert.equal(isAutoResolvedFailure({ ...base, shopifyRefundStatus: "success" }), false);
+    assert.equal(isAutoResolvedFailure({ ...base, shopifyRefundStatus: "pending" }), false);
   });
 });

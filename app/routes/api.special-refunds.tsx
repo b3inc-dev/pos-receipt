@@ -23,6 +23,7 @@ import {
 } from "../services/specialRefundIdempotency.server";
 import { normalizeLocationGid } from "../utils/locationGid";
 import { autoResolveStalePendingSpecialRefunds } from "../services/specialRefundAutoResolve.server";
+import { isAutoResolvedFailure } from "../services/specialRefundAutoResolvePure.server";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
 
@@ -229,7 +230,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     if (
       existingIdempotentEvent &&
-      !["none", "pending"].includes(existingIdempotentEvent.shopifyRefundStatus)
+      !canResumeShopifyRefund(existingIdempotentEvent)
     ) {
       return replayResponse(existingIdempotentEvent);
     }
@@ -283,9 +284,30 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!matchesSpecialRefundIdempotencyPayload(event, idempotencyPayload)) {
         return replayResponse(event);
       }
-      if (!["none", "pending"].includes(event.shopifyRefundStatus)) {
+      if (!canResumeShopifyRefund(event)) {
         return replayResponse(event);
       }
+    }
+
+    // 自動の確定で failed にした登録を POS が同じキー・同じ内容で送り直した: pending に戻して
+    // 同じ冪等キーで返金し直す。戻すのは読んだときと同じ行だけ（同時の送り直しは片方だけが進む）。
+    let resumedFromAutoFailure = false;
+    if (idempotentReplay && isAutoResolvedFailure(event)) {
+      const reopened = await prisma.specialRefundEvent.updateMany({
+        where: {
+          id: event.id,
+          status: "active",
+          shopifyRefundStatus: "failed",
+          shopifyRefundError: event.shopifyRefundError,
+          updatedAt: event.updatedAt,
+        },
+        data: { shopifyRefundStatus: "pending", shopifyRefundProcessedAt: null },
+      });
+      if (reopened.count !== 1) {
+        const latest = await prisma.specialRefundEvent.findUnique({ where: { id: event.id } });
+        return replayResponse(latest ?? event);
+      }
+      resumedFromAutoFailure = true;
     }
 
     const processedEvent = await applyShopifyRefundToEvent(admin, merged, event, {
@@ -295,7 +317,9 @@ export async function action({ request }: ActionFunctionArgs) {
       // pending は前回すでに実返金処理へ入ったイベント。後から無効化イベントが
       // 増えても記録専用へ切り替えず、同じ Shopify 冪等キーで完了させる。
       isCorrectionRegistration:
-        event.shopifyRefundStatus === "pending" ? false : isCorrectionRegistration,
+        event.shopifyRefundStatus === "pending" || resumedFromAutoFailure
+          ? false
+          : isCorrectionRegistration,
     });
 
     if (processedEvent.shopifyRefundStatus === "pending") {
@@ -370,6 +394,15 @@ export async function action({ request }: ActionFunctionArgs) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
   }
+}
+
+/** 同じキーの送り直しで Shopify の返金へ進んでよい状態か（まだ / 処理中 / 自動の確定で failed） */
+function canResumeShopifyRefund(event: {
+  status: string;
+  shopifyRefundStatus: string;
+  shopifyRefundError: string | null;
+}): boolean {
+  return ["none", "pending"].includes(event.shopifyRefundStatus) || isAutoResolvedFailure(event);
 }
 
 async function applyShopifyRefundToEvent(

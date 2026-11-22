@@ -5,7 +5,7 @@
  * - 売上サマリーのキュー（salesSummaryWebhookQueue.server.ts）と同じ pg-boss を使う。
  *   そのキューが無効（SALES_SUMMARY_WEBHOOK_QUEUE=0）や DATABASE_URL が無いときは見回りも動かない
  *   （精算・POS の一覧の中で決める道は動く）。
- * - SPECIAL_REFUND_AUTO_RESOLVE=0 で自動の確定そのものを止められる。
+ * - 自動の確定は既定でオフ。SPECIAL_REFUND_AUTO_RESOLVE=1 のときだけ動く（未設定・0 は止まる）。
  * - schedule は pg-boss が 1 回の時刻に 1 つだけ積むので、Render のインスタンスが複数でも重ならない。
  *   重なっても、DB の書き換えは pending・updatedAt が同じ行だけなので 2 回決めない。
  */
