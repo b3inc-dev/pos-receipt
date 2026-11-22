@@ -26,7 +26,7 @@
 | D18 | 特殊返金の Shopify 返金が `pending`（成否不明）のあいだは精算を確定しない。二重計上も抜けも出さないため | `assertNoPendingSpecialRefunds`（`specialRefundOverlayPure.server.ts`） |
 | D19 | 精算注文（SETTLEMENT）を作るかは、印字設定「精算注文を作成」（`createSettlementOrderWhenPrinting`）の保存が無ければ ON。管理画面は保存が無いとチェックが入って見えるので、サーバーも同じにそろえる（今の本番の動きを続ける）。作らないのは、チェックを外して保存したとき・精算設定 `orderBasedCreateSettlementOrderEnabled=false`・`cloudprnt_direct`。作らなかったとき API は `settlementOrderSkipped: true` を返し、POS は「再インストール」を案内しない | `settlementSyncSettings.server.ts` `shouldCreateSettlementOrder` |
 | D20 | 前からある pending の特殊返金（ID が `pos_sr_` で始まらない）は、Shopify を読み直して決めるだけで返金を実行しない | `specialRefundLegacyRecheck.server.ts` / `api.special-refunds.$id.recheck.tsx` |
-| D21 | 確定値を守る（T の決定 2026-11-22・Issue #20）。確定済みの日は、もう一度「確定」を押しても再集計しても集計し直さず、DB の Settlement の値を返す。Shopify の精算注文は書き換えない。直したいときの別の版の作り方は未定（別の作業） | `api.settlements.create.tsx` / `api.settlements.recalculate.tsx` / `settlementConfirmedPure.server.ts` |
+| D21 | 確定値を守る（T の決定 2026-11-22・Issue #20）。確定済みの日は、もう一度「確定」を押しても DB の Settlement の値を返し、Shopify の精算注文は書き換えない。再集計は比べるために集計し、数が変わっていれば `changedSinceConfirm` を返す。**再確定**（create の `reconfirm: true`、T の決定 2026-11-23 4:20）は今の数で確定し直し、前の行は `status=superseded`・冪等キーなしで履歴に残す（migration なし）。order_based は精算注文も新しい値に直す。点検は毎回その時点の金額を保存し、返金処理中（pending）の特殊返金があっても警告つきで出す（T の決定 2026-11-23 4:25。pending の分は数に入れず、売上サマリーのキャッシュも書かない）。精算の確定・再確定・再集計は pending で止める（D18） | `api.settlements.create.tsx` / `api.settlements.recalculate.tsx` / `api.settlements.preview.tsx` / `settlementConfirmedPure.server.ts` |
 
 ## 2. 古い docs との差分（注意）
 

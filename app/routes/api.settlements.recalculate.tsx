@@ -4,8 +4,10 @@
  *
  * Body: { settlementId } or { locationId, locationName, targetDate }
  *
- * 確定済みの日（点検以外の Settlement が completed / printed）は集計し直さず、DB の値を返す
+ * 確定済みの日（点検以外の Settlement が completed / printed）は DB の確定値を preview で返す
  * （応答に confirmed: true）。Shopify の精算注文は書き換えない（T の決定「確定値を守る」）。
+ * 比べるために今の集計を 1 回行い、違えば changedSinceConfirm: true・livePreview を返す
+ * （再確定は api.settlements.create の reconfirm: true）。
  * 確定前の日は従来どおり集計し直し、精算注文を更新する。
  */
 import type { ActionFunctionArgs } from "react-router";
@@ -18,6 +20,7 @@ import { resolveSettlementOrderSyncOptions } from "../services/settlementSyncSet
 import prisma from "../db.server";
 import {
   CONFIRMED_SETTLEMENT_STATUSES,
+  diffConfirmedVsLive,
   isConfirmedSettlementRow,
   locationIdVariants,
   settlementRowToPreview,
@@ -91,8 +94,10 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // T の決定（2026-11-22「確定値を守る」・Issue #20）: 確定済みの日は集計し直さず DB の値を返す。
-    // Shopify の精算注文も、売上サマリーのキャッシュも書き換えない。
+    // T の決定（2026-11-22「確定値を守る」・Issue #20）: 確定済みの日は DB の確定値を返す。
+    // Shopify の精算注文は書き換えない。今の集計は比べるためだけに 1 回行い、数が変わっていれば
+    // changedSinceConfirm: true と今の値（livePreview）を返す。POS はこれを見て再確定を出す
+    // （T の決定 2026-11-23 4:20。再確定は api.settlements.create の reconfirm: true）。
     const confirmed = await findConfirmedSettlementForDay(
       shop.id,
       String(locationId),
@@ -100,11 +105,34 @@ export async function action({ request }: ActionFunctionArgs) {
       settlementId ? String(settlementId) : null,
     );
     if (confirmed) {
+      const confirmedPreview = settlementRowToPreview(confirmed, String(locationName ?? ""));
+      const livePreview = await buildSettlementPreview(
+        admin,
+        shop.id,
+        String(locationId),
+        String(locationName ?? ""),
+        String(targetDate),
+      );
+      try {
+        // 売上サマリーは今の数（従来どおり）。確定値とずれたら POS が再確定を出す
+        await upsertDailySummaryCacheFromPreview(
+          shop.id,
+          String(locationId),
+          String(targetDate),
+          livePreview,
+        );
+      } catch {
+        // キャッシュ更新失敗は精算結果に影響させない
+      }
+      const diff = diffConfirmedVsLive(confirmedPreview, livePreview);
       return corsJson({
         ok: true,
         confirmed: true,
         settlementId: confirmed.id,
-        preview: settlementRowToPreview(confirmed, String(locationName ?? "")),
+        preview: confirmedPreview,
+        changedSinceConfirm: diff.changedFields.length > 0,
+        changedFields: diff.changedFields,
+        livePreview,
         sourceOrderId: confirmed.sourceOrderId,
         sourceOrderName: confirmed.sourceOrderName,
       });

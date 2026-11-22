@@ -36,18 +36,24 @@ export async function action({ request }: ActionFunctionArgs) {
       String(locationId),
       String(locationName ?? ""),
       String(targetDate),
+      // 返金処理中（pending）の特殊返金があっても止めずに出す（点検を出せるようにするため。
+      // T の決定 2026-11-23 4:25）。精算の確定は create 側で止める（D18）
+      { allowPendingSpecialRefunds: true },
     );
 
-    // プレビュー結果で日次キャッシュのみ更新（Shopify の二重呼び出しを避ける）
-    try {
-      await upsertDailySummaryCacheFromPreview(
-        shop.id,
-        String(locationId),
-        String(targetDate),
-        preview,
-      );
-    } catch {
-      // キャッシュ更新失敗は精算プレビュー表示には影響させない
+    // プレビュー結果で日次キャッシュのみ更新（Shopify の二重呼び出しを避ける）。
+    // pending があるときは数に入っていない返金があるので書かない
+    if (!preview.pendingSpecialRefundOrderLabels?.length) {
+      try {
+        await upsertDailySummaryCacheFromPreview(
+          shop.id,
+          String(locationId),
+          String(targetDate),
+          preview,
+        );
+      } catch {
+        // キャッシュ更新失敗は精算プレビュー表示には影響させない
+      }
     }
 
     return corsJson({ ok: true, preview });

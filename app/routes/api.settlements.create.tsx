@@ -4,7 +4,10 @@
  *
  * - cloudprnt_direct: 集計してDB保存 → printable payload を返す
  * - order_based: 集計 → Shopify精算注文作成（GAS newSettlementFresh 相当）→ DB保存
- * - isInspection=true: 点検レシート（GAS uiCreateZeroInspection 相当）。0 円で保存するので集計しない
+ * - isInspection=true: 点検レシート（GAS uiCreateZeroInspection 相当）。発行ごとにその時点の金額と
+ *   支払方法別内訳を保存する（T の決定・#78 と同じ形）。精算（確定）としては扱わない。
+ *   返金処理中（pending）の特殊返金があっても止めず、warning を返す（T の決定 2026-11-23 4:25）
+ * - reconfirm=true: 確定済みの日を集計し直し、数が変わっていれば確定値を新しくする（前の行は superseded）
  *
  * 印字方式 printMode はリクエスト body ではなく DB（Location.printMode）で決定（未登録は order_based）。
  * リトライ安全: locationId+targetDate+printMode のハッシュを idempotencyKey として使用。
@@ -22,7 +25,11 @@ import {
   syncInspectionOrderLikeGas,
 } from "../services/settlementOrderGas.server";
 import { upsertDailySummaryCacheFromPreview } from "../services/salesSummaryEngine.server";
-import { settlementRowToPreview } from "../services/settlementConfirmedPure.server";
+import {
+  diffConfirmedVsLive,
+  settlementRowToPreview,
+  SUPERSEDED_SETTLEMENT_STATUS,
+} from "../services/settlementConfirmedPure.server";
 import {
   buildSettlementLockKey,
   withSettlementOperationLock,
@@ -53,8 +60,7 @@ async function resolveEffectivePrintMode(shopId: string, locationId: string): Pr
 async function syncShopifySettlementOrder(
   admin: Parameters<typeof syncSettlementOrderLikeGas>[0],
   shopId: string,
-  /** 点検レシートのときは集計しないので null */
-  preview: Awaited<ReturnType<typeof buildSettlementPreview>> | null,
+  preview: Awaited<ReturnType<typeof buildSettlementPreview>>,
   printMode: string,
   isInspection: boolean,
   locationName: string,
@@ -82,9 +88,6 @@ async function syncShopifySettlementOrder(
     };
   }
 
-  if (!preview) {
-    throw new Error("精算の集計結果がありません");
-  }
   const result = await syncSettlementOrderLikeGas(admin, shopId, preview, {
     attachNote: syncOpts.attachNote,
     attachMetafields: syncOpts.attachMetafields,
@@ -124,17 +127,14 @@ function confirmedSettlementResponse(
   };
 }
 
-/**
- * 点検レシートは集計しないので、通貨は同じ店の直近の精算から取る。無ければ null
- * （印字は null を JPY として扱う。0 件の日の集計と同じ既定値）。
- */
-async function resolveInspectionCurrency(shopId: string): Promise<string | null> {
-  const last = await prisma.settlement.findFirst({
-    where: { shopId, currency: { not: null } },
-    orderBy: { createdAt: "desc" },
-    select: { currency: true },
-  });
-  return last?.currency ?? null;
+/** 点検の応答に付ける警告（返金処理中の特殊返金は数に入っていない） */
+function pendingSpecialRefundWarning(labels: string[]): string {
+  const shown = labels.slice(0, 5).join("、");
+  const more = labels.length > 5 ? ` ほか ${labels.length - 5} 件` : "";
+  return (
+    `返金処理中の特殊返金があります（注文: ${shown}${more}）。この返金は点検の金額に入っていません。` +
+    "精算（確定）の前に、POS の特殊返金で「Shopify 返金を確かめる」を押してください。"
+  );
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -169,10 +169,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // ── 冪等性チェック（点検レシートは対象外） ──────────────────────────────
     // T の決定（2026-11-22「確定値を守る」・Issue #20）: 確定済みの日は集計し直さず、
     // DB の値を返す。Shopify の精算注文も書き換えない。売上サマリーのキャッシュも触らない。
+    // reconfirm: true のときだけ、集計し直して数が変わっていれば確定値を新しくする
+    // （T の決定 2026-11-23 4:20。前の確定値は status=superseded で履歴に残す）。
+    const reconfirm = !inspection && body.reconfirm === true;
     const idemKey = !inspection
       ? buildIdempotencyKey(shop.id, String(locationId), String(targetDate), effectivePrintMode)
       : null;
-    if (idemKey) {
+    if (idemKey && !reconfirm) {
       const existingSettlement = await prisma.settlement.findUnique({
         where: { idempotencyKey: idemKey },
       });
@@ -186,30 +189,46 @@ export async function action({ request }: ActionFunctionArgs) {
 
     return await withSettlementOperationLock(lockKey, async () => {
       // ロック内で再チェック（レース対策）。先に確定した側の値をそのまま返す。
-      if (idemKey) {
-        const raced = await prisma.settlement.findUnique({ where: { idempotencyKey: idemKey } });
-        if (raced) {
+      const raced = idemKey
+        ? await prisma.settlement.findUnique({ where: { idempotencyKey: idemKey } })
+        : null;
+      if (raced && !reconfirm) {
+        return corsJson(
+          confirmedSettlementResponse(raced, effectivePrintMode, String(locationName ?? "")),
+          { status: 200 },
+        );
+      }
+
+      // 集計は 1 回だけにし、その結果で売上サマリーのキャッシュも更新する
+      // （以前は computeAndCacheDailySummary の中でもう一度集計していた）。
+      // 点検は毎回その時点の金額を残す（T の決定）。返金処理中（pending）の特殊返金があっても
+      // 点検は止めずに警告を返す（T の決定 2026-11-23 4:25）。精算の確定・再確定は止める（D18）。
+      const preview = await buildSettlementPreview(
+        admin,
+        shop.id,
+        String(locationId),
+        String(locationName ?? ""),
+        String(targetDate),
+        { allowPendingSpecialRefunds: inspection },
+      );
+      const pendingLabels = preview.pendingSpecialRefundOrderLabels ?? [];
+
+      // 再確定で数が変わっていなければ、前の確定値のまま返す（行も Shopify も変えない）
+      if (raced && reconfirm) {
+        const diff = diffConfirmedVsLive(settlementRowToPreview(raced, ""), preview);
+        if (diff.changedFields.length === 0) {
           return corsJson(
-            confirmedSettlementResponse(raced, effectivePrintMode, String(locationName ?? "")),
+            {
+              ...confirmedSettlementResponse(raced, effectivePrintMode, String(locationName ?? "")),
+              reconfirmed: false,
+            },
             { status: 200 },
           );
         }
       }
 
-      // 点検レシートは 0 円で保存し、集計の結果を使わない（Issue #20）ので集計しない。
-      // 精算は集計を 1 回だけにし、その結果で売上サマリーのキャッシュを更新する
-      // （以前は computeAndCacheDailySummary の中でもう一度集計していた）。
-      const preview = inspection
-        ? null
-        : await buildSettlementPreview(
-            admin,
-            shop.id,
-            String(locationId),
-            String(locationName ?? ""),
-            String(targetDate),
-          );
-
-      if (preview) {
+      // pending があるときは、数に入っていない返金があるのでキャッシュを書かない（D18 と同じ考え）
+      if (pendingLabels.length === 0) {
         try {
           await upsertDailySummaryCacheFromPreview(
             shop.id,
@@ -227,6 +246,7 @@ export async function action({ request }: ActionFunctionArgs) {
       let settlementOrderSkipped = false;
 
       if (effectivePrintMode === "order_based") {
+        // 再確定のときも同じ日の精算注文を新しい値に直す（DB と Shopify をそろえる）
         const sync = await syncShopifySettlementOrder(
           admin,
           shop.id,
@@ -240,34 +260,45 @@ export async function action({ request }: ActionFunctionArgs) {
         settlementOrderSkipped = sync.settlementOrderSkipped;
       }
 
-      const settlement = await prisma.settlement.create({
-        data: {
-          shopId: shop.id,
-          locationId: String(locationId),
-          sourceOrderId,
-          sourceOrderName,
-          targetDate: String(targetDate),
-          periodLabel: inspection ? `点検_${String(targetDate)}` : String(targetDate),
-          currency: preview ? preview.currency : await resolveInspectionCurrency(shop.id),
-          total: preview?.total ?? 0,
-          netSales: preview?.netSales ?? 0,
-          tax: preview?.tax ?? 0,
-          discounts: preview?.discounts ?? 0,
-          vipPointsUsed: preview?.vipPointsUsed ?? 0,
-          refundTotal: preview?.refundTotal ?? 0,
-          orderCount: preview?.orderCount ?? 0,
-          refundCount: preview?.refundCount ?? 0,
-          itemCount: preview?.itemCount ?? 0,
-          voucherChangeAmount: preview?.voucherChangeAmount ?? 0,
-          paymentSectionsJson: JSON.stringify(preview?.paymentSections ?? []),
-          printMode: effectivePrintMode,
-          status: "completed",
-          idempotencyKey: idemKey,
-        },
-      });
+      const data = {
+        shopId: shop.id,
+        locationId: String(locationId),
+        sourceOrderId,
+        sourceOrderName,
+        targetDate: String(targetDate),
+        periodLabel: inspection ? `点検_${String(targetDate)}` : String(targetDate),
+        currency: preview.currency,
+        total: preview.total,
+        netSales: preview.netSales,
+        tax: preview.tax,
+        discounts: preview.discounts,
+        vipPointsUsed: preview.vipPointsUsed,
+        refundTotal: preview.refundTotal,
+        orderCount: preview.orderCount,
+        refundCount: preview.refundCount,
+        itemCount: preview.itemCount,
+        voucherChangeAmount: preview.voucherChangeAmount,
+        paymentSectionsJson: JSON.stringify(preview.paymentSections),
+        printMode: effectivePrintMode,
+        status: "completed",
+        idempotencyKey: idemKey,
+      };
+
+      // 再確定: 前の行は冪等キーを外して superseded にし（履歴に残る）、新しい行を確定値にする
+      const settlement = raced
+        ? (
+            await prisma.$transaction([
+              prisma.settlement.update({
+                where: { id: raced.id },
+                data: { status: SUPERSEDED_SETTLEMENT_STATUS, idempotencyKey: null },
+              }),
+              prisma.settlement.create({ data }),
+            ])
+          )[1]
+        : await prisma.settlement.create({ data });
 
       const printPayload =
-        effectivePrintMode === "cloudprnt_direct" && preview
+        effectivePrintMode === "cloudprnt_direct" && !inspection
           ? buildSettlementReceiptText(preview)
           : undefined;
 
@@ -283,6 +314,10 @@ export async function action({ request }: ActionFunctionArgs) {
           printMode: effectivePrintMode,
           targetDate: String(targetDate),
           isInspection: inspection,
+          ...(raced ? { reconfirmed: true, previousSettlementId: raced.id } : {}),
+          ...(pendingLabels.length > 0
+            ? { warning: pendingSpecialRefundWarning(pendingLabels) }
+            : {}),
           ...(printPayload !== undefined && { printPayload }),
         },
         { status: 201 },
