@@ -5,7 +5,7 @@
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useLocation, useNavigate } from "react-router";
-import { Page, Layout, Card, ResourceList, ResourceItem, Text, Badge, InlineStack, BlockStack, Link } from "@shopify/polaris";
+import { Page, Layout, Card, ResourceList, ResourceItem, Text, Badge, InlineStack, BlockStack, Button } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getAppSetting } from "../utils/appSettings.server";
@@ -94,11 +94,15 @@ export default function ReceiptLayoutsIndex() {
             </Card>
           </Layout.Section>
           <Layout.Section>
-            <Text as="p" tone="subdued">
-              精算の支払方法の並び順・まとめの行・納金額、販売レシートのスタッフ名は{" "}
-              <Link url={`/app/receipt-layouts/print-data${q}`}>印字の値の設定</Link>
-              で変えます。
-            </Text>
+            <Card>
+              <InlineStack align="space-between" blockAlign="center" gap="300">
+                <BlockStack gap="100">
+                  <Text as="h3" variant="headingSm">印字の値の設定</Text>
+                  <Text as="p" tone="subdued">精算の支払方法の並び順・まとめの行・納金額と、販売レシートのスタッフ名の探し方です。</Text>
+                </BlockStack>
+                <Button onClick={() => navigate(`/app/receipt-layouts/print-data${q}`)}>開く</Button>
+              </InlineStack>
+            </Card>
           </Layout.Section>
         </Layout>
       </Page>

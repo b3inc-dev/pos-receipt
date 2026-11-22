@@ -6,7 +6,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Form, useActionData, useLoaderData, useLocation, useNavigate, useNavigation } from "react-router";
-import { Page, Layout, Card, Checkbox, BlockStack, Text, Link } from "@shopify/polaris";
+import { Page, Layout, Card, Checkbox, BlockStack, Text, Button, InlineStack } from "@shopify/polaris";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
@@ -155,13 +155,14 @@ export default function ReceiptLayoutEdit() {
                       }}
                     />
                     {kind === "settlement" || kind === "sales" ? (
-                      <Text as="p" tone="subdued">
-                        {kind === "settlement"
-                          ? "支払方法の並び順・電子マネー(合計) などのまとめの行・納金額の計算は "
-                          : "スタッフ名を探す明細のプロパティは "}
-                        <Link url={`/app/receipt-layouts/print-data${q}`}>印字の値の設定</Link>
-                        で変えます。
-                      </Text>
+                      <InlineStack gap="200" blockAlign="center" wrap>
+                        <Text as="p" tone="subdued">
+                          {kind === "settlement"
+                            ? "支払方法の並び順・まとめの行（電子マネー(合計) など）・納金額の計算"
+                            : "スタッフ名を探す明細のプロパティ"}
+                        </Text>
+                        <Button onClick={() => navigate(`/app/receipt-layouts/print-data${q}`)}>印字の値の設定</Button>
+                      </InlineStack>
                     ) : null}
                   </BlockStack>
                 </Card>
