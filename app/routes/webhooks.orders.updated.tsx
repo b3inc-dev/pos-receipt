@@ -10,6 +10,7 @@ import prisma from "../db.server";
 import { runSalesSummaryRefreshFromOrderWebhook } from "../services/salesSummaryWebhookRefresh.server";
 import { enqueueSalesSummaryOrdersUpdatedJob } from "../services/salesSummaryWebhookQueue.server";
 import { syncRefundAggregationFromWebhookPayload } from "../services/refundAggregation.server";
+import { recordOrderStaffAttributionFromWebhook } from "../services/orderStaffAttribution.server";
 
 export const loader = async (_: LoaderFunctionArgs) => {
   return new Response("Method Not Allowed", { status: 405 });
@@ -47,6 +48,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!dbShop) {
       console.log(`[orders/updated][pos-receipt] shop not in DB, skip refresh: ${shop}`);
       return new Response("OK", { status: 200 });
+    }
+
+    // 販売の帰属スタッフ（line_items[].attributed_staffs）を記録する。本文だけで足り、Shopify は呼ばない。
+    // 売上サマリーの停止スイッチ・キューとは別に、毎回ここで記録する。失敗しても売上サマリーの更新は続ける。
+    try {
+      await recordOrderStaffAttributionFromWebhook(dbShop.id, payload);
+    } catch (e) {
+      console.warn(`[orders/updated][pos-receipt] staff attribution record failed shop=${shop}`, e);
     }
 
     const disabled = process.env.SALES_SUMMARY_WEBHOOK_REFRESH_DISABLED;

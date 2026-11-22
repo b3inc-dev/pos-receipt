@@ -59,6 +59,7 @@ model Shop {
   salesChannelCacheDaily   SalesChannelCacheDaily[]
   salesChannelBudgets      SalesChannelBudget[]
   salesChannelCachePeriod  SalesChannelCachePeriod[]
+  orderStaffAttributions   OrderStaffAttribution[]
 }
 
 // ========== 20.2 ロケーション（印字方式・サマリー設定）要件 §4 ==========
@@ -252,6 +253,26 @@ model ReceiptIssue {
 
   @@index([shopId, orderId])
   @@index([locationId, createdAt])
+}
+
+// ========== 販売の帰属スタッフ（POS の明細に付いたスタッフ） ==========
+// 注文 Webhook（orders/updated）の line_items[].attributed_staffs を、明細×スタッフで 1 行に残す。
+// 注文ごとに丸ごと入れ替える（古い通知は sourceUpdatedAt で捨てる）。名前は持たない（AppSetting staff_display_names_v1 か Shopify から引く）。
+model OrderStaffAttribution {
+  id              String    @id @default(cuid())
+  shopId          String
+  shop            Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  orderId         String    // 注文 ID（数字）
+  lineItemId      String    // 明細 ID（数字）
+  position        Int       // 明細の並び（Webhook の line_items の順）
+  staffId         String    // StaffMember ID（数字）
+  quantity        Int
+  sourceUpdatedAt DateTime? // Webhook の updated_at
+  createdAt       DateTime  @default(now())
+
+  @@unique([shopId, orderId, lineItemId, staffId])
+  @@index([shopId, orderId])
+  @@index([shopId, staffId])
 }
 
 // ========== 20.8 予算 ==========
