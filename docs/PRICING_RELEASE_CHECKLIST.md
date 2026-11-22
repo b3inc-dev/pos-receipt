@@ -29,9 +29,19 @@ Partner Dashboard の画面ごとの細かい手順は `docs/PARTNER_DASHBOARD_P
 **プランの名前の決まり（レビューの P2）**: アプリは契約の名前からプランを決めます（`shopPlan.server.ts` の `planFromSubscriptionName`）。
 
 - `Pro`・`Pro Plan`・`Proプラン`・「プロ」は Pro。`Professional`・`Product` は Pro に**ならない**（前後が英字だと数えない）
-- `Lite`・`Standard`・「ライト」・「スタンダード」は Lite
+- `Lite`・`Standard`・「ライト」・「スタンダード」は Lite。`Elite`・`substandard` は Lite に**ならない**（PR #63 で pro と同じ決まりにした）
 - どれも入っていない名前（`Basic`・`Premium` など）は**契約なし（Lite 扱い）**になり、Pro の店が Pro の機能を使えません
 - いちばん安全なのは、名前をそのまま `Lite` と `Pro` にすること
+
+- [ ] **Partner Dashboard のプラン名（と Partner API で読むなら項目の handle）を、作ったあとに目で確かめる**
+  - 読める: `Lite`・`Pro` そのもの、または `lite` / `pro` の前後が英字でない名前。区切りは空白・記号・数字・日本語のどれでもよい（例: `Lite（月額）`・`Pro Plan`・`lite_monthly`・`pro-monthly`・`Lite 2026`）
+  - 読めない: `LitePlan`・`ProPlan`・`LiteMonthly`・`proplan` のように、英字がそのまま続く名前（`lite` / `pro` の後ろに英字がつながるので、1 つの言葉と見なさない）
+  - 読めないとどうなるか: その店は**契約なし（Lite 扱い）**になる
+    - Lite の機能はそのまま使える（Lite の店は困らない）
+    - **Pro で払っている店も Lite 扱い**になり、Pro の機能（売上サマリー・入店数報告・予算管理）が使えない。DB の `planCode` も `lite` に書き直される
+    - 料金プラン画面の超えたロケーションの枠に「有効な契約が無いため、超えたロケーションは数えていません」と出て、**App Events の報告は送られない**（超えた 1 か所 +$20 が請求されない）
+  - 読めない名前で作ってしまったら: Partner Dashboard で名前を直す（アプリの直しは要らない）。直したあと、店がアプリを開くと門番が契約を読み直し、60 秒以内に正しいプランに戻る（推測: 名前を直したあと、すでに契約している店の契約の名前も変わるかは未確認。変わらなければ、その店にはプランを選び直してもらう）
+  - 出したあとの確かめ方: 開発ストアで（`PLAN_TEST_DEV_STORE_AS_PUBLIC=1` のときだけ料金の流れを通る）Pro を選び、料金プラン画面の Pro に「ご契約中」のバッジが付く（Lite に付いたまま・「有効な契約が無いため…」と出たら、名前が読めていない）
 
 ## 3. 環境変数のスイッチ（公開用の Render だけ・どれも既定オフ）
 
