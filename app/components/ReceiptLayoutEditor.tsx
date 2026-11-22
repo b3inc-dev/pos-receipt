@@ -238,7 +238,7 @@ const EDITOR_CSS = `
 .RL-code{width:100%;min-height:480px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.5;border:1px solid #8a8a8a;border-radius:8px;padding:8px;resize:vertical;tab-size:2;white-space:pre;overflow:auto}
 .RL-vars{font-size:12px}
 .RL-vars code{font-size:12px}
-@media (max-width: 900px){.RL-grid{grid-template-columns:minmax(0,1fr)}.RL-preview{position:static;max-height:none;padding:8px}.RL-jump{display:block}.RL-code{font-size:16px}}
+@media (max-width: 900px){.RL-grid{grid-template-columns:minmax(0,1fr)}.RL-preview{position:static;max-height:none;padding:8px}.RL-jump{display:block;padding:0 16px}.RL-code{font-size:16px}}
 `;
 
 export function ReceiptLayoutEditor({
