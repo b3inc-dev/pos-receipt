@@ -10,9 +10,11 @@
 import prisma from "../db.server";
 import { resolvePaymentSectionLabels } from "../utils/paymentMethod.server";
 import { getAppSetting } from "../utils/appSettings.server";
+import { resolvePointRedemptionRules } from "../utils/pointRedemptionRules";
 import {
   LOYALTY_SETTINGS_KEY,
   DEFAULT_LOYALTY_SETTINGS,
+  type LoyaltySettings,
   SETTLEMENT_SETTINGS_KEY,
   DEFAULT_SETTLEMENT_SETTINGS,
   SPECIAL_REFUND_SETTINGS_KEY,
@@ -690,7 +692,12 @@ async function buildSettlementPreviewImpl(
     return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
   };
 
-  const gas = aggregateGasStyleForOrders(ordersUnion, inDay, attributionOpts);
+  // ポイント利用額に数える割引（旧 VIP の VIP-・Shop Point の SP-POINT- と旧形式・POS の「Shop Point」）。
+  // 「ポイント/会員施策設定」で変えられる。保存していない店は初めの値。
+  const loyaltySettings = await getAppSetting<Partial<LoyaltySettings>>(shopId, LOYALTY_SETTINGS_KEY);
+  const pointRules = resolvePointRedemptionRules(loyaltySettings);
+
+  const gas = aggregateGasStyleForOrders(ordersUnion, inDay, attributionOpts, pointRules);
 
   const settlementSettings = await getAppSetting<Partial<SettlementSettings>>(shopId, SETTLEMENT_SETTINGS_KEY);
   const settlementMerged: SettlementSettings = { ...DEFAULT_SETTLEMENT_SETTINGS, ...settlementSettings };
@@ -782,10 +789,9 @@ async function buildSettlementPreviewImpl(
   const voucherChangeAmount =
     Math.round(gas.voucherChangeObserved) +
     voucherAdjustments.reduce((sum, e) => sum + Number(e.voucherChangeAmount ?? 0), 0);
-  /** GAS: lineItems の VIP- 割引按分のみ（特殊返金の points は後続フェーズで合成可） */
+  /** lineItems のポイント利用の割引（pointRules）の按分のみ（特殊返金の points は後続フェーズで合成可） */
   const vipPointsUsed = gas.vipPointsUsed;
 
-  const loyaltySettings = await getAppSetting<{ loyaltyUsageDisplayLabel?: string }>(shopId, LOYALTY_SETTINGS_KEY);
   const loyaltyUsageDisplayLabel =
     loyaltySettings?.loyaltyUsageDisplayLabel ?? DEFAULT_LOYALTY_SETTINGS.loyaltyUsageDisplayLabel;
 
