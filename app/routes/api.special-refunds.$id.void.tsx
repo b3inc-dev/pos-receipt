@@ -7,15 +7,7 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import prisma from "../db.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
-
-function normalizeLocationIdToGid(locationId: string): string | null {
-  const s = String(locationId || "").trim();
-  if (!s) return null;
-  if (s.startsWith("gid://shopify/Location/")) return s;
-  if (/^\d+$/.test(s)) return `gid://shopify/Location/${s}`;
-  const m = s.match(/\/(\d+)$/);
-  return m?.[1] ? `gid://shopify/Location/${m[1]}` : null;
-}
+import { normalizeLocationGid } from "../utils/locationGid";
 
 export async function action({ request, params }: ActionFunctionArgs) {
   if (request.method === "OPTIONS") return corsPreflightResponse(request);
@@ -48,7 +40,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     // 無効化後の過去実績集計ズレを防ぐため、登録日の日次キャッシュを再計算
-    const locationGid = normalizeLocationIdToGid(existing.locationId);
+    const locationGid = normalizeLocationGid(existing.locationId);
     if (locationGid) {
       try {
         const timezone = await getShopTimezoneForDaily(admin, shop.id);

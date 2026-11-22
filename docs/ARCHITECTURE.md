@@ -147,4 +147,4 @@ app/routes/webhooks.orders.updated.tsx     … キャッシュ・metafield
 
 - CloudPRNT 実機が payload URL をどう認証するか（アプリ側のプリンタ認証実装は見当たらない）
 - Render 以外の本番ホストの有無
-- Admin API バージョン（October25）と webhook TOML（2026-04）の運用上の意図的差分の公式根拠
+- POS 内から直接呼ぶ Admin GraphQL（`shopify:admin/api/graphql.json`）が答える Admin API の版（Admin SDK と Webhook は 2026-04 にそろえた）

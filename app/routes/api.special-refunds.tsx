@@ -21,6 +21,7 @@ import {
   matchesSpecialRefundIdempotencyPayload,
   resolveSpecialRefundIdempotencyKey,
 } from "../services/specialRefundIdempotency.server";
+import { normalizeLocationGid } from "../utils/locationGid";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
 
@@ -41,15 +42,6 @@ async function countVoidedEventsOnOrder(shopId: string, sourceOrderId: string): 
   return prisma.specialRefundEvent.count({
     where: { shopId, sourceOrderId, status: "voided" },
   });
-}
-
-function normalizeLocationIdToGid(locationId: string): string | null {
-  const s = String(locationId || "").trim();
-  if (!s) return null;
-  if (s.startsWith("gid://shopify/Location/")) return s;
-  if (/^\d+$/.test(s)) return `gid://shopify/Location/${s}`;
-  const m = s.match(/\/(\d+)$/);
-  return m?.[1] ? `gid://shopify/Location/${m[1]}` : null;
 }
 
 // GET /api/special-refunds?sourceOrderId=...
@@ -316,7 +308,7 @@ export async function action({ request }: ActionFunctionArgs) {
       ? String(sourceOrderId)
       : `gid://shopify/Order/${String(sourceOrderId).replace(/\D/g, "")}`;
     try {
-      const processingGid = normalizeLocationIdToGid(locationId ? String(locationId) : "");
+      const processingGid = normalizeLocationGid(locationId ? String(locationId) : "");
       if (processingGid) {
         await setOrderRefundAggregationLocationGid(admin, orderGid, processingGid);
       } else {
@@ -327,7 +319,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // 売上サマリー（過去実績含む）の整合を保つため、登録日の日次キャッシュを再計算
-    const locationGid = normalizeLocationIdToGid(processedEvent.locationId);
+    const locationGid = normalizeLocationGid(processedEvent.locationId);
     if (locationGid) {
       try {
         const timezone = await getShopTimezoneForDaily(admin, shop.id);

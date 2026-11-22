@@ -3,6 +3,8 @@
  * settlementEngine のユニットテストから prisma なしで import できるように分離。
  */
 
+import { normalizeLocationGid, extractLocationNumericId } from "../utils/locationGid";
+
 export type RefundAggregationLocationMode =
   | "order_transaction"
   | "refund_transaction_pos_location";
@@ -35,21 +37,8 @@ export interface OrderForRefundAggregation {
   }>;
 }
 
-/** GID 正規化 */
-export function normalizeLocationGid(locationId: string | null | undefined): string | null {
-  const s = String(locationId ?? "").trim();
-  if (!s) return null;
-  if (s.startsWith("gid://shopify/Location/")) return s;
-  if (/^\d+$/.test(s)) return `gid://shopify/Location/${s}`;
-  const m = s.match(/\/(\d+)$/);
-  return m?.[1] ? `gid://shopify/Location/${m[1]}` : null;
-}
-
-export function extractLocationNumericId(locationId: string | null | undefined): string | null {
-  const gid = normalizeLocationGid(locationId);
-  if (!gid) return null;
-  return gid.replace("gid://shopify/Location/", "");
-}
+/** GID 正規化（本体は app/utils/locationGid.ts。既存の import 先を変えないために再公開） */
+export { normalizeLocationGid, extractLocationNumericId };
 
 /**
  * 精算対象ロケーションと返金計上 GID が一致するか。
