@@ -46,6 +46,8 @@ Shopify メタフィールドは以下の用途に限る。
 3. システムデフォルト
 
 ### 1.4 ポイント / 会員施策に関する前提
+> 2026-11-22: ポイントの付与・残高は Shop Point、LINE は LINE CRM の担当。POS Receipt は注文の割引からポイント利用額を見分けて数えるだけ（[要件書 §0.2](posreceipt_requirements_spec.md#02-line会員証ポイントの担当2026-11-22)）。今の見分け方は BUSINESS_RULES §4・DECISIONS D7。
+
 販売用アプリでは、`vip_points_used` のような特定アプリ依存の固定フィールドを標準項目としない。
 
 代わりに、以下の論理項目を採用する。
