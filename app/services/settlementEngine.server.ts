@@ -41,6 +41,13 @@ import {
   type GasAggregateAttributionOpts,
 } from "./settlementAggregatePure.server";
 import { extractLocationNumericId } from "./refundAggregationPure.server";
+import { fetchGiftCardRefundsForDay } from "./settlementGiftCardRefunds.server";
+import {
+  SETTLEMENT_CALC_SETTINGS_KEY,
+  paymentSectionTxCount,
+  resolveSettlementCalcSettings,
+  type SettlementCalcSettings,
+} from "../utils/settlementCalcSettings";
 
 export type { GasAggregateAttributionOpts } from "./settlementAggregatePure.server";
 import {
@@ -109,6 +116,12 @@ export interface SettlementPreviewDTO {
    */
   legacyGiftCardsAddedAmount?: number;
   legacyGiftCardsAddedCount?: number;
+  /**
+   * 「精算の数え方」でギフトカードの返金を ON にした店だけ: その日に返金として引いたギフトカードの額と枚数。
+   * OFF のときは undefined。
+   */
+  giftCardRefundAmount?: number;
+  giftCardRefundCount?: number;
 }
 
 export interface SettlementPreviewDebugDTO {
@@ -154,7 +167,10 @@ interface ShopifyRefund {
   id: string;
   createdAt?: string; // ISO (UTC); 返金日でフィルタするため
   totalRefundedSet: { shopMoney: { amount: string; currencyCode: string } };
-  refundLineItems?: { quantity: number }[];
+  refundLineItems?: {
+    quantity: number;
+    lineItem?: { sku?: string | null; originalUnitPriceSet?: { shopMoney: { amount: string } } | null } | null;
+  }[];
   transactions: ShopifyRefundTransaction[];
 }
 
@@ -172,6 +188,8 @@ interface ShopifyOrder {
   lineItems: {
     nodes: {
       quantity: number;
+      sku?: string | null;
+      originalUnitPriceSet?: { shopMoney: { amount: string } } | null;
       discountAllocations?: {
         allocatedAmountSet: { shopMoney: { amount: string } };
         discountApplication?: {
@@ -211,6 +229,8 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
         lineItems(first: 250) {
           nodes {
             quantity
+            sku
+            originalUnitPriceSet { shopMoney { amount } }
             discountAllocations {
               allocatedAmountSet { shopMoney { amount } }
               discountApplication {
@@ -237,7 +257,10 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
           id
           createdAt
           refundLineItems(first: 250) {
-            nodes { quantity }
+            nodes {
+              quantity
+              lineItem { sku originalUnitPriceSet { shopMoney { amount } } }
+            }
           }
           totalRefundedSet { shopMoney { amount currencyCode } }
           transactions(first: 50) {
@@ -502,6 +525,7 @@ function unionSettlementOrdersById(created: ShopifyOrder[], updated: ShopifyOrde
 async function payBucketsToPaymentSections(
   pay: Record<string, { sale: number; refund: number; saleTx: number; refundTx: number }>,
   shopId: string,
+  txCountMode: SettlementCalcSettings["paymentTxCountMode"] = "sales",
 ): Promise<PaymentSectionDTO[]> {
   const entries = Object.entries(pay);
   entries.sort((a, b) => a[0].localeCompare(b[0], "ja"));
@@ -516,7 +540,7 @@ async function payBucketsToPaymentSections(
       label: labels.get(key) ?? key,
       net: p.sale,
       refund: p.refund,
-      txCount: p.saleTx,
+      txCount: paymentSectionTxCount(p.saleTx, p.refundTx, txCountMode),
       refundCount: p.refundTx,
     });
   }
@@ -710,7 +734,17 @@ async function buildSettlementPreviewImpl(
   const loyaltySettings = await getAppSetting<Partial<LoyaltySettings>>(shopId, LOYALTY_SETTINGS_KEY);
   const pointRules = resolvePointRedemptionRules(loyaltySettings);
 
-  const gas = aggregateGasStyleForOrders(ordersUnion, inDay, attributionOpts, pointRules);
+  // 精算の数え方（売上を数える日・返金の付け替え・点数に数えない SKU など）。保存していない店は今の数え方
+  const calcSettings = resolveSettlementCalcSettings(
+    await getAppSetting<unknown>(shopId, SETTLEMENT_CALC_SETTINGS_KEY),
+  );
+
+  const gas = aggregateGasStyleForOrders(ordersUnion, inDay, attributionOpts, pointRules, {
+    saleDateBasis: calcSettings.saleDateBasis,
+    itemCountExcludedSkuKeys: new Set(calcSettings.itemCountExcludedSkus),
+    refundRemapRules: calcSettings.refundRemapRules,
+    locIdRaw,
+  });
 
   const settlementSettings = await getAppSetting<Partial<SettlementSettings>>(shopId, SETTLEMENT_SETTINGS_KEY);
   const settlementMerged: SettlementSettings = { ...DEFAULT_SETTLEMENT_SETTINGS, ...settlementSettings };
@@ -738,6 +772,32 @@ async function buildSettlementPreviewImpl(
       }
     } catch {
       // read_gift_cards 未付与・API 差異時は加算せず続行
+    }
+  }
+
+  // ギフトカードで払い出した返金（「精算の数え方」で ON の店だけ）。読めなければ精算を止める
+  let giftCardRefundAmount = 0;
+  let giftCardRefundCount = 0;
+  if (calcSettings.giftCardRefundEnabled) {
+    const locRow = await prisma.location.findFirst({
+      where: { shopId, shopifyLocationGid: { in: [locationId, `gid://shopify/Location/${locIdRaw}`] } },
+      select: { name: true, displayName: true, shortName: true },
+    });
+    const gc = await fetchGiftCardRefundsForDay(admin, {
+      targetDate,
+      dayRange,
+      locationNames: [locationName, locRow?.name, locRow?.displayName, locRow?.shortName].filter(
+        (v): v is string => typeof v === "string" && v.trim() !== "",
+      ),
+    });
+    giftCardRefundAmount = gc.amount;
+    giftCardRefundCount = gc.count;
+    if (gc.amount > 0) {
+      const bucket = calcSettings.giftCardRefundLabel;
+      ensurePayBucket(gas.pay, bucket);
+      gas.pay[bucket].refund += gc.amount;
+      gas.pay[bucket].refundTx += gc.count;
+      gas.refundsGross += gc.amount;
     }
   }
 
@@ -808,7 +868,11 @@ async function buildSettlementPreviewImpl(
   const loyaltyUsageDisplayLabel =
     loyaltySettings?.loyaltyUsageDisplayLabel ?? DEFAULT_LOYALTY_SETTINGS.loyaltyUsageDisplayLabel;
 
-  let paymentSections = await payBucketsToPaymentSections(gas.pay, shopId);
+  let paymentSections = await payBucketsToPaymentSections(
+    gas.pay,
+    shopId,
+    calcSettings.paymentTxCountMode,
+  );
   const eventTotals = { total, refundTotal };
   applySpecialRefundEventsToTotals(paymentSections, otherEvents, eventTotals);
   total = eventTotals.total;
@@ -819,9 +883,17 @@ async function buildSettlementPreviewImpl(
   const sectionsTotal = roundInt(
     paymentSections.reduce((sum, sec) => sum + Number(sec.net || 0) - Number(sec.refund || 0), 0)
   );
-  total = Math.max(0, sectionsTotal);
+  // 返金が売上より多い日: 初めは 0 で止める。「精算の数え方」でマイナスのまま出すこともできる
+  total = calcSettings.clampTotalAtZero ? Math.max(0, sectionsTotal) : sectionsTotal;
   const taxRatePercent = Number(settlementMerged.taxRatePercent) || 10;
-  const split = splitTaxInclusiveToNetAndTax(total, taxRatePercent);
+  const split =
+    total >= 0
+      ? splitTaxInclusiveToNetAndTax(total, taxRatePercent)
+      : (() => {
+          // マイナスのまま出すとき: 税も同じ式でマイナスにする（純売上 = 合計 − 税）
+          const t = roundInt((total * taxRatePercent) / (100 + taxRatePercent));
+          return { tax: t, netSales: roundInt(total - t) };
+        })();
   const tax = split.tax;
   const netSales = split.netSales;
 
@@ -845,7 +917,8 @@ async function buildSettlementPreviewImpl(
     vipPointsUsed: roundInt(vipPointsUsed),
     refundTotal: roundInt(refundTotal),
     orderCount: gas.saleOrderSet.size,
-    refundCount: gas.refundOrderSet.size,
+    // ギフトカードの返金は注文が無いので 1 枚を 1 件として足す（ciara-system と同じ）
+    refundCount: gas.refundOrderSet.size + giftCardRefundCount,
     itemCount,
     voucherChangeAmount: roundInt(voucherChangeAmount),
     paymentSections,
@@ -876,6 +949,7 @@ async function buildSettlementPreviewImpl(
     settlementTxLastHm,
     taxShopify,
     ...(legacyGiftOn ? { legacyGiftCardsAddedAmount, legacyGiftCardsAddedCount } : {}),
+    ...(calcSettings.giftCardRefundEnabled ? { giftCardRefundAmount, giftCardRefundCount } : {}),
   };
 }
 

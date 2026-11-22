@@ -48,6 +48,7 @@ export const RECEIPT_TABS: TabItem[] = [
 /** 2. 精算 */
 export const SETTLEMENT_TABS: TabItem[] = [
   { path: "/app/settlement-settings", label: "精算設定" },
+  { path: "/app/settlement-calc-settings", label: "精算の数え方" },
   { path: "/app/settlement-print-layout", label: "精算印字プレビュー" },
   { path: "/app/settlement-history", label: "精算履歴" },
   { path: "/app/special-refund-settings", label: "特殊返金設定" },
