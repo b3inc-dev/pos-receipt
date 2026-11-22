@@ -37,7 +37,7 @@ import {
   INSTALL_PROBE_QUERY,
   probeShopStillInstalled,
 } from "../services/shopInstallProbe.server";
-import { verifyShopifyWebhookRequest } from "../services/webhookHmac.server";
+import { payloadShopMatchesHeader, verifyShopifyWebhookRequest } from "../services/webhookHmac.server";
 
 /** 入れ直した店か（オフラインのセッションがあり、Admin API を呼べる） */
 async function isShopStillInstalled(shop: string): Promise<boolean> {
@@ -68,10 +68,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // HMAC が不正なら 401（ヘッダーが足りなければ 400）の Response が投げられる（try の外に置いてそのまま返す）
   const { payload, topic: topicStr, shop } = await verifyShopifyWebhookRequest(request, webhookSecret);
 
+  // ヘッダーの店と本文の店（shop_domain）が違うときは何もしない（ほかの店のデータを消さない・出さない）。
+  // 送り直しても同じなので 200 を返す
+  if (!payloadShopMatchesHeader(payload, shop)) {
+    console.warn(`[webhooks.compliance] ${topicStr} shop=${shop} skipped: shop_domain does not match header`);
+    return new Response(null, { status: 200 });
+  }
+
   try {
     if (topicStr === "CUSTOMERS_DATA_REQUEST") {
       const body = payload as CustomerDataRequestPayload;
-      const shopDomain = body.shop_domain ?? shop;
+      const shopDomain = shop;
       const orderVariants = expandOrderIdVariants(body.orders_requested);
 
       let receiptIssues: Awaited<ReturnType<typeof prisma.receiptIssue.findMany>> = [];
@@ -139,7 +146,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       };
       await redactCustomerData({
         db: prisma as unknown as CustomerRedactDb,
-        shopDomain: body.shop_domain ?? shop,
+        shopDomain: shop,
         ordersToRedact: body.orders_to_redact,
       });
       return new Response(null, { status: 200 });
@@ -149,8 +156,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // ショップデータの削除要求（アンインストール 48 時間後）。
       // 使用量の記録（AppUsageReport）・セッション・Shop（CASCADE で関連テーブルも）を消す。
       // 48 時間のうちに入れ直した店なら何も消さない。
-      const body = payload as { shop_domain?: string };
-      const shopDomain = body.shop_domain ?? shop;
+      const shopDomain = shop;
 
       await redactShopData({
         db: prisma as unknown as ShopRedactDb,

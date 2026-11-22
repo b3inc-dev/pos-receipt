@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   computeWebhookHmac,
   isValidWebhookHmac,
+  payloadShopMatchesHeader,
   verifyShopifyWebhookRequest,
 } from "./webhookHmac.server";
 
@@ -112,5 +113,61 @@ describe("verifyShopifyWebhookRequest（refresh しない確かめ）", () => {
 
   it("秘密が空なら必ず 401（設定漏れで通さない）", async () => {
     assert.equal(await statusOfThrown(verifyShopifyWebhookRequest(req("{}"), "")), 401);
+  });
+
+  it("本文が上限より大きい → 413（Content-Length で読む前に断る）", async () => {
+    const body = JSON.stringify({ shop_domain: "example.myshopify.com", pad: "x".repeat(200) });
+    assert.equal(await statusOfThrown(verifyShopifyWebhookRequest(req(body), SECRET, { maxBodyBytes: 100 })), 413);
+  });
+
+  it("Content-Length が無くても、読みながら上限を超えたら 413", async () => {
+    const body = "x".repeat(300);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(body.slice(0, 150)));
+        controller.enqueue(new TextEncoder().encode(body.slice(150)));
+        controller.close();
+      },
+    });
+    const headers = new Headers({
+      "X-Shopify-Hmac-Sha256": sign(body),
+      "X-Shopify-Topic": "shop/redact",
+      "X-Shopify-Shop-Domain": "example.myshopify.com",
+    });
+    const r = new Request("https://app.example.com/webhooks/compliance", {
+      method: "POST",
+      headers,
+      body: stream,
+      // @ts-expect-error Node の fetch はストリームの本文に duplex が要る
+      duplex: "half",
+    });
+    assert.equal(await statusOfThrown(verifyShopifyWebhookRequest(r, SECRET, { maxBodyBytes: 100 })), 413);
+  });
+
+  it("上限ちょうどまでは通す", async () => {
+    const body = JSON.stringify({ shop_domain: "example.myshopify.com" });
+    const v = await verifyShopifyWebhookRequest(req(body), SECRET, { maxBodyBytes: Buffer.byteLength(body) });
+    assert.equal(v.shop, "example.myshopify.com");
+  });
+});
+
+describe("payloadShopMatchesHeader", () => {
+  it("shop_domain・myshopify_domain がヘッダーと同じなら true（大文字・空白は区別しない）", () => {
+    assert.equal(payloadShopMatchesHeader({ shop_domain: "Example.myshopify.com " }, "example.myshopify.com"), true);
+    assert.equal(payloadShopMatchesHeader({ myshopify_domain: "example.myshopify.com" }, "example.myshopify.com"), true);
+  });
+
+  it("違えば false", () => {
+    assert.equal(payloadShopMatchesHeader({ shop_domain: "other.myshopify.com" }, "example.myshopify.com"), false);
+    assert.equal(payloadShopMatchesHeader({ myshopify_domain: "other.myshopify.com" }, "example.myshopify.com"), false);
+    assert.equal(
+      payloadShopMatchesHeader({ shop_domain: "example.myshopify.com", myshopify_domain: "other.myshopify.com" }, "example.myshopify.com"),
+      false,
+    );
+  });
+
+  it("本文に店が無いときは比べられないので true", () => {
+    assert.equal(payloadShopMatchesHeader({}, "example.myshopify.com"), true);
+    assert.equal(payloadShopMatchesHeader(null, "example.myshopify.com"), true);
   });
 });

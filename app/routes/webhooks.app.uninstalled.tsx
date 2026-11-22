@@ -13,7 +13,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { webhookSecret } from "../shopify.server";
 import prisma from "../db.server";
-import { verifyShopifyWebhookRequest } from "../services/webhookHmac.server";
+import { payloadShopMatchesHeader, verifyShopifyWebhookRequest } from "../services/webhookHmac.server";
 
 export const loader = async (_: LoaderFunctionArgs) => {
   return new Response("Method Not Allowed", { status: 405 });
@@ -21,7 +21,13 @@ export const loader = async (_: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   // 不正なら 405 / 400 / 401 の Response が投げられ、そのまま返る
-  const { shop } = await verifyShopifyWebhookRequest(request, webhookSecret);
+  const { shop, payload } = await verifyShopifyWebhookRequest(request, webhookSecret);
+
+  // ヘッダーの店と本文の店（myshopify_domain）が違うときは何もしない（ほかの店のセッションを消さない）
+  if (!payloadShopMatchesHeader(payload, shop)) {
+    console.warn(`[webhooks.app.uninstalled] shop=${shop} skipped: myshopify_domain does not match header`);
+    return new Response(null, { status: 200 });
+  }
 
   try {
     const result = await prisma.session.deleteMany({ where: { shop } });
