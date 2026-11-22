@@ -48,6 +48,7 @@ POS Stock と同様に、**自社用**と**公開用**で **別々の Shopify �
 
 - **重要**: 自社用の Render では、必ず **SHOPIFY_API_KEY** と **SHOPIFY_API_SECRET** を「POS Receipt - Ciara」用の値にしてください。公開用アプリの値のままにすると認証エラーになります。
 - **SHOPIFY_APP_URL** が空や違う URL のままだと、管理画面からアプリを開いたときに **何も表示されない（真っ白）** になります。必ず自社用の URL に設定してください。
+- **公開用の料金を本番に出すときの確認表**: `docs/PRICING_RELEASE_CHECKLIST.md`（プランの名前・スイッチ・マージの直前と本番のすぐあとに見ること）。
 - **公開用の料金（確定・2026-11-22 T の決定）**: Partner Dashboard の App Pricing を次の金額にする。アプリの画面の金額（`planFeatures.server.ts`）と同じにそろえる。自社用（Ciara）は請求なしのまま。
   - Lite: $100/月（3 ロケーションまで）。メーター `extra_location_lite`: 1 単位 $20
   - Pro: $200/月（10 ロケーションまで）。メーター `extra_location_pro`: 1 単位 $20
