@@ -4,6 +4,7 @@ import {
   DEV_ONLY_GENERAL_SETTING_KEYS,
   isDevelopmentStore,
   keepDevOnlySettings,
+  requireDevelopmentStore,
 } from "./devStore.server";
 
 function adminReturning(body: unknown) {
@@ -32,8 +33,27 @@ describe("isDevelopmentStore", () => {
 });
 
 describe("keepDevOnlySettings", () => {
-  const saved = { appDisplayName: "前", debugModeEnabled: false, diagnosticsPanelEnabled: true, verboseCalcLogEnabled: false };
-  const next = { appDisplayName: "後", debugModeEnabled: true, diagnosticsPanelEnabled: false, verboseCalcLogEnabled: true };
+  const saved = {
+    appDisplayName: "前",
+    debugModeEnabled: false,
+    diagnosticsPanelEnabled: true,
+    verboseCalcLogEnabled: false,
+    currentPlanCode: "lite",
+    enabledFeaturesJson: "{}",
+  };
+  const next = {
+    appDisplayName: "後",
+    debugModeEnabled: true,
+    diagnosticsPanelEnabled: false,
+    verboseCalcLogEnabled: true,
+    currentPlanCode: "pro",
+    enabledFeaturesJson: '{"x":true}',
+  };
+
+  it("プラン（表示用）・有効機能 JSON（表示用）も開発ストアだけの欄", () => {
+    assert.ok(DEV_ONLY_GENERAL_SETTING_KEYS.includes("currentPlanCode"));
+    assert.ok(DEV_ONLY_GENERAL_SETTING_KEYS.includes("enabledFeaturesJson"));
+  });
 
   it("開発ストアでは送られた値で保存する", () => {
     assert.deepEqual(keepDevOnlySettings(next, saved, true), next);
@@ -43,5 +63,21 @@ describe("keepDevOnlySettings", () => {
     const result = keepDevOnlySettings(next, saved, false);
     assert.equal(result.appDisplayName, "後");
     for (const key of DEV_ONLY_GENERAL_SETTING_KEYS) assert.equal(result[key], saved[key]);
+  });
+});
+
+describe("requireDevelopmentStore", () => {
+  it("開発ストアなら通す", async () => {
+    await requireDevelopmentStore(adminReturning({ data: { shop: { plan: { partnerDevelopment: true } } } }));
+  });
+
+  it("開発ストアでない・読めないときは 404 を投げる", async () => {
+    for (const admin of [
+      adminReturning({ data: { shop: { plan: { partnerDevelopment: false } } } }),
+      adminReturning({ errors: [{ message: "Access denied" }] }),
+      { graphql: async () => { throw new Error("network"); } },
+    ]) {
+      await assert.rejects(requireDevelopmentStore(admin), (e: unknown) => e instanceof Response && e.status === 404);
+    }
   });
 });

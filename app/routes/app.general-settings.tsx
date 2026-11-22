@@ -133,7 +133,7 @@ export default function GeneralSettingsPage() {
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
-        <SystemPageNav memberCardEnabled={false} />
+        <SystemPageNav memberCardEnabled={false} isDevStore={isDevStore} />
         <Layout>
           {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
           <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
@@ -171,11 +171,16 @@ export default function GeneralSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="プラン・表示言語">
+          <Layout.AnnotatedSection title={isDevStore ? "プラン・表示言語" : "表示言語"}>
             <Card>
               <BlockStack gap="400">
-                <Select label="プラン（表示用）" options={PLAN_OPTIONS} value={form.currentPlanCode} onChange={(v) => set("currentPlanCode", v)} />
-                <TextField label="有効機能 JSON（表示用）" value={form.enabledFeaturesJson} onChange={(v) => set("enabledFeaturesJson", v)} multiline={2} autoComplete="off" />
+                {/* 「プラン（表示用）」「有効機能 JSON（表示用）」は開発ストアだけに出す（客先の店には出さない） */}
+                {isDevStore && (
+                  <>
+                    <Select label="プラン（表示用）" options={PLAN_OPTIONS} value={form.currentPlanCode} onChange={(v) => set("currentPlanCode", v)} />
+                    <TextField label="有効機能 JSON（表示用）" value={form.enabledFeaturesJson} onChange={(v) => set("enabledFeaturesJson", v)} multiline={2} autoComplete="off" />
+                  </>
+                )}
                 <Select label="管理画面言語" options={LANG_OPTIONS} value={form.adminLanguage} onChange={(v) => set("adminLanguage", v)} />
                 <Select label="POS 言語" options={LANG_OPTIONS} value={form.posLanguage} onChange={(v) => set("posLanguage", v)} />
               </BlockStack>

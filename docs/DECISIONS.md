@@ -20,7 +20,6 @@
 | D12 | プライバシーポリシー URL は AppSetting `privacyPolicyUrl` 優先、なければ env `PRIVACY_POLICY_URL`。ダミー固定 URL なし | `privacyPolicyUrl.ts` + 一般設定 / ホーム |
 | D13 | `customers/data_request` は注文紐づけの ReceiptIssue / SpecialRefundEvent を列挙し PII 本文なしでログ。新規 PII 永続化なし。webhook は 200 | `webhooks.compliance.tsx` |
 | D14 | LIFF 会員証は、LINE ユーザー ID の顧客メタフィールドを決めた順で読む。既定は `line_crm.line_user_id`（LINE CRM＝Shop CRM for LINE の項目。line-crm の D-APP-14）→ `socialplus.line`（SocialPlus と、LINE CRM の互換の書き込み）。環境変数 `MEMBER_CARD_LINE_ID_METAFIELDS`（`<namespace>.<key>` をカンマ区切り、多くて 4 つ）で並べ替えられる。顧客の LINE ユーザー ID は「並べた順で最初に値が入っている項目」の値（LINE CRM の項目に値があれば、古い項目の別の ID では見つけない）。タグ `line:<id>` のファストパスはそのまま（タグで見つかった人も同じ決まりで確かめる）。全件スキャンは項目ごとに `metafields.<namespace>.<key>:*` を並べた順に行う。`socialplus.line` 以外は、定義の `adminFilterable` が FILTERABLE のときだけ全件を見る（絞り込みが効かない項目で全顧客を見ない。定義が無い・オフの項目は飛ばす。先の項目を定義の読み込み・検索のエラーで見られなかったら、後の項目で探さず `API_ERROR`。Throttled は定義の読み込みも検索もやり直し、使い切ったら `THROTTLED`）。`socialplus.line` は前と同じ | `app/utils/memberCardLineFields.ts` + `app/lib/customer.server.ts` + `app/lib/memberCardFieldFilter.server.ts` |
-- **一般設定のデバッグ・診断の欄は開発ストアだけ**（T さんの決定 2026-11-22）: 「デバッグモード」「診断パネルを有効にする」「詳細計算ログ」は、Shopify の `shop.plan.partnerDevelopment` が true の店だけに出す。店の名前はコードに書かない。読めない・失敗したときは出さない。開発ストアでない店から保存が来ても、この 3 つは保存済みの値のまま（`app/utils/devStore.server.ts`）。自社用（inhouse）や `CUSTOM_APP_STORE_IDS` は本番の Ciara も入るので、この判定には使わない。
 
 ## 2. 古い docs との差分（注意）
 
@@ -94,3 +93,7 @@
 - 売上サマリーが同一プレビューを読むこと
 - 冪等キーとロック
 - order_based / cloudprnt_direct の分岐
+
+## 8. 開発ストアだけに出すもの（2026-11-22）
+
+- **一般設定のデバッグ・診断の欄とシステム診断は開発ストアだけ**（T さんの決定 2026-11-22）: 一般設定の「デバッグモード」「診断パネルを有効にする」「詳細計算ログ」「プラン（表示用）」「有効機能 JSON（表示用）」、店舗設定とホームの「システム診断」の枠、高度な設定の「システム診断」ボタン、`/app/diagnostics` の画面は、Shopify の `shop.plan.partnerDevelopment` が true の店だけに出す。店の名前はコードに書かない。読めない・失敗したときは出さない（`/app/diagnostics` は 404。店と DB を読む前に止める）。開発ストアでない店から保存が来ても、一般設定のこの 5 つは保存済みの値のまま（`app/utils/devStore.server.ts`）。自社用（inhouse）や `CUSTOM_APP_STORE_IDS` は本番の Ciara も入るので、この判定には使わない。
