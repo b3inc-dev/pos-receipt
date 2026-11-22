@@ -11,7 +11,8 @@ import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
 import { encodeReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
 import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
-import { attributedStaffFromLineItems, type AttributedStaffMember } from "../utils/receiptIssuer";
+import { receiptIssuerFromAttributedStaff } from "../utils/receiptIssuer";
+import { getOrderAttributedStaff } from "../services/orderStaffAttribution.server";
 
 const ORDER_QUERY = `#graphql
   query ReceiptIssueOrder($id: ID!) {
@@ -26,34 +27,19 @@ const ORDER_QUERY = `#graphql
 `;
 
 /**
- * 発行者（帰属スタッフ）だけを別の問い合わせで読む。
- * LineItem.staffMember は read_users スコープが要るので、無い店ではエラーになる。
- * 注文の取得と分けて、失敗しても発行は止めない（発行者は空のまま）。
+ * 発行者＝注文の帰属スタッフ（販売の帰属スタッフ対応の記録から）。
+ * 記録が無い・失敗のときは空にして、発行は止めない。
  */
-const ORDER_ATTRIBUTED_STAFF_QUERY = `#graphql
-  query ReceiptIssueOrderAttributedStaff($id: ID!) {
-    order(id: $id) {
-      lineItems(first: 250) {
-        nodes { staffMember { id name firstName lastName } }
-      }
-    }
-  }
-`;
-
-async function readAttributedStaff(
-  admin: { graphql: (q: string, o?: { variables?: Record<string, unknown> }) => Promise<Response> },
-  gid: string,
-): Promise<{ staffIds: string | null; names: string | null }> {
+async function readReceiptIssuer(
+  shopId: string,
+  orderId: string,
+  opts: Parameters<typeof getOrderAttributedStaff>[2],
+): Promise<{ createdBy: string | null; createdByStaffId: string | null }> {
   try {
-    const res = await admin.graphql(ORDER_ATTRIBUTED_STAFF_QUERY, { variables: { id: gid } });
-    const json = (await res.json()) as {
-      errors?: unknown;
-      data?: { order?: { lineItems?: { nodes?: Array<{ staffMember?: AttributedStaffMember }> } | null } | null };
-    };
-    if (json.errors) return { staffIds: null, names: null };
-    return attributedStaffFromLineItems(json.data?.order?.lineItems?.nodes);
+    const res = await getOrderAttributedStaff(shopId, orderId, opts);
+    return receiptIssuerFromAttributedStaff(res.recorded ? res.staffs : []);
   } catch {
-    return { staffIds: null, names: null };
+    return { createdBy: null, createdByStaffId: null };
   }
 }
 
@@ -65,7 +51,7 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
-    const { admin, shop, corsJson } = authResult;
+    const { admin, shop, scope, corsJson } = authResult;
 
     const body = await request.json() as Record<string, unknown>;
     // 発行者は注文の帰属スタッフ（サーバーが注文の明細から引く）。POS から来る createdBy は使わない
@@ -126,7 +112,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return corsJson({ ok: false, error: "Order not found" }, { status: 404 });
     }
 
-    const issuer = await readAttributedStaff(admin, gid);
+    const issuer = await readReceiptIssuer(shop.id, rawOrderId, { admin, scope });
 
     const tmpl = await prisma.receiptTemplate.findFirst({
       where: { shopId: shop.id, isActive: true },
@@ -154,8 +140,8 @@ export async function action({ request }: ActionFunctionArgs) {
           templateId: tmpl?.id ?? null,
           templateVersion: tmpl?.version ?? 1,
           isReissue: Boolean(isReissue),
-          createdBy: issuer.names,
-          createdByStaffId: issuer.staffIds,
+          createdBy: issuer.createdBy,
+          createdByStaffId: issuer.createdByStaffId,
           idempotencyKey: idempotencyKey && typeof idempotencyKey === "string"
             ? idempotencyKey
             : null,

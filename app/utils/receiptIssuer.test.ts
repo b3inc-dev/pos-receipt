@@ -1,53 +1,36 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  normalizeStaffId,
-  staffDisplayName,
-  attributedStaffFromLineItems,
-  formatReceiptIssuer,
-} from "./receiptIssuer";
+import { receiptIssuerFromAttributedStaff, formatReceiptIssuer } from "./receiptIssuer";
 
-test("normalizeStaffId: 数字・GID をそろえ、おかしな値は null", () => {
-  assert.equal(normalizeStaffId(12345), "12345");
-  assert.equal(normalizeStaffId(" 0077 "), "77");
-  assert.equal(normalizeStaffId("gid://shopify/StaffMember/987"), "987");
-  assert.equal(normalizeStaffId(0), null);
-  assert.equal(normalizeStaffId(""), null);
-  assert.equal(normalizeStaffId("山田"), null);
-  assert.equal(normalizeStaffId("gid://shopify/Customer/5"), null);
-  assert.equal(normalizeStaffId(1.5), null);
-  assert.equal(normalizeStaffId(null), null);
-  assert.equal(normalizeStaffId("1".repeat(21)), null);
-});
-
-test("staffDisplayName: name を優先し、無ければ 名 姓（注文詳細と同じ）", () => {
-  assert.equal(staffDisplayName({ name: " 山田 太郎 " }), "山田 太郎");
-  assert.equal(staffDisplayName({ name: "", firstName: "太郎", lastName: "山田" }), "太郎 山田");
-  assert.equal(staffDisplayName({ name: "  " }), null);
-  assert.equal(staffDisplayName(null), null);
-});
-
-test("attributedStaffFromLineItems: 明細の帰属スタッフを順に重複なしで", () => {
-  const sm = (id: number, name: string) => ({ staffMember: { id: `gid://shopify/StaffMember/${id}`, name } });
-  assert.deepEqual(attributedStaffFromLineItems([sm(1, "山田"), { staffMember: null }, sm(2, "佐藤"), sm(1, "山田")]), {
-    staffIds: "1,2",
-    names: "山田・佐藤",
+test("receiptIssuerFromAttributedStaff: ID は全員、名前は分かった人だけ", () => {
+  assert.deepEqual(
+    receiptIssuerFromAttributedStaff([
+      { staffId: "1", name: "山田" },
+      { staffId: "2", name: null },
+      { staffId: "3", name: " 佐藤 " },
+      { staffId: "1", name: "山田" },
+    ]),
+    { createdByStaffId: "1,2,3", createdBy: "山田・佐藤" },
+  );
+  assert.deepEqual(receiptIssuerFromAttributedStaff([{ staffId: "gid://shopify/StaffMember/9", name: null }]), {
+    createdByStaffId: "9",
+    createdBy: null,
   });
-  assert.deepEqual(attributedStaffFromLineItems([sm(3, "鈴木")]), { staffIds: "3", names: "鈴木" });
-  // 名前が空のスタッフは ID だけ
-  assert.deepEqual(attributedStaffFromLineItems([{ staffMember: { id: "gid://shopify/StaffMember/9", name: "" } }]), {
-    staffIds: "9",
-    names: null,
-  });
-  // 帰属スタッフがいない注文
-  assert.deepEqual(attributedStaffFromLineItems([{ staffMember: null }, {}]), { staffIds: null, names: null });
-  assert.deepEqual(attributedStaffFromLineItems(undefined), { staffIds: null, names: null });
+  // 記録が無い注文（通知の前）・帰属スタッフがいない注文
+  assert.deepEqual(receiptIssuerFromAttributedStaff([]), { createdByStaffId: null, createdBy: null });
+  assert.deepEqual(receiptIssuerFromAttributedStaff(undefined), { createdByStaffId: null, createdBy: null });
 });
 
-test("formatReceiptIssuer: 名前 → スタッフ ID → —", () => {
-  assert.equal(formatReceiptIssuer("山田・佐藤", "1,2"), "山田・佐藤");
+test("formatReceiptIssuer: いまの登録名 → 発行時の名前 → スタッフ ID → —", () => {
+  // いまの登録名を先に使う（あとから登録しても出る）
+  assert.equal(formatReceiptIssuer(null, "1,2", { "1": "山田", "2": "佐藤" }), "山田・佐藤");
+  assert.equal(formatReceiptIssuer(null, "1,2", { "1": "山田" }), "山田・スタッフ ID 2");
+  // 登録名が無く、発行時の名前だけある
+  assert.equal(formatReceiptIssuer("山田・佐藤", "1,2", {}), "山田・佐藤");
+  // ID だけ
   assert.equal(formatReceiptIssuer(null, "12"), "スタッフ ID 12");
-  assert.equal(formatReceiptIssuer(null, "1,2"), "スタッフ ID 1・スタッフ ID 2");
+  // 古い行（ID 列が無い）
+  assert.equal(formatReceiptIssuer("旧データ", null), "旧データ");
+  assert.equal(formatReceiptIssuer(null, null), "—");
   assert.equal(formatReceiptIssuer("", ""), "—");
-  assert.equal(formatReceiptIssuer(undefined, undefined), "—");
 });

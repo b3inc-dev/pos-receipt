@@ -94,7 +94,7 @@ export async function authenticatePosRequest(request: Request) {
  */
 export async function authenticatePosRequestOrCorsError(
   request: Request
-): Promise<{ admin: Awaited<ReturnType<typeof unauthenticated.admin>>["admin"]; shop: Awaited<ReturnType<typeof resolveShop>>; corsJson: (data: unknown, init?: ResponseInit) => Promise<Response> } | Response> {
+): Promise<Awaited<ReturnType<typeof authenticatePosRequest>> | Response> {
   try {
     return await authenticatePosRequest(request);
   } catch (err) {

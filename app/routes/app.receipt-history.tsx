@@ -24,6 +24,7 @@ import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
 import { formatReceiptIssuer } from "../utils/receiptIssuer";
+import { loadStaffDisplayNames } from "../services/orderStaffAttribution.server";
 
 const PAGE_SIZE = 30;
 
@@ -54,7 +55,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : {}),
   };
 
-  const [total, items] = await Promise.all([
+  const [total, items, staffNames] = await Promise.all([
     prisma.receiptIssue.count({ where: whereClean }),
     prisma.receiptIssue.findMany({
       where: whereClean,
@@ -77,6 +78,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         createdAt: true,
       },
     }),
+    loadStaffDisplayNames(shop.id).catch(() => ({} as Record<string, string>)),
   ]);
 
   return {
@@ -91,7 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       currency: r.currency ?? "JPY",
       templateVersion: r.templateVersion,
       isReissue: r.isReissue,
-      issuerLabel: formatReceiptIssuer(r.createdBy, r.createdByStaffId),
+      issuerLabel: formatReceiptIssuer(r.createdBy, r.createdByStaffId, staffNames),
       createdAt: r.createdAt.toISOString(),
     })),
     total,

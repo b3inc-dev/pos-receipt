@@ -1,75 +1,52 @@
 /**
  * 領収書の発行者（ReceiptIssue.createdBy / createdByStaffId）
  *
- * T さんの決定（2026-11-22）: 発行者は注文の「帰属スタッフ」（POS で明細に付けたスタッフ）。
- * POS でピン留め中・ログイン中のスタッフではない。
+ * T さんの決定（2026-11-23）: 発行者は注文の「帰属スタッフ」。POS でピン留め中・ログイン中のスタッフではない。
  *
- * - 帰属スタッフは注文の明細 `lineItems.staffMember` から取る（注文詳細 API `orderDetail.server.ts` と同じ取り方）。
- * - 明細ごとに違うスタッフが付いているときは、明細の順に重複を除いて全員を並べる。
- *   ID は `,` 区切り、名前は `・` 区切りで保存する。
- * - 帰属スタッフが 1 人もいない注文は null（履歴は「—」）。
- * - POS から送られる名前・ID は使わない（サーバーが注文から引くので、だれでも書き換えられる値にならない）。
+ * - 帰属スタッフは販売の帰属スタッフ対応の共通部品から取る
+ *   （`getOrderAttributedStaff`・orders/updated の通知の attributed_staffs を記録したもの）。
+ * - 何人か付いているときは明細の順に全員。ID は `,` 区切りで createdByStaffId、
+ *   発行した時点で名前が分かった人だけ `・` 区切りで createdBy に残す。
+ * - 履歴では、いまの「スタッフ名」の登録を先に使う（あとから名前を登録しても出る）。
+ * - POS から送られる名前・ID は使わない。
  */
+import { cleanStaffName, formatAttributedStaffLabel, normalizeStaffId, type AttributedStaff } from "./attributedStaff";
 
-export type AttributedStaffMember = {
-  id?: string | null;
-  name?: string | null;
-  firstName?: string | null;
-  lastName?: string | null;
-} | null | undefined;
-
-/** 明細の staffMember の GID（または数字）を数字だけにそろえる。おかしな値は null。 */
-export function normalizeStaffId(raw: unknown): string | null {
-  if (raw === null || raw === undefined) return null;
-  let s = typeof raw === "number" ? (Number.isSafeInteger(raw) ? String(raw) : "") : String(raw).trim();
-  const gid = /^gid:\/\/shopify\/(?:StaffMember|User)\/(\d+)$/.exec(s);
-  if (gid) s = gid[1];
-  if (!/^\d{1,20}$/.test(s)) return null;
-  if (/^0+$/.test(s)) return null;
-  return s.replace(/^0+/, "");
-}
-
-/** staffMember から表示名を作る。`orderDetail.server.ts` の staffMemberName と同じ順（name → 名 姓）。 */
-export function staffDisplayName(staff: AttributedStaffMember): string | null {
-  if (!staff) return null;
-  const name =
-    staff.name?.trim() ||
-    [staff.firstName, staff.lastName].map((v) => v?.trim()).filter(Boolean).join(" ").trim();
-  return name ? name.slice(0, 120) : null;
-}
-
-/**
- * 注文の明細から帰属スタッフをまとめる。
- * 戻り値の staffIds は `,` 区切り、names は `・` 区切り（名前が引けないスタッフは名前に入れない）。
- */
-export function attributedStaffFromLineItems(
-  lineItems: Array<{ staffMember?: AttributedStaffMember }> | null | undefined,
-): { staffIds: string | null; names: string | null } {
+/** 帰属スタッフの一覧を、ReceiptIssue に保存する形にする。 */
+export function receiptIssuerFromAttributedStaff(
+  staffs: Pick<AttributedStaff, "staffId" | "name">[] | null | undefined,
+): { createdBy: string | null; createdByStaffId: string | null } {
   const ids: string[] = [];
   const names: string[] = [];
-  const seen = new Set<string>();
-  for (const li of lineItems ?? []) {
-    const staff = li?.staffMember;
-    if (!staff) continue;
-    const id = normalizeStaffId(staff.id);
-    const name = staffDisplayName(staff);
-    const key = id ?? (name ? `name:${name}` : null);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    if (id) ids.push(id);
+  for (const s of staffs ?? []) {
+    const id = normalizeStaffId(s.staffId);
+    if (!id || ids.includes(id)) continue;
+    ids.push(id);
+    const name = cleanStaffName(s.name);
     if (name) names.push(name);
   }
   return {
-    staffIds: ids.length ? ids.join(",").slice(0, 500) : null,
-    names: names.length ? names.join("・").slice(0, 300) : null,
+    createdByStaffId: ids.length ? ids.join(",").slice(0, 500) : null,
+    createdBy: names.length ? names.join("・").slice(0, 300) : null,
   };
 }
 
-/** 管理画面・POS の履歴に出す発行者の文言（名前 → スタッフ ID → —）。 */
-export function formatReceiptIssuer(createdBy: string | null | undefined, createdByStaffId: string | null | undefined): string {
-  const name = createdBy?.trim();
-  if (name) return name;
-  const ids = createdByStaffId?.split(",").map((v) => v.trim()).filter(Boolean) ?? [];
-  if (ids.length) return ids.map((id) => `スタッフ ID ${id}`).join("・");
-  return "—";
+/**
+ * 管理画面・POS の履歴に出す発行者の文言。
+ * ID があれば ID ごとに「いまの登録名 → スタッフ ID n」。ID が無い古い行は保存した名前、それも無ければ「—」。
+ * 登録名が無く発行時の名前だけある行（read_users の店など）は、保存した名前を使う。
+ */
+export function formatReceiptIssuer(
+  createdBy: string | null | undefined,
+  createdByStaffId: string | null | undefined,
+  currentNames: Record<string, string | null | undefined> = {},
+): string {
+  const ids = (createdByStaffId ?? "").split(",").map((v) => normalizeStaffId(v)).filter((v): v is string => !!v);
+  const saved = cleanStaffName(createdBy);
+  if (ids.length) {
+    const anyCurrent = ids.some((id) => cleanStaffName(currentNames[id]));
+    if (!anyCurrent && saved) return saved;
+    return ids.map((id) => formatAttributedStaffLabel({ staffId: id, name: cleanStaffName(currentNames[id]) })).join("・");
+  }
+  return saved ?? "—";
 }

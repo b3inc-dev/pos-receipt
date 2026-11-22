@@ -7,6 +7,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { formatReceiptIssuer } from "../utils/receiptIssuer";
+import { loadStaffDisplayNames } from "../services/orderStaffAttribution.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -31,6 +32,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       (where as Record<string, unknown>).createdAt = createdAt;
     }
 
+    const staffNames = await loadStaffDisplayNames(shop.id).catch(() => ({} as Record<string, string>));
     const items = await prisma.receiptIssue.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -51,7 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         templateVersion: r.templateVersion,
         createdBy: r.createdBy,
         createdByStaffId: r.createdByStaffId,
-        issuerLabel: formatReceiptIssuer(r.createdBy, r.createdByStaffId),
+        issuerLabel: formatReceiptIssuer(r.createdBy, r.createdByStaffId, staffNames),
         createdAt: r.createdAt.toISOString(),
       })),
     });
