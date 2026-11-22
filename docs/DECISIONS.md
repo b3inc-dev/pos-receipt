@@ -39,10 +39,12 @@
 - POS Stock の D15・D16（PR #80・#82）と同じ決まり。処理は `app/utils/appEventsUsage.server.ts`（POS Stock の `app-events-usage.server.ts` と同じ中身で、数と単価だけ違う）。
 - 送る数は `max(0, ロケーション数 − プランに含まれる数)`（Lite 3・Pro 10）。ロケーション数は Admin API の `locations(first: 250)`（有効なロケーション。POS で使うかどうかでは絞らない。**T の確認待ち**）。単価 $20 は画面の目安（**未確定**）で、請求の金額は Partner Dashboard のメーター。メーターの handle は既定 `extra_location_lite` / `extra_location_pro`（`APP_EVENTS_HANDLE_LITE` / `APP_EVENTS_HANDLE_PRO` で変えられる）。
 - 外へ送るのは `APP_EVENTS_USAGE_ENABLED=1` のときだけ（**既定オフ**）。オフでも数は DB `AppUsageReport` に `disabled` で残す。鍵は `APP_EVENTS_CLIENT_ID` / `APP_EVENTS_CLIENT_SECRET`。
-- 1 店・1 請求期間に 1 回: DB `AppUsageReport` の `(shop, periodEnd)` 一意 ＋ Shopify の `idempotency_key`（`posr-xloc-<店の番号>-<YYYYMMDD>`）。`periodEnd` はプランを決めた契約の今の請求期間の終わり（Partner で決めたら `currentBillingCycle.endTime`、無ければ Admin の ACTIVE な契約の `currentPeriodEnd`）の **UTC の日付**。同じ日付の行が無くても前後 1 日の行があれば同じ期間としてその行のキーで続ける（Partner と Admin のずれで 2 回送らない）。
+- 1 店・1 請求期間に 1 回: DB `AppUsageReport` の `(shop, periodEnd)` 一意 ＋ Shopify の `idempotency_key`（`posr-xloc-<店の番号>-<YYYYMMDD>`）。`periodEnd` はプランを決めた契約の今の請求期間の終わり（Partner で決めたら `currentBillingCycle.endTime`、無ければ Admin の `currentPeriodEnd`）の **UTC の日付**。Admin の期間は、ACTIVE な契約の先頭ではなく**プランを決めた契約**のものだけを使う（`selectPlanSubscription`。Partner の `legacySubscriptionId` と同じ契約 → プランの名前に合う契約 → 2 件あれば `createdAt` が新しい方。決まらず期間も違えば送らず `missing_period`）。古い Billing API の契約と App Pricing の契約が同時に ACTIVE の店（切りかえの途中）で、別の契約の期間とキーを使わないため（2026-11-22 レビュー #41 の P2-1）。同じ日付の行が無くても前後 1 日の行があれば同じ期間としてその行のキーで続ける（Partner と Admin のずれで 2 回送らない）。
 - 期間の終わり 10 分前を過ぎたら送らない（次の期間の請求に入って 2 重になるため）。期間が分からないときは送らず `missing_period` で数と理由を残す。
 - アプリ側の上限 `APP_EVENTS_USAGE_MAX_UNITS`（既定 50 か所）を超えたら送らず `over_limit`。失敗は `failed`（HTTP の番号・理由・回数）で残し、10 分おいて同じキー・同じ数で送り直す（最大 8 回。400・403 は自動で送り直さない）。
 - 呼ぶのは `getShopPlan`（待たない）。全機能の例外（自社用・`CUSTOM_APP_STORE_IDS`・開発ストア）と DB `unlimited` の店は報告しない。
+- 守りの二重化: `reportExtraLocationUsage` の中でも `APP_DISTRIBUTION=inhouse`・`CUSTOM_APP_STORE_IDS` の店なら DB も Shopify も触らずに返す（`isInhouseForUsage`。ほかから呼ばれても自社用は送らない。2026-11-22 レビュー #41 の P2-4）。
+- 料金プラン画面の「超えたロケーション」の文は、数えなかった理由（`extraLocationStatus`: 範囲内・契約なし・読めない・例外）で分ける。契約が無い・読めない店に「プランの範囲内です」と出さない（P2-2）。設定・診断の画面のプラン表示も門番と同じ `checkShopPlanAccess` から読む（P2-3）。
 - **残り**: 期間の途中で増えた分は取らない。shop/redact で `AppUsageReport` を消すかは未決（個人情報は入っていない）。migration `20261122120000_add_app_usage_report` はマージ直前に main の最新より後の時刻へ付け直す。
 
 ## 2. 古い docs との差分（注意）

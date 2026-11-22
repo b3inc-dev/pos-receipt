@@ -9,10 +9,12 @@ import {
   computeExtraLocationUsage,
   describeUsageReportForMerchant,
   getEventHandle,
+  isInhouseForUsage,
   MISSING_PERIOD_END,
   normalizePeriodEnd,
   pickUsagePeriodEnd,
   reportExtraLocationUsage,
+  selectPlanSubscription,
   usagePeriodKey,
   PERIOD_END_MARGIN_MS,
   RETRY_AFTER_MS,
@@ -513,5 +515,74 @@ describe("つなぎ方（ソースの確認）", () => {
       assert.match(src, /checkShopPlanAccess\(admin, shop, "/, p);
       assert.doesNotMatch(src, /checkPlanAccess\(shop\.planCode/, p);
     }
+  });
+});
+
+describe("プランを決めた契約を選ぶ（レビュー #41 の P2-1）", () => {
+  const A = { id: "gid://shopify/AppSubscription/1", name: "Liteプラン", status: "ACTIVE", currentPeriodEnd: "2099-12-05T00:00:00Z", createdAt: "2099-01-01T00:00:00Z" };
+  const B = { id: "gid://shopify/AppSubscription/2", name: "Pro", status: "ACTIVE", currentPeriodEnd: "2099-12-21T00:00:00Z", createdAt: "2099-11-21T00:00:00Z" };
+  const isPro = (s) => /pro/i.test(s.name);
+
+  test("名前で合う契約が 1 件ならそれ。ACTIVE でない契約は見ない", () => {
+    assert.equal(selectPlanSubscription([A, B], { matches: isPro }), B);
+    assert.equal(selectPlanSubscription([{ ...B, status: "CANCELLED" }], { matches: isPro }), null);
+  });
+
+  test("preferId（gid でも数字だけでも）と同じ契約を先に使う", () => {
+    assert.equal(selectPlanSubscription([A, B], { matches: () => true, preferId: "1" }), A);
+    assert.equal(selectPlanSubscription([A, B], { matches: () => true, preferId: "gid://shopify/AppSubscription/2" }), B);
+    assert.equal(selectPlanSubscription([A, B], { matches: isPro, preferId: "999" }), B);
+  });
+
+  test("2 件合うときは作られた日が新しい方。決まらず期間が違えば null、期間が同じなら先の 1 件", () => {
+    const oldPro = { ...A, name: "Proプラン" };
+    assert.equal(selectPlanSubscription([oldPro, B], { matches: isPro }), B);
+    assert.equal(selectPlanSubscription([B, oldPro], { matches: isPro }), B);
+    assert.equal(selectPlanSubscription([{ ...oldPro, createdAt: null }, { ...B, createdAt: null }], { matches: isPro }), null);
+    const same = { ...B, id: "gid://shopify/AppSubscription/3", createdAt: null };
+    assert.equal(selectPlanSubscription([{ ...B, createdAt: null }, same], { matches: isPro }).id, B.id);
+  });
+
+  test("pickUsagePeriodEnd は planSubscription を渡すと、その契約の期間だけを使う", () => {
+    assert.deepEqual(pickUsagePeriodEnd({ planSource: "admin", planSubscription: B }), { periodEnd: "2099-12-21T00:00:00.000Z", periodSource: "admin" });
+    assert.deepEqual(pickUsagePeriodEnd({ planSource: "admin", planSubscription: null, adminSubscriptions: [A] }), { periodEnd: null, periodSource: null });
+    assert.deepEqual(pickUsagePeriodEnd({ planSource: "admin", planSubscription: { ...B, status: "CANCELLED" } }), { periodEnd: null, periodSource: null });
+    // Partner の期間があれば先に使う
+    assert.equal(pickUsagePeriodEnd({ planSource: "partner", partnerPeriodEnd: "2099-12-25T00:00:00Z", planSubscription: B }).periodSource, "partner");
+  });
+
+  test("planSubscription を渡さない古い呼び方: 期間の違う ACTIVE な契約が 2 件あれば null（どちらか分からない）", () => {
+    assert.deepEqual(pickUsagePeriodEnd({ planSource: "admin", adminSubscriptions: [A, B] }), { periodEnd: null, periodSource: null });
+    assert.equal(pickUsagePeriodEnd({ planSource: "admin", adminSubscriptions: [B, { ...B, id: "x" }] }).periodEnd, "2099-12-21T00:00:00.000Z");
+  });
+});
+
+describe("自社用の守りの二重化（レビュー #41 の P2-4）", () => {
+  beforeEach(() => {
+    __resetUsageRecheckForTest();
+  });
+
+  test("APP_DISTRIBUTION=inhouse なら、スイッチがオンでも DB も Shopify も触らない", async () => {
+    let touched = 0;
+    const store = new Proxy({}, { get: () => async () => { touched++; return null; } });
+    const fetchImpl = async () => { touched++; return { status: 202, text: async () => "{}" }; };
+    const r = await reportExtraLocationUsage(
+      { shop: SHOP, shopGid: GID, plan: "pro", locationsCount: 30, periodEnd: PERIOD },
+      { store, env: { ...ENV_ON, APP_DISTRIBUTION: "inhouse" }, fetchImpl }
+    );
+    assert.deepEqual(r, { outcome: "skipped", reason: "inhouse" });
+    // 期間が分からないときも記録しない
+    const r2 = await reportExtraLocationUsage(
+      { shop: SHOP, shopGid: GID, plan: "pro", locationsCount: 30, periodEnd: null },
+      { store, env: { APP_DISTRIBUTION: " InHouse " }, fetchImpl }
+    );
+    assert.equal(r2.reason, "inhouse");
+    assert.equal(touched, 0);
+  });
+
+  test("CUSTOM_APP_STORE_IDS の店も送らない。公開用のふつうの店は今まで通り", () => {
+    assert.equal(isInhouseForUsage(SHOP, { CUSTOM_APP_STORE_IDS: "a.myshopify.com, Demo.myshopify.com" }), true);
+    assert.equal(isInhouseForUsage(SHOP, { APP_DISTRIBUTION: "public" }), false);
+    assert.equal(isInhouseForUsage(SHOP, {}), false);
   });
 });
