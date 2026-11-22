@@ -14,7 +14,8 @@ T の決定（2026-11-23 1:35・1:50、commercor-site #1）で、公開版のペ
 |---|---|
 | プライバシーポリシー | https://commercore.b3-inc.com/apps/pos-receipt/privacy/ |
 | サポートページ | https://commercore.b3-inc.com/apps/pos-receipt/support/ |
-| 問い合わせ先 | お問い合わせフォーム https://b3-inc.com/contact だけ（メールは載せない。Partner Dashboard でメールの欄が必須なら【T】） |
+| 問い合わせ先 | お問い合わせフォーム https://b3-inc.com/contact |
+| サポートのメール（Partner Dashboard・ポリシー） | app-support@b3-inc.com（全アプリ共通の窓口。T 2026-11-23 1:54・2:00）。届いたら自動の返事でフォームを案内する。受け口（別名か Google グループ）と自動の返事は T が作る（commercor-site docs/SUPPORT_EMAIL_ALIASES.md）。受け口ができてから Partner Dashboard に入れる |
 | 事業者 | 株式会社B3（東京都目黒区青葉台1-15-3 AK-4ビル2F） |
 
 - サイトを本番に出し、独自ドメインがつながるまで、この URL は開けない（commercor-site #1）。施行日は公開申請の日に入れる。
