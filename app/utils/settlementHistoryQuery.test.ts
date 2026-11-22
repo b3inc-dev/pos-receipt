@@ -103,3 +103,59 @@ test("ロケーション絞り込みと表示名は数値 ID と GID の両方�
   assert.equal(settlementLocationLabel(found, "100").label, "渋谷");
   assert.equal(findSettlementLocation(locations, "gid://shopify/Location/999"), undefined);
 });
+
+test("照合用 CSV: 期間の両端がそろったときだけ取得先を作る", async () => {
+  const { buildSettlementCsvExportRequest, SETTLEMENT_CSV_EXPORT_MAX_DAYS } = await import(
+    "./settlementHistoryQuery"
+  );
+  const { SETTLEMENT_CSV_MAX_DAYS } = await import("../services/settlementCsvPure.server");
+  assert.equal(SETTLEMENT_CSV_EXPORT_MAX_DAYS, SETTLEMENT_CSV_MAX_DAYS);
+
+  assert.deepEqual(
+    buildSettlementCsvExportRequest({ dateFrom: "2026-11-01", dateTo: "2026-11-30", locationId: "" }),
+    { ok: true, path: "/api/settlements/export-csv?dateFrom=2026-11-01&dateTo=2026-11-30" },
+  );
+  const withLocation = buildSettlementCsvExportRequest({
+    dateFrom: "2026-11-01",
+    dateTo: "2026-11-01",
+    locationId: " gid://shopify/Location/123 ",
+  });
+  assert.equal(withLocation.ok, true);
+  if (withLocation.ok) {
+    const url = new URL(withLocation.path, "https://example.test");
+    assert.equal(url.searchParams.get("locationId"), "gid://shopify/Location/123");
+    assert.equal(url.searchParams.get("kind"), null);
+  }
+
+  assert.equal(
+    buildSettlementCsvExportRequest({ dateFrom: "", dateTo: "2026-11-30", locationId: "" }).ok,
+    false,
+  );
+  assert.equal(
+    buildSettlementCsvExportRequest({ dateFrom: "2026-11-30", dateTo: "2026-11-01", locationId: "" }).ok,
+    false,
+  );
+  // 366 日まで（うるう年をまたぐ 1 年）は可、367 日は不可
+  assert.equal(
+    buildSettlementCsvExportRequest({ dateFrom: "2027-03-01", dateTo: "2028-02-29", locationId: "" }).ok,
+    true,
+  );
+  assert.equal(
+    buildSettlementCsvExportRequest({ dateFrom: "2027-03-01", dateTo: "2028-03-01", locationId: "" }).ok,
+    false,
+  );
+});
+
+test("照合用 CSV: 保存するファイル名は filename* を優先する", async () => {
+  const { csvFilenameFromDisposition } = await import("./settlementHistoryQuery");
+  const header = `attachment; filename="settlements_2026-11-01_2026-11-30.csv"; filename*=UTF-8''${encodeURIComponent(
+    "精算照合_2026-11-01_2026-11-30.csv",
+  )}`;
+  assert.equal(csvFilenameFromDisposition(header, "x.csv"), "精算照合_2026-11-01_2026-11-30.csv");
+  assert.equal(
+    csvFilenameFromDisposition('attachment; filename="a.csv"', "x.csv"),
+    "a.csv",
+  );
+  assert.equal(csvFilenameFromDisposition("attachment; filename*=UTF-8''%E0%A4%A", "x.csv"), "x.csv");
+  assert.equal(csvFilenameFromDisposition(null, "x.csv"), "x.csv");
+});
