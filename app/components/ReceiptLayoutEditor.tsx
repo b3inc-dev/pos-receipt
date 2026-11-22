@@ -326,7 +326,12 @@ export function ReceiptLayoutEditor({
       <div className="RL-grid">
         <BlockStack gap="400">
           <div className="RL-jump">
-            <a href="#rl-preview">プレビューを見る</a>
+            <Button
+              variant="tertiary"
+              onClick={() => document.getElementById("rl-preview")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              プレビューを見る
+            </Button>
           </div>
           <SectionTabs
             label="編集すること"
