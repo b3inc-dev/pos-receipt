@@ -3,7 +3,8 @@
  * 要件書 §9 領収書設定: §9.2 全項目対応・プレビュー一致（§9.3）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { SuccessToast } from "../components/admin-ui";
 import {
   Page,
   Layout,
@@ -174,16 +175,14 @@ const BODY_SPACING_OPTIONS = [
 export default function ReceiptTemplatePage() {
   const { template, version } = useLoaderData<typeof loader>();
   const submit = useSubmit();
+  const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<ReceiptTemplateData>({ ...template });
 
   const handleSave = () => {
     submit(templateToFormData(form), { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = (key: keyof ReceiptTemplateData, value: string | boolean | null) => {
@@ -202,11 +201,8 @@ export default function ReceiptTemplatePage() {
           <TabGroupBar tabs={RECEIPT_TABS} />
         </Card>
         <Layout>
-          {saved && (
-            <Layout.Section>
-              <Banner tone="success">保存しました。</Banner>
-            </Layout.Section>
-          )}
+          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
 
           {/* §9.2.1 基本情報 */}
           <Layout.AnnotatedSection
@@ -410,14 +406,6 @@ export default function ReceiptTemplatePage() {
               <ReceiptPreview template={form} />
             </Card>
           </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end">
-              <Button variant="primary" onClick={handleSave}>
-                保存
-              </Button>
-            </InlineStack>
-          </Layout.Section>
         </Layout>
       </Page>
     </PolarisPageWrapper>

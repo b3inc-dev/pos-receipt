@@ -4,6 +4,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { SuccessToast, AdminIntro } from "../components/admin-ui";
 import {
   Page,
   Layout,
@@ -17,7 +18,7 @@ import {
   InlineStack,
   Select,
 } from "@shopify/polaris";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
@@ -120,18 +121,9 @@ export default function LoyaltySettingsPage() {
   const navigate = useNavigate();
   const q = location.search || "";
   const actionData = useActionData<{ ok: boolean; error?: string; at?: number }>();
-  const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<LoyaltySettings>({ ...initial });
   const [pointPrefixText, setPointPrefixText] = useState(initial.pointRedemptionCodePrefixes.join("\n"));
   const [pointTitleText, setPointTitleText] = useState(initial.pointRedemptionManualTitles.join("\n"));
-
-  // 保存できたときだけ「保存しました」を出す（入力の誤りで保存しなかったときは出さない）
-  useEffect(() => {
-    if (actionData?.ok !== true) return;
-    setSaved(true);
-    const t = setTimeout(() => setSaved(false), 3000);
-    return () => clearTimeout(t);
-  }, [actionData]);
 
   const handleSave = () => {
     const fd = new FormData();
@@ -173,11 +165,8 @@ export default function LoyaltySettingsPage() {
       >
         <SystemPageNav memberCardEnabled={false} />
         <Layout>
-          {saved && (
-            <Layout.Section>
-              <Banner tone="success">保存しました。</Banner>
-            </Layout.Section>
-          )}
+          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
           {actionData?.ok === false && actionData.error && (
             <Layout.Section>
               <Banner tone="critical">保存していません。{actionData.error}</Banner>
@@ -185,9 +174,8 @@ export default function LoyaltySettingsPage() {
           )}
 
           <Layout.Section>
-            <Banner tone="info">
-              精算・売上サマリーで表示する「ポイント利用額」の表示名と抽出方法を設定します。特定のポイントアプリに依存せず、割引コードのプレフィックスやメタフィールドで判定できます。
-            </Banner>
+            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+            <AdminIntro><p>精算・売上サマリーで表示する「ポイント利用額」の表示名と抽出方法を設定します。特定のポイントアプリに依存せず、割引コードのプレフィックスやメタフィールドで判定できます。</p></AdminIntro>
           </Layout.Section>
 
           <Layout.AnnotatedSection
@@ -319,11 +307,6 @@ export default function LoyaltySettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.Section>
-            <InlineStack align="end">
-              <Button variant="primary" onClick={handleSave}>保存</Button>
-            </InlineStack>
-          </Layout.Section>
         </Layout>
       </Page>
     </PolarisPageWrapper>

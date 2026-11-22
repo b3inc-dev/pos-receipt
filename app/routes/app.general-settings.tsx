@@ -2,7 +2,8 @@
  * /app/general-settings — 一般設定（要件 §3）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { SuccessToast, AdminIntro } from "../components/admin-ui";
 import {
   Page,
   Layout,
@@ -90,10 +91,10 @@ export default function GeneralSettingsPage() {
     privacyPolicyFromEnvOnly,
   } = useLoaderData<typeof loader>();
   const submit = useSubmit();
+  const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [form, setForm] = useState<GeneralSettings>({ ...initial });
 
@@ -108,8 +109,6 @@ export default function GeneralSettingsPage() {
       fd.set(k, typeof v === "boolean" ? (v ? "true" : "false") : String(v));
     });
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = <K extends keyof GeneralSettings>(key: K, value: GeneralSettings[K]) => {
@@ -125,13 +124,15 @@ export default function GeneralSettingsPage() {
       >
         <SystemPageNav memberCardEnabled={false} />
         <Layout>
-          {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
+          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
           {saveError && <Layout.Section><Banner tone="critical">{saveError}</Banner></Layout.Section>}
           <Layout.Section>
-            <Banner tone="info">アプリ全体の基本情報・タイムゾーン・デバッグ表示を設定します。</Banner>
+            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+            <AdminIntro><p>アプリ全体の基本情報・タイムゾーン・デバッグ表示を設定します。</p></AdminIntro>
           </Layout.Section>
 
-          <Layout.AnnotatedSection title="アプリ基本情報" description="§3.2.1">
+          <Layout.AnnotatedSection title="アプリ基本情報">
             <Card>
               <BlockStack gap="400">
                 <TextField label="アプリ表示名" value={form.appDisplayName} onChange={(v) => set("appDisplayName", v)} autoComplete="off" />
@@ -159,7 +160,7 @@ export default function GeneralSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="プラン・表示言語" description="§3.2.2, §3.2.3">
+          <Layout.AnnotatedSection title="プラン・表示言語">
             <Card>
               <BlockStack gap="400">
                 <Select label="プラン（表示用）" options={PLAN_OPTIONS} value={form.currentPlanCode} onChange={(v) => set("currentPlanCode", v)} />
@@ -170,7 +171,7 @@ export default function GeneralSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="ログ・デバッグ" description="§3.2.4">
+          <Layout.AnnotatedSection title="ログ・デバッグ">
             <Card>
               <BlockStack gap="300">
                 <Checkbox label="デバッグモード" checked={form.debugModeEnabled} onChange={(v) => set("debugModeEnabled", v)} helpText="ON 時のみ診断情報を増やす" />
@@ -179,10 +180,6 @@ export default function GeneralSettingsPage() {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end"><Button variant="primary" onClick={handleSave}>保存</Button></InlineStack>
-          </Layout.Section>
         </Layout>
       </Page>
     </PolarisPageWrapper>
