@@ -40,6 +40,21 @@ export function StateSaveForm<T>({
     markFormDirty(formRef.current?.querySelector("[data-state-snapshot]"));
   }, [serialized]);
 
+  // 帯の「保存」「破棄」のボタンはフォームの中にあり、押されると（type の無い button なので）フォームを送ることがある。
+  // 「保存」は SaveBar が requestSubmit() で送るので、ボタンからの送信は止める（二重に送る・「破棄」で送るのを防ぐ）
+  useEffect(() => {
+    const element = formRef.current;
+    if (!element) return;
+    const stopBarButtonSubmit = (event: SubmitEvent) => {
+      if (event.submitter && event.submitter.closest("ui-save-bar")) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    };
+    element.addEventListener("submit", stopBarButtonSubmit, true);
+    return () => element.removeEventListener("submit", stopBarButtonSubmit, true);
+  }, []);
+
   useEffect(() => {
     if (result && result.ok === false) {
       saved.current = previousSaved.current;

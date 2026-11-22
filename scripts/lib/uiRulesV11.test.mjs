@@ -98,6 +98,7 @@ test("保存の帯の囲みは、送る中身を作らず各画面の onSave に
   assert.match(source, /onSave\(\)/);
   assert.match(source, /failed=\{failed\}/, "失敗のあとは帯を出し直す");
   assert.match(source, /onDiscard\(saved\.current\)/, "破棄は最後に保存した値に戻す");
+  assert.match(source, /closest\("ui-save-bar"\)/, "帯のボタンからの送信（二重の送信・破棄での送信）を止める");
 });
 
 // 表をスマホで 1 件 1 枚のカードにした画面（8章）
