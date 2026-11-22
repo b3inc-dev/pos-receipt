@@ -3,6 +3,10 @@
  * 要件書 §21.3: 精算再集計
  *
  * Body: { settlementId } or { locationId, locationName, targetDate }
+ *
+ * 確定済みの日（点検以外の Settlement が completed / printed）は集計し直さず、DB の値を返す
+ * （応答に confirmed: true）。Shopify の精算注文は書き換えない（T の決定「確定値を守る」）。
+ * 確定前の日は従来どおり集計し直し、精算注文を更新する。
  */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
@@ -12,6 +16,39 @@ import { upsertDailySummaryCacheFromPreview } from "../services/salesSummaryEngi
 import { settlementApiErrorResponse } from "../utils/settlementApiError.server";
 import { resolveSettlementOrderSyncOptions } from "../services/settlementSyncSettings.server";
 import prisma from "../db.server";
+import {
+  CONFIRMED_SETTLEMENT_STATUSES,
+  isConfirmedSettlementRow,
+  locationIdVariants,
+  settlementRowToPreview,
+} from "../services/settlementConfirmedPure.server";
+
+/**
+ * その日・その店の確定済みの精算（点検は除く）を探す。settlementId が確定済みの行ならそれを使う。
+ * 無ければ null（従来どおり集計し直す）。
+ */
+async function findConfirmedSettlementForDay(
+  shopId: string,
+  locationId: string,
+  targetDate: string,
+  settlementId: string | null,
+) {
+  if (settlementId) {
+    const byId = await prisma.settlement.findFirst({ where: { id: settlementId, shopId } });
+    if (byId && isConfirmedSettlementRow(byId)) return byId;
+  }
+  const rows = await prisma.settlement.findMany({
+    where: {
+      shopId,
+      locationId: { in: locationIdVariants(locationId) },
+      targetDate,
+      status: { in: [...CONFIRMED_SETTLEMENT_STATUSES] },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 5,
+  });
+  return rows.find((r: { periodLabel: string | null; status: string }) => isConfirmedSettlementRow(r)) ?? null;
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method === "OPTIONS") return corsPreflightResponse(request);
@@ -52,6 +89,25 @@ export async function action({ request }: ActionFunctionArgs) {
         { ok: false, error: "locationId and targetDate are required" },
         { status: 400 }
       );
+    }
+
+    // T の決定（2026-11-22「確定値を守る」・Issue #20）: 確定済みの日は集計し直さず DB の値を返す。
+    // Shopify の精算注文も、売上サマリーのキャッシュも書き換えない。
+    const confirmed = await findConfirmedSettlementForDay(
+      shop.id,
+      String(locationId),
+      String(targetDate),
+      settlementId ? String(settlementId) : null,
+    );
+    if (confirmed) {
+      return corsJson({
+        ok: true,
+        confirmed: true,
+        settlementId: confirmed.id,
+        preview: settlementRowToPreview(confirmed, String(locationName ?? "")),
+        sourceOrderId: confirmed.sourceOrderId,
+        sourceOrderName: confirmed.sourceOrderName,
+      });
     }
 
     const preview = await buildSettlementPreview(

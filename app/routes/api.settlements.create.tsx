@@ -4,11 +4,13 @@
  *
  * - cloudprnt_direct: 集計してDB保存 → printable payload を返す
  * - order_based: 集計 → Shopify精算注文作成（GAS newSettlementFresh 相当）→ DB保存
- * - isInspection=true: 点検レシート（GAS uiCreateZeroInspection 相当）
+ * - isInspection=true: 点検レシート（GAS uiCreateZeroInspection 相当）。0 円で保存するので集計しない
  *
  * 印字方式 printMode はリクエスト body ではなく DB（Location.printMode）で決定（未登録は order_based）。
  * リトライ安全: locationId+targetDate+printMode のハッシュを idempotencyKey として使用。
  * 同一キーが既存の場合は重複精算を作成せず既存レコードを返す（点検レシートは除外）。
+ * このとき集計し直さず、Shopify の精算注文も書き換えず、DB の確定値を preview として返す
+ * （T の決定「確定値を守る」2026-11-22・Issue #20）。
  * Shopify 同期は GAS Script Lock 相当の DB ロックで直列化。
  */
 import type { ActionFunctionArgs } from "react-router";
@@ -19,7 +21,8 @@ import {
   syncSettlementOrderLikeGas,
   syncInspectionOrderLikeGas,
 } from "../services/settlementOrderGas.server";
-import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
+import { upsertDailySummaryCacheFromPreview } from "../services/salesSummaryEngine.server";
+import { settlementRowToPreview } from "../services/settlementConfirmedPure.server";
 import {
   buildSettlementLockKey,
   withSettlementOperationLock,
@@ -57,7 +60,8 @@ async function resolveEffectivePrintMode(shopId: string, locationId: string): Pr
 async function syncShopifySettlementOrder(
   admin: Parameters<typeof syncSettlementOrderLikeGas>[0],
   shopId: string,
-  preview: Awaited<ReturnType<typeof buildSettlementPreview>>,
+  /** 点検レシートのときは集計しないので null */
+  preview: Awaited<ReturnType<typeof buildSettlementPreview>> | null,
   printMode: string,
   isInspection: boolean,
   locationName: string,
@@ -85,6 +89,9 @@ async function syncShopifySettlementOrder(
     };
   }
 
+  if (!preview) {
+    throw new Error("精算の集計結果がありません");
+  }
   const result = await syncSettlementOrderLikeGas(admin, shopId, preview, {
     attachNote: syncOpts.attachNote,
     attachMetafields: syncOpts.attachMetafields,
@@ -94,6 +101,47 @@ async function syncShopifySettlementOrder(
     sourceOrderName: result.orderName,
     settlementOrderSkipped: false,
   };
+}
+
+type SettlementRow = NonNullable<Awaited<ReturnType<typeof prisma.settlement.findUnique>>>;
+
+/**
+ * 確定済みの精算をもう一度押されたときの応答（T の決定「確定値を守る」）。
+ * 集計し直さず、Shopify の精算注文も書き換えず、DB に保存した値をそのまま返す。
+ */
+function confirmedSettlementResponse(
+  row: SettlementRow,
+  printMode: string,
+  locationName: string,
+) {
+  return {
+    ok: true,
+    idempotent: true,
+    /** 確定済みの値（DB）を返したことを示す。集計し直した値ではない */
+    confirmed: true,
+    settlementId: row.id,
+    preview: settlementRowToPreview(row, locationName),
+    sourceOrderId: row.sourceOrderId,
+    sourceOrderName: row.sourceOrderName,
+    // order_based で精算注文が無い行は、設定で作らなかった行（作成に失敗したときは行を保存しない）
+    settlementOrderSkipped: printMode === "order_based" && !row.sourceOrderName,
+    printMode,
+    targetDate: row.targetDate,
+    isInspection: false,
+  };
+}
+
+/**
+ * 点検レシートは集計しないので、通貨は同じ店の直近の精算から取る。無ければ null
+ * （印字は null を JPY として扱う。0 件の日の集計と同じ既定値）。
+ */
+async function resolveInspectionCurrency(shopId: string): Promise<string | null> {
+  const last = await prisma.settlement.findFirst({
+    where: { shopId, currency: { not: null } },
+    orderBy: { createdAt: "desc" },
+    select: { currency: true },
+  });
+  return last?.currency ?? null;
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -126,154 +174,59 @@ export async function action({ request }: ActionFunctionArgs) {
     );
 
     // ── 冪等性チェック（点検レシートは対象外） ──────────────────────────────
-    if (!inspection) {
-      const idemKey = buildIdempotencyKey(
-        shop.id, String(locationId), String(targetDate), effectivePrintMode,
-      );
+    // T の決定（2026-11-22「確定値を守る」・Issue #20）: 確定済みの日は集計し直さず、
+    // DB の値を返す。Shopify の精算注文も書き換えない。売上サマリーのキャッシュも触らない。
+    const idemKey = !inspection
+      ? buildIdempotencyKey(shop.id, String(locationId), String(targetDate), effectivePrintMode)
+      : null;
+    if (idemKey) {
       const existingSettlement = await prisma.settlement.findUnique({
         where: { idempotencyKey: idemKey },
       });
       if (existingSettlement) {
-        return await withSettlementOperationLock(lockKey, async () => {
-          if (effectivePrintMode === "order_based") {
-            const preview = await buildSettlementPreview(
-              admin,
-              shop.id,
-              String(locationId),
-              String(locationName ?? ""),
-              String(targetDate),
-            );
-            let sourceOrderId = existingSettlement.sourceOrderId;
-            let sourceOrderName = existingSettlement.sourceOrderName;
-            let settlementOrderSkipped = false;
-            try {
-              const sync = await syncShopifySettlementOrder(
-                admin,
-                shop.id,
-                preview,
-                effectivePrintMode,
-                false,
-                String(locationName ?? ""),
-              );
-              sourceOrderId = sync.sourceOrderId;
-              sourceOrderName = sync.sourceOrderName;
-              settlementOrderSkipped = sync.settlementOrderSkipped;
-            } catch (syncErr) {
-              const msg = syncErr instanceof Error ? syncErr.message : String(syncErr);
-              return corsJson({ ok: false, error: msg }, { status: 500 });
-            }
-            try {
-              await computeAndCacheDailySummary(
-                admin,
-                shop.id,
-                String(locationId),
-                String(locationName ?? ""),
-                String(targetDate),
-              );
-            } catch {
-              /* キャッシュ失敗は精算結果に影響させない */
-            }
-            return corsJson(
-              {
-                ok: true,
-                idempotent: true,
-                settlementId: existingSettlement.id,
-                preview,
-                sourceOrderId,
-                sourceOrderName,
-                settlementOrderSkipped,
-                printMode: effectivePrintMode,
-                targetDate: existingSettlement.targetDate,
-                isInspection: false,
-              },
-              { status: 200 },
-            );
-          }
-          return corsJson(
-            {
-              ok: true,
-              idempotent: true,
-              settlementId: existingSettlement.id,
-              preview: null,
-              sourceOrderId: existingSettlement.sourceOrderId,
-              sourceOrderName: existingSettlement.sourceOrderName,
-              printMode: effectivePrintMode,
-              targetDate: existingSettlement.targetDate,
-              isInspection: false,
-            },
-            { status: 200 },
-          );
-        });
+        return corsJson(
+          confirmedSettlementResponse(existingSettlement, effectivePrintMode, String(locationName ?? "")),
+          { status: 200 },
+        );
       }
     }
 
     return await withSettlementOperationLock(lockKey, async () => {
-      // ロック内で再チェック（レース対策）
-      if (!inspection) {
-        const idemKey = buildIdempotencyKey(
-          shop.id, String(locationId), String(targetDate), effectivePrintMode,
-        );
+      // ロック内で再チェック（レース対策）。先に確定した側の値をそのまま返す。
+      if (idemKey) {
         const raced = await prisma.settlement.findUnique({ where: { idempotencyKey: idemKey } });
         if (raced) {
-          const preview = await buildSettlementPreview(
+          return corsJson(
+            confirmedSettlementResponse(raced, effectivePrintMode, String(locationName ?? "")),
+            { status: 200 },
+          );
+        }
+      }
+
+      // 点検レシートは 0 円で保存し、集計の結果を使わない（Issue #20）ので集計しない。
+      // 精算は集計を 1 回だけにし、その結果で売上サマリーのキャッシュを更新する
+      // （以前は computeAndCacheDailySummary の中でもう一度集計していた）。
+      const preview = inspection
+        ? null
+        : await buildSettlementPreview(
             admin,
             shop.id,
             String(locationId),
             String(locationName ?? ""),
             String(targetDate),
           );
-          let sourceOrderId = raced.sourceOrderId;
-          let sourceOrderName = raced.sourceOrderName;
-          let settlementOrderSkipped = false;
-          if (effectivePrintMode === "order_based") {
-            const sync = await syncShopifySettlementOrder(
-              admin,
-              shop.id,
-              preview,
-              effectivePrintMode,
-              false,
-              String(locationName ?? ""),
-            );
-            sourceOrderId = sync.sourceOrderId;
-            sourceOrderName = sync.sourceOrderName;
-            settlementOrderSkipped = sync.settlementOrderSkipped;
-          }
-          return corsJson(
-            {
-              ok: true,
-              idempotent: true,
-              settlementId: raced.id,
-              preview,
-              sourceOrderId,
-              sourceOrderName,
-              settlementOrderSkipped,
-              printMode: effectivePrintMode,
-              targetDate: raced.targetDate,
-              isInspection: false,
-            },
-            { status: 200 },
+
+      if (preview) {
+        try {
+          await upsertDailySummaryCacheFromPreview(
+            shop.id,
+            String(locationId),
+            String(targetDate),
+            preview,
           );
+        } catch {
+          /* キャッシュ更新失敗は精算結果に影響させない */
         }
-      }
-
-      const preview = await buildSettlementPreview(
-        admin,
-        shop.id,
-        String(locationId),
-        String(locationName ?? ""),
-        String(targetDate),
-      );
-
-      try {
-        await computeAndCacheDailySummary(
-          admin,
-          shop.id,
-          String(locationId),
-          String(locationName ?? ""),
-          String(targetDate),
-        );
-      } catch {
-        /* キャッシュ更新失敗は精算結果に影響させない */
       }
 
       let sourceOrderId: string | null = null;
@@ -294,10 +247,6 @@ export async function action({ request }: ActionFunctionArgs) {
         settlementOrderSkipped = sync.settlementOrderSkipped;
       }
 
-      const idemKey = !inspection
-        ? buildIdempotencyKey(shop.id, String(locationId), String(targetDate), effectivePrintMode)
-        : null;
-
       const settlement = await prisma.settlement.create({
         data: {
           shopId: shop.id,
@@ -306,18 +255,18 @@ export async function action({ request }: ActionFunctionArgs) {
           sourceOrderName,
           targetDate: String(targetDate),
           periodLabel: inspection ? `点検_${String(targetDate)}` : String(targetDate),
-          currency: preview.currency,
-          total: inspection ? 0 : preview.total,
-          netSales: inspection ? 0 : preview.netSales,
-          tax: inspection ? 0 : preview.tax,
-          discounts: inspection ? 0 : preview.discounts,
-          vipPointsUsed: inspection ? 0 : preview.vipPointsUsed,
-          refundTotal: inspection ? 0 : preview.refundTotal,
-          orderCount: inspection ? 0 : preview.orderCount,
-          refundCount: inspection ? 0 : preview.refundCount,
-          itemCount: inspection ? 0 : preview.itemCount,
-          voucherChangeAmount: inspection ? 0 : preview.voucherChangeAmount,
-          paymentSectionsJson: JSON.stringify(inspection ? [] : preview.paymentSections),
+          currency: preview ? preview.currency : await resolveInspectionCurrency(shop.id),
+          total: preview?.total ?? 0,
+          netSales: preview?.netSales ?? 0,
+          tax: preview?.tax ?? 0,
+          discounts: preview?.discounts ?? 0,
+          vipPointsUsed: preview?.vipPointsUsed ?? 0,
+          refundTotal: preview?.refundTotal ?? 0,
+          orderCount: preview?.orderCount ?? 0,
+          refundCount: preview?.refundCount ?? 0,
+          itemCount: preview?.itemCount ?? 0,
+          voucherChangeAmount: preview?.voucherChangeAmount ?? 0,
+          paymentSectionsJson: JSON.stringify(preview?.paymentSections ?? []),
           printMode: effectivePrintMode,
           status: "completed",
           idempotencyKey: idemKey,
@@ -325,7 +274,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
 
       const printPayload =
-        effectivePrintMode === "cloudprnt_direct" && !inspection
+        effectivePrintMode === "cloudprnt_direct" && preview
           ? buildSettlementReceiptText(preview)
           : undefined;
 

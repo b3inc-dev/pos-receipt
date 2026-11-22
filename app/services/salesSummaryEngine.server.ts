@@ -7,7 +7,6 @@
  * - 予算・入店数と組み合わせてキャッシュに保存
  */
 import prisma from "../db.server";
-import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
 import { expandLocationIdsForBudgetQuery } from "../utils/salesSummaryBudgetFromDb.server";
 import {
   buildSettlementPreview,
@@ -128,9 +127,6 @@ export async function computeAndCacheDailySummary(
   const locationGid = locationId.startsWith("gid://")
     ? locationId
     : `gid://shopify/Location/${locationId}`;
-
-  const timezone = await getShopTimezoneForDaily(admin, shopId);
-  const dayRange = getDayRangeInUtc(targetDate, timezone);
 
   // 売上サマリーの基礎数値は精算プレビューと同じ集計関数を使用し、差分をゼロにする
   const preview = await buildSettlementPreview(

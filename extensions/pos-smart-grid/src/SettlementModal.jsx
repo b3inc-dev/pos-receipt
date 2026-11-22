@@ -302,7 +302,8 @@ function SettlementModal() {
         locationName: selectedLocation.locationName,
         targetDate,
       });
-      setPreview(res.preview);
+      // 確定済みの日は、サーバーが集計し直さずに保存した値を返す（confirmed: true）
+      setPreview(res?.confirmed ? { ...res.preview, confirmedFromDb: true } : res.preview);
     } catch (e) {
       setError(toUserMessage(e?.message) || "再集計に失敗しました");
     } finally {
@@ -1019,6 +1020,11 @@ function PreviewView({
                 </s-box>
               ) : null}
 
+              {preview.confirmedFromDb ? (
+                <s-text tone="subdued">
+                  この日は精算を確定済みです。確定したときの値を表示しています（集計し直していません）。
+                </s-text>
+              ) : null}
               {error ? <s-text tone="critical">{error}</s-text> : null}
             </s-stack>
           </s-box>
@@ -1333,14 +1339,19 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
                     value: result?.settlementId ? `…${result.settlementId.slice(-8)}` : "-",
                   },
                   { label: "対象日", value: formatYmdSlash(doneTargetDate) },
-                  {
-                    label: "総売上",
-                    value:
-                      doneTotal != null
-                        ? `¥${Number(doneTotal).toLocaleString()}`
-                        : "（再表示時は履歴から確認）",
-                    valueBold: true,
-                  },
+                  // 点検レシートは金額を保存しない（0 円）ので総売上は出さない
+                  ...(isInspection
+                    ? []
+                    : [
+                        {
+                          label: "総売上",
+                          value:
+                            doneTotal != null
+                              ? `¥${Number(doneTotal).toLocaleString()}`
+                              : "（再表示時は履歴から確認）",
+                          valueBold: true,
+                        },
+                      ]),
                 ].map((row, i, arr) => (
                   <SummaryRow
                     key={row.label}
