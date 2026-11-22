@@ -11,6 +11,9 @@ import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
 import { encodeReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
 import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
+import { getPrintLayout, renderLayoutForPrint } from "../services/receiptLayoutPrint.server";
+import { LAYOUT_RECEIPT_ORDER_QUERY, receiptTemplateData } from "../services/receiptLayoutAdapters";
+import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 
 const ORDER_QUERY = `#graphql
   query ReceiptIssueOrder($id: ID!) {
@@ -104,6 +107,32 @@ export async function action({ request }: ActionFunctionArgs) {
     const effectiveProviso = String(proviso || templateData.defaultProviso || "お買上品代として");
     const locationId = order.retailLocation?.id ?? "";
     const locationName = order.retailLocation?.name ?? "";
+    // 管理画面のレイアウト（#69）を「印字に使う」にしているときだけ。発行の時点の HTML を保存する（再印刷も同じ紙面）
+    const receiptLayout = await getPrintLayout(shop.id, "receipt");
+    let layoutSource: {
+      shop: { name?: string; currencyCode?: string } | null;
+      order: Record<string, unknown> | null;
+      timezone: string;
+    } | null = null;
+    if (receiptLayout) {
+      try {
+        const res = await admin.graphql(LAYOUT_RECEIPT_ORDER_QUERY, { variables: { id: gid } });
+        const json = (await res.json()) as {
+          errors?: unknown[];
+          data?: { shop?: { name?: string; currencyCode?: string }; order?: Record<string, unknown> | null };
+        };
+        if (!json.errors?.length && json.data?.order) {
+          layoutSource = {
+            shop: json.data.shop ?? null,
+            order: json.data.order,
+            timezone: await getShopTimezoneForDaily(admin, shop.id),
+          };
+        }
+      } catch {
+        layoutSource = null;
+      }
+    }
+
     const issued = await prisma.$transaction(async (tx) => {
       const created = await tx.receiptIssue.create({
         data: {
@@ -141,13 +170,34 @@ export async function action({ request }: ActionFunctionArgs) {
         showOrderNumber: Boolean(templateData.showOrderNumber ?? templateData.showOrderName),
         showDate: Boolean(templateData.showDate ?? templateData.showIssueDate),
       };
+      let rendered = {
+        58: renderPrintReceiptHtml({ ...model, paperWidthMm: 58 }),
+        80: renderPrintReceiptHtml({ ...model, paperWidthMm: 80 }),
+      };
+      if (receiptLayout && layoutSource) {
+        const data = receiptTemplateData({
+          shop: layoutSource.shop,
+          order: layoutSource.order,
+          issue: {
+            recipientName: created.recipientName ?? "",
+            proviso: created.proviso ?? effectiveProviso,
+            amount: Number(created.amount),
+            currency: created.currency ?? "JPY",
+            orderName: created.orderName ?? "",
+            createdAt: created.createdAt,
+          },
+          timezone: layoutSource.timezone,
+          printedAt: created.createdAt.toISOString(),
+        });
+        const html58 = renderLayoutForPrint(receiptLayout, data, 58);
+        const html80 = renderLayoutForPrint(receiptLayout, data, 80);
+        // どちらかでも作れなければ、今までの領収書のまま（58 と 80 で紙面が違うものを保存しない）
+        if (html58 && html80) rendered = { 58: html58, 80: html80 };
+      }
       const printSnapshotJson = encodeReceiptPrintSnapshot({
         locationName,
         templateData: templateData as unknown as Record<string, unknown>,
-        renderedHtmlByPaperWidth: {
-          58: renderPrintReceiptHtml({ ...model, paperWidthMm: 58 }),
-          80: renderPrintReceiptHtml({ ...model, paperWidthMm: 80 }),
-        },
+        renderedHtmlByPaperWidth: rendered,
       });
 
       return tx.receiptIssue.update({

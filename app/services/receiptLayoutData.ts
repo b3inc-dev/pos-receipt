@@ -78,6 +78,8 @@ export type SettlementPayment = {
   count: number;
   refund: number;
   refund_count: number;
+  /** まとめの行（電子マネー(合計) など） */
+  is_group?: boolean;
 };
 
 export type SettlementData = {
@@ -229,7 +231,7 @@ export function sampleTemplateData(kind: ReceiptKind): ReceiptTemplateData {
           refund_count: 1,
           item_count: 57,
           total_including_returns: 133350,
-          cash_deposit: 40350,
+          cash_deposit: 45300,
           payments: [
             { label: "現金", net: 45300, count: 18, refund: 4950, refund_count: 1 },
             { label: "クレジットカード", net: 61200, count: 16, refund: 0, refund_count: 0 },

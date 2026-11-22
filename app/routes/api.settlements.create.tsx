@@ -192,6 +192,12 @@ export async function action({ request }: ActionFunctionArgs) {
           paymentSectionsJson: encodePaymentSectionsJson(
             inspection ? [] : preview.paymentSections,
             printSnapshot,
+            // 印字に出す金額（レイアウトの印字用）。点検は行の金額を 0 で保存するので、出し直しはここから
+            {
+              issuedAt: new Date().toISOString(),
+              figures: preview as unknown as Record<string, unknown>,
+              sections: preview.paymentSections,
+            },
           ),
           printMode: UNIFIED_PRINT_MODE,
           status: "completed",

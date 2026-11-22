@@ -245,8 +245,11 @@ export function ReceiptLayoutEditor({
   kind,
   initial,
   onLayoutChange,
+  sampleData,
 }: {
   kind: ReceiptKind;
+  /** プレビューの見本のデータ。無ければ receiptLayoutData.ts の見本（精算は店の並び順の設定を入れたもの） */
+  sampleData?: ReturnType<typeof sampleTemplateData>;
   /** 開いた時点（保存した時点）のレイアウト。「破棄」でここに戻す */
   initial: ReceiptLayout;
   /** 今の値を親のフォームへ（保存の帯の判定と送信用） */
@@ -280,7 +283,7 @@ export function ReceiptLayoutEditor({
     const t = window.setTimeout(() => setRenderTarget(layout), layout.mode === "code" ? 300 : 0);
     return () => window.clearTimeout(t);
   }, [layout]);
-  const rendered = useMemo(() => renderReceiptLayout(renderTarget, sampleTemplateData(kind)), [renderTarget, kind]);
+  const rendered = useMemo(() => renderReceiptLayout(renderTarget, sampleData ?? sampleTemplateData(kind)), [renderTarget, kind, sampleData]);
 
   const defs = blockDefsForKind(kind);
   const setBlocks = (blocks: LayoutBlock[]) => update({ ...layout, blocks });

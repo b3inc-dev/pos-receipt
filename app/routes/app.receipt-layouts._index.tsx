@@ -1,11 +1,11 @@
 /**
  * /app/receipt-layouts — 4 種のレシートのレイアウト（一覧）
  * 1 行 = 1 種類。押すとブロックエディタ（/app/receipt-layouts/:kind）へ。
- * まだ印字にはつないでいない（#22 が main に入ってからつなぐ）。
+ * 「このレイアウトで印字する」を入れた種類だけ、印字がこのレイアウトになる（入れていなければ今までの印字）。
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useLocation, useNavigate } from "react-router";
-import { Page, Layout, Card, ResourceList, ResourceItem, Text, Badge, InlineStack, BlockStack } from "@shopify/polaris";
+import { Page, Layout, Card, ResourceList, ResourceItem, Text, Badge, InlineStack, BlockStack, Link } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getAppSetting } from "../utils/appSettings.server";
@@ -18,10 +18,13 @@ import {
   type ReceiptKind,
 } from "../services/receiptLayoutSchema";
 import { normalizeLayout } from "../services/receiptLayoutValidate";
+import { getLayoutPrintEnabled } from "../services/receiptLayoutPrint.server";
+import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
+  const enabled = await getLayoutPrintEnabled(shop.id);
   const rows = await Promise.all(
     RECEIPT_KINDS.map(async (kind) => {
       const raw = await getAppSetting<unknown>(shop.id, receiptLayoutSettingKey(kind));
@@ -29,6 +32,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return {
         kind,
         saved: raw !== null,
+        printing: enabled[kind] && raw !== null,
         mode: layout.mode,
         blockCount: layout.blocks.filter((b) => !b.hidden).length,
         paperWidthMm: layout.paperWidthMm,
@@ -54,7 +58,10 @@ export default function ReceiptLayoutsIndex() {
       <Page title="レシートのレイアウト" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
         <Layout>
           <Layout.Section>
-            <AdminIntro>ブロックを並べ替えて、印字と同じプレビューを見ながらレシートの見た目を作ります。細かく作り込むときはコードでも編集できます。</AdminIntro>
+            <TabGroupBar tabs={RECEIPT_TABS} />
+          </Layout.Section>
+          <Layout.Section>
+            <AdminIntro>ブロックを並べ替えて、印字と同じプレビューを見ながらレシートの見た目を作ります。細かく作り込むときはコードでも編集できます。「このレイアウトで印字する」を入れた種類だけ、印字がこのレイアウトになります。</AdminIntro>
           </Layout.Section>
           <Layout.Section>
             <Card padding="0">
@@ -72,6 +79,7 @@ export default function ReceiptLayoutsIndex() {
                         <Text as="p" tone="subdued">{DESCRIPTIONS[row.kind]}</Text>
                       </BlockStack>
                       <InlineStack gap="200" wrap={false} blockAlign="center">
+                        {row.printing ? <Badge tone="success">印字に使用中</Badge> : <Badge>今までの印字</Badge>}
                         {row.saved ? null : <Badge>標準</Badge>}
                         <Badge tone={row.mode === "code" ? "attention" : "info"}>
                           {row.mode === "code" ? "コード" : `ブロック ${row.blockCount}`}
@@ -84,6 +92,13 @@ export default function ReceiptLayoutsIndex() {
                 )}
               />
             </Card>
+          </Layout.Section>
+          <Layout.Section>
+            <Text as="p" tone="subdued">
+              精算の支払方法の並び順・まとめの行・納金額、販売レシートのスタッフ名は{" "}
+              <Link url={`/app/receipt-layouts/print-data${q}`}>印字の値の設定</Link>
+              で変えます。
+            </Text>
           </Layout.Section>
         </Layout>
       </Page>
