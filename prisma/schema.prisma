@@ -206,10 +206,17 @@ model SpecialRefundEvent {
   shopifyRefundId         String?
   shopifyRefundError      String?
   shopifyRefundProcessedAt DateTime?
+  /// 管理者の承認（特殊返金設定 requirePaymentOverrideApproval）。
+  /// not_required | pending | approved | rejected。pending・rejected は精算・売上サマリーに数えない
+  approvalStatus          String   @default("not_required")
+  approvalDecidedAt       DateTime?
+  approvalDecidedBy       String?
+  approvalNote            String?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
   @@index([shopId, sourceOrderId])
+  @@index([shopId, approvalStatus])
   @@index([locationId, createdAt])
   @@index([eventType, createdAt])
 }

@@ -72,6 +72,7 @@ export async function action({ request }: ActionFunctionArgs) {
     reflectPaymentOverrideToSettlement: bool("reflectPaymentOverrideToSettlement", true),
     reflectVoucherAdjustmentToSettlement: bool("reflectVoucherAdjustmentToSettlement", true),
     reflectReceiptCashAdjustmentToSettlement: bool("reflectReceiptCashAdjustmentToSettlement", true),
+    requirePaymentOverrideApproval: bool("requirePaymentOverrideApproval", false),
     specialRefundUiLabel: str("specialRefundUiLabel", "特殊返金"),
     voucherAdjustmentUiLabel: str("voucherAdjustmentUiLabel", "商品券調整"),
     cashRefundUiLabel: str("cashRefundUiLabel", "現金返金"),
@@ -189,6 +190,20 @@ export default function SpecialRefundSettingsPage() {
                   実返金を ON にすると、POS で登録した金額が Shopify 上の注文に返金として記録されます。誤登録に注意してください。Shopify 返金済みの無効化では返金は自動取り消しされません。
                 </Banner>
               </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection
+            title="管理者の承認"
+            description="返金手段変更を、管理画面の「特殊返金・商品券調整 履歴」で承認してから精算に入れます。"
+          >
+            <Card>
+              <Checkbox
+                label="返金手段変更は管理者の承認のあとで精算に入れる"
+                checked={form.requirePaymentOverrideApproval}
+                onChange={(v) => set("requirePaymentOverrideApproval", v)}
+                helpText="ON にすると、POS で登録した返金手段変更は承認待ちになります。承認するまで Shopify 返金をせず、精算・点検・売上サマリーにも入れません。却下した登録も入れません。ON にする前の登録は今までどおりです。"
+              />
             </Card>
           </Layout.AnnotatedSection>
 

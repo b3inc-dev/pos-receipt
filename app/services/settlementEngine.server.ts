@@ -8,6 +8,7 @@
  * - 支払方法マスタ・ポイント/会員施策設定を参照
  */
 import prisma from "../db.server";
+import { COUNTABLE_APPROVAL_STATUSES } from "./specialRefundApproval";
 import { resolvePaymentSectionLabels } from "../utils/paymentMethod.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { resolvePointRedemptionRules } from "../utils/pointRedemptionRules";
@@ -733,6 +734,8 @@ async function buildSettlementPreviewImpl(
       shopId,
       locationId: { in: [locationId, locationGid, locIdRaw] },
       status: "active",
+      // 承認待ち・却下の返金手段変更は数えない（特殊返金設定 requirePaymentOverrideApproval）
+      approvalStatus: { in: [...COUNTABLE_APPROVAL_STATUSES] },
       createdAt: {
         gte: dayRange.startUtc,
         lte: dayRange.endUtc,

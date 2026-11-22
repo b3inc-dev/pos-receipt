@@ -9,18 +9,17 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import prisma from "../db.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { SPECIAL_REFUND_SETTINGS_KEY, DEFAULT_SPECIAL_REFUND_SETTINGS } from "../utils/appSettings.server";
-import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
-import { syncRefundAggregationMetafieldForOrder } from "../services/refundAggregation.server";
-import { setOrderRefundAggregationLocationGid } from "../services/posOrderMetafields.server";
-import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
-import {
-  executeShopifyRefundForEvent,
-  shouldExecuteShopifyRefund,
-} from "../services/shopifyRefundExecute.server";
 import {
   matchesSpecialRefundIdempotencyPayload,
   resolveSpecialRefundIdempotencyKey,
 } from "../services/specialRefundIdempotency.server";
+import {
+  applyShopifyRefundToEvent,
+  CORRECTION_SKIP_REASON,
+  countVoidedEventsOnOrder,
+  syncAfterSpecialRefundProcessed,
+} from "../services/specialRefundProcess.server";
+import { initialApprovalStatus, isApprovalHolding } from "../services/specialRefundApproval";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
 
@@ -32,24 +31,6 @@ function getAllowedEventTypes(settings: typeof DEFAULT_SPECIAL_REFUND_SETTINGS |
   if (s.enableVoucherChangeAdjustment) out.push("voucher_change_adjustment");
   if (s.enableReceiptCashAdjustment) out.push("receipt_cash_adjustment");
   return out.length > 0 ? out : [...EVENT_TYPES];
-}
-
-const CORRECTION_SKIP_REASON =
-  "訂正登録のため記録のみ（同一取引に無効化済みイベントがあります）";
-
-async function countVoidedEventsOnOrder(shopId: string, sourceOrderId: string): Promise<number> {
-  return prisma.specialRefundEvent.count({
-    where: { shopId, sourceOrderId, status: "voided" },
-  });
-}
-
-function normalizeLocationIdToGid(locationId: string): string | null {
-  const s = String(locationId || "").trim();
-  if (!s) return null;
-  if (s.startsWith("gid://shopify/Location/")) return s;
-  if (/^\d+$/.test(s)) return `gid://shopify/Location/${s}`;
-  const m = s.match(/\/(\d+)$/);
-  return m?.[1] ? `gid://shopify/Location/${m[1]}` : null;
 }
 
 // GET /api/special-refunds?sourceOrderId=...
@@ -92,6 +73,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         hasVoidedEvents: voidedCount > 0,
         nextRegistrationRecordOnly:
           merged.correctionUsesRecordOnly && voidedCount > 0,
+        // 次の返金手段変更の登録が管理者の承認待ちになるか（POS の確認画面で知らせる）
+        paymentOverrideRequiresApproval: merged.requirePaymentOverrideApproval === true,
       },
       uiLabels: {
         specialRefund: merged.specialRefundUiLabel,
@@ -202,6 +185,7 @@ export async function action({ request }: ActionFunctionArgs) {
         ok: true,
         event: serializeEvent(existing),
         idempotentReplay: true,
+        approvalPending: existing.approvalStatus === "pending",
         correctionRegistration:
           existing.shopifyRefundStatus === "skipped" &&
           existing.shopifyRefundError === CORRECTION_SKIP_REASON,
@@ -228,10 +212,16 @@ export async function action({ request }: ActionFunctionArgs) {
     ) {
       return replayResponse(existingIdempotentEvent);
     }
+    // 承認待ち・却下の登録は POS から進めない（Shopify 返金は管理画面の承認のときに行う）
+    if (existingIdempotentEvent && isApprovalHolding(existingIdempotentEvent.approvalStatus)) {
+      return replayResponse(existingIdempotentEvent);
+    }
 
     const voidedOnOrder = await countVoidedEventsOnOrder(shop.id, sourceOrderIdStr);
     const isCorrectionRegistration =
       merged.correctionUsesRecordOnly && voidedOnOrder > 0;
+
+    const approvalStatus = initialApprovalStatus(merged, eventTypeStr);
 
     let idempotentReplay = Boolean(existingIdempotentEvent);
     const event = existingIdempotentEvent ?? await (async () => {
@@ -256,6 +246,7 @@ export async function action({ request }: ActionFunctionArgs) {
             createdBy: createdBy ? String(createdBy) : null,
             status: "active",
             shopifyRefundStatus: "none",
+            approvalStatus,
           },
         });
       } catch (error: unknown) {
@@ -281,6 +272,33 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!["none", "pending"].includes(event.shopifyRefundStatus)) {
         return replayResponse(event);
       }
+      if (isApprovalHolding(event.approvalStatus)) {
+        return replayResponse(event);
+      }
+    }
+
+    if (event.approvalStatus === "pending") {
+      // 承認待ち: Shopify 返金も精算への反映もしない。訂正（記録のみ）かどうかは登録の時点で決めて残す。
+      const held = isCorrectionRegistration
+        ? await prisma.specialRefundEvent.update({
+            where: { id: event.id },
+            data: { shopifyRefundStatus: "skipped", shopifyRefundError: CORRECTION_SKIP_REASON },
+          })
+        : event;
+      return corsJson(
+        {
+          ok: true,
+          event: serializeEvent(held),
+          approvalPending: true,
+          correctionRegistration: isCorrectionRegistration,
+          shopifyRefund: {
+            status: held.shopifyRefundStatus,
+            refundId: held.shopifyRefundId,
+            error: held.shopifyRefundError,
+          },
+        },
+        { status: 202 },
+      );
     }
 
     const processedEvent = await applyShopifyRefundToEvent(admin, merged, event, {
@@ -312,41 +330,7 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const orderGid = String(sourceOrderId).startsWith("gid://")
-      ? String(sourceOrderId)
-      : `gid://shopify/Order/${String(sourceOrderId).replace(/\D/g, "")}`;
-    try {
-      const processingGid = normalizeLocationIdToGid(locationId ? String(locationId) : "");
-      if (processingGid) {
-        await setOrderRefundAggregationLocationGid(admin, orderGid, processingGid);
-      } else {
-        await syncRefundAggregationMetafieldForOrder(admin, shop.id, orderGid);
-      }
-    } catch {
-      // メタフィールド同期失敗でもイベント登録は成功させる
-    }
-
-    // 売上サマリー（過去実績含む）の整合を保つため、登録日の日次キャッシュを再計算
-    const locationGid = normalizeLocationIdToGid(processedEvent.locationId);
-    if (locationGid) {
-      try {
-        const timezone = await getShopTimezoneForDaily(admin, shop.id);
-        const targetDate = getCalendarDateStringInTimeZone(processedEvent.createdAt, timezone);
-        const loc = await prisma.location.findFirst({
-          where: { shopId: shop.id, shopifyLocationGid: locationGid },
-          select: { name: true },
-        });
-        await computeAndCacheDailySummary(
-          admin,
-          shop.id,
-          locationGid,
-          loc?.name ?? "",
-          targetDate,
-        );
-      } catch {
-        // キャッシュ更新失敗でイベント登録自体は失敗させない
-      }
-    }
+    await syncAfterSpecialRefundProcessed(admin, shop.id, processedEvent);
 
     return corsJson(
       {
@@ -365,100 +349,6 @@ export async function action({ request }: ActionFunctionArgs) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
   }
-}
-
-async function applyShopifyRefundToEvent(
-  admin: { graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }> },
-  settings: typeof DEFAULT_SPECIAL_REFUND_SETTINGS,
-  event: {
-    id: string;
-    sourceOrderId: string;
-    eventType: string;
-    amount: { toString(): string };
-    adjustKind: string | null;
-  },
-  opts: {
-    originalPaymentMethod: string | null;
-    actualRefundMethod: string | null;
-    note: string | null;
-    isCorrectionRegistration: boolean;
-  },
-) {
-  if (opts.isCorrectionRegistration) {
-    return prisma.specialRefundEvent.update({
-      where: { id: event.id },
-      data: {
-        shopifyRefundStatus: "skipped",
-        shopifyRefundError: CORRECTION_SKIP_REASON,
-      },
-    });
-  }
-
-  if (!shouldExecuteShopifyRefund(settings, event.eventType, event.adjustKind)) {
-    return prisma.specialRefundEvent.update({
-      where: { id: event.id },
-      data: { shopifyRefundStatus: "skipped", shopifyRefundError: null },
-    });
-  }
-
-  await prisma.specialRefundEvent.update({
-    where: { id: event.id },
-    data: { shopifyRefundStatus: "pending" },
-  });
-
-  const result = await executeShopifyRefundForEvent(admin, {
-    sourceOrderId: event.sourceOrderId,
-    amount: Number(event.amount),
-    eventType: event.eventType,
-    note: opts.note,
-    originalPaymentMethod: opts.originalPaymentMethod,
-    actualRefundMethod: opts.actualRefundMethod,
-    adjustKind: event.adjustKind,
-    idempotencyKey: event.id,
-  });
-
-  if (result.status === "success") {
-    return prisma.specialRefundEvent.update({
-      where: { id: event.id },
-      data: {
-        shopifyRefundStatus: "success",
-        shopifyRefundId: result.refundId,
-        shopifyRefundError: null,
-        shopifyRefundProcessedAt: new Date(),
-      },
-    });
-  }
-
-  if (result.status === "skipped") {
-    return prisma.specialRefundEvent.update({
-      where: { id: event.id },
-      data: {
-        shopifyRefundStatus: "skipped",
-        shopifyRefundError: result.reason,
-      },
-    });
-  }
-
-  if (result.status === "retryable") {
-    return prisma.specialRefundEvent.update({
-      where: { id: event.id },
-      data: {
-        // 同一payload・同一イベントIDで再開できる状態を維持する。
-        shopifyRefundStatus: "pending",
-        shopifyRefundError: result.error,
-        shopifyRefundProcessedAt: null,
-      },
-    });
-  }
-
-  return prisma.specialRefundEvent.update({
-    where: { id: event.id },
-    data: {
-      shopifyRefundStatus: "failed",
-      shopifyRefundError: result.error,
-      shopifyRefundProcessedAt: new Date(),
-    },
-  });
 }
 
 function serializeEvent(e: {
@@ -483,6 +373,10 @@ function serializeEvent(e: {
   shopifyRefundId: string | null;
   shopifyRefundError: string | null;
   shopifyRefundProcessedAt: Date | null;
+  approvalStatus: string;
+  approvalDecidedAt: Date | null;
+  approvalDecidedBy: string | null;
+  approvalNote: string | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -507,6 +401,10 @@ function serializeEvent(e: {
     shopifyRefundId: e.shopifyRefundId,
     shopifyRefundError: e.shopifyRefundError,
     shopifyRefundProcessedAt: e.shopifyRefundProcessedAt?.toISOString() ?? null,
+    approvalStatus: e.approvalStatus,
+    approvalDecidedAt: e.approvalDecidedAt?.toISOString() ?? null,
+    approvalDecidedBy: e.approvalDecidedBy,
+    approvalNote: e.approvalNote,
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
   };

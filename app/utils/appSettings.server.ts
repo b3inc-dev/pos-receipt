@@ -269,6 +269,11 @@ export interface SpecialRefundSettings {
   reflectPaymentOverrideToSettlement: boolean;
   reflectVoucherAdjustmentToSettlement: boolean;
   reflectReceiptCashAdjustmentToSettlement: boolean;
+  /**
+   * 返金手段変更を管理画面で承認してから数える（店舗ごと・既定 OFF）。
+   * ON のとき POS の登録は承認待ちになり、承認までは Shopify 返金をせず、精算・売上サマリーにも入れない。
+   */
+  requirePaymentOverrideApproval: boolean;
   specialRefundUiLabel: string;
   voucherAdjustmentUiLabel: string;
   cashRefundUiLabel: string;
@@ -296,6 +301,7 @@ export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
   reflectPaymentOverrideToSettlement: true,
   reflectVoucherAdjustmentToSettlement: true,
   reflectReceiptCashAdjustmentToSettlement: true,
+  requirePaymentOverrideApproval: false,
   specialRefundUiLabel: "特殊返金",
   voucherAdjustmentUiLabel: "商品券調整",
   cashRefundUiLabel: "現金返金",

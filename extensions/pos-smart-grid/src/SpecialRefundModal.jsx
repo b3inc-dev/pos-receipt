@@ -170,6 +170,12 @@ function CorrectionModeBanner({ orderCorrectionContext }) {
 }
 
 function formatShopifyRefundNotice(res) {
+  if (res?.approvalPending || res?.event?.approvalStatus === "pending") {
+    return {
+      tone: "info",
+      text: "登録しました。管理者の承認待ちです。承認されるまで Shopify 返金はせず、精算にも入りません。",
+    };
+  }
   if (res?.correctionRegistration) {
     return {
       tone: "info",
@@ -197,6 +203,28 @@ function formatShopifyRefundNotice(res) {
     };
   }
   return { tone: "success", text: "登録しました。" };
+}
+
+function ApprovalStatusLine({ event }) {
+  const st = event?.approvalStatus;
+  if (st === "pending") {
+    return (
+      <s-text tone="caution" fontSize="small">
+        管理者の承認待ち（承認されるまで精算に入りません）
+      </s-text>
+    );
+  }
+  if (st === "approved") {
+    return <s-text tone="success" fontSize="small">承認済み</s-text>;
+  }
+  if (st === "rejected") {
+    return (
+      <s-text tone="critical" fontSize="small">
+        却下（精算に入りません）{event?.approvalNote ? `: ${event.approvalNote}` : ""}
+      </s-text>
+    );
+  }
+  return null;
 }
 
 function ShopifyRefundStatusLine({ status, error }) {
@@ -852,6 +880,8 @@ function EventCard({ event, onAskConfirm, legacyDecision, loading }) {
           <s-text tone="subdued" fontSize="small">メモ: {event.note}</s-text>
         ) : null}
 
+        <ApprovalStatusLine event={event} />
+
         <ShopifyRefundStatusLine
           status={event.shopifyRefundStatus}
           error={event.shopifyRefundError}
@@ -1041,6 +1071,12 @@ function SpecialRefundForm({
                   {note ? <Row label="メモ" value={note} /> : null}
                 </s-stack>
               </s-box>
+              {eventType === "payment_method_override" &&
+              orderCorrectionContext?.paymentOverrideRequiresApproval ? (
+                <s-text tone="subdued">
+                  返金手段変更は管理者の承認待ちになります。承認されるまで Shopify 返金はせず、精算にも入りません。
+                </s-text>
+              ) : null}
               {error ? <s-text tone="critical">{error}</s-text> : null}
               <s-stack gap="small">
                 <s-button kind="primary" onClick={handleSubmit} loading={loading}>

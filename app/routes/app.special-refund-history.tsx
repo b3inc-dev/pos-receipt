@@ -2,8 +2,9 @@
  * /app/special-refund-history — 特殊返金・商品券調整 履歴
  * 要件書 §19.3: 管理画面 - 特殊返金履歴一覧・取引別確認
  */
-import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useLocation, useNavigate, useSearchParams } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { useActionData, useLoaderData, useLocation, useNavigate, useNavigation, useSearchParams, useSubmit } from "react-router";
+import { useState } from "react";
 import {
   Page,
   Layout,
@@ -18,12 +19,23 @@ import {
   TextField,
   Box,
   Select,
+  Banner,
+  Modal,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
+import { SuccessToast } from "../components/admin-ui";
+import {
+  getAppSetting,
+  SPECIAL_REFUND_SETTINGS_KEY,
+  DEFAULT_SPECIAL_REFUND_SETTINGS,
+  type SpecialRefundSettings,
+} from "../utils/appSettings.server";
+import { decideSpecialRefundApproval } from "../services/specialRefundProcess.server";
+import { approvalStatusLabel } from "../services/specialRefundApproval";
 
 const PAGE_SIZE = 30;
 
@@ -34,6 +46,20 @@ const EVENT_TYPE_OPTIONS = [
   { label: "商品券調整", value: "voucher_change_adjustment" },
   { label: "レシート現金調整", value: "receipt_cash_adjustment" },
 ];
+
+const APPROVAL_OPTIONS = [
+  { label: "すべて", value: "" },
+  { label: "承認待ち", value: "pending" },
+  { label: "承認済み", value: "approved" },
+  { label: "却下", value: "rejected" },
+];
+
+function approvalBadge(status: string) {
+  const label = approvalStatusLabel(status);
+  if (!label) return null;
+  const tone = status === "pending" ? "attention" : status === "approved" ? "success" : "critical";
+  return <Badge tone={tone}>{label}</Badge>;
+}
 
 function eventTypeLabel(t: string) {
   const map: Record<string, string> = {
@@ -76,11 +102,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const dateFrom  = url.searchParams.get("dateFrom")  ?? "";
   const dateTo    = url.searchParams.get("dateTo")    ?? "";
   const eventType = url.searchParams.get("eventType") ?? "";
+  const approval  = url.searchParams.get("approval")  ?? "";
   const page      = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
 
   const whereClean = {
     shopId: shop.id,
     ...(eventType ? { eventType } : {}),
+    ...(approval ? { approvalStatus: approval } : {}),
     ...(dateFrom || dateTo
       ? {
           createdAt: {
@@ -91,7 +119,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : {}),
   };
 
-  const [total, items] = await Promise.all([
+  const [total, items, pendingApprovalCount, srSettingsRaw] = await Promise.all([
     prisma.specialRefundEvent.count({ where: whereClean }),
     prisma.specialRefundEvent.findMany({
       where: whereClean,
@@ -115,9 +143,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
         status: true,
         shopifyRefundStatus: true,
         shopifyRefundError: true,
+        approvalStatus: true,
+        approvalDecidedAt: true,
+        approvalDecidedBy: true,
         createdAt: true,
       },
     }),
+    prisma.specialRefundEvent.count({
+      where: { shopId: shop.id, status: "active", approvalStatus: "pending" },
+    }),
+    getAppSetting<Partial<SpecialRefundSettings>>(shop.id, SPECIAL_REFUND_SETTINGS_KEY),
   ]);
 
   return {
@@ -138,8 +173,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       status: e.status,
       shopifyRefundStatus: e.shopifyRefundStatus,
       shopifyRefundError: e.shopifyRefundError,
+      approvalStatus: e.approvalStatus,
+      approvalDecidedAt: e.approvalDecidedAt?.toISOString() ?? null,
+      approvalDecidedBy: e.approvalDecidedBy,
       createdAt: e.createdAt.toISOString(),
     })),
+    pendingApprovalCount,
+    approvalEnabled: srSettingsRaw?.requirePaymentOverrideApproval === true,
+    approval,
     total,
     page,
     pageSize: PAGE_SIZE,
@@ -149,9 +190,68 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
+type ApprovalActionData =
+  | { ok: true; message: string; warning: string | null; at: number }
+  | { ok: false; error: string; at: number };
+
+export async function action({ request }: ActionFunctionArgs) {
+  const { admin, session } = await authenticate.admin(request);
+  const shop = await resolveShop(session.shop, admin);
+  const formData = await request.formData();
+  const intent = String(formData.get("intent") ?? "");
+  const eventId = String(formData.get("eventId") ?? "");
+  if ((intent !== "approve" && intent !== "reject") || !eventId) {
+    return Response.json({ ok: false, error: "操作が分かりません。画面を読み直してください。", at: Date.now() }, { status: 400 });
+  }
+  const saved = await getAppSetting<Partial<SpecialRefundSettings>>(shop.id, SPECIAL_REFUND_SETTINGS_KEY);
+  const settings: SpecialRefundSettings = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...saved };
+  const user = session.onlineAccessInfo?.associated_user;
+  const decidedBy =
+    [user?.last_name, user?.first_name].filter(Boolean).join(" ").trim() || "管理画面";
+
+  const result = await decideSpecialRefundApproval(admin, shop.id, settings, {
+    eventId,
+    decision: intent,
+    decidedBy,
+  });
+  if (!result.ok) {
+    return Response.json({ ok: false, error: result.error, at: Date.now() }, { status: result.retryable ? 503 : 409 });
+  }
+  const message = result.approvalStatus === "approved" ? "承認しました" : "却下しました";
+  let warning: string | null = null;
+  if (result.approvalStatus === "approved" && result.shopifyRefundStatus === "failed") {
+    warning = `承認しましたが、Shopify 返金に失敗しました。${result.shopifyRefundError ?? ""}`.trim();
+  }
+  if (result.settlementAlreadyExists) {
+    const tail =
+      "この登録の日の精算はもう作られています。数字を合わせるには、精算履歴からその日の精算を出し直してください。";
+    warning = warning ? `${warning} ${tail}` : tail;
+  }
+  return Response.json({ ok: true, message, warning, at: Date.now() } satisfies ApprovalActionData);
+}
+
 export default function SpecialRefundHistoryPage() {
-  const { items, total, page, pageSize, dateFrom, dateTo, eventType } =
-    useLoaderData<typeof loader>();
+  const {
+    items, total, page, pageSize, dateFrom, dateTo, eventType,
+    approval, pendingApprovalCount, approvalEnabled,
+  } = useLoaderData<typeof loader>();
+  const actionData = useActionData<ApprovalActionData>();
+  const submit = useSubmit();
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle" && navigation.formMethod?.toLowerCase() === "post";
+  const [confirm, setConfirm] = useState<{
+    intent: "approve" | "reject";
+    eventId: string;
+    label: string;
+  } | null>(null);
+  const runDecision = () => {
+    if (!confirm) return;
+    const fd = new FormData();
+    fd.set("intent", confirm.intent);
+    fd.set("eventId", confirm.eventId);
+    submit(fd, { method: "post" });
+    setConfirm(null);
+  };
   const location = useLocation();
   const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
@@ -189,6 +289,31 @@ export default function SpecialRefundHistoryPage() {
           <TabGroupBar tabs={SETTLEMENT_TABS} />
         </Card>
         <Layout>
+          <SuccessToast message={actionData?.ok ? actionData.message : null} trigger={actionData?.at} />
+          {/* お知らせ枠は 1 つ: 失敗 > 注意 > 承認待ちの件数 */}
+          {actionData && !actionData.ok ? (
+            <Layout.Section>
+              <Banner tone="critical" title="承認・却下できませんでした">
+                <p>{actionData.error}</p>
+              </Banner>
+            </Layout.Section>
+          ) : actionData?.ok && actionData.warning ? (
+            <Layout.Section>
+              <Banner tone="warning" title={actionData.message}>
+                <p>{actionData.warning}</p>
+              </Banner>
+            </Layout.Section>
+          ) : pendingApprovalCount > 0 ? (
+            <Layout.Section>
+              <Banner
+                tone="warning"
+                title={`承認待ちの返金手段変更が ${pendingApprovalCount} 件あります`}
+                action={approval === "pending" ? undefined : { content: "承認待ちだけ見る", onAction: () => handleFilter("approval", "pending") }}
+              >
+                <p>承認するまで Shopify 返金はせず、精算・売上サマリーにも入りません。</p>
+              </Banner>
+            </Layout.Section>
+          ) : null}
           {/* フィルター */}
           <Layout.Section>
             <Card>
@@ -203,6 +328,16 @@ export default function SpecialRefundHistoryPage() {
                       onChange={(v) => handleFilter("eventType", v)}
                     />
                   </Box>
+                  {approvalEnabled || pendingApprovalCount > 0 || approval ? (
+                    <Box minWidth="160px">
+                      <Select
+                        label="承認"
+                        options={APPROVAL_OPTIONS}
+                        value={approval}
+                        onChange={(v) => handleFilter("approval", v)}
+                      />
+                    </Box>
+                  ) : null}
                   <Box minWidth="160px">
                     <TextField
                       label="開始日"
@@ -239,6 +374,7 @@ export default function SpecialRefundHistoryPage() {
                   { title: "返金手段変更" },
                   { title: "備考" },
                   { title: "ステータス" },
+                  { title: "承認" },
                   { title: "Shopify返金" },
                   { title: "登録日時" },
                 ]}
@@ -289,6 +425,50 @@ export default function SpecialRefundHistoryPage() {
                     <IndexTable.Cell>{statusBadge(item.status)}</IndexTable.Cell>
                     <IndexTable.Cell>
                       <BlockStack gap="100">
+                        {approvalBadge(item.approvalStatus) ?? <Text as="span" tone="subdued">—</Text>}
+                        {item.approvalDecidedBy && item.approvalStatus !== "pending" ? (
+                          <Text as="span" variant="bodySm" tone="subdued">{item.approvalDecidedBy}</Text>
+                        ) : null}
+                        {item.status === "active" &&
+                        (item.approvalStatus === "pending" ||
+                          (item.approvalStatus === "approved" && item.shopifyRefundStatus === "pending")) ? (
+                          <InlineStack gap="200" wrap={false}>
+                            <Button
+                              size="slim"
+                              variant="primary"
+                              disabled={busy}
+                              onClick={() =>
+                                setConfirm({
+                                  intent: "approve",
+                                  eventId: item.id,
+                                  label: `${item.sourceOrderName ?? item.sourceOrderId}・${fmtYen(item.amount)}`,
+                                })
+                              }
+                            >
+                              {item.approvalStatus === "approved" ? "もう一度実行" : "承認する"}
+                            </Button>
+                            {item.approvalStatus === "pending" ? (
+                              <Button
+                                size="slim"
+                                tone="critical"
+                                disabled={busy}
+                                onClick={() =>
+                                  setConfirm({
+                                    intent: "reject",
+                                    eventId: item.id,
+                                    label: `${item.sourceOrderName ?? item.sourceOrderId}・${fmtYen(item.amount)}`,
+                                  })
+                                }
+                              >
+                                却下
+                              </Button>
+                            ) : null}
+                          </InlineStack>
+                        ) : null}
+                      </BlockStack>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <BlockStack gap="100">
                         {shopifyRefundBadge(item.shopifyRefundStatus)}
                         {item.shopifyRefundStatus === "failed" && item.shopifyRefundError ? (
                           <Text as="span" variant="bodySm" tone="subdued">
@@ -336,6 +516,29 @@ export default function SpecialRefundHistoryPage() {
             </Layout.Section>
           )}
         </Layout>
+        <Modal
+          open={confirm != null}
+          onClose={() => setConfirm(null)}
+          title={confirm?.intent === "reject" ? "返金手段変更を却下しますか" : "返金手段変更を承認しますか"}
+          primaryAction={{
+            content: confirm?.intent === "reject" ? "却下する" : "承認する",
+            destructive: confirm?.intent === "reject",
+            loading: busy,
+            onAction: runDecision,
+          }}
+          secondaryActions={[{ content: "キャンセル", onAction: () => setConfirm(null) }]}
+        >
+          <Modal.Section>
+            <BlockStack gap="200">
+              <Text as="p" fontWeight="semibold">{confirm?.label}</Text>
+              <Text as="p">
+                {confirm?.intent === "reject"
+                  ? "却下すると、この登録は精算・売上サマリーに入りません。Shopify 返金もしません。却下は取り消せません。"
+                  : "承認すると、設定で Shopify 返金を実行する種別なら Shopify で返金し、登録した日の精算・売上サマリーに入れます。Shopify 返金は取り消せません。"}
+              </Text>
+            </BlockStack>
+          </Modal.Section>
+        </Modal>
       </Page>
     </PolarisPageWrapper>
   );

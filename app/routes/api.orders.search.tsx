@@ -206,18 +206,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
         }),
         prisma.specialRefundEvent.findMany({
           where: { shopId: shop.id, sourceOrderId: { in: idKeys }, status: "active" },
-          select: { sourceOrderId: true, eventType: true, shopifyRefundStatus: true },
+          select: { sourceOrderId: true, eventType: true, shopifyRefundStatus: true, approvalStatus: true },
         }),
       ]);
       const receiptSet = new Set(receiptRows.map((r) => normalizeOrderIdKey(r.orderId)));
       const eventsByOrder = new Map<string, string[]>();
       // Shopify 返金の結果が分かっていない（pending）登録がある注文。精算を止めるので一覧で分かるようにする
       const pendingOrders = new Set<string>();
+      // 管理者の承認を待っている返金手段変更がある注文（精算に入らない）
+      const approvalPendingOrders = new Set<string>();
       for (const e of eventRows) {
         const oid = normalizeOrderIdKey(e.sourceOrderId);
         if (!eventsByOrder.has(oid)) eventsByOrder.set(oid, []);
         eventsByOrder.get(oid)!.push(e.eventType);
         if (isShopifyRefundPending(e.shopifyRefundStatus)) pendingOrders.add(oid);
+        if (e.approvalStatus === "pending") approvalPendingOrders.add(oid);
       }
       items = items.map((item) => {
         const oid = normalizeOrderIdKey(item.orderId);
@@ -233,6 +236,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             hasVoucherAdjustment,
             appSpecialApplied: hasSpecialRefund,
             hasPendingShopifyRefund: pendingOrders.has(oid),
+            hasPendingApproval: approvalPendingOrders.has(oid),
           },
         };
       });
