@@ -30,6 +30,7 @@ import {
 import { resolveSettlementOrderSyncOptions } from "../services/settlementSyncSettings.server";
 import { UpstreamAggregationError } from "../services/settlementUpstreamPage.server";
 import { SpecialRefundPendingError } from "../services/specialRefundOverlayPure.server";
+import { normalizeLocationGidOrRaw } from "../utils/locationGid";
 
 /** locationId + targetDate + printMode から冪等キーを生成 */
 function buildIdempotencyKey(
@@ -41,16 +42,8 @@ function buildIdempotencyKey(
   return `${shopId}:${locationId}:${targetDate}:${printMode}`;
 }
 
-/** Prisma / Shopify の GID を api.locations と同じ形に揃える */
-function normalizeLocationGid(locationId: string): string {
-  const s = String(locationId).trim();
-  if (s.startsWith("gid://shopify/Location/")) return s;
-  if (/^\d+$/.test(s)) return `gid://shopify/Location/${s}`;
-  return s;
-}
-
 async function resolveEffectivePrintMode(shopId: string, locationId: string): Promise<string> {
-  const gid = normalizeLocationGid(locationId);
+  const gid = normalizeLocationGidOrRaw(locationId);
   const dbLoc = await prisma.location.findFirst({
     where: { shopId, shopifyLocationGid: gid },
   });
