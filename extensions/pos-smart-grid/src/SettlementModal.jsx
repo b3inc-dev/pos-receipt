@@ -264,6 +264,31 @@ function SettlementModal() {
     }
   }, [selectedLocation, preview, targetDate, isInspection]);
 
+  // 確定のあとに数が変わった日の再確定（前の確定値は履歴に残る）
+  const handleReconfirm = useCallback(async () => {
+    if (!selectedLocation) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await createSettlement({
+        locationId: selectedLocation.locationId,
+        locationName: selectedLocation.locationName,
+        targetDate,
+        printMode: selectedLocation.printMode ?? "order_based",
+        isInspection: false,
+        reconfirm: true,
+      });
+      setIsInspection(false);
+      setSettlementResult(res);
+      hideSettlementIssueConfirmModals();
+      setStep("done");
+    } catch (e) {
+      setError(toUserMessage(e?.message) || "再確定に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedLocation, targetDate]);
+
   const handleOpenDailyRow = useCallback(async (row) => {
     const d = String(row?.targetDate || "").trim();
     if (!d || !selectedLocation) return;
@@ -302,7 +327,18 @@ function SettlementModal() {
         locationName: selectedLocation.locationName,
         targetDate,
       });
-      setPreview(res.preview);
+      // 確定済みの日は、サーバーが確定値を返す（confirmed: true）。確定のあとに数が変わっていれば
+      // changedSinceConfirm と今の値（livePreview）も返るので、再確定のボタンを出す
+      setPreview(
+        res?.confirmed
+          ? {
+              ...res.preview,
+              confirmedFromDb: true,
+              changedSinceConfirm: !!res.changedSinceConfirm,
+              liveTotal: res.livePreview?.total ?? null,
+            }
+          : res.preview,
+      );
     } catch (e) {
       setError(toUserMessage(e?.message) || "再集計に失敗しました");
     } finally {
@@ -392,6 +428,7 @@ function SettlementModal() {
           error={error}
           onPickDate={(d) => fetchPreviewForDate({ date: d, inspection: isInspection, openStep: "preview" })}
           onRecalculate={handleRecalculate}
+          onReconfirm={handleReconfirm}
           onPrepareInspectionIssue={() => {
             setIsInspection(true);
             setError("");
@@ -713,6 +750,7 @@ function PreviewView({
   error,
   onPickDate,
   onRecalculate,
+  onReconfirm,
   onPrepareInspectionIssue,
   onPrepareSettleIssue,
   onBackToHistory,
@@ -1019,6 +1057,26 @@ function PreviewView({
                 </s-box>
               ) : null}
 
+              {preview.pendingSpecialRefundOrderLabels?.length ? (
+                <s-text tone="caution">
+                  返金処理中の特殊返金があります（注文: {preview.pendingSpecialRefundOrderLabels.slice(0, 5).join("、")}）。この返金は上の金額に入っていません。点検は出せますが、精算（確定）の前に特殊返金の「Shopify 返金を確かめる」を押してください。
+                </s-text>
+              ) : null}
+              {preview.confirmedFromDb ? (
+                <s-text tone="subdued">
+                  この日は精算を確定済みです。確定したときの値を表示しています。
+                </s-text>
+              ) : null}
+              {preview.confirmedFromDb && preview.changedSinceConfirm ? (
+                <s-stack gap="small">
+                  <s-text tone="caution">
+                    確定したあとに数が変わりました（今の総売上 ¥{Number(preview.liveTotal ?? 0).toLocaleString()}）。再確定すると今の数で確定し直し、前の確定値は履歴に残ります。
+                  </s-text>
+                  <s-button kind="secondary" onClick={onReconfirm} disabled={loading}>
+                    {loading ? "再確定中.." : "今の数で再確定する"}
+                  </s-button>
+                </s-stack>
+              ) : null}
               {error ? <s-text tone="critical">{error}</s-text> : null}
             </s-stack>
           </s-box>
@@ -1311,6 +1369,13 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
             <s-text fontWeight="bold">
               {isInspection ? "点検レシートを保存しました" : "精算レシートを保存しました"}
             </s-text>
+            {result?.reconfirmed === true ? (
+              <s-text tone="subdued">今の数で確定し直しました。前の確定値は履歴に残っています。</s-text>
+            ) : null}
+            {result?.reconfirmed === false ? (
+              <s-text tone="subdued">確定値と今の数は同じでした。確定値はそのままです。</s-text>
+            ) : null}
+            {result?.warning ? <s-text tone="caution">{result.warning}</s-text> : null}
 
             {/* preferPrintingApi ON → Printing API を primary、旧経路は secondary＋警告 */}
             {preferNew ? (

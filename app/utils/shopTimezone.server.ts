@@ -26,14 +26,53 @@ export async function getShopTimezoneForDaily(
   admin: AdminClient,
   shopId: string
 ): Promise<string> {
+  // Issue #20: 1 リクエスト（= 1 つの admin クライアント）の中では 1 回だけ読む。
+  // 確定 1 回で 4 回読んでいた（一般設定の DB 読み＋ shop.ianaTimezone）。
+  const memo = readTimezoneMemo(admin, shopId);
+  if (memo) return memo;
+
   const general = await getAppSetting<Partial<GeneralSettings>>(shopId, GENERAL_SETTINGS_KEY);
   const appTz = general?.defaultTimezone?.trim();
-  if (appTz) return appTz;
+  if (appTz) {
+    writeTimezoneMemo(admin, shopId, appTz);
+    return appTz;
+  }
 
   const fromShop = await getShopIanaTimezone(admin);
-  if (fromShop) return fromShop;
+  if (fromShop) {
+    writeTimezoneMemo(admin, shopId, fromShop);
+    return fromShop;
+  }
 
+  // 取得に失敗したときの既定値は覚えない（次の呼び出しで取り直す。従来どおり）
   return FALLBACK_TIMEZONE;
+}
+
+/**
+ * タイムゾーンの短い覚え書き。admin クライアントはリクエスト（またはキューの 1 ジョブ）ごとに
+ * 作られるので、それをキーにして同じリクエストの中だけで使い回す。WeakMap なので
+ * リクエストが終われば消える。念のため TIMEZONE_MEMO_TTL_MS を過ぎたら読み直す
+ * （同じ admin を長く持つ処理があっても、一般設定の変更が遅れて効くだけにする）。
+ */
+const TIMEZONE_MEMO_TTL_MS = 60_000;
+const timezoneMemo = new WeakMap<object, Map<string, { tz: string; at: number }>>();
+
+function readTimezoneMemo(admin: AdminClient, shopId: string): string | null {
+  if (!admin || typeof admin !== "object") return null;
+  const hit = timezoneMemo.get(admin)?.get(shopId);
+  if (!hit) return null;
+  if (Date.now() - hit.at > TIMEZONE_MEMO_TTL_MS) return null;
+  return hit.tz;
+}
+
+function writeTimezoneMemo(admin: AdminClient, shopId: string, tz: string): void {
+  if (!admin || typeof admin !== "object") return;
+  let byShop = timezoneMemo.get(admin);
+  if (!byShop) {
+    byShop = new Map();
+    timezoneMemo.set(admin, byShop);
+  }
+  byShop.set(shopId, { tz, at: Date.now() });
 }
 
 /**
