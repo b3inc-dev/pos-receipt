@@ -36,7 +36,7 @@ import {
   EXTRA_LOCATION_PRICE_USD,
   buildPricingPlansUrl,
 } from "../utils/planFeatures.server";
-import { getShopPlan } from "../utils/shopPlan.server";
+import { getShopPlan, POS_LOCATION_WINDOW_DAYS } from "../utils/shopPlan.server";
 import {
   describeUsageReportForMerchant,
   findUsageReportForPeriod,
@@ -83,7 +83,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     hasSubscription: state.plan !== null,
     subscriptionsRead: state.subscriptionsRead,
     activeSubscriptions: state.activeSubscriptions,
-    locationsCount: state.locationsCount,
+    posLocationsCount: state.posLocationsCount,
+    posLocationWindowDays: POS_LOCATION_WINDOW_DAYS,
     extraLocationUsage: usage ?? null,
     extraLocationStatus: state.extraLocationStatus,
     usageReportingEnabled: isUsageReportingEnabled(),
@@ -111,7 +112,8 @@ export default function PlanPage() {
     hasSubscription,
     subscriptionsRead,
     activeSubscriptions,
-    locationsCount,
+    posLocationsCount,
+    posLocationWindowDays,
     extraLocationUsage,
     extraLocationStatus,
     usageReportingEnabled,
@@ -239,21 +241,21 @@ export default function PlanPage() {
                 {extraLocationUsage && usageReportingEnabled ? (
                   <>
                     <Text as="p">
-                      ロケーション {locationsCount} か所のうち、{extraLocationUsage.includedLocations} か所を超えた{" "}
+                      POS で使うロケーション {posLocationsCount ?? 0} か所のうち、{extraLocationUsage.includedLocations} か所を超えた{" "}
                       <strong>{extraLocationUsage.units} か所</strong> × ${extraLocationUsage.unitPriceUsd} ＝{" "}
                       <strong>${extraLocationUsage.amountUsd}</strong>／請求期間（月額とは別に Shopify の請求に載ります）
                     </Text>
                     <Text as="p" tone="subdued" variant="bodySm">
-                      請求期間ごとに 1 回、その時点のロケーション数で数えます。{usageReportNote ?? ""}
+                      {posLocationNote(posLocationWindowDays)}請求期間ごとに 1 回、その時点の数で数えます。{usageReportNote ?? ""}
                     </Text>
                   </>
                 ) : usageReportingEnabled ? (
                   <Text as="p" tone="subdued">
-                    {extraLocationNotCountedText(extraLocationStatus, locationsCount, extraLocationPriceUsd)}
+                    {extraLocationNotCountedText(extraLocationStatus, posLocationsCount, extraLocationPriceUsd, posLocationWindowDays)}
                   </Text>
                 ) : (
                   <Text as="p" tone="subdued">
-                    今は、プランに含まれる数を超えたロケーションの料金を請求していません（今のロケーション数: {locationsCount} か所）。
+                    今は、プランに含まれる数を超えたロケーションの料金を請求していません{posLocationsCount !== null ? `（POS で使うロケーション: ${posLocationsCount} か所）` : ""}。
                   </Text>
                 )}
               </BlockStack>
@@ -275,17 +277,29 @@ function formatDate(iso: string | null | undefined): string {
  * 超えたロケーションを数えていないときの文（スイッチがオンのとき）。
  * 契約が無い・読めない店に「プランの範囲内です」と出さない（レビュー #41 の P2-2）。
  */
-function extraLocationNotCountedText(status: string, locationsCount: number, priceUsd: number): string {
+function extraLocationNotCountedText(
+  status: string,
+  posLocationsCount: number | null,
+  priceUsd: number,
+  windowDays: number
+): string {
   switch (status) {
     case "within_plan":
-      return `超えた分は 1 か所 $${priceUsd}/月です。今のロケーション数（${locationsCount} か所）はプランの範囲内です。`;
+      return `超えた分は 1 か所 $${priceUsd}/月です。POS で使うロケーション（${posLocationsCount ?? 0} か所）はプランの範囲内です。${posLocationNote(windowDays)}`;
     case "no_subscription":
-      return `有効な契約が無いため、超えたロケーションは数えていません（今のロケーション数: ${locationsCount} か所）。プランを選ぶと、プランに含まれる数を超えた分は 1 か所 $${priceUsd}/月です。`;
+      return `有効な契約が無いため、超えたロケーションは数えていません。プランを選ぶと、プランに含まれる数を超えた分は 1 か所 $${priceUsd}/月です。${posLocationNote(windowDays)}`;
     case "unread":
-      return `契約の状態を Shopify から読めないため、超えたロケーションをまだ数えていません（今のロケーション数: ${locationsCount} か所）。少し待ってから再読み込みしてください。`;
+      return "契約の状態を Shopify から読めないため、超えたロケーションをまだ数えていません。少し待ってから再読み込みしてください。";
+    case "count_failed":
+      return "POS で使うロケーションを数えられませんでした。少し待ってから再読み込みしてください。数えられない間は請求しません。";
     default:
-      return `今のプランでは、超えたロケーションの料金はかかりません（今のロケーション数: ${locationsCount} か所）。`;
+      return "今のプランでは、超えたロケーションの料金はかかりません。";
   }
+}
+
+/** 「POS で使うロケーション」の説明（1 文） */
+function posLocationNote(windowDays: number): string {
+  return `POS で使うロケーションは、直近 ${windowDays} 日にこのアプリで精算・領収書・特殊返金を使ったロケーションです。`;
 }
 
 // ── サブコンポーネント ─────────────────────────────────────────────────────────

@@ -181,7 +181,7 @@ order_based の Shopify 注文ノート／metafields は `settlementOrderGas` �
 無制限: `APP_DISTRIBUTION=inhouse` / `CUSTOM_APP_STORE_IDS` / 開発ストア / planCode `unlimited`。
 
 - 公開用のプランは Shopify App Pricing の契約から読む（`shopPlan.server.ts`。Admin API、スイッチがオンなら Partner API も）。アプリは契約を作らない。店は Shopify の料金プラン画面でプランを選ぶ（DECISIONS D15）。
-- 料金（**確定**。2026-11-22 T の決定）: Lite $100/月（3 ロケーションまで）、Pro $200/月（10 ロケーションまで）、超えた 1 か所 +$20/月（Lite・Pro とも）。Partner Dashboard の App Pricing も同じ金額にする。
+- 料金（**確定**。2026-11-22 T の決定）: Lite $100/月（3 ロケーションまで）、Pro $200/月（10 ロケーションまで）、超えた 1 か所 +$20/月（Lite・Pro とも）。Partner Dashboard の App Pricing も同じ金額にする。無料体験は 14 日、月額だけ（年額なし）。数えるロケーションは POS で使う所だけ（直近 30 日にこのアプリで精算・領収書・特殊返金を使った、有効なロケーション。D16）。未契約の店は止める（スイッチ `PLAN_REQUIRE_SUBSCRIPTION`、既定オフ。D15）。
 - 超えた分は App Events API で 1 請求期間に 1 回報告する。既定オフ（`APP_EVENTS_USAGE_ENABLED`）。自社用（Ciara）は報告しない・請求なし（DECISIONS D16）。
 
 **Shopify POS Pro / Light** プランを参照する分岐はコードに **見当たらない**（未確認＝依存なしと断定せず、検出なしと記載）。

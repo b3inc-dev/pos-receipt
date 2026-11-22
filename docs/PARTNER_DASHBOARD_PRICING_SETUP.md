@@ -19,12 +19,10 @@
 | app handle | `pos-receipt`（T 確認済み） | `getPublicAppHandle`（`SHOPIFY_APP_HANDLE` は入れなくてよい） |
 | メーターの handle | `extra_location_lite` / `extra_location_pro` | `APP_EVENTS_HANDLE_LITE` / `APP_EVENTS_HANDLE_PRO`（既定のままでよい） |
 
-## 先に決めること（T・未決）
+## そのほかの決定（2026-11-22 T）
 
-設定の前に決めておくと手戻りがありません。決まっていなくても手順 1〜3 は進められます。
-
-- 未契約の店を止めるか（D15 の残り。今のコードは未契約でも Lite の機能が使える）
-- ロケーションの数え方（D16 の残り。今のコードは Shopify の有効なロケーション全部を数える）
+- 未契約の店は止める（POS Stock と同じ）。スイッチ `PLAN_REQUIRE_SUBSCRIPTION=1` で始める（手順 8。既定オフ）
+- 超えたロケーションは POS で使う所だけ数える。直近 30 日にこのアプリで精算・領収書・特殊返金を使った、有効なロケーション（倉庫などは数えない）
 
 ## 順番の全体
 
@@ -35,6 +33,7 @@
 5. 開発ストアで確かめる（スイッチは開発ストアの確かめ用だけ）
 6. （任意）Partner API で契約を読む
 7. 超えたロケーションの報告をオンにする
+8. 未契約の店を止める
 
 **1〜3 と 4 の間はなるべく空けない**でください。Managed pricing にすると Billing API（`appSubscriptionCreate`）で契約を作れなくなります（Shopify の決まり。shopify.dev の Managed pricing の説明）。今の main の料金プラン画面は Billing API で契約を作るので、4 を入れるまで公開用の「プランを選ぶ」は失敗します。逆に 4 を先に入れると、1 が済むまで「プランを選ぶ」で開く Shopify の料金プラン画面が出ません。今、公開用を入れているのは開発ストアだけ（T・2026-11-22）なので、どちらの順でも困るのは開発ストアだけです。
 
@@ -105,12 +104,23 @@ Admin API で契約が読めていれば要りません（手順 5 の 6 で「�
 ## 7. 超えたロケーションの報告をオンにする
 
 1. Dev Dashboard で公開用アプリの API キーを取り、公開用の Render に `APP_EVENTS_CLIENT_ID` / `APP_EVENTS_CLIENT_SECRET`（秘密）を入れる。
-2. まず開発ストアで: `PLAN_TEST_DEV_STORE_AS_PUBLIC=1` のまま、開発ストアのロケーションを 4 か所以上にして Lite を選ぶ。
-3. `APP_EVENTS_USAGE_ENABLED=1` を入れて再起動し、料金プラン画面を開く。「ロケーション 5 か所のうち、3 か所を超えた 2 か所 × $20 ＝ $40」と、報告の状態が出る。
+2. まず開発ストアで: `PLAN_TEST_DEV_STORE_AS_PUBLIC=1` のまま Lite を選び、4 か所以上のロケーションで POS から精算・領収書・特殊返金のどれかを 1 回ずつ使う（数えるのは直近 30 日に使った、有効なロケーションだけ）。
+3. `APP_EVENTS_USAGE_ENABLED=1` を入れて再起動し、料金プラン画面を開く。「POS で使うロケーション 5 か所のうち、3 か所を超えた 2 か所 × $20 ＝ $40」と、報告の状態が出る。
 4. Dev Dashboard の Logs で、そのイベントが受け付けられたことを確かめる（Shopify の 202 は「受け取った」だけなので、請求に載ったかは Logs で見る）。
 5. 問題なければ `PLAN_TEST_DEV_STORE_AS_PUBLIC` を消す。`APP_EVENTS_USAGE_ENABLED=1` はそのまま（ほかの店でも報告が始まる）。
 
 報告は 1 店・1 請求期間に 1 回です。期間の終わり 10 分前を過ぎると送りません。送れなかった分は DB の `AppUsageReport` に理由（`failed`・`over_limit`・`missing_period`）が残ります。
+
+## 8. 未契約の店を止める
+
+手順 5 で、プランを選んだあと料金プラン画面に「Liteプラン」「Proプラン」と出た（Admin API か Partner API で契約を読めた）ことを確かめてから入れます。読めないまま入れると、払っている店まで止めてしまいます。
+
+1. 開発ストアで: `PLAN_TEST_DEV_STORE_AS_PUBLIC=1` のまま、公開用の Render に `PLAN_REQUIRE_SUBSCRIPTION=1` を入れて再起動する。
+2. 開発ストアの契約を Shopify の料金プラン画面で解約する。アプリを開くと、どの画面からも料金プラン画面に移る。POS のタイルを開くと「プランが選ばれていません。…「料金プラン」でプランを選んでください。」と出る。
+3. もう一度 Lite を選ぶ → アプリと POS が元どおり使える（遅くても 60 秒以内）。
+4. `PLAN_TEST_DEV_STORE_AS_PUBLIC` を消す（開発ストアは全機能に戻り、止められない）。`PLAN_REQUIRE_SUBSCRIPTION=1` はそのまま。
+
+契約を Shopify から読めなかったとき（混雑など）は止めません。自社用（Ciara）には効きません。
 
 ## 戻し方
 
@@ -118,6 +128,7 @@ Admin API で契約が読めていれば要りません（手順 5 の 6 で「�
 |---|---|
 | 超えたロケーションの報告を止める | `APP_EVENTS_USAGE_ENABLED` を消して再起動（送った分の請求は取り消されない） |
 | Partner API で読むのをやめる | `PARTNER_API_SUBSCRIPTION_ENABLED` を消して再起動 |
+| 未契約の店を止めるのをやめる | `PLAN_REQUIRE_SUBSCRIPTION` を消して再起動 |
 | 開発ストアを全機能に戻す | `PLAN_TEST_DEV_STORE_AS_PUBLIC` を消して再起動 |
 | 料金の仕組みを前の形（Billing API）に戻す | #41 を戻す PR と、Partner Dashboard の料金の方式を戻す操作の両方が要る。Managed pricing で契約した店がいるとややこしいので、開発ストアだけのうちに決める |
 
