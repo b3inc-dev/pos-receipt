@@ -15,11 +15,13 @@
 
 | 箇所 | バージョン |
 |------|------------|
-| Admin SDK（`app/shopify.server.ts`） | `ApiVersion.October25` |
-| Webhooks（`shopify.app.toml`） | `api_version = "2026-04"` |
-| POS Extension | `api_version = "2026-01"` |
+| Admin SDK（`app/shopify.server.ts`） | `ApiVersion.April26`（= `2026-04`） |
+| Webhooks（`shopify.app.toml` / `shopify.app.public.toml`） | `api_version = "2026-04"` |
+| POS Extension（`extensions/pos-smart-grid/shopify.extension.toml`） | `api_version = "2026-07"`（POS UI Extensions の版。Printing API に要る） |
 
-意図的差分の公式根拠は **未確認**。実装時は各エントリポイントの宣言を正とする。
+Admin SDK と Webhook は同じ版にそろえる。`app/utils/apiVersionAlignment.test.ts` が片方だけ変えたときに落ちる。Webhook の版を変えるのは HIGH RISK（届く payload の形が変わる）ので、上げるときは別 PR で T の承認を取る。
+
+POS 拡張の版は Admin API とは別の系列。POS の中から直接呼ぶ Admin GraphQL（`extensions/common/shopifyAdminGraphql.js` の `shopify:admin/api/graphql.json`）がどの Admin API の版で答えるかは、Shopify の公式文書で **未確認**（拡張の `api_version` に従うと見られるが、確かめていない）。
 
 ## 3. スコープ（自社用 toml 記載）
 

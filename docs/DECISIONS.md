@@ -26,6 +26,7 @@
 | D18 | 特殊返金の Shopify 返金が `pending`（成否不明）のあいだは精算を確定しない。二重計上も抜けも出さないため | `assertNoPendingSpecialRefunds`（`specialRefundOverlayPure.server.ts`） |
 | D19 | 精算注文（SETTLEMENT）を作るかは、印字設定「精算注文を作成」（`createSettlementOrderWhenPrinting`）の保存が無ければ ON。管理画面は保存が無いとチェックが入って見えるので、サーバーも同じにそろえる（今の本番の動きを続ける）。作らないのは、チェックを外して保存したとき・精算設定 `orderBasedCreateSettlementOrderEnabled=false`・`cloudprnt_direct`。作らなかったとき API は `settlementOrderSkipped: true` を返し、POS は「再インストール」を案内しない | `settlementSyncSettings.server.ts` `shouldCreateSettlementOrder` |
 | D20 | 前からある pending の特殊返金（ID が `pos_sr_` で始まらない）は、Shopify を読み直して決めるだけで返金を実行しない | `specialRefundLegacyRecheck.server.ts` / `api.special-refunds.$id.recheck.tsx` |
+| D21 | 確定値を守る（T の決定 2026-11-22・Issue #20）。確定済みの日は、もう一度「確定」を押しても DB の Settlement の値を返し、Shopify の精算注文は書き換えない。再集計は比べるために集計し、数が変わっていれば `changedSinceConfirm` を返す。**再確定**（create の `reconfirm: true`、T の決定 2026-11-23 4:20）は今の数で確定し直し、前の行は `status=superseded`・冪等キーなしで履歴に残す（migration なし）。order_based は精算注文も新しい値に直す。点検は毎回その時点の金額を保存し、返金処理中（pending）の特殊返金があっても警告つきで出す（T の決定 2026-11-23 4:25。pending の分は数に入れず、売上サマリーのキャッシュも書かない）。精算の確定・再確定・再集計は pending で止める（D18） | `api.settlements.create.tsx` / `api.settlements.recalculate.tsx` / `api.settlements.preview.tsx` / `settlementConfirmedPure.server.ts` |
 
 ## 2. 古い docs との差分（注意）
 
@@ -41,7 +42,7 @@
 | 項目 | 内容 |
 |------|------|
 | 決済名称の二重系（軽減・選べる） | 初めの値の集計バケットキーは依然 `gasNormalizeGatewayLabel`（今の精算を変えないため）。表示は `resolvePaymentSectionLabel` で raw/formatted/displayLabel を単一マッチ（日本語キー含む）。「精算の数え方」の「支払方法マスタで分ける」を選んだ店は、集計キーをマスタの表示名にする（`paymentKeyMasterPure.server.ts`）。決まった分け方では `paidy` が「id」を含んで電子マネーになるなど、文字の含み方での誤った分け方が残る |
-| ロケーション ID 正規化の重複 | `extractLocationNumericId` / `normalizeLocationGid` が複数ファイルに存在（返金照合は `refundAggregationPure` の数値 ID 比較に寄せた） |
+| ロケーション ID 正規化の重複（軽減） | 同じ関数の写し 6 か所を `app/utils/locationGid.ts` にまとめた（`refundAggregationPure` は再公開）。各ルート・集計の `replace("gid://shopify/Location/", "")` などのその場の書き方はまだ残る（触る PR が多いので、そのファイルを直すときに寄せる） |
 | 返金オーバーレイ死コード | `getRefundOverlayForDay` / `computeRefundsOnlyForDay` は定義・export されるが、プレビュー本体からの適用は無く、他ファイルからの import も見当たらない |
 | 表示と集計の混在（軽減） | payment section の `gateway` は集計キーのまま。`label` はマスタ解決。マスタ未登録の日本語キーはキー＝表示のまま |
 | 精算設定ラベル未使用 | UI で項目名を変えられても `buildSettlementReceiptText` は固定文言 |
@@ -49,7 +50,7 @@
 | customAttributes | 取得するが UI 非表示 |
 | レガシー Gift Card | 既定 OFF（T が 2026-11-22 までに OFF に決定）。ON 時のみ API 加算。取得失敗時は精算を確定しない（以前は握りつぶして 0 円のまま続行していた） |
 | 用紙幅キー | 中立 `paperWidthMm` を追加済み。レガシー `cloudprntPaperWidth` は同期エイリアスとして残置（フルリネームは未実施） |
-| API バージョン分散 | Admin SDK / Webhook TOML / POS extension で宣言が異なる |
+| API バージョン（解消） | Admin SDK と Webhook TOML は `2026-04` にそろえ、テストで見張る。POS extension `2026-07` は別系列（docs/SHOPIFY.md §2） |
 | Fulfillment / Draft complete | V2→旧 API、paymentPending→単純 complete のフォールバック（互換のための分岐） |
 
 ## 4. 安全性（金額・返金・件数）
@@ -84,7 +85,7 @@
 6. `ReceiptIssue.createdBy` を運用で埋めるか
 7. line item properties を精算／領収書に出す要件の有無
 8. ギフトレシート（Shopify Gift Receipt）要件の有無（現行未実装）
-9. Admin API October25 と webhook 2026-04 の併用方針
+9. ~~Admin API October25 と webhook 2026-04 の併用方針~~ → Admin も 2026-04 にそろえた。残る未確認: POS 内から直接呼ぶ Admin GraphQL が答える版
 10. 死コード（refund overlay）削除の是非
 11. 点検 DoneView 文言と order_based 同期のどちらを仕様とするか
 12. 精算設定の表示項目名を印字テキストへ反映する要件の有無

@@ -12,6 +12,7 @@ import {
   corsPreflightResponse,
 } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import { SUPERSEDED_SETTLEMENT_STATUS } from "../services/settlementConfirmedPure.server";
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
@@ -93,9 +94,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    // 日付別マップ（同日複数精算は最新を採用）
+    // 日付別マップ（同日複数精算は最新を採用）。
+    // 点検（その時点の金額を残すだけ）と、再確定で置き換わった前の確定値（superseded）は
+    // その日の精算として扱わない。
     const settlementByDate = new Map<string, typeof settlements[number]>();
     for (const s of settlements) {
+      if (s.periodLabel?.startsWith("点検_")) continue;
+      if (s.status === SUPERSEDED_SETTLEMENT_STATUS) continue;
       const prev = settlementByDate.get(s.targetDate);
       if (!prev || s.createdAt > prev.createdAt) {
         settlementByDate.set(s.targetDate, s);

@@ -35,6 +35,7 @@ function statusBadge(status: string, isInspection: boolean) {
     case "printed":   return <Badge tone="success">印字済</Badge>;
     case "draft":     return <Badge tone="info">下書き</Badge>;
     case "failed":    return <Badge tone="critical">失敗</Badge>;
+    case "superseded": return <Badge>再確定前</Badge>;
     default:          return <Badge>{status}</Badge>;
   }
 }
