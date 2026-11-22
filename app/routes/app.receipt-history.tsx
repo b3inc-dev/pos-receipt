@@ -214,7 +214,7 @@ export default function ReceiptHistoryPage() {
                       </Text>
                     </IndexTable.Cell>
                     <IndexTable.Cell>
-                      {item.recipientName ?? "—"}
+                      {item.recipientName || "—"}
                     </IndexTable.Cell>
                     <IndexTable.Cell>
                       <Text as="span" variant="bodySm" tone="subdued">

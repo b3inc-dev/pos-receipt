@@ -93,6 +93,8 @@
 - 残ること（推測）: shop/redact で入れ直したかを確かめる `unauthenticated.admin()` も同じ refresh を通る。入れ直した店ならトークンは有効なので通る。app/uninstalled が 48 時間ずっと失敗して古いセッションが残った店だけは、refresh の失敗（500）になり消せない（記録に `Response 500 (token refresh or Admin API failed)` と出る）。めったに起きないので、出たら手で確かめる。
 - `webhooks.orders.updated.tsx` は今までどおり `authenticate.webhook()`（Admin API が要るため。アンインストールした店には来ない）。
 - あとで shopify-app-react-router を 4.0.3 以上に上げたら、この 2 つのルートを `authenticate.webhook()` に戻してもよい（そのときは Polaris の版の固定を忘れない）。
+- 足した守り（2026-11-23・とりまとめ側の依頼）: 本文は 1 MiB まで（超えたら読む前・読みながら 413）。ヘッダーの店（`X-Shopify-Shop-Domain`）と本文の店（必須 webhook は `shop_domain`、app/uninstalled は `myshopify_domain`）が違えば何もせず 200（ほかの店のデータを消さない。送り直しても同じなので 500 にしない）。本文に店が無ければヘッダーの店を使う。消すときに使う店は常にヘッダーの店。
+- #13・#40・#55 を取り込み直すとき、`webhooks.compliance.tsx` の customers/redact は #41 の側（宛名は空・特殊返金のメモは消す・D18）を採る。
 
 ## 2. 古い docs との差分（注意）
 
