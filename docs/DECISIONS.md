@@ -54,7 +54,12 @@
 - `orders/updated` の中身（お客様の情報が入ることがある）は、売上サマリーのキュー（pg-boss・スキーマ `pgboss` の `job` と `archive`）に置かれる。このキュー（`pos-receipt-sales-summary-orders-updated`）の行で、作られてから 30 日を過ぎたものを消す（`app/services/orderWebhookQueueRetention.server.ts`）。処理中（`active`）の行は消さない。
 - スイッチ `ORDER_WEBHOOK_QUEUE_PURGE`（**既定オフ**）: `preview`（数えるだけ）→ `one`（いちばん古い 1 件）→ `all`（すべて）の順に T が進める。日数は `ORDER_WEBHOOK_QUEUE_RETENTION_DAYS`（既定 30。1〜30 にそろえ、30 日より長くはできない）。
 - 動くのはキューのワーカーを動かしているプロセスだけ（起動の 1 分後に 1 回、その後 24 時間ごと）。記録（ログ）には表ごとの件数だけを出し、中身は読まない。pg-boss の表や列が思った形でないときは何も消さずに `skip` と理由を出す。
-- 推測（確かめていない）: pg-boss 10 は自分でも古い行を片づける（既定の日数はこの PR では確かめていない）。このスイッチは「30 日を超えて残らない」ことをアプリ側で守るためのもの。
+- 事実（pg-boss 10.4.2 の元のコードで確かめた。`package-lock.json` の版。GitHub の `v10` の枝の `f65e9336`＝package.json が 10.4.2 のコミット。10.4.0 との違いは `src/plans.js` の型の直し 4 行だけで、日数の既定は同じ）: このアプリは `new PgBoss()` と `createQueue()` に保存の日数を渡していないので、次の既定が効く。
+  - 処理されずに残った行（`created`・`retry`）: `keep_until` の既定が **14 日**（`src/plans.js` の `'14 days'`）。過ぎると `archive` へ移る。
+  - 終わった行（`completed`）と失敗した行（`failed`）: **12 時間**で `archive` へ移る（`src/attorney.js` の `ARCHIVE_DEFAULT = 60 * 60 * 12`、失敗も同じ値）。
+  - `archive` の行: **7 日**で消える（`deleteAfter` の既定 `'7 days'`）。
+  - この片づけは `supervise`（既定オン）のとき、キューを動かしているプロセスで 2 分ごと（`maintenanceIntervalSeconds` の既定 120）に動く。
+  - つまりふだんは、いちばん長くても 14 日＋7 日＝およそ 21 日で消え、30 日より前に無くなる。このスイッチは「プロセスが止まっていて片づけが動かなかったときも、30 日を超えて残らない」ことをアプリ側で守るための保険。preview の件数はふだん 0 になるはず。
 - `SALES_SUMMARY_WEBHOOK_QUEUE=0` でキューを止めた店では新しく積まれないが、止める前に積まれた行は、このタイマーが動かないので残る（キューを動かして消すか、手で消す）。
 
 ### D18. customers/redact で消すもの（2026-11-23）
@@ -62,6 +67,15 @@
 - 今の main: 指定の注文の領収書の宛名（`ReceiptIssue.recipientName`）を `[redacted]` にする。
 - 特殊返金のメモ（`SpecialRefundEvent.note`。自由に書けるので、お客様の名前などが入ることがある）も `[redacted]` にする直しは **#13（`cursor/decision-audit-p2-debt-docs-0059`）に入っている**。同じ行を二重に直してぶつからないよう、この PR では触らない。#13 が入らないときは、別の PR で同じ直しをする。
 - `createdBy`（スタッフ）や金額・支払方法はお客様の情報ではないので残す。
+
+### D19. shop/redact は「入れ直した店」なら消さない・失敗は 500（2026-11-23）
+
+- shop/redact はアンインストールの 48 時間後に届く。そのあいだに入れ直した店のデータ（精算・領収書・設定・使用量の記録）を消さないよう、消す前に確かめる（Location Stock と同じ形。`app/services/shopInstallProbe.server.ts`）。
+  - このアプリはアンインストールの webhook でセッションを消すので、オフラインのセッションが残っていれば入れ直したかもしれないと見て、Admin API（`shop { id }`）を 1 回呼ぶ。呼べたら入れ直している → 何も消さない（記録に `reinstalled` と出す）。
+  - セッションが無い・401（トークンが無効）→ 入っていない → 消す。
+  - それ以外（DB・通信・5xx・403）→ 分からないので消さず、500 を返す。Shopify は 2xx 以外ならもう一度送るので、消し残しにはならない。
+- ルートは、HMAC の確かめ（`authenticate.webhook`）だけを try の外に置き、不正なら 401 のまま。そのあとの DB の失敗は前は 401 を返していたが、500 にした。
+- 事実: `authenticate.webhook()` の `topic` は `SHOP_REDACT` の形で来る（`@shopify/shopify-api` 12.3.0 の `topicForStorage` が大文字にして `/` を `_` にする）。前のルートは `"shop/redact"` などと比べていたので、**3 つの必須 webhook のどれも中の処理が動かず 200 だけ返していた**。`normalizeWebhookTopic` でそろえて直した。これで customers/data_request（件数の記録）と customers/redact（領収書の宛名を `[redacted]` にする）も動き始める。
 
 ## 2. 古い docs との差分（注意）
 
