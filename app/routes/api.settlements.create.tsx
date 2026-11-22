@@ -5,6 +5,10 @@
  * 印字は shopify.printing に統一。SETTLEMENT / INSPECTION 注文は作らない。
  * 保存済み Location.printMode が order_based / cloudprnt_direct でも旧経路は復活しない。
  * 冪等キーは shopId:locationId:targetDate（旧 printMode 付きキーも検索し、精算行を増やさない）。
+ *
+ * 点検（isInspection）は 1 日に何回でも発行できる（T 決定 2026-11-22）。
+ * 冪等キーを付けず、発行ごとに 1 行を作り、その時点の集計値と支払方法別内訳を残す。
+ * 点検の行はその日の精算（確定）としては扱わない（月別一覧・照合 CSV は除外する）。
  */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
@@ -179,20 +183,17 @@ export async function action({ request }: ActionFunctionArgs) {
           targetDate: String(targetDate),
           periodLabel: inspection ? `点検_${String(targetDate)}` : String(targetDate),
           currency: preview.currency,
-          total: inspection ? 0 : preview.total,
-          netSales: inspection ? 0 : preview.netSales,
-          tax: inspection ? 0 : preview.tax,
-          discounts: inspection ? 0 : preview.discounts,
-          vipPointsUsed: inspection ? 0 : preview.vipPointsUsed,
-          refundTotal: inspection ? 0 : preview.refundTotal,
-          orderCount: inspection ? 0 : preview.orderCount,
-          refundCount: inspection ? 0 : preview.refundCount,
-          itemCount: inspection ? 0 : preview.itemCount,
-          voucherChangeAmount: inspection ? 0 : preview.voucherChangeAmount,
-          paymentSectionsJson: encodePaymentSectionsJson(
-            inspection ? [] : preview.paymentSections,
-            printSnapshot,
-          ),
+          total: preview.total,
+          netSales: preview.netSales,
+          tax: preview.tax,
+          discounts: preview.discounts,
+          vipPointsUsed: preview.vipPointsUsed,
+          refundTotal: preview.refundTotal,
+          orderCount: preview.orderCount,
+          refundCount: preview.refundCount,
+          itemCount: preview.itemCount,
+          voucherChangeAmount: preview.voucherChangeAmount,
+          paymentSectionsJson: encodePaymentSectionsJson(preview.paymentSections, printSnapshot),
           printMode: UNIFIED_PRINT_MODE,
           status: "completed",
           idempotencyKey: idemKey,
