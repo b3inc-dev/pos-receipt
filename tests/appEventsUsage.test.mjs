@@ -18,6 +18,7 @@ import {
   usagePeriodKey,
   PERIOD_END_MARGIN_MS,
   RETRY_AFTER_MS,
+  resolveAppEventsCredentials,
 } from "../app/utils/appEventsUsage.server.ts";
 
 const SHOP = "demo.myshopify.com";
@@ -584,5 +585,28 @@ describe("自社用の守りの二重化（レビュー #41 の P2-4）", () => 
     assert.equal(isInhouseForUsage(SHOP, { CUSTOM_APP_STORE_IDS: "a.myshopify.com, Demo.myshopify.com" }), true);
     assert.equal(isInhouseForUsage(SHOP, { APP_DISTRIBUTION: "public" }), false);
     assert.equal(isInhouseForUsage(SHOP, {}), false);
+  });
+});
+
+describe("App Events API の鍵（公開用アプリ自身の client ID / secret）", () => {
+  test("APP_EVENTS_CLIENT_* があればそれを使う", () => {
+    assert.deepEqual(
+      resolveAppEventsCredentials({ APP_EVENTS_CLIENT_ID: "a", APP_EVENTS_CLIENT_SECRET: "b", SHOPIFY_API_KEY: "k", SHOPIFY_API_SECRET: "s" }),
+      { clientId: "a", clientSecret: "b", source: "app_events_env" }
+    );
+  });
+  test("無ければ SHOPIFY_API_KEY / SHOPIFY_API_SECRET を使う", () => {
+    assert.deepEqual(resolveAppEventsCredentials({ SHOPIFY_API_KEY: "k", SHOPIFY_API_SECRET: "s" }), {
+      clientId: "k",
+      clientSecret: "s",
+      source: "shopify_api_key",
+    });
+  });
+  test("片方だけはエラー", () => {
+    assert.ok("error" in resolveAppEventsCredentials({ APP_EVENTS_CLIENT_ID: "a", SHOPIFY_API_KEY: "k", SHOPIFY_API_SECRET: "s" }));
+  });
+  test("自社用（APP_DISTRIBUTION=inhouse）は鍵を返さない", () => {
+    const r = resolveAppEventsCredentials({ APP_DISTRIBUTION: "inhouse", SHOPIFY_API_KEY: "k", SHOPIFY_API_SECRET: "s", APP_EVENTS_CLIENT_ID: "a", APP_EVENTS_CLIENT_SECRET: "b" });
+    assert.match(r.error, /inhouse/);
   });
 });
