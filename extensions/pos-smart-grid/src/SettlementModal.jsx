@@ -472,12 +472,7 @@ function MainView({
 }) {
   const [yearMenuOpen, setYearMenuOpen] = useState(false);
   const [monthMenuOpen, setMonthMenuOpen] = useState(false);
-
-  const handleLocChange = (e) => {
-    const id = e?.currentTarget?.value ?? e?.currentValue?.value;
-    const loc = locations.find((l) => l.locationId === id);
-    if (loc) onSelectLocation(loc);
-  };
+  const [locMenuOpen, setLocMenuOpen] = useState(false);
 
   return (
     <s-page heading="精算">
@@ -513,17 +508,17 @@ function MainView({
                 <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
                   <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
                     {locations.length > 1 ? (
-                      <s-select
-                        label=""
-                        value={selectedLocation?.locationId ?? ""}
-                        onChange={handleLocChange}
+                      <s-button
+                        kind="secondary"
+                        style={{ width: "100%", maxInlineSize: "100%" }}
+                        onClick={() => {
+                          setYearMenuOpen(false);
+                          setMonthMenuOpen(false);
+                          setLocMenuOpen((v) => !v);
+                        }}
                       >
-                        {locations.map((loc) => (
-                          <s-option key={loc.locationId} value={loc.locationId}>
-                            {loc.locationName}
-                          </s-option>
-                        ))}
-                      </s-select>
+                        {selectedLocation?.locationName ?? "ロケーションを選ぶ"} ▾
+                      </s-button>
                     ) : selectedLocation ? (
                       <s-text emphasis="bold" size="small">{selectedLocation.locationName}</s-text>
                     ) : loading ? (
@@ -542,6 +537,7 @@ function MainView({
                         style={{ width: "100%", maxInlineSize: "100%" }}
                         onClick={() => {
                           setMonthMenuOpen(false);
+                          setLocMenuOpen(false);
                           setYearMenuOpen((v) => !v);
                         }}
                       >
@@ -554,6 +550,7 @@ function MainView({
                         style={{ width: "100%", maxInlineSize: "100%" }}
                         onClick={() => {
                           setYearMenuOpen(false);
+                          setLocMenuOpen(false);
                           setMonthMenuOpen((v) => !v);
                         }}
                       >
@@ -562,6 +559,26 @@ function MainView({
                     </s-box>
                   </s-stack>
                 </s-stack>
+                {/* 上の行の直下：ロケーションの選択リスト（POS には s-select が無いのでボタンで選ぶ） */}
+                {locMenuOpen && locations.length > 1 ? (
+                  <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                    <s-stack gap="small">
+                      {locations.map((loc) => (
+                        <s-button
+                          key={`loc-${loc.locationId}`}
+                          kind={loc.locationId === selectedLocation?.locationId ? "primary" : "secondary"}
+                          onClick={() => {
+                            onSelectLocation(loc);
+                            setLocMenuOpen(false);
+                            setError("");
+                          }}
+                        >
+                          {loc.locationName}
+                        </s-button>
+                      ))}
+                    </s-stack>
+                  </s-box>
+                ) : null}
                 {/* 上の行の直下：年または月の選択リスト（同行には出さない） */}
                 {yearMenuOpen ? (
                   <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
@@ -802,6 +819,13 @@ function PreviewView({
     summaryRows.push({
       label: "商品券釣有り差額",
       value: `¥${Number(preview.voucherChangeAmount).toLocaleString()}`,
+    });
+  }
+  // 売上に含めない送料等（支払方法別には入っている分。総売上には入れていない）
+  if (Number(preview.nonSalesFeeTotal ?? 0) !== 0) {
+    summaryRows.push({
+      label: "売上に含めない送料等",
+      value: `¥${Number(preview.nonSalesFeeTotal).toLocaleString()}`,
     });
   }
 

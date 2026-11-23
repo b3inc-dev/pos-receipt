@@ -20,6 +20,7 @@
 | D12 | プライバシーポリシー URL は AppSetting `privacyPolicyUrl` 優先、なければ env `PRIVACY_POLICY_URL`。ダミー固定 URL なし | `privacyPolicyUrl.ts` + 一般設定 / ホーム |
 | D13 | `customers/data_request` は注文紐づけの ReceiptIssue / SpecialRefundEvent を列挙し PII 本文なしでログ。新規 PII 永続化なし。webhook は 200 | `webhooks.compliance.tsx` |
 | D14 | LIFF 会員証は、LINE ユーザー ID の顧客メタフィールドを決めた順で読む。既定は `line_crm.line_user_id`（LINE CRM＝Shop CRM for LINE の項目。line-crm の D-APP-14）→ `socialplus.line`（SocialPlus と、LINE CRM の互換の書き込み）。環境変数 `MEMBER_CARD_LINE_ID_METAFIELDS`（`<namespace>.<key>` をカンマ区切り、多くて 4 つ）で並べ替えられる。顧客の LINE ユーザー ID は「並べた順で最初に値が入っている項目」の値（LINE CRM の項目に値があれば、古い項目の別の ID では見つけない）。タグ `line:<id>` のファストパスはそのまま（タグで見つかった人も同じ決まりで確かめる）。全件スキャンは項目ごとに `metafields.<namespace>.<key>:*` を並べた順に行う。`socialplus.line` 以外は、定義の `adminFilterable` が FILTERABLE のときだけ全件を見る（絞り込みが効かない項目で全顧客を見ない。定義が無い・オフの項目は飛ばす。先の項目を定義の読み込み・検索のエラーで見られなかったら、後の項目で探さず `API_ERROR`。Throttled は定義の読み込みも検索もやり直し、使い切ったら `THROTTLED`）。`socialplus.line` は前と同じ | `app/utils/memberCardLineFields.ts` + `app/lib/customer.server.ts` + `app/lib/memberCardFieldFilter.server.ts` |
+| D22 | 売上に含めない送料等（明細の `_lsi_fee="1"` かつ `_lsi_fee_sales="0"`。Location Stock #76）は、支払方法別の金額に残したまま総売上・純売上・税・点数・割引から外し、`nonSalesFeeTotal` として分けて出す。領収書の金額は受け取った全額のまま（T 2026-11-23）。見分けは明細の属性だけ（名前は見ない）。店ごとの切り替えは Location Stock の管理画面の設定が明細に残す値で決まり、POS Receipt 側に設定は足さない。Settlement に列は足さず、保存済みの印字は「支払方法別の合計 − 総売上」で戻す（BUSINESS_RULES §7.1） | `nonSalesFeeLines.ts` + `aggregateGasStyleForOrders` + `buildSettlementPreviewImpl` |
 
 ## 2. 古い docs との差分（注意）
 
@@ -97,3 +98,10 @@
 ## 8. 開発ストアだけに出すもの（2026-11-22）
 
 - **一般設定のデバッグ・診断の欄とシステム診断は開発ストアだけ**（T さんの決定 2026-11-22）: 一般設定の「デバッグモード」「診断パネルを有効にする」「詳細計算ログ」「プラン（表示用）」「有効機能 JSON（表示用）」、店舗設定とホームの「システム診断」の枠、高度な設定の「システム診断」ボタン、`/app/diagnostics` の画面は、Shopify の `shop.plan.partnerDevelopment` が true の店だけに出す。店の名前はコードに書かない。読めない・失敗したときは出さない（`/app/diagnostics` は 404。店と DB を読む前に止める）。開発ストアでない店から保存が来ても、一般設定のこの 5 つは保存済みの値のまま（`app/utils/devStore.server.ts`）。自社用（inhouse）や `CUSTOM_APP_STORE_IDS` は本番の Ciara も入るので、この判定には使わない。
+
+## 9. POS 拡張で使える部品（2026-11-23）
+
+- **POS の UI 拡張では `@shopify/ui-extensions` の point-of-sale にある部品だけを使う**。`s-select`・`s-option`・`s-checkbox` は POS に無く、エラーも出さずに何も描かれない。2843ee7（2026-03-10）から特殊返金の「返金種別」「元の支払手段」「実際の返金手段」「調整種別」が `s-select` で、選ぶ欄が出ないまま初めの値（現金返金・現金）で登録されていた。精算のロケーション選択（`s-select`）と領収書の「再発行として記録する」（`s-checkbox`）も同じく出ていなかった。
+- 1 つを選ぶ欄は `extensions/pos-smart-grid/src/PosChoiceField.jsx` の `PosChoiceField`（`s-choice-list`）、オン・オフは `PosToggleField` を使う。精算のロケーションは年・月と同じくボタンで開く一覧にした。
+- `scripts/lib/posExtensionComponents.test.mjs` が POS の拡張（target がすべて `pos.` の拡張と `extensions/common`）のソースを見て、POS に無い部品があると落ちる。部品の一覧は `@shopify/ui-extensions` 2025.10.x のもの。版を上げたら一覧を見直す（版が変わると試験が落ちて知らせる）。
+- POS の実機ではまだ見ていない（選ぶ欄の見た目・押したときの動きは実機で確かめる）。
