@@ -43,6 +43,22 @@ export function formatListBadges(item) {
   return out;
 }
 
+// タイルごとに出すバッジ（T 2026-11-24: 返金と商品券のバッジが混ざらないように。「すべて」の絞り込みでも同じ）
+const TILE_BADGE_KEYS = {
+  refunded: new Set(["pending", "cancelled", "refund", "approval", "special", "voided", "receipt"]),
+  voucher_change: new Set(["cancelled", "vadj", "voided", "vchg", "voucher", "receipt"]),
+};
+
+/**
+ * @param {Record<string, unknown>} item
+ * @param {"refunded" | "voucher_change" | "all"} tile - どのタイルから開いた一覧か（all は全部出す）
+ */
+export function formatListBadgesForTile(item, tile) {
+  const keys = TILE_BADGE_KEYS[tile];
+  const all = formatListBadges(item);
+  return keys ? all.filter((b) => keys.has(b.key)) : all;
+}
+
 // label はボタン（スマホの 3 等分に 1 行で収まる長さ。T 2026-11-23「返金」だけに）。
 // noun は 0 件の案内で使う（「返金」の絞り込みはキャンセルの注文も含む）
 export const LIST_SEGMENTS = [

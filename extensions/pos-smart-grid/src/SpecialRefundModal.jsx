@@ -553,7 +553,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
     return (
       <OrderDayListScreen
         pageHeading={`${pageHeading}（取引を選択）`}
-        badgeMode="specialRefund"
+        badgeMode={initialListSegment === "voucher_change" ? "voucherTile" : initialListSegment === "refunded" ? "refundTile" : "specialRefund"}
         onSelectOrderId={handleOrderSelect}
         noticeError={bootstrapError}
         onDismissNotice={() => setBootstrapError("")}
@@ -796,6 +796,7 @@ function OrderDetailView({
                     <EventCard
                       key={ev.id}
                       event={ev}
+                      readOnlyHint={eventReadOnlyHint(ev, isVoucherEntry)}
                       onEdit={onEdit}
                       onAskConfirm={onAskConfirm}
                       legacyDecision={legacyDecision?.eventId === ev.id ? legacyDecision : null}
@@ -973,7 +974,18 @@ function AdjustmentStatusNote({ event }) {
   );
 }
 
-function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
+/**
+ * 入口と違う種類の調整は見るだけ（T 2026-11-24: 返金方法変更から開いた注文で商品券釣銭登録を変更・無効化できないように。逆も同じ）
+ * @returns {string} 見るだけのときの案内（操作できるときは ""）
+ */
+function eventReadOnlyHint(event, isVoucherEntry) {
+  const isVoucherEvent = event?.eventType === "voucher_change_adjustment";
+  if (isVoucherEntry && !isVoucherEvent) return "直すときは「返金方法変更」のタイルから開いてください。";
+  if (!isVoucherEntry && isVoucherEvent) return "直すときは「商品券釣銭登録」のタイルから開いてください。";
+  return "";
+}
+
+function EventCard({ event, readOnlyHint = "", onEdit, onAskConfirm, legacyDecision, loading }) {
   const label = EVENT_TYPE_LABELS[event.eventType] ?? event.eventType;
   // 案A（T 2026-11-23）: 一覧の行と同じ形。種類と金額は太字、手段・日時は灰色の小さい字、状態は色の印
   const badges = adjustmentBadges(event);
@@ -996,7 +1008,7 @@ function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
 
         <AdjustmentStatusNote event={event} />
 
-        {canRecheckShopifyRefund(event) || canRecheckLegacyShopifyRefund(event) ? (
+        {!readOnlyHint && (canRecheckShopifyRefund(event) || canRecheckLegacyShopifyRefund(event)) ? (
           <s-stack gap="extraSmall">
             <s-text tone="subdued" fontSize="small">
               先に Shopify の管理画面でこの注文に返金があるかを確かめてから押してください。登録し直さないでください。
@@ -1018,7 +1030,7 @@ function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
           </s-stack>
         ) : null}
 
-        {legacyDecision ? (
+        {!readOnlyHint && legacyDecision ? (
           <LegacyDecisionPanel
             event={event}
             decision={legacyDecision}
@@ -1027,7 +1039,10 @@ function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
           />
         ) : null}
 
-        {/* ボタンは右に小さく。赤は「無効化」だけ */}
+        {/* ボタンは右に小さく。赤は「無効化」だけ。入口と違う種類の調整はボタンを出さない */}
+        {readOnlyHint ? (
+          <s-text type="small" color="subdued">{readOnlyHint}</s-text>
+        ) : (
         <s-stack direction="inline" justifyContent="end" alignItems="center" gap="small">
           {canEditEvent(event) ? (
             <s-button variant="secondary" onClick={() => onEdit?.(event)} disabled={loading}>
@@ -1044,6 +1059,7 @@ function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
             無効化
           </s-button>
         </s-stack>
+        )}
         {event.metafieldWritten === false ? (
           <s-text type="small" tone="critical">
             注文への記録がまだ書けていません。この画面を開き直すか、もう一度「変更」してください。
