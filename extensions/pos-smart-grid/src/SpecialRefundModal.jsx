@@ -541,7 +541,7 @@ function OrderDetailView({
 
         {!voucherAllowed ? (
           <s-box padding="small">
-            <s-text tone="subdued">商品券釣銭調整は、管理画面の商品券設定で「手動調整」がオフのため使えません。</s-text>
+            <s-text tone="subdued">商品券釣銭登録は、管理画面の商品券設定で「手動調整」がオフのため使えません。</s-text>
           </s-box>
         ) : null}
 

@@ -41,7 +41,7 @@ const PRIORITY_CHOICES = [
   {
     label: "POS で手で入れた額を使う（おすすめ）",
     value: "manual_first",
-    helpText: "スタッフが「商品券釣銭調整」で入れた額を正しいものとして、自動で見つけた額は数えません。",
+    helpText: "スタッフが「商品券釣銭登録」で入れた額を正しいものとして、自動で見つけた額は数えません。",
   },
   {
     label: "自動で見つけた額を使う",
@@ -179,7 +179,7 @@ export default function VoucherSettingsPage() {
                 />
                 <Checkbox
                   label="手動調整を有効にする"
-                  helpText="オフにすると、POS の「商品券釣銭調整」で登録できなくなり、登録済みの分も精算に数えません。"
+                  helpText="オフにすると、POS の「商品券釣銭登録」で登録できなくなり、登録済みの分も精算に数えません。"
                   checked={form.voucherManualAdjustmentEnabled}
                   onChange={(v) => set("voucherManualAdjustmentEnabled", v)}
                 />
