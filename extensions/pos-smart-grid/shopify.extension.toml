@@ -8,10 +8,10 @@ api_version = "2026-07"
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "返金・商品券 / 特殊返金・商品券調整"
+name = "返金・商品券 / 特殊返金・商品券釣り調整"
 uid = "149c1d23-b280-f51c-42ee-3a558fd9cf8a2b8ba0cd"
 handle = "pos-special-refund"
-description = "返金・商品券 / 特殊返金・商品券調整"
+description = "返金・商品券 / 特殊返金・商品券釣り調整"
 
 [[extensions.targeting]]
 module = "./src/SpecialRefundTile.jsx"
