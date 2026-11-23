@@ -93,7 +93,10 @@ describe("精算が止まったときの案内", () => {
 
   it("POS の登録一覧に pending の表示（返金処理中）と確かめ直しのボタン、日別一覧に「返金処理中」がある", () => {
     const modal = readFileSync(new URL("../../extensions/pos-smart-grid/src/SpecialRefundModal.jsx", import.meta.url), "utf8");
-    assert.ok(modal.includes("返金処理中（結果待ち。この日の精算が止まります）"));
+    // 状態は色の印「返金処理中」（調整履歴の案A, 2026-11-23）、理由は印の下の一行
+    assert.ok(modal.includes("結果待ちのため、この日の精算が止まっています"));
+    const layout = readFileSync(new URL("../../extensions/common/orderDetailLayout.js", import.meta.url), "utf8");
+    assert.ok(layout.includes('label: "返金処理中"'));
     assert.ok(modal.includes("返金を確かめる"));
     assert.ok(modal.includes('event?.shopifyRefundStatus === "pending"'));
     const utils = readFileSync(new URL("../../extensions/pos-smart-grid/src/orderDisplayUtils.js", import.meta.url), "utf8");

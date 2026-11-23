@@ -69,3 +69,74 @@ export function customerLabel(order) {
   if (c && c.id) return "顧客あり（名前は表示できません）";
   return "顧客なし";
 }
+
+/**
+ * 調整履歴の 1 件の状態の印（一覧のバッジと同じ考え方の色）。
+ * Shopify 返金の状態と、管理者の承認の状態。
+ * @param {Record<string, any>} event
+ * @returns {{ key: string, label: string, tone: string }[]}
+ */
+export function adjustmentBadges(event) {
+  const out = [];
+  switch (event?.shopifyRefundStatus) {
+    case "pending":
+      out.push({ key: "refund", label: "返金処理中", tone: "critical" });
+      break;
+    case "success":
+      out.push({ key: "refund", label: "返金済", tone: "success" });
+      break;
+    case "failed":
+      out.push({ key: "refund", label: "返金失敗", tone: "critical" });
+      break;
+    case "skipped":
+      out.push({ key: "refund", label: "記録のみ", tone: "neutral" });
+      break;
+    default:
+      break;
+  }
+  switch (event?.approvalStatus) {
+    case "pending":
+      out.push({ key: "approval", label: "承認待ち", tone: "caution" });
+      break;
+    case "approved":
+      out.push({ key: "approval", label: "承認済", tone: "success" });
+      break;
+    case "rejected":
+      out.push({ key: "approval", label: "却下", tone: "critical" });
+      break;
+    default:
+      break;
+  }
+  return out;
+}
+
+function shortDate(isoDate) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate ?? ""));
+  return m ? `${Number(m[2])}/${Number(m[3])}` : String(isoDate ?? "");
+}
+
+/**
+ * 調整履歴の 1 件の灰色の小さい字の行（手段・内訳・いつの精算・登録日時）。
+ * @param {Record<string, any>} event
+ * @returns {string[]}
+ */
+export function adjustmentSubLines(event) {
+  const lines = [];
+  if (event?.eventType === "voucher_change_adjustment") {
+    lines.push(
+      `額面 ${yen(event.voucherFaceValue)} ・ 商品券で払った額 ${yen(event.voucherAppliedAmount)} ・ お釣り ${yen(event.voucherChangeAmount)}`,
+    );
+  }
+  const from = event?.originalPaymentMethod ? event.originalPaymentLabel || event.originalPaymentMethod : "";
+  const to = event?.actualRefundMethod ? event.actualRefundLabel || event.actualRefundMethod : "";
+  if (from && to) lines.push(`${from} → ${to} で返金`);
+  else if (from) lines.push(`元の支払い ${from}`);
+  else if (to) lines.push(`${to} で返金`);
+  const when = [
+    event?.countDate ? `${shortDate(event.countDate)} の精算` : "",
+    event?.createdAtLabel ? `登録 ${event.createdAtLabel}${event.replacesEventId ? "（変更あり）" : ""}` : "",
+  ].filter(Boolean);
+  if (when.length) lines.push(when.join(" ・ "));
+  if (event?.note) lines.push(`メモ ${event.note}`);
+  return lines;
+}

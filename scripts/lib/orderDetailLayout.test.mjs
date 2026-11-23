@@ -52,3 +52,37 @@ describe("customerLabel", async () => {
     assert.equal(customerLabel(null), "顧客なし");
   });
 });
+
+describe("調整履歴の行", async () => {
+  const { adjustmentBadges, adjustmentSubLines } = await import("../../extensions/common/orderDetailLayout.js");
+  it("返金の状態と承認の状態を色の印にする", () => {
+    assert.deepEqual(
+      adjustmentBadges({ shopifyRefundStatus: "success", approvalStatus: "pending" }).map((b) => [b.label, b.tone]),
+      [["返金済", "success"], ["承認待ち", "caution"]],
+    );
+    assert.deepEqual(adjustmentBadges({ shopifyRefundStatus: "none" }), []);
+  });
+  it("手段・いつの精算・登録日時を灰色の行にする", () => {
+    assert.deepEqual(
+      adjustmentSubLines({
+        eventType: "cash_refund",
+        originalPaymentMethod: "cash",
+        originalPaymentLabel: "現金",
+        actualRefundMethod: "cash",
+        actualRefundLabel: "現金",
+        countDate: "2026-11-23",
+        createdAtLabel: "11/23 18:21",
+      }),
+      ["現金 → 現金 で返金", "11/23 の精算 ・ 登録 11/23 18:21"],
+    );
+  });
+  it("商品券は額面・払った額・お釣りを出す", () => {
+    const lines = adjustmentSubLines({
+      eventType: "voucher_change_adjustment",
+      voucherFaceValue: 1000,
+      voucherAppliedAmount: 800,
+      voucherChangeAmount: 200,
+    });
+    assert.equal(lines[0], "額面 ¥1,000 ・ 商品券で払った額 ¥800 ・ お釣り ¥200");
+  });
+});
