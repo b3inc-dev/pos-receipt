@@ -9,8 +9,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
-import { encodeReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
-import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
+import { encodeReceiptPrintSnapshot, renderReceiptHtmlByPaperWidth } from "../services/receiptPrintSnapshot.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { issuerNameAtIssue, normalizeStaffId, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
 
@@ -136,29 +135,14 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
 
-      const model = {
-        kind: "receipt" as const,
-        title: "領　収　書",
-        recipientName: created.recipientName ?? "",
-        proviso: created.proviso ?? effectiveProviso,
-        amount: Number(created.amount),
-        currency: created.currency ?? "JPY",
-        issueDate: created.createdAt.toISOString().slice(0, 10),
-        orderName: created.orderName ?? undefined,
-        locationName,
-        companyName: templateData.companyName,
-        address: templateData.address,
-        phone: templateData.phone,
-        showOrderNumber: Boolean(templateData.showOrderNumber ?? templateData.showOrderName),
-        showDate: Boolean(templateData.showDate ?? templateData.showIssueDate),
-      };
       const printSnapshotJson = encodeReceiptPrintSnapshot({
         locationName,
         templateData: templateData as unknown as Record<string, unknown>,
-        renderedHtmlByPaperWidth: {
-          58: renderPrintReceiptHtml({ ...model, paperWidthMm: 58 }),
-          80: renderPrintReceiptHtml({ ...model, paperWidthMm: 80 }),
-        },
+        renderedHtmlByPaperWidth: renderReceiptHtmlByPaperWidth(
+          { ...created, proviso: created.proviso ?? effectiveProviso },
+          locationName,
+          templateData as unknown as Record<string, unknown>,
+        ),
       });
 
       return tx.receiptIssue.update({

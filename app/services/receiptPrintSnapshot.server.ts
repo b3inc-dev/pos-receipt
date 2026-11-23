@@ -1,3 +1,5 @@
+import { renderPrintReceiptHtml } from "./printReceiptHtml";
+
 export const RECEIPT_PRINT_SNAPSHOT_FORMAT = "receipt-print-snapshot-v1";
 export const RECEIPT_PRINT_FORM_VERSION = "receipt-v1";
 
@@ -96,4 +98,77 @@ export function resolveReceiptPrintSnapshot(
     templateData: { ...snapshot.templateData },
     renderedHtmlByPaperWidth: { ...snapshot.renderedHtmlByPaperWidth },
   };
+}
+
+/** 領収書の 1 行（ReceiptIssue）のうち、紙面を作るのに使う値 */
+export type ReceiptIssueForPrint = {
+  recipientName: string | null;
+  proviso: string | null;
+  amount: number | string | { toString(): string };
+  currency: string | null;
+  createdAt: Date;
+  orderName: string | null;
+};
+
+/** 発行時と同じ形で、58mm・80mm の領収書 HTML を作る（発行と、削除の依頼での作り直しで共通） */
+export function renderReceiptHtmlByPaperWidth(
+  row: ReceiptIssueForPrint,
+  locationName: string,
+  templateData: Record<string, unknown>,
+): { 58: string; 80: string } {
+  const t = templateData as {
+    companyName?: string;
+    address?: string;
+    phone?: string;
+    defaultProviso?: string;
+    showOrderNumber?: boolean;
+    showOrderName?: boolean;
+    showDate?: boolean;
+    showIssueDate?: boolean;
+  };
+  const model = {
+    kind: "receipt" as const,
+    title: "領　収　書",
+    recipientName: row.recipientName ?? "",
+    proviso: row.proviso ?? t.defaultProviso ?? "お買上品代として",
+    amount: Number(String(row.amount)),
+    currency: row.currency ?? "JPY",
+    issueDate: row.createdAt.toISOString().slice(0, 10),
+    orderName: row.orderName ?? undefined,
+    locationName,
+    companyName: t.companyName ?? "",
+    address: t.address ?? "",
+    phone: t.phone ?? "",
+    showOrderNumber: Boolean(t.showOrderNumber ?? t.showOrderName),
+    showDate: Boolean(t.showDate ?? t.showIssueDate),
+  };
+  return {
+    58: renderPrintReceiptHtml({ ...model, paperWidthMm: 58 }),
+    80: renderPrintReceiptHtml({ ...model, paperWidthMm: 80 }),
+  };
+}
+
+/** 削除の依頼（customers/redact）のあとに、宛名の列へ入れる値 */
+export const REDACTED_RECIPIENT_NAME = "[redacted]";
+
+/**
+ * 削除の依頼で、保存した発行時の紙面から宛名を抜く。
+ * - 読める紙面: 発行時の会社・店・表示の設定のまま、宛名を空にして 58mm・80mm を作り直す
+ * - 無い・読めない紙面: null（宛名入りの HTML を残さない。刷り直しは今の設定で作り直す道になり、宛名は列の値）
+ */
+export function redactReceiptPrintSnapshot(
+  raw: string | null | undefined,
+  row: ReceiptIssueForPrint,
+): string | null {
+  const snapshot = parseReceiptPrintSnapshot(raw);
+  if (!snapshot) return null;
+  return encodeReceiptPrintSnapshot({
+    locationName: snapshot.locationName,
+    templateData: snapshot.templateData,
+    renderedHtmlByPaperWidth: renderReceiptHtmlByPaperWidth(
+      { ...row, recipientName: "" },
+      snapshot.locationName,
+      snapshot.templateData,
+    ),
+  });
 }

@@ -24,7 +24,7 @@ export const CUSTOMER_CONTACT_NOT_STORED_RATIONALE = [
 
 /** 注文 ID に紐づきうる保存データ（開示対象になりうる） */
 export const ORDER_LINKED_STORED_FIELDS = [
-  "ReceiptIssue: orderId, orderName, recipientName（店員入力の宛名）, amount, currency, proviso, locationId, createdAt",
+  "ReceiptIssue: orderId, orderName, recipientName（店員入力の宛名）, amount, currency, proviso, locationId, createdAt, printSnapshotJson（発行時の紙面。宛名・但し書きを含む）",
   "SpecialRefundEvent: sourceOrderId, sourceOrderName, eventType, amount, payment method labels, note（任意）",
 ] as const;
 
