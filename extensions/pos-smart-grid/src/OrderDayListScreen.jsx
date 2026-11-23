@@ -18,7 +18,11 @@ import {
   formatListBadges,
   fmtYen,
 } from "./orderDisplayUtils.js";
-import { formatOrderDayLabel, formatOrderDateTimeLabel, formatOrderTitle } from "../../common/orderListLabels.js";
+import {
+  formatOrderDayLabel,
+  formatOrderDateTimeLabel,
+  formatOrderTitle,
+} from "../../common/orderListLabels.js";
 import { OrderListRow } from "./OrderListRow.jsx";
 
 function pad2(n) {
@@ -48,9 +52,12 @@ export function formatPosBadges(item, badgeMode) {
   if (badgeMode === "receipt") {
     const b = item?.posBadges ?? {};
     const out = [];
-    if (b.receiptIssued) out.push({ key: "receipt", label: "領収書発行済", tone: "success" });
-    if (b.refundedShopify) out.push({ key: "refund", label: "返金済", tone: "warning" });
-    if (b.voucherLikeGateway) out.push({ key: "voucher", label: "商品券決済", tone: "neutral" });
+    if (b.receiptIssued)
+      out.push({ key: "receipt", label: "領収書発行済", tone: "success" });
+    if (b.refundedShopify)
+      out.push({ key: "refund", label: "返金済", tone: "warning" });
+    if (b.voucherLikeGateway)
+      out.push({ key: "voucher", label: "商品券決済", tone: "neutral" });
     return out;
   }
   return formatListBadges(item);
@@ -76,7 +83,11 @@ export function OrderDayListScreen({
   initialSegment = "all",
 }) {
   const t0 = useMemo(() => todayYmd(), []);
-  const { locationGid, locationIdParam, isReady: sessionReady } = useSessionLocation();
+  const {
+    locationGid,
+    locationIdParam,
+    isReady: sessionReady,
+  } = useSessionLocation();
 
   const [selectedYear, setSelectedYear] = useState(t0.y);
   const [selectedMonth, setSelectedMonth] = useState(t0.m);
@@ -127,7 +138,11 @@ export function OrderDayListScreen({
     return Array.from({ length: maxDayForSelection }, (_, i) => i + 1);
   }, [maxDayForSelection]);
 
-  const dateStr = ymdToStr(selectedYear, selectedMonth, Math.min(selectedDay, maxDayForSelection));
+  const dateStr = ymdToStr(
+    selectedYear,
+    selectedMonth,
+    Math.min(selectedDay, maxDayForSelection),
+  );
 
   useEffect(() => {
     if (!sessionReady) return;
@@ -138,12 +153,18 @@ export function OrderDayListScreen({
     getLocationsFromShopify(80)
       .then((res) => {
         const locs = res.locations ?? [];
-        const hit = locs.find((l) => l.locationId === locationGid || String(l.locationId).endsWith(locationIdParam ?? ""));
+        const hit = locs.find(
+          (l) =>
+            l.locationId === locationGid ||
+            String(l.locationId).endsWith(locationIdParam ?? ""),
+        );
         setLocationName(hit?.locationName ?? "この店舗");
         setLocLoadError("");
       })
       .catch(() => {
-        setLocationName(locationIdParam ? `店舗 #${locationIdParam}` : "この店舗");
+        setLocationName(
+          locationIdParam ? `店舗 #${locationIdParam}` : "この店舗",
+        );
         setLocLoadError("");
       });
   }, [sessionReady, locationGid, locationIdParam]);
@@ -187,7 +208,9 @@ export function OrderDayListScreen({
       setFetchedAtTime(res.fetchedAtTime || "");
     } catch (e) {
       // 店の人に英語や番号のエラーを出さない（T 2026-11-23）
-      setListError("注文を読み込めませんでした。少し待ってから「再読み込み」を押してください。");
+      setListError(
+        "注文を読み込めませんでした。少し待ってから「再読み込み」を押してください。",
+      );
       setItems([]);
       setNextCursor(null);
     } finally {
@@ -232,7 +255,9 @@ export function OrderDayListScreen({
 
   const todayKey = todayLocalDate || ymdToStr(t0.y, t0.m, t0.day);
   const dayChipLabel = formatOrderDayLabel(dateStr, todayKey) || dateStr;
-  const visibleItems = items.filter((order) => matchesListSegment(order, effectiveSegment));
+  const visibleItems = items.filter((order) =>
+    matchesListSegment(order, effectiveSegment),
+  );
   const storeLabel = sessionReady ? locationName || "店舗を確認中…" : "確認中…";
 
   const isTodaySelected = dateStr === ymdToStr(t0.y, t0.m, t0.day);
@@ -260,7 +285,12 @@ export function OrderDayListScreen({
         blockSize="100%"
         inlineSize="100%"
         minBlockSize="0"
-        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          flex: "1 1 auto",
+          minHeight: 0,
+        }}
       >
         {/* 上の固定: 検索欄〜「店名・時刻 に更新」まではスクロールしても動かない（直す前と同じ作り） */}
         <s-box
@@ -279,53 +309,71 @@ export function OrderDayListScreen({
               onInput={(e) => setSearchDraft(e?.currentTarget?.value ?? "")}
             />
             {searchDraft.trim().length === 1 ? (
-              <s-text type="small" color="subdued">あと1文字入力すると検索します</s-text>
+              <s-text type="small" color="subdued">
+                あと1文字入力すると検索します
+              </s-text>
             ) : null}
 
             {/* 絞り込みのボタン。選ぶものが少ないので開かずに並べたまま出す（T 2026-11-23） */}
-            <s-stack direction="inline" gap="small-300" alignItems="center">
+            {/* 左に年・月・日、右端に「今日」（一覧の行の金額と同じ space-between。T 2026-11-23） */}
+            <s-stack
+              direction="inline"
+              justifyContent="space-between"
+              alignItems="center"
+              gap="small-300"
+            >
               {isSearchMode ? (
-                <s-button variant="secondary" onClick={clearSearch} disabled={listLoading}>
+                <s-button
+                  variant="secondary"
+                  onClick={clearSearch}
+                  disabled={listLoading}
+                >
                   検索をクリア
                 </s-button>
               ) : (
                 <>
                   {/* 今日の分を扱うことが多いので年・月・日のボタン。日付を変えたとき用に「今日」へ戻すボタン（T 2026-11-23） */}
+                  <s-stack
+                    direction="inline"
+                    gap="small-300"
+                    alignItems="center"
+                  >
+                    <s-button
+                      variant={yearMenuOpen ? "primary" : "secondary"}
+                      onClick={() => {
+                        setMonthMenuOpen(false);
+                        setDayMenuOpen(false);
+                        setYearMenuOpen((v) => !v);
+                      }}
+                    >
+                      {selectedYear}年
+                    </s-button>
+                    <s-button
+                      variant={monthMenuOpen ? "primary" : "secondary"}
+                      onClick={() => {
+                        setYearMenuOpen(false);
+                        setDayMenuOpen(false);
+                        setMonthMenuOpen((v) => !v);
+                      }}
+                    >
+                      {selectedMonth}月
+                    </s-button>
+                    <s-button
+                      variant={dayMenuOpen ? "primary" : "secondary"}
+                      onClick={() => {
+                        setYearMenuOpen(false);
+                        setMonthMenuOpen(false);
+                        setDayMenuOpen((v) => !v);
+                      }}
+                    >
+                      {Math.min(selectedDay, maxDayForSelection)}日
+                    </s-button>
+                  </s-stack>
                   <s-button
                     variant={isTodaySelected ? "primary" : "secondary"}
                     onClick={() => selectYmd(t0)}
                   >
                     今日
-                  </s-button>
-                  <s-button
-                    variant={yearMenuOpen ? "primary" : "secondary"}
-                    onClick={() => {
-                      setMonthMenuOpen(false);
-                      setDayMenuOpen(false);
-                      setYearMenuOpen((v) => !v);
-                    }}
-                  >
-                    {selectedYear}年
-                  </s-button>
-                  <s-button
-                    variant={monthMenuOpen ? "primary" : "secondary"}
-                    onClick={() => {
-                      setYearMenuOpen(false);
-                      setDayMenuOpen(false);
-                      setMonthMenuOpen((v) => !v);
-                    }}
-                  >
-                    {selectedMonth}月
-                  </s-button>
-                  <s-button
-                    variant={dayMenuOpen ? "primary" : "secondary"}
-                    onClick={() => {
-                      setYearMenuOpen(false);
-                      setMonthMenuOpen(false);
-                      setDayMenuOpen((v) => !v);
-                    }}
-                  >
-                    {Math.min(selectedDay, maxDayForSelection)}日
                   </s-button>
                 </>
               )}
@@ -354,13 +402,17 @@ export function OrderDayListScreen({
 
                 {monthMenuOpen ? (
                   availableMonths.length === 0 ? (
-                    <s-text type="small" color="subdued">選べる月がありません</s-text>
+                    <s-text type="small" color="subdued">
+                      選べる月がありません
+                    </s-text>
                   ) : (
                     <s-stack direction="inline" gap="small-300">
                       {availableMonths.map((m) => (
                         <s-button
                           key={`m-${m}`}
-                          variant={m === selectedMonth ? "primary" : "secondary"}
+                          variant={
+                            m === selectedMonth ? "primary" : "secondary"
+                          }
                           onClick={() => {
                             setSelectedMonth(m);
                             setMonthMenuOpen(false);
@@ -379,7 +431,11 @@ export function OrderDayListScreen({
                     {availableDays.map((d) => (
                       <s-button
                         key={`d-${d}`}
-                        variant={d === Math.min(selectedDay, maxDayForSelection) ? "primary" : "secondary"}
+                        variant={
+                          d === Math.min(selectedDay, maxDayForSelection)
+                            ? "primary"
+                            : "secondary"
+                        }
                         onClick={() => {
                           setSelectedDay(d);
                           setDayMenuOpen(false);
@@ -399,7 +455,9 @@ export function OrderDayListScreen({
                 {LIST_SEGMENTS.map((seg) => (
                   <s-button
                     key={seg.value}
-                    variant={effectiveSegment === seg.value ? "primary" : "secondary"}
+                    variant={
+                      effectiveSegment === seg.value ? "primary" : "secondary"
+                    }
                     onClick={() => {
                       setListSegment(seg.value);
                       if (isSearchMode) {
@@ -416,7 +474,9 @@ export function OrderDayListScreen({
 
             {/* 純正の「たった今に更新」の位置。店名と取得した時刻（店のタイムゾーン） */}
             {locLoadError ? (
-              <s-text type="small" tone="critical">{locLoadError}</s-text>
+              <s-text type="small" tone="critical">
+                {locLoadError}
+              </s-text>
             ) : (
               <s-text type="small" color="subdued">
                 {isSearchMode
@@ -443,24 +503,37 @@ export function OrderDayListScreen({
               {noticeError ? (
                 <s-stack gap="small-300">
                   <s-banner tone="critical" heading={noticeError} />
-                  <s-button variant="secondary" onClick={onDismissNotice}>閉じる</s-button>
+                  <s-button variant="secondary" onClick={onDismissNotice}>
+                    閉じる
+                  </s-button>
                 </s-stack>
               ) : null}
               {!sessionReady ? (
-                <s-text type="small" color="subdued">確認しています…</s-text>
+                <s-text type="small" color="subdued">
+                  確認しています…
+                </s-text>
               ) : !locationIdParam ? (
-                <s-text type="small" tone="critical">POS の店舗が分かりません。店舗を選び直してから開き直してください。</s-text>
+                <s-text type="small" tone="critical">
+                  POS
+                  の店舗が分かりません。店舗を選び直してから開き直してください。
+                </s-text>
               ) : listLoading ? (
-                <s-text type="small" color="subdued">読み込み中…</s-text>
+                <s-text type="small" color="subdued">
+                  読み込み中…
+                </s-text>
               ) : listError ? (
                 <s-stack gap="small">
                   <s-text tone="critical">{listError}</s-text>
-                  <s-button variant="secondary" onClick={reloadList}>再読み込み</s-button>
+                  <s-button variant="secondary" onClick={reloadList}>
+                    再読み込み
+                  </s-button>
                 </s-stack>
               ) : items.length === 0 ? (
                 <s-stack gap="small-300">
                   <s-text>
-                    {isSearchMode ? "該当する取引は見つかりませんでした。" : `${dayChipLabel}の取引はありません。`}
+                    {isSearchMode
+                      ? "該当する取引は見つかりませんでした。"
+                      : `${dayChipLabel}の取引はありません。`}
                   </s-text>
                   <s-text type="small" color="subdued">
                     {isSearchMode
@@ -468,7 +541,9 @@ export function OrderDayListScreen({
                       : "ほかの日は年・月・日のボタンから選べます。上の欄で注文番号や顧客名から探すこともできます。"}
                   </s-text>
                   {!isSearchMode ? (
-                    <s-button variant="secondary" onClick={reloadList}>読み込み直す</s-button>
+                    <s-button variant="secondary" onClick={reloadList}>
+                      読み込み直す
+                    </s-button>
                   ) : null}
                 </s-stack>
               ) : (
@@ -477,10 +552,15 @@ export function OrderDayListScreen({
                     <s-stack gap="small-300">
                       <s-text>
                         {`${dayChipLabel}の取引は ${items.length} 件ありますが、「${
-                          LIST_SEGMENTS.find((x) => x.value === effectiveSegment)?.label ?? ""
+                          LIST_SEGMENTS.find(
+                            (x) => x.value === effectiveSegment,
+                          )?.label ?? ""
                         }」に当てはまるものはありません。`}
                       </s-text>
-                      <s-button variant="secondary" onClick={() => setListSegment("all")}>
+                      <s-button
+                        variant="secondary"
+                        onClick={() => setListSegment("all")}
+                      >
                         すべて表示する
                       </s-button>
                     </s-stack>
@@ -497,7 +577,11 @@ export function OrderDayListScreen({
                   ))}
                   {nextCursor ? (
                     <s-box paddingBlockStart="base">
-                      <s-button variant="secondary" onClick={onLoadMore} loading={loadingMore}>
+                      <s-button
+                        variant="secondary"
+                        onClick={onLoadMore}
+                        loading={loadingMore}
+                      >
                         さらに読み込む
                       </s-button>
                     </s-box>
@@ -520,7 +604,12 @@ export function OrderDayListScreen({
               zIndex: 10,
             }}
           >
-            <s-stack direction="inline" justifyContent="end" alignItems="center" gap="small">
+            <s-stack
+              direction="inline"
+              justifyContent="end"
+              alignItems="center"
+              gap="small"
+            >
               {footerTrailing}
             </s-stack>
           </s-box>
