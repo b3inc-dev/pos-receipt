@@ -15,6 +15,7 @@ import {
   type SpecialRefundSettings,
 } from "../utils/appSettings.server";
 import { createRedoDraftFromOrder } from "../services/orderRedoDraft.server";
+import { normalizeOrderRedoMethod } from "../services/orderRedoCartPlan";
 
 export async function action({ request, params }: ActionFunctionArgs) {
   if (request.method === "OPTIONS") return corsPreflightResponse(request);
@@ -37,7 +38,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       SPECIAL_REFUND_SETTINGS_KEY,
     );
     const settings = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...settingsRaw };
-    if (!settings.enableOrderRedoDraft) {
+    if (!settings.enableOrderRedoDraft || normalizeOrderRedoMethod(settings.orderRedoMethod) === "cart") {
       return corsJson(
         { ok: false, error: "会計やり直し（下書き作成）は設定で無効になっています" },
         { status: 403 },

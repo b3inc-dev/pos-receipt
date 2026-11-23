@@ -24,6 +24,7 @@ import { toUserMessage } from "../../common/errorMessage.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
+import { RedoCheckoutSection } from "./RedoCheckoutSection.jsx";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 
 const STORAGE_KEY_REFUND = "pos_special_refund_order_id";
@@ -467,24 +468,14 @@ function OrderDetailView({
             <s-stack gap="base">
               <OrderDetailSummary order={order} />
 
-              {order?.canRedoAsDraft ? (
-                <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="small">
-                    <s-text fontWeight="bold" size="small">会計をやり直す</s-text>
-                    <s-text tone="subdued" fontSize="small">
-                      キャンセル・返金済みの取引向けです。同じ商品構成の下書き注文を作成します。決済は POS または管理画面で行ってください。
-                    </s-text>
-                    <s-button
-                      kind="secondary"
-                      onClick={onRedoDraft}
-                      disabled={loading}
-                      loading={loading}
-                    >
-                      下書き注文を作成
-                    </s-button>
-                  </s-stack>
-                </s-box>
-              ) : null}
+              {/* 会計をやり直す（カートに入れる／下書き注文）。方法は管理画面の特殊返金設定で選ぶ */}
+              <RedoCheckoutSection
+                order={order}
+                canRedoToCart={Boolean(order?.canRedoToCart)}
+                canRedoAsDraft={Boolean(order?.canRedoAsDraft)}
+                onRedoDraft={onRedoDraft}
+                busy={loading}
+              />
 
               <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
 

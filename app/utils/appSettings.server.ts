@@ -240,6 +240,8 @@ export const DEFAULT_VOUCHER_SETTINGS: VoucherSettings = {
 
 // ── 特殊返金設定（要件 §8） ───────────────────────────────────────────────────
 
+import type { OrderRedoMethod } from "../services/orderRedoCartPlan";
+
 export const SPECIAL_REFUND_SETTINGS_KEY = "special_refund_settings";
 
 /** record_only = DB記録のみ / shopify_execute = POS登録時に Shopify refundCreate */
@@ -253,8 +255,13 @@ export interface SpecialRefundSettings {
   shopifyExecuteReceiptCashAdjustment: boolean;
   /** 同一取引に無効化済みイベントがあるときの再登録は記録のみ（Shopify 実返金しない） */
   correctionUsesRecordOnly: boolean;
-  /** キャンセル・返金済み注文から会計やり直し用の下書きを作成 */
+  /** キャンセル・返金済み注文の「会計をやり直す」を使う（名前は昔の下書き専用のころのまま） */
   enableOrderRedoDraft: boolean;
+  /**
+   * 会計をやり直す方法。both = POS で「カートに入れる」と「下書き注文を作成」を選べる /
+   * cart = カートに入れるだけ / draft = 下書き注文だけ（昔の動き）
+   */
+  orderRedoMethod: OrderRedoMethod;
   enableCashRefund: boolean;
   enablePaymentMethodOverride: boolean;
   enableVoucherChangeAdjustment: boolean;
@@ -282,6 +289,7 @@ export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
   shopifyExecuteReceiptCashAdjustment: true,
   correctionUsesRecordOnly: true,
   enableOrderRedoDraft: true,
+  orderRedoMethod: "both",
   enableCashRefund: true,
   enablePaymentMethodOverride: true,
   enableVoucherChangeAdjustment: true,

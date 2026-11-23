@@ -162,6 +162,25 @@ Location Stock の POS Lite 配送では、送料が注文の配送料でなく 
 
 反映後に税・net の再計算ロジックあり（エンジン後半）。
 
+### 10.1 会計やり直し（キャンセル・返金済み注文）
+
+特殊返金設定の `enableOrderRedoDraft`（会計やり直しを使う）と `orderRedoMethod` で、POS の注文の詳細に出すボタンが決まる。対象はキャンセル・返金済みの注文だけ（`isOrderEligibleForRedoDraft`）。
+
+| `orderRedoMethod` | POS に出るボタン |
+|---|---|
+| `both`（既定。値が無い昔の保存値もこれ） | 「カートに入れる」と「下書き注文を作成」 |
+| `cart` | 「カートに入れる」だけ |
+| `draft` | 「下書き注文を作成」だけ（昔の動き） |
+
+- 下書き: `POST /api/orders/:id/redo-draft` が `draftOrderCreate`（決済はしない）。
+- カートに入れる: `GET /api/orders/:id/redo-cart`（読み取りのみ）が中身を組み立て（`orderRedoCartPlan.ts`）、POS 拡張が Cart API（`shopify.cart`、`extensions/common/redoToCart.js`）で入れる。
+  - 商品は今のバリアントで入れる。単価は書き換えられないので、元の割引と「今の値段 − 元の単価」の差を 1 個あたりの定額割引で入れ、割り切れない端数はカート全体の定額割引（「元の注文の割引（端数）」）にする。合計は元の注文の割引後の額に合う。
+  - 今の値段のほうが安い商品は今の値段で入れて知らせる（値段を上げる手段が無い）。
+  - 削除された商品は同じ名前・元の単価のカスタム商品（在庫は動かない）。
+  - 同じバリアントの行は 1 行にまとめる（POS が同じ商品をまとめるため）。
+  - カートに商品があるときは止める（`clearCart` は元に戻せないので使わない）。お客様を設定し、カート属性 `_pos_receipt_redo_from` に元の注文番号を付ける。
+  - 拡張の `api_version` を 2026-10 以上に上げるときは、Cart API の書き込みが「POS が確認できないと reject」に変わるため、reject の扱いを見直す。
+
 ---
 
 ## 11. 商品券・レガシー Gift Card
