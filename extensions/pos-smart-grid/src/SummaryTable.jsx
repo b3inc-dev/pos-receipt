@@ -104,33 +104,49 @@ export function MetricCard({ title, items, updatedLabel = "" }) {
             {subParts.join("　・　")}
           </s-text>
         ) : null}
-        {cells.length > 0 ? (
-          <s-box paddingBlockStart="small">
-            <s-stack gap="small">
-              {chunkRows(cells, 3).map((row, ri) => (
-                <s-stack key={ri} direction="inline" gap="none" alignItems="start" inlineSize="100%">
-                  {row.map((c, ci) => (
-                    <s-box
-                      key={`${c.label}-${ci}`}
-                      inlineSize="33%"
-                      minInlineSize="0"
-                      maxInlineSize="33%"
-                      paddingInlineEnd="small-300"
-                    >
-                      <s-stack gap="none">
-                        <s-text type="small" color="subdued">
-                          {c.label}
-                        </s-text>
-                        <s-text type="strong">{c.value}</s-text>
-                      </s-stack>
-                    </s-box>
-                  ))}
-                </s-stack>
-              ))}
-            </s-stack>
-          </s-box>
+        <MetricGrid cells={cells.filter((c) => c.group !== "month")} />
+        {cells.some((c) => c.group === "month") ? (
+          <>
+            <s-box paddingBlockStart="small">
+              <s-text type="small" color="subdued">
+                今月
+              </s-text>
+            </s-box>
+            <MetricGrid cells={cells.filter((c) => c.group === "month")} />
+          </>
         ) : null}
       </s-stack>
     </s-section>
+  );
+}
+
+/** 小さい見出し付きの数を 3 列に並べる */
+function MetricGrid({ cells }) {
+  if (!cells || cells.length === 0) return null;
+  return (
+    <s-box paddingBlockStart="small">
+      <s-stack gap="small">
+        {chunkRows(cells, 3).map((row, ri) => (
+          <s-stack key={ri} direction="inline" gap="none" alignItems="start" inlineSize="100%">
+            {row.map((c, ci) => (
+              <s-box
+                key={`${c.label}-${ci}`}
+                inlineSize="33%"
+                minInlineSize="0"
+                maxInlineSize="33%"
+                paddingInlineEnd="small-300"
+              >
+                <s-stack gap="none">
+                  <s-text type="small" color="subdued">
+                    {c.label}
+                  </s-text>
+                  <s-text type="strong">{c.value}</s-text>
+                </s-stack>
+              </s-box>
+            ))}
+          </s-stack>
+        ))}
+      </s-stack>
+    </s-box>
   );
 }

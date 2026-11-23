@@ -419,7 +419,8 @@ function monthKpiRowsOrderedFromPeriodRow(row, o) {
     items.push({ label: "遂行予算(前日)", value: fmtAmount(row.progressBudgetPrev) });
     items.push({ label: "遂行率(前日)", value: fmtPct(row.progressRatePrev) });
   }
-  return items;
+  // 日次のカードでは「今月」の見出しの下にまとめて出す（日の数と混ざらないように）
+  return items.map((it) => ({ ...it, group: "month" }));
 }
 
 function mergeDailyRowsWithMonthKpi(baseItems, periodRow, o) {
