@@ -116,9 +116,13 @@
 pos-receipt の精算は、**いつもアプリの記録（DB）で数えます**。書くのは pos-receipt だけなので、注文の値と DB が違うときは、DB の方が新しい（書き込みの失敗・同時の登録）か、注文の値が外で書き換えられたかのどちらかです。
 
 1. DB の目次で、その日・その店の行がある注文を出す（`countDate` がその日の行。前からの行で `countDate` が無いものは登録した日）。
-2. 注文に書く設定の店だけ、その注文の `pos.adjustments` を Shopify から読む（`nodes(ids:)` で 50 件ずつ。行が無い日は読まない）。
-3. その日・その店の行が DB と違う・値が無い・形が読めない注文は、その場で DB から書き直す（1 回の精算で 20 件まで。残りは次に開いたとき）。前から登録していて注文に値が無い行も、ここで書かれる。
-4. 書き直せなかった注文は、精算のプレビューの `adjustmentSourceWarnings` に出す（`metafield_missing`・`metafield_invalid`・`metafield_differs`）。読み取りそのものが失敗したときも警告（`metafield_unreadable`）。精算は止めない（数はアプリの記録で合っている）。
+2. 注文に書く設定の店だけ、注文に書く設定にしてから書いた注文（行の `metafieldSyncedAt` か `metafieldSyncError` が残っている注文）の `pos.adjustments` を Shopify から読む（`nodes(ids:)` で 50 件ずつ。行が無い日は読まない）。
+3. その日・その店の行が DB と違う・値が無い・形が読めない注文は、その場で DB から書き直す（1 回の精算で 20 件まで。残りは次に開いたとき）。書き直したあと注文を読み直し、まだ違えば知らせる（`metafield_differs_again`）。
+4. 精算で 10 分以内に書き直した注文がまた違うときは、書き直さずに知らせる（`metafield_differs_again`。ほかのアプリと書き合いにならないように。時刻はサーバーの中だけで持つ）。
+5. 書き直せなかった注文は、精算のプレビューの `adjustmentSourceWarnings` に出す（`metafield_missing`・`metafield_invalid`・`metafield_differs`）。読み取りそのものが失敗したときも警告（`metafield_unreadable`）。精算は止めない（数はアプリの記録で合っている）。
+6. 調べるだけの呼び出し（`api.debug.settlement-compare`）は書き直さない（`resyncOrderAdjustments: false`）。
+
+**前からの登録（注文に書く設定にする前の登録）は、精算では書きません**（見直し P2-A。注文を書くと `orders/updated` が届き、売上サマリーの計算し直しが注文ごとに走るため）。特殊返金設定の「注文への記録」→「前からの登録を注文に書く」で、T が「1 件だけ書く」で 1 件書いて注文ページで確かめてから、「20 件書く」で古い順に書きます。書けなかった注文は `metafieldSyncError` が残り、それからは精算のときに書き直す対象になります。
 
 ciara-system は注文の値で数えるので、書き直したあとは両方の数が合います。
 
