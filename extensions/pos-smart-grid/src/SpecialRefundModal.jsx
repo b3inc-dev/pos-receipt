@@ -9,7 +9,7 @@
  *   form_voucher → 商品券調整フォーム（額面だけ入れる。使った額は注文の取引から）
  *   form_edit    → 登録の「変更」（前の登録を無効にし、直した内容の登録を足す。Shopify の返金はしない）
  *
- * タイルごとに一覧の最初の絞り込みを変える: 「返金・商品券」タイルは返金・キャンセル、「商品券」タイルは商品券釣有り
+ * タイルごとに一覧の最初の絞り込みを変える: 「返金」タイルは返金・キャンセル、「商品券」タイルは商品券釣有り
  * （VoucherModal.jsx が initialListSegment="voucher_change" で開く）
  *
  * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券調整」→ form_voucher へ直行
@@ -475,9 +475,11 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
     } else if (action.kind === "redo_draft") await runRedoDraft();
   }, [confirmAction, runVoid, runRecheck, runLegacyRecheck, runRedoDraft]);
 
+  // タイルを分けた（T 2026-11-23）: 見出しは開いたタイルの名前
+  const pageHeading = initialListSegment === "voucher_change" ? "商品券" : "返金";
   if (orderEntryLoading) {
     return (
-      <s-page heading="返金・商品券">
+      <s-page heading={pageHeading}>
         <s-box padding="base">
           <s-text tone="subdued">取引を開いています…</s-text>
         </s-box>
@@ -487,7 +489,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
 
   if (bootstrapError && fromOrderEntry) {
     return (
-      <s-page heading="返金・商品券">
+      <s-page heading={pageHeading}>
         <s-box padding="base">
           <s-stack gap="base">
             <s-text tone="critical">{bootstrapError}</s-text>
@@ -514,7 +516,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
   if (step === "day_list") {
     return (
       <OrderDayListScreen
-        pageHeading="返金・商品券（取引を選択）"
+        pageHeading={`${pageHeading}（取引を選択）`}
         badgeMode="specialRefund"
         onSelectOrderId={handleOrderSelect}
         noticeError={bootstrapError}
