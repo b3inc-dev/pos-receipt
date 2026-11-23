@@ -25,6 +25,24 @@ export function reservationRowsFromInput(rows) {
   return { ok: true, error: "", rows: out };
 }
 
+/**
+ * 返金する金額（純正で返金する見込みの額）。要る。分けた行（最後以外）の合計はこれより小さく。
+ * 純正の返金額がこれと違うと、自動では付け替えずに「要確認」にする（T 2026-11-23）
+ */
+export function reservationExpectedAmountFromInput(input, rows) {
+  const expected = money(input);
+  if (!(expected > 0)) return { ok: false, error: "返金する金額を入れてください", amount: 0 };
+  const fixed = (Array.isArray(rows) ? rows : []).slice(0, -1).reduce((s, r) => s + money(r?.amount), 0);
+  if (!(money(fixed) < expected)) {
+    return {
+      ok: false,
+      error: `分けた金額の合計（¥${money(fixed).toLocaleString()}）を、返金する金額（¥${expected.toLocaleString()}）より小さくしてください`,
+      amount: 0,
+    };
+  }
+  return { ok: true, error: "", amount: expected };
+}
+
 const STATUS_LABEL = {
   pending: "予約中",
   applied: "返金に使いました",

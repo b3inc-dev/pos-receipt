@@ -17,7 +17,10 @@ import { syncOrderAdjustmentsMetafield } from "./orderAdjustments.server";
 import { refreshDailySummaryForAdjustment } from "./orderAdjustmentEdit.server";
 import { toOrderGid } from "./orderAdjustmentsPure.server";
 import {
+  checkExpectedAmount,
   normalizeReservationRows,
+  numericOrderId,
+  refundOnReservationDay,
   parseReservationRows,
   pickRefundForReservation,
   planReservation,
@@ -32,12 +35,29 @@ type AdminClient = {
 
 type ReservationRecord = Awaited<ReturnType<typeof prisma.refundReservation.create>>;
 
+async function loadSpecialRefundSettings(shopId: string) {
+  const saved = await getAppSetting<Partial<typeof DEFAULT_SPECIAL_REFUND_SETTINGS>>(shopId, SPECIAL_REFUND_SETTINGS_KEY);
+  return { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...(saved ?? {}) };
+}
+
+/** 管理画面の「返金の予約」がオンか（初めはオフ） */
+export async function refundReservationEnabled(shopId: string): Promise<boolean> {
+  return (await loadSpecialRefundSettings(shopId)).refundReservationEnabled === true;
+}
+
+/** 注文の id の書き方（gid・数字）どちらでも探す */
+function orderIdVariants(sourceOrderId: string): string[] {
+  const digits = numericOrderId(sourceOrderId);
+  return [...new Set([digits, toOrderGid(digits), String(sourceOrderId).trim()].filter(Boolean))];
+}
+
 export function serializeReservation(r: ReservationRecord) {
   return {
     id: r.id,
     sourceOrderId: r.sourceOrderId,
     sourceOrderName: r.sourceOrderName,
     rows: parseReservationRows(r.rowsJson),
+    expectedAmount: Number(r.expectedAmount),
     note: r.note,
     status: r.status,
     businessDate: r.businessDate,
@@ -61,13 +81,38 @@ export async function createRefundReservation(
     sourceOrderName?: string | null;
     locationId?: string | null;
     rows: unknown;
+    expectedAmount: unknown;
     note?: string | null;
     createdBy?: string | null;
   },
 ): Promise<CreateReservationResult> {
-  const orderGid = toOrderGid(input.sourceOrderId);
+  const settings = await loadSpecialRefundSettings(shopId);
+  if (settings.refundReservationEnabled !== true) {
+    return {
+      ok: false,
+      status: 403,
+      code: "RESERVATION_DISABLED",
+      message: "返金の予約は管理画面の「特殊返金設定」でオフになっています。",
+    };
+  }
+  const orderId = numericOrderId(input.sourceOrderId);
+  if (!orderId) return { ok: false, status: 400, code: "INVALID_ORDER", message: "注文が読めませんでした" };
   const check = normalizeReservationRows(input.rows);
   if (!check.ok) return { ok: false, status: 400, code: "INVALID_ROWS", message: check.error };
+  const amount = checkExpectedAmount(check.rows, input.expectedAmount);
+  if (!amount.ok) return { ok: false, status: 400, code: "INVALID_AMOUNT", message: amount.error };
+  // 種類は特殊返金設定でオンのものだけ（返金 = 現金返金、付け替え = 支払方法の付け替え）
+  for (const r of check.rows) {
+    const on = r.eventType === "cash_refund" ? settings.enableCashRefund : settings.enablePaymentMethodOverride;
+    if (!on) {
+      return {
+        ok: false,
+        status: 400,
+        code: "EVENT_TYPE_DISABLED",
+        message: "選んだ種類は、管理画面の「特殊返金設定」でオフになっています。",
+      };
+    }
+  }
 
   // 返す手段は支払方法マスタ（有効・特殊返金で選べる）からだけ（D 特殊返金の決まりと同じ）
   const selectable = await prisma.paymentMethodMaster.findMany({
@@ -87,21 +132,30 @@ export async function createRefundReservation(
 
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const today = getCalendarDateStringInTimeZone(new Date(), timezone);
-  await expireOldReservations(shopId, orderGid, today);
+  await expireOldReservations(shopId, orderId, today);
 
-  const reservation = await prisma.$transaction(
+  const exists = {
+    ok: false as const,
+    status: 409,
+    code: "RESERVATION_EXISTS",
+    message: "この注文には、もう予約があります。直すときは、今の予約を取り消してから入れ直してください。",
+  };
+  let reservation: ReservationRecord | null;
+  try {
+    reservation = await prisma.$transaction(
     async (tx) => {
       const open = await tx.refundReservation.findFirst({
-        where: { shopId, sourceOrderId: orderGid, status: "pending" },
+        where: { shopId, sourceOrderId: { in: orderIdVariants(orderId) }, status: "pending" },
       });
       if (open) return null;
       return tx.refundReservation.create({
         data: {
           shopId,
-          sourceOrderId: orderGid,
+          sourceOrderId: orderId,
           sourceOrderName: input.sourceOrderName ?? null,
           locationId: String(input.locationId ?? ""),
           rowsJson: JSON.stringify(check.rows),
+          expectedAmount: amount.expectedAmount,
           note: input.note ? String(input.note) : null,
           createdBy: input.createdBy ? String(input.createdBy) : null,
           status: "pending",
@@ -111,14 +165,12 @@ export async function createRefundReservation(
     },
     { isolationLevel: "Serializable" },
   );
-  if (!reservation) {
-    return {
-      ok: false,
-      status: 409,
-      code: "RESERVATION_EXISTS",
-      message: "この注文には、もう予約があります。直すときは、今の予約を取り消してから入れ直してください。",
-    };
+  } catch (err) {
+    // P2034: 同じ注文の予約が同時に入った（先に入った方が残る）
+    if ((err as { code?: string } | null)?.code === "P2034") return exists;
+    throw err;
   }
+  if (!reservation) return exists;
   return { ok: true, reservation };
 }
 
@@ -142,9 +194,9 @@ export async function cancelRefundReservation(
   return { ok: true, reservation: row };
 }
 
-async function expireOldReservations(shopId: string, orderGid: string | null, today: string): Promise<void> {
+async function expireOldReservations(shopId: string, orderId: string | null, today: string): Promise<void> {
   const open = await prisma.refundReservation.findMany({
-    where: { shopId, status: "pending", ...(orderGid ? { sourceOrderId: orderGid } : {}) },
+    where: { shopId, status: "pending", ...(orderId ? { sourceOrderId: { in: orderIdVariants(orderId) } } : {}) },
     select: { id: true, businessDate: true },
   });
   const old = open.filter((r) => reservationExpired(r.businessDate, today)).map((r) => r.id);
@@ -155,7 +207,7 @@ async function expireOldReservations(shopId: string, orderGid: string | null, to
 
 export async function listRefundReservations(shopId: string, sourceOrderId: string): Promise<ReservationRecord[]> {
   return prisma.refundReservation.findMany({
-    where: { shopId, sourceOrderId: toOrderGid(sourceOrderId) },
+    where: { shopId, sourceOrderId: { in: orderIdVariants(sourceOrderId) } },
     orderBy: { createdAt: "desc" },
     take: 20,
   });
@@ -164,7 +216,7 @@ export async function listRefundReservations(shopId: string, sourceOrderId: stri
 /** その注文に、使う前の予約があるか（知らせのたびに Shopify を読まないため） */
 export async function hasPendingReservation(shopId: string, sourceOrderId: string): Promise<boolean> {
   const n = await prisma.refundReservation.count({
-    where: { shopId, sourceOrderId: toOrderGid(sourceOrderId), status: "pending" },
+    where: { shopId, sourceOrderId: { in: orderIdVariants(sourceOrderId) }, status: "pending" },
   });
   return n > 0;
 }
@@ -180,24 +232,29 @@ export async function applyRefundReservationsForOrder(
   sourceOrderId: string,
 ): Promise<ApplyResult> {
   const result: ApplyResult = { applied: 0, review: 0, waiting: 0, expired: 0 };
-  const orderGid = toOrderGid(sourceOrderId);
+  const orderId = numericOrderId(sourceOrderId);
+  if (!orderId) return result;
+  const variants = orderIdVariants(orderId);
   const pending = await prisma.refundReservation.findMany({
-    where: { shopId, sourceOrderId: orderGid, status: "pending" },
+    where: { shopId, sourceOrderId: { in: variants }, status: "pending" },
     orderBy: { createdAt: "asc" },
   });
   if (pending.length === 0) return result;
+  // オフにした店では当てない（予約は残す。オンに戻したら次の知らせで当てる）
+  const settings = await loadSpecialRefundSettings(shopId);
+  if (settings.refundReservationEnabled !== true) return result;
 
   const timezone = await getShopTimezoneForDaily(admin, shopId);
-  const lines = await fetchNativeRefundLines(admin, orderGid);
-  const saved = await getAppSetting<Partial<typeof DEFAULT_SPECIAL_REFUND_SETTINGS>>(shopId, SPECIAL_REFUND_SETTINGS_KEY);
-  const settings = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...(saved ?? {}) };
+  const lines = await fetchNativeRefundLines(admin, orderId);
+  const refundDay = (l: { createdAt?: string | null }) =>
+    getCalendarDateStringInTimeZone(l.createdAt ? new Date(l.createdAt) : new Date(), timezone);
   const today = getCalendarDateStringInTimeZone(new Date(), timezone);
   const touchedDates = new Set<string>();
   let locationForRefresh = "";
 
   for (const res of pending) {
     const events = await prisma.specialRefundEvent.findMany({
-      where: { shopId, sourceOrderId: orderGid, refundSource: NATIVE_REFUND_SOURCE },
+      where: { shopId, sourceOrderId: { in: variants }, refundSource: NATIVE_REFUND_SOURCE },
       select: { id: true, status: true, approvalStatus: true, shopifyRefundId: true, originalPaymentMethod: true, amount: true },
     });
     // 自分の行がもうできている（前に途中まで当てた）なら、その返金に当て直す
@@ -217,8 +274,15 @@ export async function applyRefundReservationsForOrder(
       continue;
     }
 
+    // 予約した日のうちの返金だけに当てる（別の日の返金は別のことかもしれない）
+    if (!ownRefund && !refundOnReservationDay(refundDay(picked.lines[0]), res.businessDate)) {
+      await prisma.refundReservation.updateMany({ where: { id: res.id, status: "pending" }, data: { status: "expired" } });
+      result.expired += 1;
+      continue;
+    }
+
     const rows: ReservationRow[] = parseReservationRows(res.rowsJson);
-    const plan = planReservation(picked.lines, rows);
+    const plan = planReservation(picked.lines, rows, Number(res.expectedAmount));
     if (!plan.ok) {
       await prisma.refundReservation.updateMany({
         where: { id: res.id, status: "pending" },
@@ -230,6 +294,7 @@ export async function applyRefundReservationsForOrder(
 
     const createdIds: string[] = [];
     let failure: string | null = null;
+    let retryLater = false;
     // 行の番号は予約の行のまま（元と同じ手段で外した行があっても id がずれない）
     for (const planned of plan.rows) {
       const id = reservationEventId(res.id, planned.index);
@@ -243,7 +308,7 @@ export async function applyRefundReservationsForOrder(
           data: {
             id,
             shopId,
-            sourceOrderId: orderGid,
+            sourceOrderId: orderId,
             sourceOrderName: res.sourceOrderName,
             locationId: res.locationId,
             eventType: planned.eventType,
@@ -257,13 +322,16 @@ export async function applyRefundReservationsForOrder(
             status: "active",
             approvalStatus: initialApprovalStatus(settings, planned.eventType),
           },
-          countDateOf: (line) =>
-            getCalendarDateStringInTimeZone(line.createdAt ? new Date(line.createdAt) : new Date(), timezone),
+          countDateOf: refundDay,
         });
         if (r.ok) {
           createdIds.push(r.event.id);
           if (r.event.countDate) touchedDates.add(r.event.countDate);
           locationForRefresh = r.event.locationId;
+        } else if (r.code === "CONCURRENT_UPDATE") {
+          // 同時の書き込み: 予約は使う前のまま残し、次の知らせ・開いたときに続きを当てる
+          retryLater = true;
+          break;
         } else {
           failure = r.message;
           break;
@@ -277,7 +345,9 @@ export async function applyRefundReservationsForOrder(
       }
     }
 
-    if (failure) {
+    if (retryLater) {
+      result.waiting += 1;
+    } else if (failure) {
       await prisma.refundReservation.updateMany({
         where: { id: res.id, status: "pending" },
         data: {
@@ -298,7 +368,7 @@ export async function applyRefundReservationsForOrder(
   }
 
   if (touchedDates.size > 0) {
-    await syncOrderAdjustmentsMetafield(admin, shopId, orderGid);
+    await syncOrderAdjustmentsMetafield(admin, shopId, orderId);
     for (const d of touchedDates) await refreshDailySummaryForAdjustment(admin, shopId, locationForRefresh, d);
   }
   return result;

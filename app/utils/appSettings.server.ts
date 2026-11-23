@@ -275,6 +275,11 @@ export interface SpecialRefundSettings {
    */
   requireApprovalForPaymentMethodOverride: boolean;
   /**
+   * 返金の予約（返金の前に実際に返す手段を決めておき、純正の返金ができたら自動で付け替える）。初めはオフ
+   * （T の決定 2026-11-24。まず Ciara だけオン）。docs/REFUND_RESERVATION.md
+   */
+  refundReservationEnabled: boolean;
+  /**
    * 特殊返金・商品券調整を注文メタフィールド pos.adjustments に書く（初めはオフ）。
    * オフのときは注文に書かず・読まず、精算は今までどおりアプリの記録（DB）で数える。
    * docs/ORDER_ADJUSTMENTS_METAFIELD.md
@@ -308,6 +313,7 @@ export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
   reflectVoucherAdjustmentToSettlement: true,
   reflectReceiptCashAdjustmentToSettlement: true,
   requireApprovalForPaymentMethodOverride: false,
+  refundReservationEnabled: false,
   writeOrderAdjustmentsMetafield: false,
   specialRefundUiLabel: "特殊返金",
   voucherAdjustmentUiLabel: "商品券調整",

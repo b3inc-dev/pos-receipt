@@ -1,7 +1,8 @@
 /**
  * GET  /api/refund-reservations?sourceOrderId=...  → その注文の返金の予約（開いたときに、できた返金へ当て直す）
  * POST /api/refund-reservations                     → 予約する。本文: { sourceOrderId, sourceOrderName?, locationId?,
- *        rows: [{ actualRefundMethod, eventType, amount }]（最後の行は残り）, note?, createdBy? }
+ *        expectedAmount（返金する金額）, rows: [{ actualRefundMethod, eventType, amount }]（最後の行は残り）, note?, createdBy? }
+ * 管理画面の「返金の予約」がオフのとき: GET は enabled: false（当てない）、POST は 403。
  * docs/REFUND_RESERVATION.md。Shopify では返金しない。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
@@ -11,6 +12,7 @@ import {
   applyRefundReservationsForOrder,
   createRefundReservation,
   listRefundReservations,
+  refundReservationEnabled,
   serializeReservation,
 } from "../services/refundReservation.server";
 
@@ -39,8 +41,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       console.warn("[refund-reservations] apply failed", e);
       applyError = "Shopify の注文の返金を読めませんでした。少し待って、もう一度開いてください。";
     }
+    const enabled = await refundReservationEnabled(shop.id);
     const items = await listRefundReservations(shop.id, sourceOrderId);
-    return corsJson({ ok: true, items: await withLabels(shop.id, items), applyError });
+    return corsJson({ ok: true, enabled, items: await withLabels(shop.id, items), applyError });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
@@ -61,6 +64,7 @@ export async function action({ request }: ActionFunctionArgs) {
       sourceOrderName: body.sourceOrderName != null ? String(body.sourceOrderName) : null,
       locationId: body.locationId != null ? String(body.locationId) : null,
       rows: body.rows,
+      expectedAmount: body.expectedAmount,
       note: body.note != null ? String(body.note) : null,
       createdBy: body.createdBy != null ? String(body.createdBy) : null,
     });
