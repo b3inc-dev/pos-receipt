@@ -57,14 +57,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!/^-?\d{1,6}$/.test(sortText)) return { ok: false as const, error: "並び順は数字で入れてください。" };
   const values: Partial<LocationDefaults> = {};
   for (const key of DEFAULTABLE_KEYS) values[key] = locked.includes(key) ? location[key] : form.get(key) === "on";
-  const printMode = text("printMode") === "cloudprnt_direct" ? "cloudprnt_direct" : "order_based";
   const nonPos = form.get("nonPosRefundAttributionEnabled") === "on";
   const data = {
     displayName: text("displayName"),
     shortName: text("shortName"),
     sortOrder: Number(sortText),
-    printMode,
-    cloudprntEnabled: form.get("cloudprntEnabled") === "on",
+    // 印字はいつも POS につないだプリンタへ送る（#22）。前の印字のしかたの値はそのまま残し、ここでは書き換えない
     printerProfileId: text("printerProfileId"),
     summaryTargetGroup: text("summaryTargetGroup"),
     nonPosRefundAttributionEnabled: nonPos,
@@ -176,18 +174,8 @@ export default function StoreEditPage() {
             );
           })}
 
-          <AdminBlock title="印字" description="この店のプリンタへの送り方です。">
-            <label>
-              印字のしかた
-              <select name="printMode" defaultValue={location.printMode === "cloudprnt_direct" ? "cloudprnt_direct" : "order_based"}>
-                <option value="order_based">注文を通して印字する</option>
-                <option value="cloudprnt_direct">プリンタに直接送る（CloudPRNT）</option>
-              </select>
-            </label>
-            <label>
-              <input type="checkbox" name="cloudprntEnabled" defaultChecked={location.cloudprntEnabled} />
-              <span>CloudPRNT のプリンタを使う</span>
-            </label>
+          <AdminBlock title="印字" description="この店のレシートは、POS につないだプリンタで印刷します。">
+            <p className="Admin-note">印刷: POS につないだプリンタへ送ります。</p>
             <label>
               プリンタの設定の名前（任意）
               <input name="printerProfileId" defaultValue={location.printerProfileId ?? ""} maxLength={100} autoComplete="off" />

@@ -19,6 +19,8 @@ import {
   getShopTimezoneForDaily,
 } from "../utils/shopTimezone.server";
 import { normalizeLocationIdForQuery } from "../utils/orderSearchQuery";
+import { getAppSetting } from "../utils/appSettings.server";
+import { formatReceiptIssuer, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -63,6 +65,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
     if (and.length) w.AND = and;
 
+    const staffNames = parseStaffNameMap(await getAppSetting(shop.id, STAFF_DISPLAY_NAMES_SETTING_KEY).catch(() => null));
     const items = await prisma.receiptIssue.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -82,6 +85,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isReissue: r.isReissue,
         templateVersion: r.templateVersion,
         createdBy: r.createdBy,
+        createdByStaffId: r.createdByStaffId,
+        issuerLabel: formatReceiptIssuer(r.createdBy, r.createdByStaffId, staffNames),
         createdAt: r.createdAt.toISOString(),
         // 一覧の「今日 18:14」「11月20日 19:04」用（店のタイムゾーン）
         localDate: getCalendarDateStringInTimeZone(r.createdAt, timezone),

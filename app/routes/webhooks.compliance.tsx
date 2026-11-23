@@ -19,6 +19,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { redactReceiptIssuesForOrders } from "../services/receiptRedact.server";
 import {
   buildCustomerDataInventory,
   expandOrderIdVariants,
@@ -102,7 +103,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (topicStr === "customers/redact") {
       // 顧客データの削除要求。
-      // data_request と対称: ReceiptIssue.recipientName と SpecialRefundEvent.note を匿名化。
+      // 指定注文 ID の領収書の宛名（列と発行時の紙面の両方）、特殊返金のメモ・わけ、返金の予約のメモを匿名化（data_request と対称）
       const body = payload as {
         shop_domain?: string;
         orders_to_redact?: number[];
@@ -114,10 +115,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const dbShop = await prisma.shop.findFirst({ where: { shopDomain } });
         if (dbShop) {
           await Promise.all([
-            prisma.receiptIssue.updateMany({
-              where: { shopId: dbShop.id, orderId: { in: orderIds } },
-              data: { recipientName: "[redacted]" },
-            }),
+            // 宛名は列と、発行時の紙面（printSnapshotJson の HTML）の両方から消す（刷り直しで宛名が出ないように）
+            redactReceiptIssuesForOrders(prisma, dbShop.id, orderIds),
             prisma.specialRefundEvent.updateMany({
               where: { shopId: dbShop.id, sourceOrderId: { in: orderIds } },
               data: { note: "[redacted]" },

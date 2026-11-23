@@ -6,7 +6,7 @@
  *   main     → 固定ヘッダー（ロケーション・年/月）+ 履歴一覧 + 固定フッター
  *   preview  → 精算（集計結果表示）。大事な案内（読み込み中・エラー等）は一覧の上に出す
  *   confirm  → 点検／精算の発行確認（画面ごと切り替える。重ね表示は使わない）
- *   done     → 完了（印字方式別メッセージ）
+ *   done     → 完了（POS につないだプリンタで印刷）
  *   historyDetail → 精算履歴明細
  */
 import { render } from "preact";
@@ -19,13 +19,18 @@ import {
   getAvailableMonths,
   getMonthRows,
 } from "../../common/settlementApi.js";
-import { getAppUrl } from "../../common/appUrl.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { formatYmdSlash, formatJstHm } from "../../common/dateDisplay.js";
 import { specialRefundEventTypeLabel } from "../../common/specialRefundLabels.js";
-import { printSettlementReceipt, getPrintSettings } from "../../common/printApi.js";
+import {
+  printSettlementReceipt,
+  getPrintSettings,
+  printResultMessage,
+  PRINT_OUTCOME,
+} from "../../common/printApi.js";
+import { markSettlementPrinted } from "../../common/settlementApi.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { SummaryHeading, SummaryLine, PaymentLine } from "./SummaryTable.jsx";
 import { formatYen, formatDeduction, formatYmdWithWeekday } from "../../common/summaryTableLayout.js";
@@ -258,8 +263,7 @@ function SettlementModal() {
         locationId: selectedLocation.locationId,
         locationName: selectedLocation.locationName,
         targetDate,
-        // サーバーは DB の Location.printMode を正とする。欠落時は order_based で送る（互換用）。
-        printMode: selectedLocation.printMode ?? "order_based",
+        printMode: "shopify_printing",
         isInspection,
       });
       setSettlementResult(res);
@@ -282,7 +286,7 @@ function SettlementModal() {
         locationId: selectedLocation.locationId,
         locationName: selectedLocation.locationName,
         targetDate,
-        printMode: selectedLocation.printMode ?? "order_based",
+        printMode: "shopify_printing",
         isInspection: false,
         reconfirm: true,
       });
@@ -460,7 +464,6 @@ function SettlementModal() {
     return (
       <SettlementIssueConfirmView
         preview={preview}
-        printMode={selectedLocation?.printMode ?? "order_based"}
         isInspection={isInspection}
         loading={loading}
         error={error}
@@ -486,6 +489,8 @@ function SettlementModal() {
           setStep("main");
           setPreview(null);
           setSettlementResult(null);
+          // 精算済み・点検の回数を月別一覧へすぐ反映する
+          loadMonthRows(selectedLocation?.locationId, selectedYear, selectedMonth);
         }}
       />
     );
@@ -735,6 +740,7 @@ function MainView({
                             style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                           >
                             {formatYmdSlash(row.targetDate)}
+                            {Number(row.inspectionCount) > 0 ? `　点検 ${Number(row.inspectionCount)}回` : ""}
                           </s-text>
                           <s-text fontWeight="bold" size="small" style={{ whiteSpace: "nowrap" }}>
                             ¥{Number(row.netSales).toLocaleString()}
@@ -1166,23 +1172,17 @@ function SettlementTopNotices({ loading, error, busyLabel = "読み込み中で�
  * 点検／精算の発行確認。画面ごと切り替える（重ね表示の s-modal は使わない）。
  * 案内・確認の中身・発行ボタンがスクロールなしで見えるよう、上から 何をするか → 結果の案内 → 中身 の順に置く。
  */
-function SettlementIssueConfirmView({ preview, printMode, isInspection, loading, error, onExecute, onBack }) {
-  const printModeLabel =
-    printMode === "cloudprnt_direct"
-      ? "プリンタへ直接印字"
-      : "注文経由で印字（精算用の注文を作ります）";
-
+function SettlementIssueConfirmView({ preview, isInspection, loading, error, onExecute, onBack }) {
   const rows = [
     { label: "ロケーション", value: preview?.locationName ?? "-" },
     { label: "対象日", value: formatYmdSlash(preview?.targetDate ?? "-") },
     { label: "総売上", value: `¥${Number(preview?.total ?? 0).toLocaleString()}`, valueBold: true },
     { label: "件数", value: `${preview?.orderCount ?? 0}件` },
   ];
-  if (!isInspection) rows.push({ label: "印字", value: printModeLabel });
 
   const title = isInspection ? "点検レシートを発行します" : "精算を確定して、精算レシートを発行します";
   const note = isInspection
-    ? "点検ではこの日の精算は確定しません。"
+    ? "点検ではこの日の精算は確定しません。何回でも発行できます。"
     : "確定すると、この日の数が精算履歴に残ります。";
 
   return (
@@ -1198,8 +1198,8 @@ function SettlementIssueConfirmView({ preview, printMode, isInspection, loading,
           <s-box padding="base">
             <s-stack gap="base">
               <SettlementTopNotices loading={loading} error={error} busyLabel="発行中です。画面を閉じずにお待ちください。" />
-              <s-text fontWeight="bold">{title}</s-text>
-              <s-text tone="subdued" size="small">{note}</s-text>
+              <s-text type="strong">{title}</s-text>
+              <s-text color="subdued">{note}</s-text>
               <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="none">
                   {rows.map((row, i, arr) => (
@@ -1232,183 +1232,81 @@ function SettlementIssueConfirmView({ preview, printMode, isInspection, loading,
   );
 }
 
-// ── 完了画面 ──────────────────────────────────────────────────────────────────
-function DoneView({ result, isInspection, targetDateYmd, onBack }) {
-  const isOrderBased = result?.printMode === "order_based";
-  const doneTargetDate = result?.preview?.targetDate ?? result?.targetDate ?? targetDateYmd ?? "-";
-  const doneTotal = result?.preview?.total;
+function SettlementPrintControls({ settlementId, allowReprint = true }) {
   const [printBusy, setPrintBusy] = useState(false);
   const [printMsg, setPrintMsg] = useState("");
-  const [printFlags, setPrintFlags] = useState({
-    preferPrintingApi: false,
-    settlementPrintingApiEnabled: false,
-  });
-  const [flagsLoaded, setFlagsLoaded] = useState(false);
+  const [canDialog, setCanDialog] = useState(false);
+  const [outcome, setOutcome] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
-    getPrintSettings()
-      .then((s) => {
-        if (!cancelled) {
-          setPrintFlags({
-            preferPrintingApi: !!s.preferPrintingApi,
-            settlementPrintingApiEnabled: !!s.settlementPrintingApiEnabled,
-          });
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setFlagsLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const showPrintingApi =
-    flagsLoaded && !!printFlags.settlementPrintingApiEnabled && !!result?.settlementId;
-  const preferNew = showPrintingApi && !!printFlags.preferPrintingApi;
-
-  const handlePrintingApi = async () => {
-    if (!result?.settlementId) {
-      setPrintMsg("精算 ID が無いため Printing API を実行できません");
-      return;
-    }
+  const runPrint = async (allowDialog) => {
+    if (!settlementId || printBusy) return;
     setPrintBusy(true);
     setPrintMsg("");
     try {
-      const res = await printSettlementReceipt(result.settlementId);
+      const res = await printSettlementReceipt(settlementId, { allowDialog });
+      setOutcome(res.outcome || "");
+      setCanDialog(!!res.canUseDialog);
+      setPrintMsg(printResultMessage(res));
       if (res.ok) {
-        setPrintMsg(res.usedDialog ? "印刷ダイアログを開きました" : "プリンタへ送信しました");
-      } else {
-        setPrintMsg(res.error || "印字に失敗しました");
+        try {
+          await markSettlementPrinted(settlementId);
+        } catch (_) {
+          /* 紙面完了ではない。送信受付の記録失敗は印字結果を覆さない */
+        }
       }
     } catch (e) {
-      setPrintMsg(toUserMessage(e?.message) || "印字に失敗しました");
+      setOutcome(PRINT_OUTCOME.FAILED);
+      setPrintMsg(toUserMessage(e?.message) || "印刷できませんでした");
     } finally {
       setPrintBusy(false);
     }
   };
 
-  const printingApiBox = showPrintingApi ? (
+  if (!settlementId) {
+    return <s-text tone="critical">精算の記録が見つからないため印刷できません</s-text>;
+  }
+  if (!allowReprint) {
+    return <s-text tone="subdued">印刷し直すことは、管理画面の精算設定で許可されていません。</s-text>;
+  }
+
+  return (
     <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
       <s-stack gap="small">
-        <s-text fontWeight="bold">
-          {preferNew ? "Shopify Printing API（推奨）" : "Shopify Printing API（代替）"}
+        <s-text tone="subdued" fontSize="small">
+          保存した金額で印刷します。印刷し直しても売上・精算は増えません。
         </s-text>
-        {!preferNew ? (
-          <s-text tone="caution" fontSize="small">
-            ※ 旧経路で印字済みの場合は押さないでください（二重印字になります）。
+        <s-button variant="primary" onClick={() => runPrint(false)} disabled={printBusy}>
+          {printBusy ? "印刷中…" : "レシートを印刷する"}
+        </s-button>
+        {canDialog ? (
+          <s-button onClick={() => runPrint(true)} disabled={printBusy}>
+            ほかのプリンタを選んで印刷する
+          </s-button>
+        ) : null}
+        {printMsg ? (
+          <s-text tone={outcome === PRINT_OUTCOME.DIRECT_ACCEPTED ? "subdued" : "caution"}>
+            {printMsg}
           </s-text>
         ) : null}
-        <s-button
-          variant={preferNew ? "primary" : "secondary"}
-          onClick={handlePrintingApi}
-          disabled={printBusy}
-        >
-          {printBusy ? "送信中…" : "Printing API で印字"}
-        </s-button>
-        {printMsg ? <s-text tone="subdued">{printMsg}</s-text> : null}
       </s-stack>
     </s-box>
-  ) : null;
+  );
+}
 
-  const legacyBox = (() => {
-    if (isInspection) {
-      return (
-        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-          <s-stack gap="small">
-            <s-text fontWeight="bold">
-              {preferNew ? "点検レシート（従来）" : "点検レシート"}
-            </s-text>
-            <s-text tone="subdued">
-              点検では Shopify 上に精算用の注文は作りません。保存した内容をレシートテンプレートで印刷してください。
-            </s-text>
-            {preferNew ? (
-              <s-text tone="caution" fontSize="small">
-                ※ Printing API で印字した場合は、こちらでは再印字しないでください（二重印字）。
-              </s-text>
-            ) : null}
-          </s-stack>
-        </s-box>
-      );
-    }
-    if (isOrderBased && result?.sourceOrderName) {
-      return (
-        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-          <s-stack gap="small">
-            <s-text fontWeight="bold">
-              {preferNew ? "注文経由印字（従来・代替）" : "注文経由印字"}
-            </s-text>
-            <s-text tone="subdued">
-              精算注文 <s-text fontWeight="bold">{result.sourceOrderName}</s-text> を作成しました。
-            </s-text>
-            <s-text tone="subdued" fontSize="small">
-              POS の注文一覧からこの注文を開き、レシートを印刷してください。
-            </s-text>
-            {showPrintingApi ? (
-              <s-text tone="caution" fontSize="small">
-                ※ Printing API と両方で印字すると二重になります。どちらか一方だけ使ってください。
-              </s-text>
-            ) : null}
-          </s-stack>
-        </s-box>
-      );
-    }
-    if (isOrderBased && !result?.sourceOrderName && result?.settlementOrderSkipped === true) {
-      // 印字設定で「精算注文を作成」が OFF の店。失敗ではないので赤字にしない
-      return (
-        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-          <s-stack gap="small">
-            <s-text fontWeight="bold">精算を記録しました（精算注文は作っていません）</s-text>
-            <s-text tone="subdued" fontSize="small">
-              管理画面の印字設定で「精算注文を作成」が OFF のため、Shopify の精算注文は作っていません。
-              {showPrintingApi ? " レシートは上の Printing API の印字を使ってください。" : ""}
-            </s-text>
-          </s-stack>
-        </s-box>
-      );
-    }
-    if (isOrderBased && !result?.sourceOrderName) {
-      return (
-        <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-          <s-stack gap="small">
-            <s-text fontWeight="bold" tone="critical">
-              注文番号を取得できませんでした
-            </s-text>
-            <s-text tone="subdued" fontSize="small">
-              精算は記録しましたが、精算注文の名前が返っていません。管理画面の Shopify 注文一覧で tag SETTLEMENT
-              の注文ができているかを確かめてください。無ければ、同じ日・同じ店の精算をもう一度発行すると、その日の精算注文を探して、無ければ作ります（精算の記録は二重になりません）。
-            </s-text>
-          </s-stack>
-        </s-box>
-      );
-    }
-    return (
-      <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-        <s-stack gap="small">
-          <s-text fontWeight="bold">
-            {preferNew ? "CloudPRNT 直印字（従来・代替）" : "CloudPRNT 直印字"}
-          </s-text>
-          <s-text tone="subdued">精算データを保存しました。プリンタから印刷されます。</s-text>
-          {showPrintingApi ? (
-            <s-text tone="caution" fontSize="small">
-              ※ Printing API と両方で印字すると二重になります。どちらか一方だけ使ってください。
-            </s-text>
-          ) : null}
-          {result?.settlementId ? (
-            <>
-              <s-text tone="subdued" fontSize="small">
-                印字用データは以下のURLで取得できます。実機確認時に CloudPRNT 対応プリンタのポーリング先に設定してください。
-              </s-text>
-              <s-text fontSize="small" fontWeight="bold">
-                {getAppUrl()}/api/settlements/{result.settlementId}/print-payload
-              </s-text>
-            </>
-          ) : null}
-        </s-stack>
-      </s-box>
-    );
-  })();
+/** 精算の状態を店の言葉で出す（DB の値 draft / completed / printed / failed をそのまま見せない） */
+function settlementStatusLabel(status) {
+  if (status === "printed") return "印刷済み";
+  if (status === "completed") return "発行済み";
+  if (status === "draft") return "作成中";
+  if (status === "failed") return "失敗";
+  return status || "-";
+}
+
+// ── 完了画面 ──────────────────────────────────────────────────────────────────
+function DoneView({ result, isInspection, targetDateYmd, onBack }) {
+  const doneTargetDate = result?.preview?.targetDate ?? result?.targetDate ?? targetDateYmd ?? "-";
+  const doneTotal = result?.preview?.total;
+  const kindLabel = isInspection ? "点検" : "精算";
 
   return (
     <s-page heading="発行完了">
@@ -1416,7 +1314,14 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
         <s-box padding="base">
           <s-stack gap="base">
             <s-text fontWeight="bold">
-              {isInspection ? "点検レシートを保存しました" : "精算レシートを保存しました"}
+              {isInspection ? "点検レシートを発行しました" : "精算レシートを発行しました"}
+            </s-text>
+            <s-text tone="subdued" fontSize="small">
+              {isInspection
+                ? "発行した時点の金額を履歴に残しました。精算（その日の確定）はまだです。点検は何回でも発行できます。"
+                : result?.idempotent
+                  ? "この日はすでに精算済みです。保存済みの精算レシートを表示しています。"
+                  : "この日の精算を確定し、履歴に残しました。"}
             </s-text>
             {result?.reconfirmed === true ? (
               <s-text tone="subdued">今の数で確定し直しました。前の確定値は履歴に残っています。</s-text>
@@ -1426,33 +1331,23 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
             ) : null}
             {result?.warning ? <s-text tone="caution">{result.warning}</s-text> : null}
 
-            {/* preferPrintingApi ON → Printing API を primary、旧経路は secondary＋警告 */}
-            {preferNew ? (
-              <>
-                {printingApiBox}
-                {legacyBox}
-              </>
-            ) : (
-              <>
-                {legacyBox}
-                {printingApiBox}
-              </>
-            )}
+            <SettlementPrintControls settlementId={result?.settlementId} />
 
             <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
               <s-stack gap="none">
                 {[
+                  { label: "種別", value: kindLabel },
+                  { label: "対象日", value: formatYmdSlash(doneTargetDate) },
                   {
-                    label: "精算ID",
+                    label: "記録ID",
                     value: result?.settlementId ? `…${result.settlementId.slice(-8)}` : "-",
                   },
-                  { label: "対象日", value: formatYmdSlash(doneTargetDate) },
                   {
                     label: "総売上",
                     value:
                       doneTotal != null
                         ? `¥${Number(doneTotal).toLocaleString()}`
-                        : "（再表示時は履歴から確認）",
+                        : "（履歴から確認）",
                     valueBold: true,
                   },
                 ].map((row, i, arr) => (
@@ -1479,6 +1374,20 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
 
 // ── 精算履歴画面 ──────────────────────────────────────────────────────────────
 function HistoryDetailView({ item, onBack }) {
+  const [allowReprint, setAllowReprint] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    getPrintSettings()
+      .then((s) => {
+        if (!cancelled) setAllowReprint(s.allowReprintSettlement !== false);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <s-page heading="精算履歴明細">
       <s-stack
@@ -1505,14 +1414,7 @@ function HistoryDetailView({ item, onBack }) {
                       label: "種別",
                       value: item.periodLabel?.startsWith("点検_") ? "点検" : "精算",
                     },
-                    { label: "ステータス", value: item.status ?? "-" },
-                    {
-                      label: "印字方式",
-                      value:
-                        item.printMode === "order_based"
-                          ? `注文経由（${item.sourceOrderName ?? "-"}）`
-                          : "CloudPRNT",
-                    },
+                    { label: "状態", value: settlementStatusLabel(item.status) },
                   ].map((row, i, arr) => (
                     <SummaryRow
                       key={row.label}
@@ -1524,6 +1426,10 @@ function HistoryDetailView({ item, onBack }) {
                   ))}
                 </s-stack>
               </s-box>
+              <SettlementPrintControls
+                settlementId={item.id}
+                allowReprint={allowReprint}
+              />
             </s-stack>
           )}
         </s-box>

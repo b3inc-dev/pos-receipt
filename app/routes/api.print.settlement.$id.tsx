@@ -1,7 +1,8 @@
 /**
  * GET /api/print/settlement/:id
  * 精算／点検レシート HTML（Shopify Printing API の src）
- * 旧 order_based / cloudprnt 経路は残置。本ルートは並存の新経路。
+ * 保存済み表示内容（金額・店舗表示名・帳票版）を使う。ライブ再集計しない。
+ * 用紙幅は出力機器設定（再印刷時点）を適用する。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
@@ -11,24 +12,21 @@ import {
   corsPreflightResponse,
 } from "../utils/posAuth.server";
 import prisma from "../db.server";
-import type { SettlementPreviewDTO } from "../services/settlementEngine.server";
-import {
-  renderPrintReceiptHtml,
-  settlementPreviewToPrintModel,
-} from "../services/printReceiptHtml";
 import {
   getAppSetting,
   PRINT_SETTINGS_KEY,
-  resolvePrintPaperWidthMm,
   type PrintSettings,
 } from "../utils/appSettings.server";
-import { nonSalesFeeTotalFromSaved } from "../services/nonSalesFeeLines";
+import { resolvePaperWidthMm } from "../services/printUnification.server";
+import { buildSettlementReprintView } from "../services/settlementPrintSnapshot.server";
+import { getPrintLayout, PRINT_CSP } from "../services/receiptLayoutPrint.server";
+import { layoutSettlementHtml } from "../services/receiptLayoutSettlementPrint.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
-    const { shop } = authResult;
+    const { admin, shop } = authResult;
     const id = params.id;
     if (!id) {
       return corsErrorJson(request, { ok: false, error: "id is required" }, 400);
@@ -48,57 +46,33 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const location = await prisma.location.findFirst({
       where: { shopId: shop.id, shopifyLocationGid: settlement.locationId },
     });
-    const locationName = location?.displayName ?? location?.name ?? settlement.locationId;
-
-    const rawSections = settlement.paymentSectionsJson
-      ? (JSON.parse(settlement.paymentSectionsJson) as Record<string, unknown>[])
-      : [];
-    const paymentSections = rawSections.map((s) => ({
-      gateway: String(s.gateway ?? s.label ?? ""),
-      label: String(s.label ?? s.gateway ?? ""),
-      net: Number(s.net ?? 0),
-      refund: Number(s.refund ?? 0),
-      txCount: Number(s.txCount ?? 0),
-      refundCount: Number(s.refundCount ?? 0),
-    }));
-
-    const preview: SettlementPreviewDTO = {
-      locationId: settlement.locationId,
-      locationName,
-      targetDate: settlement.targetDate,
-      currency: settlement.currency ?? "JPY",
-      total: Number(settlement.total),
-      netSales: Number(settlement.netSales),
-      tax: Number(settlement.tax),
-      discounts: Number(settlement.discounts),
-      vipPointsUsed: Number(settlement.vipPointsUsed),
-      refundTotal: Number(settlement.refundTotal),
-      orderCount: settlement.orderCount,
-      refundCount: settlement.refundCount,
-      itemCount: settlement.itemCount,
-      voucherChangeAmount: Number(settlement.voucherChangeAmount),
-      paymentSections,
-      nonSalesFeeTotal: nonSalesFeeTotalFromSaved(Number(settlement.total), paymentSections),
-      appliedSpecialRefundEvents: [],
-      appliedVoucherAdjustments: [],
-      loyaltyUsageDisplayLabel: "ポイント利用",
-      settlementTxFirstHm: null,
-      settlementTxLastHm: null,
-      taxShopify: 0,
-    };
+    const currentLocationName =
+      location?.displayName ?? location?.name ?? settlement.locationId;
 
     const printSettings =
       (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
-    const paper = resolvePrintPaperWidthMm(printSettings);
+    const devicePaperWidthMm = resolvePaperWidthMm(printSettings);
 
-    const isInspection = String(settlement.periodLabel ?? "").startsWith("点検");
-    const html = renderPrintReceiptHtml(
-      settlementPreviewToPrintModel(preview, {
-        isInspection,
-        paperWidthMm: paper,
-      }),
-    );
-    return corsHtml(request, html);
+    // 管理画面のレイアウト（#69）を「印字に使う」にしているときだけ。作れなければ今までの印字
+    const layout = await getPrintLayout(shop.id, "settlement");
+    if (layout) {
+      const html = await layoutSettlementHtml(admin, shop.id, settlement, layout, {
+        currentLocationName,
+        paperWidthMm: devicePaperWidthMm,
+      }).catch((e: unknown) => {
+        console.warn("[receipt-layout] settlement print failed; falling back", {
+          error: (e instanceof Error ? e.message : String(e)).slice(0, 200),
+        });
+        return null;
+      });
+      if (html) return corsHtml(request, html, { headers: { "Content-Security-Policy": PRINT_CSP } });
+    }
+
+    const reprint = buildSettlementReprintView(settlement, {
+      currentLocationName,
+      devicePaperWidthMm,
+    });
+    return corsHtml(request, reprint.html);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);

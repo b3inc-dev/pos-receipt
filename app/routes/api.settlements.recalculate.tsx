@@ -8,15 +8,15 @@
  * （応答に confirmed: true）。Shopify の精算注文は書き換えない（T の決定「確定値を守る」）。
  * 比べるために今の集計を 1 回行い、違えば changedSinceConfirm: true・livePreview を返す
  * （再確定は api.settlements.create の reconfirm: true）。
- * 確定前の日は従来どおり集計し直し、精算注文を更新する。
+ * 確定前の日は集計し直すだけ（#22: Shopify の精算注文は作らない・更新しない）。
+ * ライブ再集計はプレビュー／日次キャッシュのみ。Shopify 精算注文は更新しない。
+ * 再印刷は保存済み Settlement を使う（本 API は帳票スナップショットを書き換えない）。
  */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import { buildSettlementPreview } from "../services/settlementEngine.server";
-import { syncSettlementOrderLikeGas } from "../services/settlementOrderGas.server";
 import { upsertDailySummaryCacheFromPreview } from "../services/salesSummaryEngine.server";
 import { settlementApiErrorResponse } from "../utils/settlementApiError.server";
-import { resolveSettlementOrderSyncOptions } from "../services/settlementSyncSettings.server";
 import prisma from "../db.server";
 import {
   CONFIRMED_SETTLEMENT_STATUSES,
@@ -67,7 +67,6 @@ export async function action({ request }: ActionFunctionArgs) {
     let { locationId, locationName, targetDate } = body;
     const { settlementId } = body;
 
-    // settlementId が指定された場合は既存レコードから取得
     if (settlementId && !locationId) {
       const existing = await prisma.settlement.findFirst({
         where: { id: String(settlementId), shopId: shop.id },
@@ -157,35 +156,12 @@ export async function action({ request }: ActionFunctionArgs) {
       // キャッシュ更新失敗は精算結果に影響させない
     }
 
-    // GAS uiReupsertByOrder / upsertSettlement: 再集計後に Shopify 精算注文を更新
-    let sourceOrderId: string | null = null;
-    let sourceOrderName: string | null = null;
-    const locIdStr = String(locationId);
-    const locGid = locIdStr.startsWith("gid://") ? locIdStr : `gid://shopify/Location/${locIdStr}`;
-    const dbLoc = await prisma.location.findFirst({
-      where: { shopId: shop.id, shopifyLocationGid: locGid },
+    return corsJson({
+      ok: true,
+      preview,
+      sourceOrderId: null,
+      sourceOrderName: null,
     });
-    const printMode = dbLoc?.printMode ?? "order_based";
-    const syncOpts = await resolveSettlementOrderSyncOptions(shop.id, printMode);
-    if (syncOpts.createOrder) {
-      const isInspection = Boolean(
-        settlementId &&
-          (await prisma.settlement.findFirst({
-            where: { id: String(settlementId), shopId: shop.id },
-            select: { periodLabel: true },
-          }))?.periodLabel?.startsWith("点検_"),
-      );
-      if (!isInspection) {
-        const sync = await syncSettlementOrderLikeGas(admin, shop.id, preview, {
-          attachNote: syncOpts.attachNote,
-          attachMetafields: syncOpts.attachMetafields,
-        });
-        sourceOrderId = sync.orderId;
-        sourceOrderName = sync.orderName;
-      }
-    }
-
-    return corsJson({ ok: true, preview, sourceOrderId, sourceOrderName });
   } catch (err) {
     return settlementApiErrorResponse(request, err);
   }

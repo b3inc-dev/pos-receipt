@@ -4,9 +4,32 @@
  *
  * print src は相対パスのみ渡す。Shopify が application_url を付与する。
  * getAppUrl() 絶対 URL は使わない（公開アプリ／DEV トンネルでオリジン不一致になり得る）。
+ *
+ * 直接印字は connected: true の機種のみ。未接続を成功扱いしない。
+ * print() の解決は API 受付であり、紙の排出完了ではない。
+ * タイムアウト後は成否不明として扱い、自動再送しない。
  */
 import { getAppUrl } from "./appUrl.js";
 import { toUserMessage } from "./errorMessage.js";
+import {
+  PRINT_OUTCOME,
+  PRINT_TIMEOUT_MS,
+  classifyPrinters,
+  mapPrinterErrorMessage,
+  pickDirectPrinter,
+  printResultMessage,
+  withTimeout,
+} from "./printApiCore.js";
+
+export {
+  PRINT_OUTCOME,
+  PRINT_TIMEOUT_MS,
+  classifyPrinters,
+  pickDirectPrinter,
+  printResultMessage,
+} from "./printApiCore.js";
+
+const inFlightSrc = new Set();
 
 /**
  * @param {string} relativePath 例: /api/print/sales/123
@@ -17,11 +40,7 @@ export function printSrc(relativePath) {
   return path;
 }
 
-/**
- * @returns {Promise<{ ok: boolean, printer?: object, error?: string, usedDialog?: boolean }>}
- */
-export async function printHtml(relativeOrAbsoluteSrc) {
-  // 絶対 URL が渡ってきた場合もパス部分だけ使う（誤用防止）
+function toRelativeSrc(relativeOrAbsoluteSrc) {
   let src = relativeOrAbsoluteSrc;
   if (typeof src === "string" && /^https?:\/\//i.test(src)) {
     try {
@@ -32,60 +51,149 @@ export async function printHtml(relativeOrAbsoluteSrc) {
   } else {
     src = printSrc(String(relativeOrAbsoluteSrc || "/"));
   }
+  return src;
+}
+
+/**
+ * @param {string} relativeOrAbsoluteSrc
+ * @param {{ allowDialog?: boolean }} [options]
+ * @returns {Promise<{
+ *   ok: boolean,
+ *   outcome: string,
+ *   printer?: object,
+ *   error?: string,
+ *   usedDialog?: boolean,
+ *   canUseDialog?: boolean,
+ *   paperConfirmed?: boolean,
+ *   extraConnected?: number,
+ *   disconnectedCount?: number,
+ * }>}
+ */
+export async function printHtml(relativeOrAbsoluteSrc, options = {}) {
+  const allowDialog = !!options.allowDialog;
+  const src = toRelativeSrc(relativeOrAbsoluteSrc);
 
   const printing = globalThis?.shopify?.printing;
   if (!printing?.print) {
     return {
       ok: false,
+      outcome: PRINT_OUTCOME.UNAVAILABLE,
+      paperConfirmed: false,
       error:
-        "この POS では Printing API を利用できません。api_version 2026-07+ と POS 11.11+ が必要です。",
+        "この POS では印刷できません。Shopify POS を新しい版に更新してください。",
     };
   }
 
+  if (inFlightSrc.has(src)) {
+    return {
+      ok: false,
+      outcome: PRINT_OUTCOME.IN_FLIGHT,
+      paperConfirmed: false,
+      error: "印刷中です。終わるまでお待ちください。",
+    };
+  }
+  inFlightSrc.add(src);
+
   try {
-    let printer = null;
+    let classified = {
+      connected: [],
+      disconnected: [],
+      connectedCount: 0,
+      disconnectedCount: 0,
+      totalCount: 0,
+    };
     if (typeof printing.getPrinters === "function") {
-      const printers = await printing.getPrinters();
-      const list = Array.isArray(printers) ? printers : printers?.printers ?? [];
-      // connected のみ。未接続の list[0] は渡さない（公式: printer 省略＝ダイアログ）
-      printer = list.find((p) => p?.connected) ?? null;
+      try {
+        const printers = await withTimeout(printing.getPrinters(), PRINT_TIMEOUT_MS);
+        classified = classifyPrinters(printers);
+      } catch {
+        return {
+          ok: false,
+          outcome: PRINT_OUTCOME.FAILED,
+          paperConfirmed: false,
+          error: "プリンタを見つけられませんでした。まだ印刷していません。プリンタのつながりを確かめて、もう一度お試しください。",
+        };
+      }
     }
 
-    if (printer) {
-      await printing.print(src, { printer });
-      return { ok: true, printer };
+    const printer = pickDirectPrinter({ printers: classified.connected });
+    if (!printer) {
+      if (!allowDialog) {
+        return {
+          ok: false,
+          outcome: PRINT_OUTCOME.NO_CONNECTED_PRINTER,
+          canUseDialog: true,
+          usedDialog: false,
+          paperConfirmed: false,
+          disconnectedCount: classified.disconnectedCount,
+          error:
+            classified.disconnectedCount > 0
+              ? "つながっているプリンタがありません。用紙・電源・つながりを確かめてください。"
+              : "つながっているレシートプリンタがありません。POS の設定でプリンタをつないでください。",
+        };
+      }
+      await withTimeout(printing.print(src), PRINT_TIMEOUT_MS);
+      return {
+        ok: true,
+        outcome: PRINT_OUTCOME.DIALOG_PRESENTED,
+        usedDialog: true,
+        paperConfirmed: false,
+      };
     }
 
-    // 接続プリンタ無し: printer 省略でダイアログ
-    await printing.print(src);
-    return { ok: true, usedDialog: true };
+    await withTimeout(printing.print(src, { printer }), PRINT_TIMEOUT_MS);
+    return {
+      ok: true,
+      outcome: PRINT_OUTCOME.DIRECT_ACCEPTED,
+      printer,
+      usedDialog: false,
+      paperConfirmed: false,
+      extraConnected: Math.max(0, classified.connectedCount - 1),
+    };
   } catch (e) {
-    return { ok: false, error: toUserMessage(e?.message || String(e)) };
+    if (e?.name === "PrintTimeoutError" || e?.code === "PRINT_TIMEOUT") {
+      return {
+        ok: false,
+        outcome: PRINT_OUTCOME.TIMEOUT_UNKNOWN,
+        paperConfirmed: false,
+        error: mapPrinterErrorMessage(e?.message),
+      };
+    }
+    return {
+      ok: false,
+      outcome: PRINT_OUTCOME.FAILED,
+      paperConfirmed: false,
+      error: toUserMessage(mapPrinterErrorMessage(e?.message || String(e))),
+    };
+  } finally {
+    inFlightSrc.delete(src);
   }
 }
 
-export async function printSalesReceipt(orderId) {
+export async function printSalesReceipt(orderId, options = {}) {
   const id = String(orderId || "").replace("gid://shopify/Order/", "");
-  return printHtml(`/api/print/sales/${encodeURIComponent(id)}`);
+  const suffix = options.gift ? "?copy=gift" : "";
+  return printHtml(`/api/print/sales/${encodeURIComponent(id)}${suffix}`, options);
 }
 
-export async function printSettlementReceipt(settlementId) {
-  return printHtml(`/api/print/settlement/${encodeURIComponent(settlementId)}`);
+export async function printSettlementReceipt(settlementId, options = {}) {
+  return printHtml(`/api/print/settlement/${encodeURIComponent(settlementId)}`, options);
 }
 
-export async function printGiftReceipt(receiptIssueId) {
-  return printHtml(`/api/print/receipt/${encodeURIComponent(receiptIssueId)}`);
+export async function printGiftReceipt(receiptIssueId, options = {}) {
+  return printHtml(`/api/print/receipt/${encodeURIComponent(receiptIssueId)}`, options);
 }
 
 /**
- * Admin 印字設定（Printing API フラグ）を POS から取得。
- * 失敗時は安全側（旧導線 primary / Printing API 非表示）を返す。
+ * POS 向け。旧フラグが DB に残っていても Printing API を無効化しない。
  */
 export async function getPrintSettings() {
-  const defaults = {
-    preferPrintingApi: false,
-    settlementPrintingApiEnabled: false,
-    receiptPrintingApiEnabled: false,
+  const unified = {
+    preferPrintingApi: true,
+    settlementPrintingApiEnabled: true,
+    receiptPrintingApiEnabled: true,
+    unifiedPrintMode: "shopify_printing",
+    allowReprintSettlement: true,
   };
   try {
     const session = globalThis?.shopify?.session;
@@ -93,14 +201,13 @@ export async function getPrintSettings() {
     const headers = { "Content-Type": "application/json" };
     if (token) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(`${getAppUrl()}/api/settings/print`, { headers });
-    if (!res.ok) return defaults;
+    if (!res.ok) return unified;
     const j = await res.json();
     return {
-      preferPrintingApi: !!j?.preferPrintingApi,
-      settlementPrintingApiEnabled: !!j?.settlementPrintingApiEnabled,
-      receiptPrintingApiEnabled: !!j?.receiptPrintingApiEnabled,
+      ...unified,
+      allowReprintSettlement: j?.allowReprintSettlement !== false,
     };
   } catch (_) {
-    return defaults;
+    return unified;
   }
 }

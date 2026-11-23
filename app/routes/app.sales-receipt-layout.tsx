@@ -3,7 +3,7 @@
  * プレビュー HTML は印字と同じ renderPrintReceiptHtml を使用。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate, useNavigation } from "react-router";
 import { SuccessToast, AdminIntro } from "../components/admin-ui";
 import {
   Page,
@@ -12,10 +12,8 @@ import {
   Text,
   TextField,
   Checkbox,
-  Button,
   BlockStack,
   Banner,
-  InlineStack,
   Select,
   Box,
 } from "@shopify/polaris";
@@ -29,6 +27,7 @@ import {
   DEFAULT_SALES_RECEIPT_SETTINGS,
   type SalesReceiptSettings,
 } from "../utils/appSettings.server";
+import { DEFAULT_GIFT_LAYOUT, GIFT_LAYOUT_KEY, type GiftLayout } from "../utils/salesReceiptSettings";
 import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
@@ -48,7 +47,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...(saved?.layoutJson ?? {}),
     },
   };
-  return { settings };
+  const giftLayout = await getAppSetting<GiftLayout>(shop.id, GIFT_LAYOUT_KEY);
+  return { settings, giftLayout: giftLayout ?? DEFAULT_GIFT_LAYOUT };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -58,6 +58,16 @@ export async function action({ request }: ActionFunctionArgs) {
   const get = (k: string) => formData.get(k);
   const bool = (k: string) => get(k) === "true";
   const str = (k: string, d: string) => String(get(k) ?? d);
+  // 1 回の保存で販売レシートとギフトレシートの両方を保存する（UI ルール v1.1: 保存は 1 画面に 1 つ）。
+  // ギフトの欄が正しくなければ、どちらも保存しない
+  const giftTitle = str("giftTitle", "").trim();
+  const giftFooter = str("giftFooter", "");
+  if (!giftTitle || giftTitle.length > 80 || giftFooter.length > 500) {
+    return Response.json(
+      { ok: false, error: "ギフトレシートの見出しは1〜80文字、末尾文は500文字以内で入力してください。" },
+      { status: 400 },
+    );
+  }
   const prev =
     (await getAppSetting<Partial<SalesReceiptSettings>>(shop.id, SALES_RECEIPT_SETTINGS_KEY)) ??
     {};
@@ -77,10 +87,21 @@ export async function action({ request }: ActionFunctionArgs) {
     },
   };
   await setAppSetting(shop.id, SALES_RECEIPT_SETTINGS_KEY, settings);
-  return Response.json({ ok: true });
+  await setAppSetting(shop.id, GIFT_LAYOUT_KEY, {
+    title: giftTitle,
+    footer: giftFooter,
+    showOrderNumber: bool("giftShowOrderNumber"),
+  });
+  return Response.json({ ok: true, at: Date.now() });
 }
 
-function buildSampleHtml(settings: SalesReceiptSettings): string {
+function buildSampleHtml(settings: SalesReceiptSettings, gift: boolean, layout: GiftLayout): string {
+  if (gift) {
+    return renderPrintReceiptHtml({
+      kind: "gift", layout, orderName: "#1042", paperWidthMm: settings.paperWidthMm,
+      items: [{ name: "サンプル商品 A（M / 黒）", quantity: 1 }, { name: "サンプル商品 B", quantity: 2 }],
+    });
+  }
   // 実印字（buildSalesReceiptPrintModel）と同じく layoutJson フラグで描画制御する
   return renderPrintReceiptHtml({
     kind: "sales",
@@ -138,15 +159,20 @@ function buildSampleHtml(settings: SalesReceiptSettings): string {
 }
 
 export default function SalesReceiptLayoutPage() {
-  const { settings: initial } = useLoaderData<typeof loader>();
+  const { settings: initial, giftLayout: initialGift } = useLoaderData<typeof loader>();
   const submit = useSubmit();
-  const actionData = useActionData<{ ok?: boolean }>();
+  const actionData = useActionData<{ ok?: boolean; error?: string; at?: number }>();
+  const navigation = useNavigation();
+  // 押してから終わるまで保存ボタンを処理中にし、二重に押せないようにする（UI ルール v1.1）
+  const saving = navigation.state !== "idle" && navigation.formMethod?.toLowerCase() === "post";
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
   const [form, setForm] = useState(initial);
 
-  const previewHtml = useMemo(() => buildSampleHtml(form), [form]);
+  const [gift, setGift] = useState(false);
+  const [giftLayout, setGiftLayout] = useState(initialGift);
+  const previewHtml = useMemo(() => buildSampleHtml(form, gift, giftLayout), [form, gift, giftLayout]);
 
   const handleSave = () => {
     const fd = new FormData();
@@ -159,6 +185,9 @@ export default function SalesReceiptLayoutPage() {
     fd.set("showSku", form.layoutJson.showSku ? "true" : "false");
     fd.set("showPayments", form.layoutJson.showPayments ? "true" : "false");
     fd.set("showLocation", form.layoutJson.showLocation ? "true" : "false");
+    fd.set("giftTitle", giftLayout.title);
+    fd.set("giftFooter", giftLayout.footer);
+    fd.set("giftShowOrderNumber", giftLayout.showOrderNumber ? "true" : "false");
     submit(fd, { method: "post" });
   };
 
@@ -167,7 +196,12 @@ export default function SalesReceiptLayoutPage() {
       <Page
         title="販売レイアウト編集"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
+        primaryAction={{
+          content: saving ? "処理中…" : "保存",
+          onAction: handleSave,
+          loading: saving,
+          disabled: saving,
+        }}
       >
         <Card padding="0">
           <TabGroupBar tabs={RECEIPT_TABS} />
@@ -175,9 +209,14 @@ export default function SalesReceiptLayoutPage() {
         <Layout>
           {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
           <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
+          {actionData?.ok === false && actionData.error && (
+            <Layout.Section>
+              <Banner tone="critical">保存していません。{actionData.error}</Banner>
+            </Layout.Section>
+          )}
           <Layout.Section>
             {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-            <AdminIntro><p>精算・領収書も同一 HTML レンダラ（printReceiptHtml）を利用します。販売レシートの見た目をここで調整し、印字結果と一致させます。</p></AdminIntro>
+            <AdminIntro><p>販売レシートとギフトレシートの見た目を選びます。プレビューは印字と同じ作りで、保存すると次の印字から変わります。</p></AdminIntro>
           </Layout.Section>
           <Layout.Section variant="oneHalf">
             <Card>
@@ -260,8 +299,20 @@ export default function SalesReceiptLayoutPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
-                  印字プレビュー（同一 HTML）
+                  印字プレビュー
                 </Text>
+                <Checkbox label="ギフトレシートをプレビュー（金額なし）" checked={gift} onChange={setGift} />
+                {gift && (
+                  <BlockStack gap="200">
+                    <TextField label="ギフトの見出し" value={giftLayout.title} maxLength={80} autoComplete="off"
+                      onChange={(title) => setGiftLayout((prev) => ({ ...prev, title }))} />
+                    <TextField label="ギフトの末尾文" value={giftLayout.footer} maxLength={500} multiline={2} autoComplete="off"
+                      onChange={(footer) => setGiftLayout((prev) => ({ ...prev, footer }))} />
+                    <Checkbox label="ギフトに注文番号を表示" checked={giftLayout.showOrderNumber}
+                      onChange={(showOrderNumber) => setGiftLayout((prev) => ({ ...prev, showOrderNumber }))} />
+                    <Text as="p" tone="subdued">ギフトレシートの設定も、上の「保存」で一緒に保存します。</Text>
+                  </BlockStack>
+                )}
                 <Box
                   padding="300"
                   background="bg-surface-secondary"

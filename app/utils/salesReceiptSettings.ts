@@ -31,3 +31,15 @@ export const DEFAULT_SALES_RECEIPT_SETTINGS: SalesReceiptSettings = {
     showLocation: true,
   },
 };
+
+export const GIFT_LAYOUT_KEY = "gift_receipt_layout";
+export interface GiftLayout {
+  title: string;
+  footer: string;
+  showOrderNumber: boolean;
+}
+export const DEFAULT_GIFT_LAYOUT: GiftLayout = {
+  title: "ギフトレシート",
+  footer: "",
+  showOrderNumber: true,
+};

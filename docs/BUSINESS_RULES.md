@@ -143,7 +143,8 @@ Location Stock の POS Lite 配送では、送料が注文の配送料でなく 
 - 注文詳細 API は lineItems の `staffMember` を読まない（`read_users` が要り、無い店では注文の取得ごと 500 になるため。`read_users` は足さない）。`staffMemberName` は今は空で返し、POS 詳細 UI の「販売: …」は出ない
 - 帰属スタッフはアプリの記録（orders/create・orders/updated の `attributed_staffs`）から入れる形を #84 で別に進めている
 - 精算集計・精算レシート文言・領収書金額計算には **未使用**
-- `ReceiptIssue.createdBy` は API で受け取れるが、POS `receiptApi.js` は送っていない
+- 領収書の発行者（T さん決定・2026-11-23 4:20）: 「領収書を発行した人 1 人」で、販売担当（帰属スタッフ）とは別。POS `receiptApi.js` が `currentSession.staffMemberId`（ピン留め中のスタッフ。無ければ `userId`）を `staffMemberId` として送り、サーバーが数字だけにそろえて `ReceiptIssue.createdByStaffId` に保存する。名前は管理画面「スタッフ名」の登録（AppSetting `staff_display_names_v1`）があれば発行時に `createdBy` に残す。POS からの自由入力の名前は受けない。`staffMember` は `read_users` が要るので読まない
+- 管理画面「領収書発行履歴」の「発行者」列は いまの登録名 → 発行時の名前 → `スタッフ ID n` → `—`（`app/utils/receiptIssuer.ts`）。印字に出すかは #69 のレイアウト編集で扱う
 
 ---
 
@@ -300,7 +301,7 @@ Shopify 返金の状態（`shopifyRefundStatus`）による扱い:
 
 `buildSettlementReceiptText` は日本語固定ラベルで total / net / tax / 割引 / 返金 / 件数 / 点数 / 支払別を出力。精算設定の項目名カスタムは **このテキストビルダでは未使用**。
 
-order_based の Shopify 注文ノート／metafields は `settlementOrderGas` が別途構築。
+Shopify 精算注文ノート／metafields は印字経路では新規作成しない（`settlementOrderGas` は未使用）。
 
 ---
 
@@ -323,9 +324,9 @@ order_based の Shopify 注文ノート／metafields は `settlementOrderGas` �
 
 | 操作 | ルール |
 |------|--------|
-| 精算 create | `idempotencyKey = shopId:locationId:targetDate:printMode`。既存なら新規 Settlement を作らず、**集計し直さずに DB の確定値を返す**（応答 `confirmed: true`）。Shopify の精算注文・売上サマリーのキャッシュは書き換えない（D21） |
-| 精算 再確定 | create に `reconfirm: true`。集計し直し、数が同じなら何も変えない（`reconfirmed: false`）。変わっていれば新しい行を確定値にし、前の行は `superseded`（履歴に「再確定前」）。order_based は精算注文も直す。POS は「更新」で数が変わったと分かった日に「今の数で再確定する」を出す（D21） |
-| 点検 | 冪等キー対象外。発行ごとにその時点の金額と支払方法別内訳を保存する。返金処理中の特殊返金があっても警告つきで出す（D21）。月別一覧ではその日の精算として扱わない |
+| 精算 create | `idempotencyKey = shopId:locationId:targetDate`（旧 printMode 付きキーも検索）。既存なら新規 Settlement を作らず、**集計し直さずに DB の確定値を返す**（応答 `confirmed: true`）。売上サマリーのキャッシュは書き換えない。Shopify 精算注文は作らない（D21・#22） |
+| 精算 再確定 | create に `reconfirm: true`。集計し直し、数が同じなら何も変えない（`reconfirmed: false`）。変わっていれば新しい行を確定値にし、前の行は `superseded`（履歴に「再確定前」）。POS は「更新」で数が変わったと分かった日に「今の数で再確定する」を出す（D21） |
+| 点検 | 冪等キー対象外。1 日に何回でも発行でき、発行ごとに Settlement を 1 行作り、その時点の金額・件数・支払方法別内訳を残す（T 決定 2026-11-22）。返金処理中の特殊返金があっても警告つきで出す（D21）。点検の行はその日の精算（確定）として扱わない（POS の月別一覧は点検の回数だけ出す。照合 CSV は除外） |
 | 同時実行 | `SettlementOperationLock` |
 | 領収書 | クライアント UUID `idempotencyKey` |
 | 特殊返金 | POS が `idempotencyKey` を送る → 登録の ID は `pos_sr_<キー>`、Shopify の `refundCreate @idempotent` にも同じ ID。**移行期間はキー無しも受ける**（古い POS の拡張。`console.warn` を残し、main と同じく登録ごとに新しい ID を作り、その ID を Shopify の冪等キーに使う）。不正な形のキーは 400。出す順番は `DEPLOY_PUBLIC_AND_INHOUSE.md` §4.1 |

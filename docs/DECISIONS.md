@@ -8,9 +8,9 @@
 |----|------|------|
 | D1 | 精算の日次注文取得は GAS 同型（`location_id` + created∪updated∪cancelled）。`source_name:pos` と retailLocation 二次フィルタは付けない。注文検索ピッカーとは境界が異なる（BUSINESS_RULES §1） | `settlementEngine` `buildSettlementPreviewImpl` |
 | D2 | 売上サマリー日次の基礎数値は精算プレビューと同一関数で差分ゼロ化 | `salesSummaryEngine.computeAndCacheDailySummary` → `buildSettlementPreview` |
-| D3 | 実効 printMode は DB `Location.printMode`。リクエスト body は決定に使わない | `api.settlements.create.tsx` |
-| D4 | `cloudprnt_direct` では Shopify 精算注文を作らない | `settlementSyncSettings` + create 分岐 |
-| D5 | 精算の冪等キーは `shopId:locationId:targetDate:printMode`。点検は除外 | create ルート |
+| D3 | 実行時 printMode は常に `shopify_printing`。DB の旧値は読み取りのみ | `printUnification.server.ts` |
+| D4 | 精算・点検で Shopify 精算注文を作らない（監査用任意作成も採用しない） | `settlementSyncSettings` + create |
+| D5 | 精算の冪等キーは `shopId:locationId:targetDate`。旧 printMode 付きキーも検索。点検は除外 | create ルート |
 | D6 | 返金の店舗帰属は設定可能な metafield / Location フラグで制御。注文基準モードの精算は metafield を計上先に使わない（不一致ログのみ）。返金基準モードだけ当日返金 TX → metafield → resolve | `refundAggregation.server.ts` / `decideRefundAttributionForSettlement` |
 | D7 | ポイント利用額は割引の形で見分ける。コードの頭（初めの値 `VIP-`・`SP-POINT-`）、Shop Point 旧形式（`SP`＋16 進）、POS の手動割引の名前（初めの値 `Shop Point`）。「ポイント/会員施策設定」で変えられ、コードに固定しない。ciara-system（PR #979）と同じ初めの値。旧形式は POS Receipt だけが数える | `pointRedemptionRules.ts` + `aggregateGasStyleForOrders` |
 | D8 | 公開／自社は別 toml・別 Render・APP_MODE。起動時に APP_DISTRIBUTION typo と既知 Render ホスト取り違えを拒否。deploy 後に APP_MODE を verify | `DEPLOY_PUBLIC_AND_INHOUSE.md` + `scripts/lib/deployGuard.mjs` + `server.js` |
@@ -22,9 +22,9 @@
 | D14 | LIFF 会員証は、LINE ユーザー ID の顧客メタフィールドを決めた順で読む。既定は `line_crm.line_user_id`（LINE CRM＝Shop CRM for LINE の項目。line-crm の D-APP-14）→ `socialplus.line`（SocialPlus と、LINE CRM の互換の書き込み）。環境変数 `MEMBER_CARD_LINE_ID_METAFIELDS`（`<namespace>.<key>` をカンマ区切り、多くて 4 つ）で並べ替えられる。顧客の LINE ユーザー ID は「並べた順で最初に値が入っている項目」の値（LINE CRM の項目に値があれば、古い項目の別の ID では見つけない）。タグ `line:<id>` のファストパスはそのまま（タグで見つかった人も同じ決まりで確かめる）。全件スキャンは項目ごとに `metafields.<namespace>.<key>:*` を並べた順に行う。`socialplus.line` 以外は、定義の `adminFilterable` が FILTERABLE のときだけ全件を見る（絞り込みが効かない項目で全顧客を見ない。定義が無い・オフの項目は飛ばす。先の項目を定義の読み込み・検索のエラーで見られなかったら、後の項目で探さず `API_ERROR`。Throttled は定義の読み込みも検索もやり直し、使い切ったら `THROTTLED`）。`socialplus.line` は前と同じ | `app/utils/memberCardLineFields.ts` + `app/lib/customer.server.ts` + `app/lib/memberCardFieldFilter.server.ts` |
 | D15 | 精算・印字の税／純売上の正は設定税率％による税込逆算。`taxShopify`（注文税×keepRatio）は診断用 | `settlementTaxPure` + preview DTO |
 | D16 | レガシー Gift Card API 集計の既定は OFF（検証時のみ ON）。T が OFF に決めた（2026-11-22 時点の連絡帳 #39）。既定の変更（ON→OFF）は #13 で入る。本番の店は #16 を出す前に設定画面でチェックを外して保存する | `DEFAULT_SETTLEMENT_SETTINGS` |
-| D17 | Printing API は Conditional-Go で並存。旧 order_based / cloudprnt は残置。紙幅は中立 `paperWidthMm`（`cloudprntPaperWidth` と同期） | `printApi.js` + `printPaperWidth.ts` + P0 SETTLEMENT 抑制方針 |
+| D17 | 印字は `shopify.printing` に一本化（#22・#53。§5）。旧 order_based / cloudprnt は使わない。紙幅は中立 `paperWidthMm`（`cloudprntPaperWidth` と同期） | `printApi.js` + `printPaperWidth.ts` + `printUnification.server.ts` |
 | D18 | 特殊返金の Shopify 返金が `pending`（成否不明）のあいだは精算を確定しない。二重計上も抜けも出さないため | `assertNoPendingSpecialRefunds`（`specialRefundOverlayPure.server.ts`） |
-| D19 | 精算注文（SETTLEMENT）を作るかは、印字設定「精算注文を作成」（`createSettlementOrderWhenPrinting`）の保存が無ければ ON。管理画面は保存が無いとチェックが入って見えるので、サーバーも同じにそろえる（今の本番の動きを続ける）。作らないのは、チェックを外して保存したとき・精算設定 `orderBasedCreateSettlementOrderEnabled=false`・`cloudprnt_direct`。作らなかったとき API は `settlementOrderSkipped: true` を返し、POS は「再インストール」を案内しない | `settlementSyncSettings.server.ts` `shouldCreateSettlementOrder` |
+| D19 | ~~精算注文（SETTLEMENT）を作るかは印字設定「精算注文を作成」で決める~~ → #22（印字の一本化）で精算注文はいつも作らない（`settlementSyncSettings` は常に `createOrder: false`）。D21 の「order_based は精算注文も直す」も同じく無くなった | `settlementSyncSettings.server.ts` |
 | D20 | 前からある pending の特殊返金（ID が `pos_sr_` で始まらない）は、Shopify を読み直して決めるだけで返金を実行しない | `specialRefundLegacyRecheck.server.ts` / `api.special-refunds.$id.recheck.tsx` |
 | D21 | 確定値を守る（T の決定 2026-11-22・Issue #20）。確定済みの日は、もう一度「確定」を押しても DB の Settlement の値を返し、Shopify の精算注文は書き換えない。再集計は比べるために集計し、数が変わっていれば `changedSinceConfirm` を返す。**再確定**（create の `reconfirm: true`、T の決定 2026-11-23 4:20）は今の数で確定し直し、前の行は `status=superseded`・冪等キーなしで履歴に残す（migration なし）。order_based は精算注文も新しい値に直す。点検は毎回その時点の金額を保存し、返金処理中（pending）の特殊返金があっても警告つきで出す（T の決定 2026-11-23 4:25。pending の分は数に入れず、売上サマリーのキャッシュも書かない）。精算の確定・再確定・再集計は pending で止める（D18） | `api.settlements.create.tsx` / `api.settlements.recalculate.tsx` / `api.settlements.preview.tsx` / `settlementConfirmedPure.server.ts` |
 | D22 | 売上に含めない送料等（明細の `_lsi_fee="1"` かつ `_lsi_fee_sales="0"`。Location Stock #76）は、支払方法別の金額に残したまま総売上・純売上・税・点数・割引から外し、`nonSalesFeeTotal` として分けて出す。領収書の金額は受け取った全額のまま（T 2026-11-23）。見分けは明細の属性だけ（名前は見ない）。店ごとの切り替えは Location Stock の管理画面の設定が明細に残す値で決まり、POS Receipt 側に設定は足さない。Settlement に列は足さず、保存済みの印字は「支払方法別の合計 − 総売上」で戻す（BUSINESS_RULES §7.1） | `nonSalesFeeLines.ts` + `aggregateGasStyleForOrders` + `buildSettlementPreviewImpl` |
@@ -55,7 +55,7 @@
 | 返金オーバーレイ死コード | `getRefundOverlayForDay` / `computeRefundsOnlyForDay` は定義・export されるが、プレビュー本体からの適用は無く、他ファイルからの import も見当たらない |
 | 表示と集計の混在（軽減） | payment section の `gateway` は集計キーのまま。`label` はマスタ解決。マスタ未登録の日本語キーはキー＝表示のまま |
 | 精算設定ラベル未使用 | UI で項目名を変えられても `buildSettlementReceiptText` は固定文言 |
-| 点検 UI と実装 | DoneView は点検で Shopify 注文を作らない旨を示しうるが、`order_based` では `syncInspectionOrderLikeGas` を呼びうる |
+| 点検 UI と実装 | 精算・点検とも Shopify 注文を作らない |
 | customAttributes | 取得するが UI 非表示 |
 | レガシー Gift Card | 既定 OFF（T が 2026-11-22 までに OFF に決定）。ON 時のみ API 加算。取得失敗時は精算を確定しない（以前は握りつぶして 0 円のまま続行していた） |
 | 用紙幅キー | 中立 `paperWidthMm` を追加済み。レガシー `cloudprntPaperWidth` は同期エイリアスとして残置（フルリネームは未実施） |
@@ -69,34 +69,33 @@
 | created∪updated の二重計上 | 注文 id で union |
 | オーバーレイと本集計の二重 | オーバーレイ未適用のため現状は二重にならない（死コード） |
 | Gift Card と注文の二重 | POS union に含まれる orderId はレガシー加算スキップ |
-| 精算の再実行 | 冪等キーで Settlement 行の重複作成を防止。再同期で Shopify 側は更新しうる |
-| 点検の再実行 | 冪等なし → 複数回作成しうる |
+| 精算の再実行 | 冪等キーで Settlement 行の重複作成を防止。Shopify 精算注文は更新しない |
+| 点検の再実行 | 何回でも発行してよい（T 決定 2026-11-22）。発行ごとに記録し、その時点の金額を残す。点検の行は精算の確定・月別一覧の精算済み・照合 CSV に数えない |
 | 返金ロケーション不一致 | その精算から除外 → **他店計上漏れ／過少**のリスク（設定依存） |
 | GraphQL エラー | リトライ／スロットルあり。同期失敗時 create は 500。キャッシュ失敗は精算成功を落とさない箇所あり |
 | 過去データ | 履歴は Settlement スナップショット。再計算 API はプレビュー中心 |
-| 領収書 | idempotencyKey。POS は createdBy 未送信 |
+| 領収書 | idempotencyKey。発行者は発行した人（POS のピン留め中スタッフ）の ID を createdByStaffId に保存 |
 
-## 5. Printing API（Conditional-Go・c69438d 以降）
+## 5. Printing API 一本化
 
-- **実装済み**: `shopify.printing` ラッパ、精算／領収書／販売の HTML ルート、Admin の prefer フラグ、拡張 `api_version` 2026-07
-- **残置**: `order_based` / `cloudprnt_direct`（Location.printMode）。CloudPRNT は Advanced／廃止候補
-- **P0 方針**: Printing 主経路では印字用途の SETTLEMENT 作成をスキップ（監査アーカイブはオプトイン）
-- **旧経路完全削除**: mPOP 実機 Go 後の別承認
-- **触らない核**: 集計・特殊返金 DB・metafield・返金帰属
+- 精算・点検・領収書・販売レシートのアプリ独自印字は `shopify.printing` のみ
+- 旧経路切替・CloudPRNT 残置・監査注文任意は採用しない（PR #1 初期方針を上書き）
+- 精算・点検の再印刷は発行時の店舗表示名・帳票版を `paymentSectionsJson` envelope に保存する。用紙幅は機器都合でスナップショットに含めない
+- 詳細: `docs/SETTLEMENT_PRINT_UNIFICATION.md` / `docs/PRINT_DEVICE_COMPAT.md`
 
 ## 6. 未確認事項リスト（横断）
 
-1. mPOP＋POS 11.11+ 実機での Printing 直印字品質（旧経路削除の前提）
-2. CloudPRNT 実機の認証・文字コードと payload の適合（設定項目はあるが実行アダプタなし）
-3. Shopify POS Pro / Light プラン差分が本アプリ動作に与える影響（コード参照なし）
+1. mPOP / mC-Print3 の紙面確認（この環境では未実施。mPOP はユーザー報告）
+2. CloudPRNT 実機経路は廃止（410）。紙幅設定キーのみ互換読み取り
+3. Shopify POS Pro / Lite プラン差分はコードで未検出（アプリ Lite/Pro とは別）
 4. 配送注文・送料を精算に含める／除外する業務ルールの正式決定（コード上は送料非集計）
 5. POS キャンセルと Admin キャンセルを件数上どう区別すべきか（コード上区別なし）
-6. `ReceiptIssue.createdBy` を運用で埋めるか
+6. ~~`ReceiptIssue.createdBy` を運用で埋めるか~~ → 決定（2026-11-23 4:20）: 領収書を発行した人 1 人を記録（販売担当とは別）
 7. line item properties を精算／領収書に出す要件の有無
 8. ギフトレシート（Shopify Gift Receipt）要件の有無（現行未実装）
 9. ~~Admin API October25 と webhook 2026-04 の併用方針~~ → Admin も 2026-04 にそろえた。残る未確認: POS 内から直接呼ぶ Admin GraphQL が答える版
 10. 死コード（refund overlay）削除の是非
-11. 点検 DoneView 文言と order_based 同期のどちらを仕様とするか
+11. ~~点検 DoneView 文言と order_based 同期のどちらを仕様とするか~~ → 点検・精算とも Shopify 注文を作らない（確定・#22）
 12. 精算設定の表示項目名を印字テキストへ反映する要件の有無
 13. `cloudprntPaperWidth` キー名の完全廃止タイミング（現状は `paperWidthMm` 同期）
 

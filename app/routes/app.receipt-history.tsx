@@ -23,6 +23,8 @@ import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
 import { DateFilter } from "../components/DateFilter";
+import { getAppSetting } from "../utils/appSettings.server";
+import { formatReceiptIssuer, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
 
 const PAGE_SIZE = 30;
 
@@ -53,7 +55,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : {}),
   };
 
-  const [total, items] = await Promise.all([
+  const [total, items, staffNameSetting] = await Promise.all([
     prisma.receiptIssue.count({ where: whereClean }),
     prisma.receiptIssue.findMany({
       where: whereClean,
@@ -72,10 +74,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
         templateVersion: true,
         isReissue: true,
         createdBy: true,
+        createdByStaffId: true,
         createdAt: true,
       },
     }),
+    getAppSetting(shop.id, STAFF_DISPLAY_NAMES_SETTING_KEY).catch(() => null),
   ]);
+  const staffNames = parseStaffNameMap(staffNameSetting);
 
   return {
     items: items.map((r) => ({
@@ -89,7 +94,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       currency: r.currency ?? "JPY",
       templateVersion: r.templateVersion,
       isReissue: r.isReissue,
-      createdBy: r.createdBy,
+      issuerLabel: formatReceiptIssuer(r.createdBy, r.createdByStaffId, staffNames),
       createdAt: r.createdAt.toISOString(),
     })),
     total,
@@ -182,7 +187,7 @@ export default function ReceiptHistoryPage() {
                         <th scope="col">但し書き</th>
                         <th scope="col" className="History-num">金額</th>
                         <th scope="col">種別</th>
-                        <th scope="col">担当</th>
+                        <th scope="col">発行者</th>
                         <th scope="col">発行日時</th>
                       </tr>
                     </thead>
@@ -206,9 +211,9 @@ export default function ReceiptHistoryPage() {
                               ? <Badge tone="attention">再発行</Badge>
                               : <Badge tone="success">新規発行</Badge>}
                           </td>
-                          <td data-label="担当">
+                          <td data-label="発行者">
                             <Text as="span" variant="bodySm" tone="subdued">
-                              {item.createdBy ?? "—"}
+                              {item.issuerLabel}
                             </Text>
                           </td>
                           <td data-label="発行日時" className="History-keep">

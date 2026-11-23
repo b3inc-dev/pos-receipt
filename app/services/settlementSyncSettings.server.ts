@@ -1,21 +1,8 @@
 /**
- * 精算注文の Shopify 同期可否（管理画面設定 × printMode × Printing API）
- *
- * 「精算注文を作成」（createSettlementOrderWhenPrinting）は、保存が無ければ ON。
- * 管理画面の印字設定は保存が無いと DEFAULT_PRINT_SETTINGS（true）でチェックが入って見えるので、
- * サーバーも同じ初めの値にそろえる（今の本番の動き = 作る、を続ける）。
- * 作りたくない店は、チェックを外して保存する（明示 false）。
- * Printing API が主の経路かどうかでは変えない。
+ * 精算注文の Shopify 同期。
+ * 印字一本化後は常に作成しない。保存済みの order_based フラグは読み取っても出力に使わない。
  */
-import {
-  getAppSetting,
-  SETTLEMENT_SETTINGS_KEY,
-  DEFAULT_SETTLEMENT_SETTINGS,
-  PRINT_SETTINGS_KEY,
-  DEFAULT_PRINT_SETTINGS,
-  type SettlementSettings,
-  type PrintSettings,
-} from "../utils/appSettings.server";
+import { shouldCreateSettlementShopifyOrder } from "./printUnification.server";
 
 export interface SettlementOrderSyncOptions {
   createOrder: boolean;
@@ -58,32 +45,13 @@ export function shouldCreateSettlementOrder(
 }
 
 export async function resolveSettlementOrderSyncOptions(
-  shopId: string,
+  _shopId: string,
   printMode: string,
 ): Promise<SettlementOrderSyncOptions> {
-  if (printMode !== "order_based") {
-    return { createOrder: false, attachNote: false, attachMetafields: false };
-  }
-
-  const settlementSaved = await getAppSetting<Partial<SettlementSettings>>(
-    shopId,
-    SETTLEMENT_SETTINGS_KEY,
-  );
-  const printSaved = await getAppSetting<Partial<PrintSettings>>(shopId, PRINT_SETTINGS_KEY);
-  const settlement = { ...DEFAULT_SETTLEMENT_SETTINGS, ...settlementSaved };
-  const print = { ...DEFAULT_PRINT_SETTINGS, ...printSaved };
-
-  const createOrder = shouldCreateSettlementOrder(settlement, printSaved);
-
+  const createOrder = shouldCreateSettlementShopifyOrder(printMode);
   return {
     createOrder,
-    attachNote:
-      createOrder &&
-      print.attachSettlementNoteToOrder !== false &&
-      settlement.orderBasedAttachNoteEnabled !== false,
-    attachMetafields:
-      createOrder &&
-      print.attachSettlementMetafieldsToOrder !== false &&
-      settlement.orderBasedAttachMetafieldsEnabled !== false,
+    attachNote: false,
+    attachMetafields: false,
   };
 }

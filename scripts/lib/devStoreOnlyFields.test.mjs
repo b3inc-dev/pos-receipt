@@ -27,16 +27,20 @@ test("「プラン（表示用）」「有効にする機能の一覧」も isDe
   }
 });
 
-/** 「システム診断」の枠（見出し〜閉じ）が {isDevStore && ( … )} または {isDevStore ? ( … ) : null} の中にあるか */
+/** 「システム診断」の枠（見出し〜閉じ）が {isDevStore && ( … )} または {isDevStore ? ( … ) : null} の中にあるか。
+ * 枠は AdminBlock（店舗の画面）・Layout.AnnotatedSection・HomeCard（ホーム。印字の一本化 #22 の作り）のどれでもよい */
+const BOX_CLOSERS = ["</AdminBlock>", "</Layout.AnnotatedSection>", "</HomeCard>"];
 function diagnosticsBoxIsGuarded(src) {
   const title = src.indexOf('title="システム診断"');
   assert.ok(title > 0, "システム診断の枠が見つからない");
-  // 店舗の画面（AdminBlock）と、ホーム（Polaris の Layout.AnnotatedSection）の 2 つの書き方
-  const close = src.lastIndexOf("<AdminBlock", title) > src.lastIndexOf("<Layout.AnnotatedSection", title) ? "</AdminBlock>" : "</Layout.AnnotatedSection>";
   const guard = Math.max(src.lastIndexOf("{isDevStore && (", title), src.lastIndexOf("{isDevStore ? (", title));
   assert.ok(guard > 0, "システム診断の前に isDevStore の分かれ目がない");
-  assert.ok(!src.slice(guard, title).includes(close), "分かれ目が枠の前で閉じている");
-  const end = src.indexOf(close, title);
+  for (const closer of BOX_CLOSERS) {
+    assert.ok(!src.slice(guard, title).includes(closer), "分かれ目が枠の前で閉じている");
+  }
+  const ends = BOX_CLOSERS.map((c) => src.indexOf(c, title)).filter((i) => i > 0);
+  assert.ok(ends.length > 0, "システム診断の枠の閉じが見つからない");
+  const end = Math.min(...ends);
   const after = src.slice(end, end + 80);
   assert.ok(after.includes(")}") || after.includes(") : null}"), "枠のすぐあとで分かれ目を閉じていない");
 }

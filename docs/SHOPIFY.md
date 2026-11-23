@@ -30,7 +30,7 @@ read_orders, read_locations, read_customers, read_gift_cards, read_products,
 write_customers, write_app_proxy, write_draft_orders, write_orders
 ```
 
-精算の order_based は draft orders + orders 更新（ノート・metafield）＋履行に依存。レガシー Gift Card 集計は `read_gift_cards`。
+印字一本化後、精算・点検で draft orders / 精算注文の更新・履行は呼ばない。`write_draft_orders` / `write_orders` は他機能や過去実装のために toml に残る可能性がある。レガシー Gift Card 集計は `read_gift_cards`。
 
 ## 4. 利用している Shopify データ（精算・レシート関連）
 
@@ -41,7 +41,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | Discount allocations / VIP- codes | 割引・VIP 集計 |
 | （staffMember on lineItems は読まない。`read_users` が要るため） | — |
 | customAttributes | 取得のみ（精算・領収書 UI では未使用） |
-| DraftOrder → Order（SETTLEMENT / INSPECTION） | order_based 印字用 |
+| DraftOrder → Order（SETTLEMENT / INSPECTION） | **印字経路では新規作成しない。** 既存履歴は削除しない |
 | Fulfillment create（V2→フォールバック） | 精算注文クローズ |
 | Gift Cards API（任意） | レガシー発行額加算 |
 | Location | 同期・表示・printMode |
@@ -54,7 +54,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | Topic | URI | 処理（コード） |
 |-------|-----|----------------|
 | `app/uninstalled` | `/webhooks/app/uninstalled` | アンインストール処理 |
-| compliance（customers/data_request, customers/redact, shop/redact） | `/webhooks/compliance` | GDPR。`data_request` は DB 列挙＋根拠ログ後に 200（email/phone 非保存。開示は運用）。`customers/redact` は `ReceiptIssue.recipientName` と `SpecialRefundEvent.note` を `[redacted]` に対称化。詳細は `gdprCustomerDataRequest.server.ts` |
+| compliance（customers/data_request, customers/redact, shop/redact） | `/webhooks/compliance` | GDPR。`data_request` は DB 列挙＋根拠ログ後に 200（email/phone 非保存。開示は運用）。`customers/redact` は領収書の宛名を列（`recipientName`）と発行時の紙面（`printSnapshotJson`）の両方から消し（`receiptRedact.server.ts`）、`SpecialRefundEvent.note` も `[redacted]` にする。詳細は `gdprCustomerDataRequest.server.ts` |
 | `orders/updated` | `/webhooks/orders/updated` | 売上サマリー更新キュー + 返金計上 metafield 同期 |
 
 ## 6. メタフィールド
@@ -96,41 +96,31 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 - `socialplus.line` は前と同じ動き（定義を確かめずに `metafields.socialplus.line:*` で全件を見る。その検索がエラーで、ほかの項目でも見つからなければ `API_ERROR`。既定の順では最後なので main と同じ答え）。
 - 未確認: 開発ストアで `line_crm.line_user_id` の定義の絞り込みがオン／オフのときに、全件の検索が何件返すか（オフなら全顧客が返り、上の打ち切りが働くはず）。定義の絞り込みは LINE CRM が定義を作るときにオンにする（line-crm 側の PR）。
 
-## 7. Printing（現行: Conditional-Go）
-
-基準: `c69438d` 以降。POS UI Extensions `api_version = "2026-07"` + `extensions/common/printApi.js`（`shopify.printing.getPrinters` / `print`）。
+## 7. Printing（shopify.printing 一本化）
 
 ### 7.1 現状フロー
 
 ```
-注文作成（Shopify 標準）
-  │
-  ├─ 販売レシート: HTML `/api/print/sales/:id` → shopify.printing（SalesReceiptModal）
-  │
-  ├─ 領収書: DB 発行 +（設定 ON 時）HTML `/api/print/receipt/:id` → shopify.printing
-  │
-  └─ 精算:
-       ├─ Printing API（preferPrintingApi 等）: HTML `/api/print/settlement/:id` → shopify.printing
-       ├─ order_based → SETTLEMENT 注文 → 人が POS 標準レシート印字（旧経路・残置）
-       └─ cloudprnt_direct → テキスト payload 提供（ポーリング想定・送信アダプタなし・Advanced）
+通常の Shopify 販売注文 … 本アプリの印字対象外（POS 標準レシートは残る）
+
+アプリ独自帳票（精算 / 点検 / 領収書 / 販売レシート）
+  → GET /api/print/{settlement|receipt|sales}/:id
+     （精算・点検は発行時の店舗表示名・帳票版・金額。用紙幅は再印刷時点の機器設定）
+  → shopify.printing.print(src, { printer })  ※ connected: true のみ
 ```
 
-**方針（監査既定 / P0）**: Printing を主経路にする店舗では印字用途の SETTLEMENT 作成を抑制しうる（アーカイブ明示オプトインのみ作成）。旧経路の完全削除は mPOP 実機 Go 後。
+旧 `order_based` / `cloudprnt_direct` / Printing API 切替フラグは保存されていても出力に使わない。
+`GET /api/settlements/:id/print-payload` は 410。
 
 ### 7.2 ギフトレシート
 
-- Shopify Gift Receipt 連携は **未実装**
-- 本アプリの「レシート」は精算・領収書・販売レシート HTML を指す
+- 金額なしのギフトレシートは、本アプリの販売レシートの印字（`GET /api/print/sales/:orderId`）で出す。見出し・末尾文・注文番号の表示は管理画面「販売レイアウト編集」で変える（`docs/POS_PRINTING_OPERATOR.md`）
+- Shopify 標準の Gift Receipt との連携は **未実装**
+- 本アプリの「レシート」は精算レシート・点検・領収書・販売レシート帳票を指す
 
-### 7.3 旧経路との関係
+### 7.3 機種・未確認
 
-| 経路 | 状態 |
-|------|------|
-| `shopify.printing` + HTML エンドポイント | **現行の推奨／追加経路**（Conditional-Go） |
-| `order_based` SETTLEMENT 注文 | **残置**。Printing 優先時は作成スキップ方針（P0） |
-| `cloudprnt_direct` | **Advanced／レガシー**。廃止候補。紙幅は中立 `paperWidthMm`（レガシー `cloudprntPaperWidth` と同期） |
-
-集計エンジン・特殊返金 DB・metafield・返金帰属は印字経路と分離（移行しても触らない核）。
+`docs/PRINT_DEVICE_COMPAT.md`。mPOP の紙面確認はこの環境では未実施（ユーザー報告）。
 
 ## 8. POS Extension ターゲット
 
@@ -151,6 +141,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 
 ## 10. 未確認
 
-- mPOP 実機での Printing 直印字品質（紙幅・日本語・切断）。旧経路削除の前提
+- mPOP / mC-Print3 の紙面確認（この環境では未実施）
+- Shopify POS Lite vs Pro が Printing API に与える差（コードでは未検出）
 - 各ストアで有効なカスタム決済の gateway 実文字列の完全一覧（マスタで吸収する設計）
 - Webhook 再送時の売上サマリーキューの完全な idempotency 保証範囲

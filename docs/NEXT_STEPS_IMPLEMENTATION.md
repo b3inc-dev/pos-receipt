@@ -58,7 +58,9 @@
   - **商品券判定**: 「商品券として扱う」に説明文を追加（gateway に gift_card 等を登録してONにする旨）。`formattedGatewayPattern` が空のときは formatted ではマッチしないよう `paymentMethod.server.ts` のマッチングを修正。
   - **API**: `getPaymentMethodVoucherInfo(shopId, gateway)` を追加。gateway に一致するマスタの `isVoucher` / `voucherChangeSupported` を返し、特殊返金・精算で利用可能。
 
-### 2.4 CloudPRNT 実機連携（payload をプリンタに送る導線） ✅ 実装済み
+### 2.4 印字（Shopify Printing API に統一）
+
+CloudPRNT payload / ポーリングは **廃止（410）**。アプリ独自印字は `shopify.printing`。紙面確認（mPOP / mC-Print3）はこの環境では未実施。
 
 - **実装内容**:
   1. **印字用 payload の生成と返却** ✅

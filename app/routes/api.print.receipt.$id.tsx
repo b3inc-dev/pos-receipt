@@ -19,9 +19,11 @@ import {
 import {
   getAppSetting,
   PRINT_SETTINGS_KEY,
-  resolvePrintPaperWidthMm,
   type PrintSettings,
 } from "../utils/appSettings.server";
+import { resolvePaperWidthMm } from "../services/printUnification.server";
+import { parseReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
+import { PRINT_CSP } from "../services/receiptLayoutPrint.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -42,6 +44,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         `<!DOCTYPE html><html><body><p>領収書が見つかりません。</p></body></html>`,
         { status: 404 },
       );
+    }
+
+    const snapshot = parseReceiptPrintSnapshot(issued.printSnapshotJson);
+    if (issued.printSnapshotJson != null && !snapshot) {
+      return corsHtml(
+        request,
+        `<!DOCTYPE html><html lang="ja"><body><p>発行時の領収書データを読み取れないため、現在設定での再生成は行いません。</p></body></html>`,
+        { status: 409 },
+      );
+    }
+
+    const printSettings =
+      (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
+    const paper = resolvePaperWidthMm(printSettings);
+    if (snapshot) {
+      const html = snapshot.renderedHtmlByPaperWidth[paper];
+      // レイアウト（#69）で作った領収書は、スクリプトを止める CSP をヘッダーでも付ける
+      const fromLayout = html.includes('http-equiv="Content-Security-Policy"');
+      return corsHtml(request, html, fromLayout ? { headers: { "Content-Security-Policy": PRINT_CSP } } : undefined);
     }
 
     let templateData: ReceiptTemplateData = normalizeTemplateData({ ...DEFAULT_TEMPLATE });
@@ -72,10 +93,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         })
       : null;
 
-    const printSettings =
-      (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
-    const paper = resolvePrintPaperWidthMm(printSettings);
-
+    const currentLocationName = location?.displayName ?? location?.name ?? "";
     const html = renderPrintReceiptHtml({
       kind: "receipt",
       title: "領　収　書",
@@ -85,7 +103,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       currency: issued.currency ?? "JPY",
       issueDate: issued.createdAt.toISOString().slice(0, 10),
       orderName: issued.orderName ?? undefined,
-      locationName: location?.displayName ?? location?.name ?? "",
+      locationName: currentLocationName,
       companyName: templateData.companyName,
       address: templateData.address,
       phone: templateData.phone,

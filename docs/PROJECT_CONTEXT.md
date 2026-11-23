@@ -39,13 +39,13 @@
 
 | 用語 | 意味（コード基準） |
 |------|-------------------|
-| 精算レシート | 日次集計結果の印字用出力。`order_based` なら Shopify 精算注文の POS レシート、`cloudprnt_direct` ならテキスト payload |
+| 精算レシート | 日次集計結果の印字用出力。Shopify Printing API（HTML） |
 | 点検レシート | ゼロ相当の点検用。`isInspection`。冪等キー対象外 |
 | 領収書 | `ReceiptIssue`。Shopify の Gift Receipt（ギフトレシート）とは別。コードにギフトレシート実装は **なし** |
 | SETTLEMENT 注文 | タグ `SETTLEMENT` の内部注文。集計対象から除外 |
 | VIP / ポイント利用額 | ポイント利用の割引（初めの値: コード `VIP-`・`SP-POINT-`・Shop Point 旧形式 `SP`＋16 進、POS の手動割引「Shop Point」）の割当額を `vipPointsUsed` に集計。設定で変えられる（BUSINESS_RULES §4） |
 | 特殊返金 | `SpecialRefundEvent`（cash_refund / payment_method_override / receipt_cash_adjustment / voucher_change_adjustment） |
-| printMode | Location の `order_based` \| `cloudprnt_direct`（create 時は DB が正） |
+| printMode | 実行時は常に `shopify_printing`。Location の旧値は出力に使わない |
 
 ## 4. リポジトリ構成（概略）
 

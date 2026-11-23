@@ -11,6 +11,7 @@ import { AdminStyle, AppNavBarView } from "./admin-ui";
 const GROUP_PATHS: Record<string, string[]> = {
   "/app/sales-receipt-layout": [
     "/app/sales-receipt-layout",
+    "/app/receipt-layouts",
     "/app/sales-receipt-settings",
     "/app/receipt-template",
     "/app/receipt-print-layout",

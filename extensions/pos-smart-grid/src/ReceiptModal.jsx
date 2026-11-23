@@ -11,10 +11,10 @@
  *   history  → 発行履歴
  */
 import { render } from "preact";
-import { useState, useCallback, useEffect } from "preact/hooks";
+import { useState, useCallback, useEffect, useRef } from "preact/hooks";
 import { getOrder } from "../../common/orderPickerApi.js";
 import { previewReceipt, issueReceipt, getReceiptHistory } from "../../common/receiptApi.js";
-import { printGiftReceipt, getPrintSettings } from "../../common/printApi.js";
+import { printGiftReceipt, printResultMessage, PRINT_OUTCOME } from "../../common/printApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { fmtYen } from "./orderDisplayUtils.js";
@@ -410,59 +410,58 @@ function ConfirmView({ preview, isReissue, loading, error, onIssue, onBack }) {
 }
 
 // ── 完了 ──────────────────────────────────────────────────────────────────────
-function DoneView({ receipt, onClose, onReissue }) {
+function ReceiptPrintControls({ receiptIssueId }) {
   const [printBusy, setPrintBusy] = useState(false);
   const [printMsg, setPrintMsg] = useState("");
-  const [printFlags, setPrintFlags] = useState({
-    preferPrintingApi: false,
-    receiptPrintingApiEnabled: false,
-  });
-  const [flagsLoaded, setFlagsLoaded] = useState(false);
+  const [canDialog, setCanDialog] = useState(false);
+  const [outcome, setOutcome] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
-    getPrintSettings()
-      .then((s) => {
-        if (!cancelled) {
-          setPrintFlags({
-            preferPrintingApi: !!s.preferPrintingApi,
-            receiptPrintingApiEnabled: !!s.receiptPrintingApiEnabled,
-          });
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setFlagsLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const showPrintingApi =
-    flagsLoaded && !!printFlags.receiptPrintingApiEnabled && !!receipt?.receiptIssueId;
-  const preferNew = showPrintingApi && !!printFlags.preferPrintingApi;
-
-  const handlePrintingApi = async () => {
-    if (!receipt?.receiptIssueId) {
-      setPrintMsg("発行 ID が無いため Printing API を実行できません");
-      return;
-    }
+  const runPrint = async (allowDialog) => {
+    if (!receiptIssueId || printBusy) return;
     setPrintBusy(true);
     setPrintMsg("");
     try {
-      const res = await printGiftReceipt(receipt.receiptIssueId);
-      if (res.ok) {
-        setPrintMsg(res.usedDialog ? "印刷ダイアログを開きました" : "プリンタへ送信しました");
-      } else {
-        setPrintMsg(res.error || "印字に失敗しました");
-      }
+      const res = await printGiftReceipt(receiptIssueId, { allowDialog });
+      setOutcome(res.outcome || "");
+      setCanDialog(!!res.canUseDialog);
+      setPrintMsg(printResultMessage(res));
     } catch (e) {
-      setPrintMsg(toUserMessage(e?.message) || "印字に失敗しました");
+      setOutcome(PRINT_OUTCOME.FAILED);
+      setPrintMsg(toUserMessage(e?.message) || "印刷できませんでした");
     } finally {
       setPrintBusy(false);
     }
   };
 
+  if (!receiptIssueId) {
+    return <s-text tone="critical">領収書の記録が見つからないため印刷できません</s-text>;
+  }
+
+  return (
+    <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+      <s-stack gap="small">
+        <s-text tone="subdued" fontSize="small">
+          保存済みの領収書を印刷します。印刷し直しても売上・返金・精算は増えません。
+        </s-text>
+        <s-button variant="primary" onClick={() => runPrint(false)} disabled={printBusy}>
+          {printBusy ? "印刷中…" : "領収書を印刷する"}
+        </s-button>
+        {canDialog ? (
+          <s-button onClick={() => runPrint(true)} disabled={printBusy}>
+            ほかのプリンタを選んで印刷する
+          </s-button>
+        ) : null}
+        {printMsg ? (
+          <s-text tone={outcome === PRINT_OUTCOME.DIRECT_ACCEPTED ? "subdued" : "caution"}>
+            {printMsg}
+          </s-text>
+        ) : null}
+      </s-stack>
+    </s-box>
+  );
+}
+
+function DoneView({ receipt, onClose, onReissue }) {
   const receiptSummary = (
     <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
       <s-stack gap="small">
@@ -474,41 +473,9 @@ function DoneView({ receipt, onClose, onReissue }) {
         <Row label="注文番号" value={receipt?.orderName ?? ""} />
         <Row label="発行日" value={receipt?.issueDate ?? ""} />
         {receipt?.companyName ? <Row label="発行者" value={receipt.companyName} /> : null}
-        {!showPrintingApi ? (
-          <s-text tone="subdued" fontSize="small">
-            印字は店舗の従来導線（注文経由 / CloudPRNT 等）で行ってください。Printing API 案内は管理画面の印字設定で有効化できます。
-          </s-text>
-        ) : null}
       </s-stack>
     </s-box>
   );
-
-  const printingApiBox = showPrintingApi ? (
-    <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-      <s-stack gap="small">
-        <s-text fontWeight="bold">
-          {preferNew ? "Shopify Printing API（推奨）" : "Shopify Printing API（代替）"}
-        </s-text>
-        {!preferNew ? (
-          <s-text tone="caution" fontSize="small">
-            ※ 他の方法で印字済みの場合は押さないでください（二重印字になります）。
-          </s-text>
-        ) : (
-          <s-text tone="subdued" fontSize="small">
-            管理画面の印字設定で有効になっています。従来導線と両方印字しないでください。
-          </s-text>
-        )}
-        <s-button
-          variant={preferNew ? "primary" : "secondary"}
-          onClick={handlePrintingApi}
-          disabled={printBusy}
-        >
-          {printBusy ? "送信中…" : "Printing API で印字"}
-        </s-button>
-        {printMsg ? <s-text tone="subdued">{printMsg}</s-text> : null}
-      </s-stack>
-    </s-box>
-  ) : null;
 
   return (
     <s-page heading="発行完了">
@@ -518,23 +485,11 @@ function DoneView({ receipt, onClose, onReissue }) {
             <s-text fontWeight="bold">
               {receipt?.isReissue ? "領収書を再発行しました" : "領収書を発行しました"}
             </s-text>
-
-            {preferNew ? (
-              <>
-                {printingApiBox}
-                {receiptSummary}
-              </>
-            ) : (
-              <>
-                {receiptSummary}
-                {printingApiBox}
-              </>
-            )}
-
+            <ReceiptPrintControls receiptIssueId={receipt?.receiptIssueId} />
+            {receiptSummary}
             <s-text tone="subdued" fontSize="small">
               発行ID: …{receipt?.receiptIssueId?.slice(-8) ?? ""}
             </s-text>
-
             <s-stack gap="small">
               <s-button kind="secondary" onClick={onReissue}>同じ取引を再発行する</s-button>
               <s-button kind="plain" onClick={onClose}>閉じる</s-button>
@@ -582,12 +537,39 @@ function receiptHistoryRow(item, todayKey) {
 }
 
 function HistoryView({ onBack }) {
+  // 一覧の行を押すと、保存済みの領収書を再印刷する画面を開く（#53 の再印刷を一覧の形に合わせた）
+  const itemsById = useRef(new Map());
+  const [reprintItem, setReprintItem] = useState(null);
+
+  if (reprintItem) {
+    const recipient = String(reprintItem.recipientName ?? "").trim();
+    return (
+      <s-page heading="領収書を再印刷">
+        <s-scroll-box>
+          <s-box padding="base">
+            <s-stack gap="small">
+              <s-text type="strong">{reprintItem.orderName}</s-text>
+              <s-text color="subdued">宛名: {recipient || "（未入力）"}{reprintItem.isReissue ? "（再発行）" : ""}</s-text>
+              <s-text color="subdued">金額: {fmtYen(reprintItem.amount)}</s-text>
+              <ReceiptPrintControls receiptIssueId={reprintItem.id} />
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+        <FixedFooterNavBar centerAlignWithButtons leftLabel="戻る" onLeft={() => setReprintItem(null)} />
+      </s-page>
+    );
+  }
+
   return (
     <OrderDayListScreen
       pageHeading="領収書発行履歴"
       badgeMode="receipt"
       fetchList={fetchReceiptHistoryPage}
-      toRow={receiptHistoryRow}
+      toRow={(item, todayKey) => {
+        itemsById.current.set(item.id, item);
+        return { ...receiptHistoryRow(item, todayKey), selectId: item.id };
+      }}
+      onSelectOrderId={(id) => setReprintItem(itemsById.current.get(id) ?? null)}
       itemNoun="発行"
       searchPlaceholder="注文番号・宛名で検索"
       searchHint="注文番号は数字だけでも探せます。宛名は 2 文字以上入れてください。"
