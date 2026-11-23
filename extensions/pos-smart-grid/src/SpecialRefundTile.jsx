@@ -11,7 +11,7 @@ function SpecialRefundTile() {
   return (
     <s-tile
       heading="返金・商品券"
-      subheading="特殊返金・商品券釣銭調整"
+      subheading="特殊返金・商品券釣銭登録"
       onClick={() => shopify.action.presentModal()}
     />
   );

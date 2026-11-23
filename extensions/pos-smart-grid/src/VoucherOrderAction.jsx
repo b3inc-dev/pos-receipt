@@ -24,5 +24,5 @@ function VoucherOrderAction() {
     }
   };
 
-  return <s-button onClick={onClick}>商品券釣銭調整</s-button>;
+  return <s-button onClick={onClick}>商品券釣銭登録</s-button>;
 }

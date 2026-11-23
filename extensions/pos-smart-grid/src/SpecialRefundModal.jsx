@@ -687,7 +687,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
           setStep("order_detail");
         }}
         onSuccess={async (res) => {
-          const parts = ["登録しました（商品券調整は記録のみで、返金はしません）。"];
+          const parts = ["登録しました（商品券釣銭登録は記録だけで、返金はしません）。"];
           if (res?.event?.countDate) parts.push(`注文の日（${shortDateLabel(res.event.countDate)}）の精算に入ります。`);
           if (res?.settlementAlreadyConfirmed) {
             parts.push("その日の精算はもう確定しています。精算の画面でその日を開き「更新」を押し、「今の数で再確定する」を押してください。");
@@ -739,7 +739,7 @@ function OrderDetailView({
     Boolean(order?.estimatedVoucherChange) || (order?.transactions ?? []).length === 0;
 
   return (
-    <s-page heading="特殊返金調整・商品券釣銭調整">
+    <s-page heading="特殊返金調整・商品券釣銭登録">
       <s-stack
         gap="none"
         blockSize="100%"
@@ -875,7 +875,7 @@ function OrderDetailView({
           middleLabel="特殊返金調整"
           onMiddle={onRefund}
           middleDisabled={loading}
-          rightLabel="商品券釣銭調整"
+          rightLabel="商品券釣銭登録"
           onRight={onVoucher}
           rightDisabled={loading || !voucherAdjustable}
         />
@@ -1491,7 +1491,7 @@ function VoucherAdjustmentForm({
 
   if (confirming) {
     return (
-      <s-page heading="商品券釣銭調整を登録">
+      <s-page heading="商品券釣銭を登録">
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
@@ -1522,7 +1522,7 @@ function VoucherAdjustmentForm({
   }
 
   return (
-    <s-page heading="商品券釣銭調整を登録">
+    <s-page heading="商品券釣銭を登録">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
