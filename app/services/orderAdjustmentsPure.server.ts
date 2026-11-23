@@ -78,6 +78,8 @@ export interface AdjustmentEventRow {
   shopifyRefundId?: string | null;
   approvalStatus?: string | null;
   countDate?: string | null;
+  /** native = POS 純正の返金の付け替え（金額は純正の返金で決まる） */
+  refundSource?: string | null;
   replacesEventId?: string | null;
   voidedAt?: Date | null;
   voidReason?: string | null;
@@ -629,6 +631,7 @@ export type AdjustmentEditPlan =
         approvalStatus: string;
         countDate: string;
         replacesEventId: string;
+        refundSource: string | null;
       };
       /** Shopify で返金済みの行を直した（Shopify の返金は直していない） */
       shopifyRefundKept: boolean;
@@ -687,11 +690,21 @@ export function planAdjustmentEdit(
   } else if (!(amount > 0)) {
     return { ok: false, code: "INVALID_AMOUNT", message: "金額は 0 より大きくしてください。" };
   }
+  // 純正の返金の付け替えは金額を変えられない（返金額と合わなくなる）。手段・メモだけ直す
+  if (String(old.refundSource ?? "") === "native" && money(old.amount) !== amount) {
+    return {
+      ok: false,
+      code: "NATIVE_REFUND_AMOUNT_FIXED",
+      message: "純正の返金の付け替えは金額を変えられません。返した手段だけ直せます。分け方を変えるときは、無効にしてから登録し直してください。",
+    };
+  }
   const shopifyRefundKept = String(old.shopifyRefundStatus ?? "") === "success";
   const keepRefundRecord = shopifyRefundKept;
   const today = calendarDateInTimeZone(ctx.now, ctx.timeZone);
   // 商品券は注文の日で数える（T の決定 2026-11-23）ので「今日の分にする」は使わない
-  const countDate = input.dateMode === "today" && !isVoucher ? today : countDateOf(old, ctx.timeZone);
+  // 純正の返金の付け替えも、純正で返金した日のまま（その日の返金の行から移すため）
+  const isNative = String(old.refundSource ?? "") === "native";
+  const countDate = input.dateMode === "today" && !isVoucher && !isNative ? today : countDateOf(old, ctx.timeZone);
   const pick = <T,>(v: T | null | undefined, fallback: T | null): T | null => (v === undefined ? fallback : v);
   const create = {
     sourceOrderId: old.sourceOrderId,
@@ -716,9 +729,12 @@ export function planAdjustmentEdit(
     approvalStatus: ctx.approvalStatusForNew,
     countDate,
     replacesEventId: old.id,
+    refundSource: old.refundSource ?? null,
   };
   let warning: string | null = null;
-  if (shopifyRefundKept && money(old.amount) !== amount) {
+  if (String(old.refundSource ?? "") === "native") {
+    warning = "純正の返金はそのままです。返した手段だけを直しました。";
+  } else if (shopifyRefundKept && money(old.amount) !== amount) {
     warning =
       "Shopify の返金の金額は変わりません。金額を直した分は、Shopify の管理画面で返金を直してください（アプリの記録は直しました）。";
   } else if (shopifyRefundKept) {

@@ -412,3 +412,28 @@ test("注文ページの表示: 注文の値とアプリの記録が同じか（
   const empty = buildOrderAdjustmentsDoc([], { timeZone: TZ, labelOf: () => null });
   assert.equal(orderMetafieldStateOf({ rowCount: 0, fetched: true, currentValue: null, built: empty }), "none");
 });
+
+test("変更: 純正の返金の付け替えは金額と数える日を変えられない（手段だけ直す）。返金の記録と印は引き継ぐ", () => {
+  const old = row({
+    id: "n",
+    amount: 3000,
+    countDate: "2026-11-22",
+    shopifyRefundStatus: "success",
+    shopifyRefundId: "gid://shopify/Refund/7",
+    refundSource: "native",
+  });
+  const ctx = { timeZone: TZ, now: NOW, approvalStatusForNew: "none" };
+  const changed = planAdjustmentEdit(old, { amount: 2000, reason: "額" }, ctx);
+  assert.equal(changed.ok, false);
+  if (!changed.ok) assert.equal(changed.code, "NATIVE_REFUND_AMOUNT_FIXED");
+  const method = planAdjustmentEdit(old, { actualRefundMethod: "cash", dateMode: "today", reason: "手段" }, ctx);
+  assert.ok(method.ok);
+  if (method.ok) {
+    assert.equal(method.create.amount, 3000);
+    assert.equal(method.create.countDate, "2026-11-22");
+    assert.equal(method.create.refundSource, "native");
+    assert.equal(method.create.shopifyRefundStatus, "success");
+    assert.equal(method.create.shopifyRefundId, "gid://shopify/Refund/7");
+    assert.match(String(method.warning), /純正の返金はそのまま/);
+  }
+});

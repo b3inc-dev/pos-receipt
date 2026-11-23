@@ -18,6 +18,7 @@ import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
 import { getOrder, createRedoDraft } from "../../common/orderPickerApi.js";
 import { PosChoiceField } from "./PosChoiceField.jsx";
+import { NativeRefundReassignForm } from "./NativeRefundReassignForm.jsx";
 import {
   listSpecialRefunds,
   createSpecialRefund,
@@ -141,7 +142,9 @@ function buildVoidConfirmMessage(event) {
       "\nShopify に返金が無いのに無効化だけすると、店で渡したお金が精算から消えます。";
     return msg;
   }
-  if (event?.shopifyRefundStatus === "success") {
+  if (event?.refundSource === "native") {
+    msg += "\n\nこれは純正の返金の付け替えです。無効にすると、その返金は元の支払方法の返金に戻ります（純正の返金はそのまま）。";
+  } else if (event?.shopifyRefundStatus === "success") {
     msg +=
       "\n\n【重要】この登録では Shopify 上に返金が作成済みです。";
     msg += "無効化しても Shopify の返金は自動では取り消されません。";
@@ -264,6 +267,10 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
   const [orderCorrectionContext, setOrderCorrectionContext] = useState(null);
   // 店の特殊返金設定で使える種別（サーバーの一覧の応答から。読めないときは null＝全部）
   const [allowedEventTypes, setAllowedEventTypes] = useState(null);
+  // POS 純正の返金（付け替えの候補）。読めなかったときは null（前の入力の形にする）
+  const [nativeRefunds, setNativeRefunds] = useState(null);
+  // 純正で返金した注文で「レシートの現金を直す」を選んだとき
+  const [refundFormOther, setRefundFormOther] = useState(false);
 
   // 取引詳細: 「特殊返金」または「商品券調整」から起動
   useEffect(() => {
@@ -285,6 +292,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
         setEvents(res.items ?? []);
         setAllowedEventTypes(Array.isArray(res.allowedEventTypes) ? res.allowedEventTypes : null);
         setOrderCorrectionContext(res.orderCorrectionContext ?? null);
+        setNativeRefunds(Array.isArray(res.nativeRefunds) ? res.nativeRefunds : null);
         // 取引詳細メニューからは一覧を挟まず、各処理のフォームへ直行
         setStep(voucherShortcut ? "form_voucher" : "form_refund");
       })
@@ -303,6 +311,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
       setEvents(res.items ?? []);
         setAllowedEventTypes(Array.isArray(res.allowedEventTypes) ? res.allowedEventTypes : null);
       setOrderCorrectionContext(res.orderCorrectionContext ?? null);
+        setNativeRefunds(Array.isArray(res.nativeRefunds) ? res.nativeRefunds : null);
       setFromOrderEntry(false);
       setStep("order_detail");
     } catch (e) {
@@ -319,6 +328,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
       setEvents(res.items ?? []);
         setAllowedEventTypes(Array.isArray(res.allowedEventTypes) ? res.allowedEventTypes : null);
       setOrderCorrectionContext(res.orderCorrectionContext ?? null);
+        setNativeRefunds(Array.isArray(res.nativeRefunds) ? res.nativeRefunds : null);
     } catch {
       // silent
     }
@@ -542,7 +552,10 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
           setError("");
           setStep("day_list");
         }}
-        onRefund={() => setStep("form_refund")}
+        onRefund={() => {
+          setRefundFormOther(false);
+          setStep("form_refund");
+        }}
         onVoucher={() => setStep("form_voucher")}
         onEdit={(ev) => {
           setEditingEvent(ev);
@@ -561,12 +574,44 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
     );
   }
 
+  if (step === "form_refund" && !refundFormOther && Array.isArray(nativeRefunds) && nativeRefunds.length > 0) {
+    // 純正で返金した注文: 返金を選び、金額はそのまま手段だけ付け替える（手で金額を入れる形は出さない。二重に数えないため）
+    const receiptAllowed = !allowedEventTypes || allowedEventTypes.includes("receipt_cash_adjustment");
+    return (
+      <NativeRefundReassignForm
+        order={selectedOrder}
+        nativeRefunds={nativeRefunds}
+        allowedEventTypes={allowedEventTypes}
+        loading={loading}
+        error={error}
+        setLoading={setLoading}
+        setError={setError}
+        onBack={() => {
+          if (fromOrderEntry && tryDismissModal()) return;
+          setStep("order_detail");
+        }}
+        onOtherRegistration={receiptAllowed ? () => { setError(""); setRefundFormOther(true); } : null}
+        onSuccess={async (notice) => {
+          if (notice) setSubmitNotice(notice);
+          await refreshEvents();
+          if (fromOrderEntry && tryDismissModal()) return;
+          setStep("order_detail");
+        }}
+      />
+    );
+  }
+
   if (step === "form_refund") {
+    // 純正で返金した注文から来たときは「レシートの現金を直す」だけ
+    const formAllowedTypes =
+      refundFormOther && Array.isArray(nativeRefunds) && nativeRefunds.length > 0
+        ? ["receipt_cash_adjustment"]
+        : allowedEventTypes;
     return (
       <SpecialRefundForm
         order={selectedOrder}
         orderCorrectionContext={orderCorrectionContext}
-        allowedEventTypes={allowedEventTypes}
+        allowedEventTypes={formAllowedTypes}
         loading={loading}
         error={error}
         setLoading={setLoading}
@@ -1540,7 +1585,9 @@ const EDIT_DATE_MODES = [
 function AdjustmentEditForm({ order, event, loading, error, setLoading, setError, onBack, onSuccess }) {
   const isVoucher = event.eventType === "voucher_change_adjustment";
   const needsMethod = event.eventType === "cash_refund" || event.eventType === "payment_method_override";
-  const refundDone = event.shopifyRefundStatus === "success";
+  // 純正の返金の付け替え: 金額と数える日は変えられない（返した手段とメモだけ直す）
+  const isNative = event.refundSource === "native";
+  const refundDone = event.shopifyRefundStatus === "success" && !isNative;
   const [amount, setAmount] = useState(String(Number(event.amount ?? 0)));
   const [faceValue, setFaceValue] = useState(String(Number(event.voucherFaceValue ?? 0)));
   const [actualRefundMethod, setActualRefundMethod] = useState(event.actualRefundMethod ?? "");
@@ -1684,7 +1731,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
             <OrderTenderPanel
               order={order}
               lines={orderTenderLines(order)}
-              onFill={isVoucher ? null : (line) => setAmount(String(fullAmountForRefund(line)))}
+              onFill={isVoucher || isNative ? null : (line) => setAmount(String(fullAmountForRefund(line)))}
               disabled={loading}
             />
             <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
@@ -1711,6 +1758,11 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
                 <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
                 <Row label="お釣り" value={change == null ? "-" : `¥${change.toLocaleString()}`} />
               </>
+            ) : isNative ? (
+              <s-stack gap="none">
+                <Row label="金額（純正の返金のまま）" value={`¥${Number(amount).toLocaleString()}`} />
+                <s-text tone="subdued" fontSize="small">分け方を変えるときは、無効にしてから付け替え直してください。</s-text>
+              </s-stack>
             ) : (
               <s-text-field
                 label="金額（円）"
@@ -1745,7 +1797,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
             ) : null}
 
             {/* 商品券は注文の日で数えるので、数える日は選ばない */}
-            {isVoucher ? null : (
+            {isVoucher || isNative ? null : (
               <PosChoiceField
                 label="数える日"
                 value={dateMode}

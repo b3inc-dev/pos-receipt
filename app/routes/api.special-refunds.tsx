@@ -34,6 +34,7 @@ import { initialApprovalStatus } from "../utils/specialRefundApproval";
 import { metafieldWrittenOf, syncOrderAdjustmentsMetafield } from "../services/orderAdjustments.server";
 import { countDateOf } from "../services/orderAdjustmentsPure.server";
 import { loadRefundMethodResolver } from "../utils/paymentMethod.server";
+import { createNativeRefundReassign, fetchNativeRefundLines, nativeRefundsForOrder } from "../services/nativeRefundReassign.server";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
 
@@ -98,10 +99,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       orderBy: { createdAt: "desc" },
     });
 
-    const [voidedCount, methodResolver, timezone] = await Promise.all([
+    const [voidedCount, methodResolver, timezone, nativeRefundsResult] = await Promise.all([
       countVoidedEventsOnOrder(shop.id, sourceOrderId),
       loadRefundMethodResolver(shop.id),
       getShopTimezoneForDaily(admin, shop.id),
+      // POS 純正の返金（付け替えの候補）。読めなくても一覧は返す（POS は前の入力の形にする）
+      nativeRefundsForOrder(admin, shop.id, sourceOrderId).then(
+        (lines) => ({ ok: true as const, lines }),
+        (e: unknown) => {
+          console.warn("[special-refunds] native refunds read failed", e);
+          return { ok: false as const, lines: [] };
+        },
+      ),
     ]);
     // 店の画面に出すため、支払方法は表示名に、時刻は店のタイムゾーンにする（内部の名前・UTC を出さない）
     const dateTimeFmt = new Intl.DateTimeFormat("ja-JP", {
@@ -120,6 +129,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         createdAtLabel: dateTimeFmt.format(e.createdAt),
       })),
       allowedEventTypes: allowedTypes,
+      // 純正の返金 1 件・支払方法 1 つずつ。読めなかったときは null
+      nativeRefunds: nativeRefundsResult.ok
+        ? nativeRefundsResult.lines.map((l) => ({
+            refundId: l.refundId,
+            gateway: l.gateway,
+            label: methodResolver.labelForMethod(l.gateway) || l.formattedGateway || l.gateway,
+            amount: l.amount,
+            reassigned: l.reassigned,
+            remaining: l.remaining,
+            createdAtLabel: l.createdAt ? dateTimeFmt.format(new Date(l.createdAt)) : null,
+          }))
+        : null,
       refundProcessingMode: merged.refundProcessingMode,
       orderCorrectionContext: {
         hasVoidedEvents: voidedCount > 0,
@@ -171,6 +192,7 @@ export async function action({ request }: ActionFunctionArgs) {
       adjustKind,
       note,
       createdBy,
+      nativeRefundId,
     } = body;
 
     if (!sourceOrderId || !eventType || amount == null) {
@@ -280,6 +302,43 @@ export async function action({ request }: ActionFunctionArgs) {
           { status: 400 },
         );
       }
+    }
+
+    // POS 純正の返金の付け替え: 金額は純正の返金の残りまで。Shopify では返金しない（設定に関係なく）
+    const nativeRefundIdStr = nativeRefundId ? String(nativeRefundId).trim() : "";
+    if (nativeRefundIdStr && !existingIdempotentEvent) {
+      if (eventTypeStr !== "cash_refund" && eventTypeStr !== "payment_method_override") {
+        return corsJson(
+          { ok: false, error: "純正の返金の付け替えは、返金の手段を変える登録だけです" },
+          { status: 400 },
+        );
+      }
+      return registerNativeRefundReassign({
+        admin,
+        shopId: shop.id,
+        corsJson,
+        nativeRefundId: nativeRefundIdStr,
+        settings: merged,
+        idempotentEventId,
+        replay: replayResponse,
+        data: {
+          ...(idempotentEventId ? { id: idempotentEventId } : {}),
+          shopId: shop.id,
+          sourceOrderId: sourceOrderIdStr,
+          sourceOrderName: sourceOrderName ? String(sourceOrderName) : null,
+          locationId: locationId ? String(locationId) : "",
+          eventType: eventTypeStr,
+          amount: Number(amount),
+          currency: currency ? String(currency) : "JPY",
+          originalPaymentMethod: originalPaymentMethod ? String(originalPaymentMethod) : null,
+          actualRefundMethod: actualRefundMethod ? String(actualRefundMethod) : null,
+          adjustKind: null,
+          note: note ? String(note) : null,
+          createdBy: createdBy ? String(createdBy) : null,
+          status: "active",
+          approvalStatus: initialApprovalStatus(merged, eventTypeStr),
+        },
+      });
     }
 
     const voidedOnOrder = await countVoidedEventsOnOrder(shop.id, sourceOrderIdStr);
@@ -455,6 +514,91 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
+type CorsJson = (body: unknown, init?: ResponseInit) => Promise<Response>;
+
+/**
+ * POS 純正の返金の付け替えを登録する（Shopify には書かない）。
+ * 登録は shopifyRefundStatus=success・shopifyRefundId=その返金にするので、精算・売上サマリー・ciara-system は
+ * 元の手段から実際の手段へ移すだけになる（返金の合計は変えない）。数える日は純正で返金した日。
+ * 返金の計上ロケーションのメタフィールドは書き換えない（純正の返金のときに決まっている）。
+ */
+async function registerNativeRefundReassign(args: {
+  admin: Parameters<typeof fetchNativeRefundLines>[0];
+  shopId: string;
+  corsJson: CorsJson;
+  nativeRefundId: string;
+  settings: typeof DEFAULT_SPECIAL_REFUND_SETTINGS;
+  idempotentEventId: string | null;
+  replay: (existing: Parameters<typeof serializeEvent>[0]) => Promise<Response>;
+  data: Parameters<typeof createNativeRefundReassign>[1]["data"];
+}): Promise<Response> {
+  const { admin, shopId, corsJson, data } = args;
+  let lines;
+  try {
+    lines = await fetchNativeRefundLines(admin, String(data.sourceOrderId));
+  } catch (e) {
+    console.warn("[special-refunds] native refund read failed", e);
+    return corsJson(
+      { ok: false, error: "Shopify の注文の返金を読めませんでした。少し待って、もう一度押してください。" },
+      { status: 503 },
+    );
+  }
+  const shopTimezone = await getShopTimezoneForDaily(admin, shopId);
+  let result;
+  try {
+    result = await createNativeRefundReassign(lines, {
+      refundId: args.nativeRefundId,
+      data,
+      countDateOf: (line) =>
+        getCalendarDateStringInTimeZone(line.createdAt ? new Date(line.createdAt) : new Date(), shopTimezone),
+    });
+  } catch (error: unknown) {
+    const code = (error as { code?: string } | null)?.code;
+    // 同じキーの登録が同時に先にできた: その登録を返す
+    if (args.idempotentEventId && code === "P2002") {
+      const existing = await prisma.specialRefundEvent.findUnique({ where: { id: args.idempotentEventId } });
+      if (existing) return args.replay(existing);
+    }
+    throw error;
+  }
+  if (!result.ok) {
+    return corsJson({ ok: false, code: result.code, error: result.message }, { status: result.status });
+  }
+  const event = result.event;
+
+  const metafieldSync = await syncOrderAdjustmentsMetafield(admin, shopId, event.sourceOrderId);
+
+  const locationGid = normalizeLocationGid(event.locationId);
+  if (locationGid) {
+    try {
+      const loc = await prisma.location.findFirst({
+        where: { shopId, shopifyLocationGid: locationGid },
+        select: { name: true },
+      });
+      await computeAndCacheDailySummary(admin, shopId, locationGid, loc?.name ?? "", countDateOf(event, shopTimezone));
+    } catch {
+      // キャッシュ更新失敗でイベント登録自体は失敗させない
+    }
+  }
+
+  return corsJson(
+    {
+      ok: true,
+      event: serializeEvent(event),
+      nativeRefundReassign: true,
+      correctionRegistration: false,
+      approvalRequired: event.approvalStatus === "pending",
+      metafieldWritten: metafieldWrittenOf(metafieldSync),
+      shopifyRefund: {
+        status: event.shopifyRefundStatus,
+        refundId: event.shopifyRefundId,
+        error: event.shopifyRefundError,
+      },
+    },
+    { status: 201 },
+  );
+}
+
 /** 同じキーの送り直しで Shopify の返金へ進んでよい状態か（まだ / 処理中 / 自動の確定で failed） */
 function canResumeShopifyRefund(event: {
   status: string;
@@ -584,6 +728,7 @@ function serializeEvent(e: {
   approvalReviewedAt?: Date | null;
   countDate?: string | null;
   replacesEventId?: string | null;
+  refundSource?: string | null;
   voidedAt?: Date | null;
   voidReason?: string | null;
   metafieldSyncedAt?: Date | null;
@@ -616,6 +761,7 @@ function serializeEvent(e: {
     approvalReviewedAt: e.approvalReviewedAt?.toISOString() ?? null,
     countDate: e.countDate ?? null,
     replacesEventId: e.replacesEventId ?? null,
+    refundSource: e.refundSource ?? null,
     voidedAt: e.voidedAt?.toISOString() ?? null,
     voidReason: e.voidReason ?? null,
     metafieldWritten: e.metafieldSyncError ? false : e.metafieldSyncedAt ? true : null,

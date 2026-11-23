@@ -78,7 +78,10 @@ export function customerLabel(order) {
  */
 export function adjustmentBadges(event) {
   const out = [];
-  switch (event?.shopifyRefundStatus) {
+  // 純正の返金の付け替え: Shopify の返金は純正の返金（このアプリでは返金していない）
+  if (event?.refundSource === "native") {
+    out.push({ key: "refund", label: "純正返金の付け替え", tone: "success" });
+  } else switch (event?.shopifyRefundStatus) {
     case "pending":
       out.push({ key: "refund", label: "返金処理中", tone: "critical" });
       break;
