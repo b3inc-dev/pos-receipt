@@ -247,6 +247,82 @@ function toDailyRowFromCache(
   };
 }
 
+/**
+ * 今日の分を開いたとき、数え直しが終わるまで先に見せる「保存済みの数字」（T の判断 2026-11-23）。
+ * 注文が更新されるたびに裏で書き直している日次の保存（売上サマリーのキャッシュ）を読むだけで、
+ * Shopify は呼ばない。数え方は数え直しと同じ（同じ関数が書いた値）。
+ * 表示する店のどれかに保存が無いときは null（合計がずれて見えないよう、出さない）。
+ */
+async function loadTodayCachePreview(
+  shopId: string,
+  targetLocations: LocationRow[],
+  targetDate: string,
+  showChannels: boolean,
+  timeZone: string,
+) {
+  const cached = await prisma.salesSummaryCacheDaily.findMany({
+    where: {
+      shopId,
+      locationId: { in: expandLocationIdsForCacheQuery(targetLocations) },
+      targetDate,
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  const byLoc = new Map<string, (typeof cached)[number]>();
+  for (const row of cached) {
+    const canon = resolveCanonicalLocationGid(targetLocations, row.locationId);
+    if (canon && !byLoc.has(canon)) byLoc.set(canon, row);
+  }
+  if (targetLocations.some((l) => !byLoc.has(l.shopifyLocationGid))) return null;
+
+  const budgetByLocDay = await getLocationBudgetAmountsForDayBatch(
+    shopId,
+    targetLocations.map((l) => l.shopifyLocationGid),
+    targetDate,
+  );
+  const rows = targetLocations.map((l) => {
+    const r = toDailyRowFromCache(l.shopifyLocationGid, l.name, targetDate, byLoc.get(l.shopifyLocationGid)!);
+    const budget = budgetByLocDay.get(r.locationId) ?? null;
+    return { ...r, budget, budgetRatio: budget != null && budget > 0 ? r.actual / budget : null };
+  });
+  let oldest = Math.min(...[...byLoc.values()].map((r) => r.updatedAt.getTime()));
+
+  const channelRows: Array<Record<string, string | number | null>> = [];
+  if (showChannels) {
+    const channels = await getEnabledSalesChannels(shopId);
+    const chCache = channels.length === 0
+      ? []
+      : await prisma.salesChannelCacheDaily.findMany({
+          where: { shopId, channelId: { in: channels.map((c) => c.id) }, targetDate },
+        });
+    for (const ch of channels) {
+      const c = chCache.find((x) => x.channelId === ch.id);
+      if (!c || ch.sourceNamesJson !== ch.sourceNamesSnapshot) return null;
+      oldest = Math.min(oldest, c.updatedAt.getTime());
+      channelRows.push({
+        channelId: ch.id,
+        channelName: ch.displayName,
+        actual: Number(c.actual),
+        orders: c.orders,
+        items: c.items,
+        budget: c.budget !== null ? Number(c.budget) : null,
+        budgetRatio: c.budgetRatio !== null ? Number(c.budgetRatio) : null,
+        atv: c.atv !== null ? Number(c.atv) : null,
+        setRate: c.setRate !== null ? Number(c.setRate) : null,
+        unit: c.unit !== null ? Number(c.unit) : null,
+      });
+    }
+  }
+  // いちばん古い保存の時刻を「この時点の数字」として出す
+  const asOf = new Intl.DateTimeFormat("ja-JP", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(oldest));
+  return { rows, channelRows, asOf };
+}
+
 function fmtYen(n: number | null) {
   if (n === null) return "-";
   return `¥${Math.round(n).toLocaleString("ja-JP")}`;
@@ -463,6 +539,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
       locationCount: validTargetLocations.length,
     };
+
+    // 今日の分は、数え直しが終わるまで保存済みの数字を「HH:MM 時点」で先に見せる
+    const cachePreview =
+      view === "daily" && targetDate >= shopCalendarToday && !forceRecomputeDaily
+        ? await loadTodayCachePreview(shop.id, validTargetLocations, targetDate, showChannels, shopIanaTz).catch(
+            () => null,
+          )
+        : null;
 
     const computeReport = async () => {
       if (view === "daily") {
@@ -913,7 +997,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }));
     // 集計が失敗しても未処理の reject にしない（画面には失敗の帯を出す）
     report.catch(() => {});
-    return { ...frame, report };
+    return { ...frame, cachePreview, report };
   } catch (err) {
     const message = err instanceof Error ? err.message : "売上サマリーの読み込みに失敗しました";
     const today = new Date().toISOString().slice(0, 10);
@@ -1244,6 +1328,7 @@ export default function SalesSummaryAdminPage() {
     | Promise<SalesSummaryReport>
     | SalesSummaryReport;
   const locationCount = "locationCount" in data ? Number(data.locationCount) : 0;
+  const cachePreview = "cachePreview" in data ? data.cachePreview : null;
 
   return (
     <PolarisPageWrapper>
@@ -1341,7 +1426,26 @@ export default function SalesSummaryAdminPage() {
               </Layout.Section>
               <Suspense
                 key={searchParams.toString()}
-                fallback={<ReportLoading view={data.view} locationCount={locationCount} />}
+                fallback={
+                  cachePreview ? (
+                    <>
+                      <Layout.Section>
+                        <div role="status" aria-busy="true">
+                          <Banner tone="info">
+                            {cachePreview.asOf} 時点の数字です。いま最新の数字に数え直しています。
+                          </Banner>
+                        </div>
+                      </Layout.Section>
+                      <ReportBody
+                        report={{ ...data, ...cachePreview, loadError: null, loadWarning: null, recomputeDailyApplied: false, recomputeChannelMonthApplied: false, recomputeDebug: null } as unknown as SalesSummaryReport}
+                        searchParams={searchParams}
+                        setSearchParams={setSearchParams}
+                      />
+                    </>
+                  ) : (
+                    <ReportLoading view={data.view} locationCount={locationCount} />
+                  )
+                }
               >
                 <Await resolve={reportSource} errorElement={<ReportFailed />}>
                   {(report) => (
