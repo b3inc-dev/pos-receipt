@@ -80,7 +80,9 @@ test("値の形: 行は登録した順、置き換えた行には replacedBy、�
   const [a, b, c, v] = doc.entries;
   assert.equal(a.status, "voided");
   assert.equal(a.replacedBy, "b");
-  assert.equal(a.reason, "金額の入れ間違い");
+  // 登録した人・直したわけは注文に入れない（DB だけ）
+  assert.equal("reason" in a, false);
+  assert.equal("by" in a, false);
   assert.equal(b.replaces, "a");
   assert.equal(b.status, "active");
   assert.equal(b.fromLabel, "クレジット");
@@ -142,7 +144,7 @@ test("その日・その店の行だけ（無効は除く）", () => {
   assert.deepEqual(entriesForDayAndLocation(doc, "2026-11-23", LOC).map((e) => e.id), ["a", "e"]);
 });
 
-test("精算: メタフィールドが読めればその値で数え、DB と同じなら警告なし", () => {
+test("精算: 注文の値が DB と同じなら書き直さない。数えるのはアプリの記録", () => {
   const rows = [row({ id: "a" })];
   const doc = buildOrderAdjustmentsDoc(rows, { timeZone: TZ });
   const r = resolveSettlementAdjustments({
@@ -152,28 +154,81 @@ test("精算: メタフィールドが読めればその値で数え、DB と同
     docs: new Map([["gid://shopify/Order/5001", JSON.stringify(doc)]]),
     docsFetched: true,
   });
-  assert.equal(r.warnings.length, 0);
+  assert.equal(r.needsResync.length, 0);
   assert.equal(r.events.length, 1);
   assert.equal(r.events[0].amount, 1200);
   assert.equal(r.events[0].actualRefundMethod, "cash");
 });
 
-test("精算: Shopify の画面で金額が書き換えられたら、注文の値で数えて警告", () => {
-  const rows = [row({ id: "a" })];
-  const doc = buildOrderAdjustmentsDoc(rows, { timeZone: TZ });
-  doc.entries[0].amount = 9999;
+test("精算: 違うときはアプリの記録で数え、注文を書き直す（T の決定。見直し P1-2 の場面）", () => {
+  // 1) 「変更」1,000 → 600 のあと注文への書き込みが失敗（注文には前の行が active のまま）
+  const changed = [row({ id: "b", amount: 600, replacesEventId: "a" })];
+  const staleDoc = buildOrderAdjustmentsDoc([row({ id: "a", amount: 1000 })], { timeZone: TZ });
+  // 2) 承認待ちの行を Shopify の画面で active・99,999 に書き換え
+  const pending = [row({ id: "p", sourceOrderId: "gid://shopify/Order/5002", approvalStatus: "pending" })];
+  const tamperedDoc = buildOrderAdjustmentsDoc(pending, { timeZone: TZ });
+  tamperedDoc.entries[0].status = "active";
+  tamperedDoc.entries[0].amount = 99999;
+  // 3) Shopify 返金が pending の行を skipped に書き換え
+  const refundPending = [row({ id: "q", sourceOrderId: "gid://shopify/Order/5003", shopifyRefundStatus: "pending" })];
+  const skippedDoc = buildOrderAdjustmentsDoc(refundPending, { timeZone: TZ });
+  skippedDoc.entries[0].shopifyRefund.status = "skipped";
+  const r = resolveSettlementAdjustments({
+    date: "2026-11-23",
+    locationGid: LOC,
+    dbRows: [...changed, ...pending, ...refundPending],
+    docs: new Map([
+      ["gid://shopify/Order/5001", JSON.stringify(staleDoc)],
+      ["gid://shopify/Order/5002", JSON.stringify(tamperedDoc)],
+      ["gid://shopify/Order/5003", JSON.stringify(skippedDoc)],
+    ]),
+    docsFetched: true,
+  });
+  assert.deepEqual(
+    r.events.map((e) => [e.id, e.amount, e.approvalStatus, e.shopifyRefundStatus]),
+    [
+      ["b", 600, "none", "skipped"],
+      ["p", 1200, "pending", "skipped"],
+      ["q", 1200, "none", "pending"],
+    ],
+  );
+  assert.deepEqual(
+    r.needsResync.map((w) => [w.sourceOrderId, w.reason]),
+    [
+      ["gid://shopify/Order/5001", "metafield_differs"],
+      ["gid://shopify/Order/5002", "metafield_differs"],
+      ["gid://shopify/Order/5003", "metafield_differs"],
+    ],
+  );
+});
+
+test("精算: 2 件目を足したのに古い値が残った・「今日の分にする」が書けていない、も DB で数えて書き直す", () => {
+  const rows = [row({ id: "a", amount: 1000 }), row({ id: "c", amount: 300 })];
+  const oldDoc = buildOrderAdjustmentsDoc([rows[0]], { timeZone: TZ });
   const r = resolveSettlementAdjustments({
     date: "2026-11-23",
     locationGid: LOC,
     dbRows: rows,
-    docs: new Map([["gid://shopify/Order/5001", JSON.stringify(doc)]]),
+    docs: new Map([["gid://shopify/Order/5001", JSON.stringify(oldDoc)]]),
     docsFetched: true,
   });
-  assert.equal(r.events[0].amount, 9999);
-  assert.deepEqual(r.warnings.map((w) => w.reason), ["metafield_differs"]);
+  assert.deepEqual(r.events.map((e) => e.amount), [1000, 300]);
+  assert.deepEqual(r.needsResync.map((w) => w.reason), ["metafield_differs"]);
+  // 今日（11/25）に移した行。注文には元の日（11/23）のまま
+  const moved = [row({ id: "m", countDate: "2026-11-25" })];
+  const notMoved = buildOrderAdjustmentsDoc([row({ id: "m", countDate: "2026-11-23" })], { timeZone: TZ });
+  const today = resolveSettlementAdjustments({
+    date: "2026-11-25",
+    locationGid: LOC,
+    dbRows: moved,
+    docs: new Map([["gid://shopify/Order/5001", JSON.stringify(notMoved)]]),
+    docsFetched: true,
+  });
+  assert.equal(today.events.length, 1);
+  assert.deepEqual(today.needsResync.map((w) => w.reason), ["metafield_differs"]);
 });
 
-test("精算: 注文に値が無い・読めないときは DB の行で数えて警告。読み取り自体が失敗したら警告なしで DB", () => {
+test("精算: 注文に値が無い・読めないときも書き直す。読まなかった（設定オフ・読めない）ときは比べない", () => {
   const rows = [row({ id: "a" })];
   const missing = resolveSettlementAdjustments({
     date: "2026-11-23",
@@ -183,7 +238,7 @@ test("精算: 注文に値が無い・読めないときは DB の行で数え�
     docsFetched: true,
   });
   assert.equal(missing.events[0].amount, 1200);
-  assert.deepEqual(missing.warnings.map((w) => w.reason), ["metafield_missing"]);
+  assert.deepEqual(missing.needsResync.map((w) => w.reason), ["metafield_missing"]);
   const broken = resolveSettlementAdjustments({
     date: "2026-11-23",
     locationGid: LOC,
@@ -191,7 +246,7 @@ test("精算: 注文に値が無い・読めないときは DB の行で数え�
     docs: new Map([["gid://shopify/Order/5001", "not json"]]),
     docsFetched: true,
   });
-  assert.deepEqual(broken.warnings.map((w) => w.reason), ["metafield_invalid"]);
+  assert.deepEqual(broken.needsResync.map((w) => w.reason), ["metafield_invalid"]);
   const notFetched = resolveSettlementAdjustments({
     date: "2026-11-23",
     locationGid: LOC,
@@ -200,32 +255,31 @@ test("精算: 注文に値が無い・読めないときは DB の行で数え�
     docsFetched: false,
   });
   assert.equal(notFetched.events.length, 1);
-  assert.equal(notFetched.warnings.length, 0);
-});
-
-test("精算: 承認待ちはメタフィールドからも承認待ちとして渡す（数えるかは精算の承認の扱い）", () => {
-  const rows = [row({ id: "a", approvalStatus: "pending" })];
-  const doc = buildOrderAdjustmentsDoc(rows, { timeZone: TZ });
-  const r = resolveSettlementAdjustments({
-    date: "2026-11-23",
-    locationGid: LOC,
-    dbRows: rows,
-    docs: new Map([["gid://shopify/Order/5001", JSON.stringify(doc)]]),
-    docsFetched: true,
-  });
-  assert.equal(r.events[0].approvalStatus, "pending");
-  assert.equal(r.warnings.length, 0);
+  assert.equal(notFetched.needsResync.length, 0);
 });
 
 test("商品券で払った額: 商品券の売上を足し、商品券の返金を引く。失敗した取引と他の支払方法は数えない", () => {
-  assert.equal(
+  assert.deepEqual(
     voucherAppliedFromTransactions([
       { kind: "SALE", status: "SUCCESS", gateway: "商品券釣有り", amount: "4200" },
       { kind: "SALE", status: "SUCCESS", gateway: "cash", amount: "1000" },
       { kind: "SALE", status: "FAILURE", gateway: "商品券釣有り", amount: "999" },
       { kind: "REFUND", status: "SUCCESS", gateway: "商品券釣有り", amount: "200" },
     ]),
-    4000,
+    { applied: 4000, found: true },
+  );
+  // 商品券の取引が無い（言葉を変えた店・マスタで分けた店）: found=false で、0 円のお釣り＝額面にしない
+  assert.deepEqual(
+    voucherAppliedFromTransactions([{ kind: "SALE", status: "SUCCESS", gateway: "facility_points", amount: "3000" }]),
+    { applied: 0, found: false },
+  );
+  // マスタで商品券にした支払方法も見る
+  assert.deepEqual(
+    voucherAppliedFromTransactions(
+      [{ kind: "SALE", status: "SUCCESS", gateway: "facility_points", amount: "3000" }],
+      (gw) => gw === "facility_points",
+    ),
+    { applied: 3000, found: true },
   );
   assert.equal(voucherChangeOf(5000, 4200), 800);
   assert.equal(voucherChangeOf(3000, 4200), 0);

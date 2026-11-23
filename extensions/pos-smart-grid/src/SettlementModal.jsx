@@ -1084,7 +1084,7 @@ function PreviewView({
               ) : null}
               {preview.pendingSpecialRefundOrderLabels?.length ? (
                 <s-text tone="caution">
-                  返金処理中の特殊返金があります（注文: {preview.pendingSpecialRefundOrderLabels.slice(0, 5).join("、")}）。この返金は上の金額に入っていません。点検は出せますが、精算（確定）の前に特殊返金の「Shopify 返金を確かめる」を押してください。
+                  返金処理中の特殊返金があります（注文: {preview.pendingSpecialRefundOrderLabels.slice(0, 5).join("、")}）。この返金は上の金額に入っていません。点検は出せますが、精算（確定）の前に特殊返金の「返金を確かめる」を押してください。
                 </s-text>
               ) : null}
               {preview.confirmedFromDb ? (

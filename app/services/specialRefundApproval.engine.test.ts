@@ -268,7 +268,7 @@ test("承認待ちでも Shopify 返金の成否が分からない（pending）�
   );
 });
 
-test("承認／却下: 承認待ちだけを書き換え、Shopify には注文メタフィールドのほか何も書かない", async () => {
+test("承認／却下: 承認待ちだけを書き換え、Shopify には何も書かない", async () => {
   putOverride("pending");
   const calls: string[] = [];
   const spyAdmin = {
@@ -282,12 +282,11 @@ test("承認／却下: 承認待ちだけを書き換え、Shopify には注文�
   assert.equal(r1.ok, true);
   assert.equal(store.specialRefundEvent[0].approvalStatus, "approved");
   assert.ok(store.specialRefundEvent[0].approvalReviewedAt instanceof Date);
-  // Shopify に書くのは注文メタフィールド pos.adjustments（承認待ち → 有効）だけ。返金などは書かない
+  // Shopify には何も書かない（返金はしない。注文への記録 pos.adjustments は設定が初めオフなので書かない）
   assert.ok(
-    calls.every((c) => c === "OrderAdjustmentsSet" || !/^mutation|Create|Update|Set$/i.test(c)),
+    calls.every((c) => !/^mutation|Create|Update|Set$/i.test(c)),
     `Shopify mutations: ${calls.join(",")}`,
   );
-  assert.ok(calls.includes("OrderAdjustmentsSet"), calls.join(","));
   // 2 回目（ほかの人が先に決めた）は断る
   const r2 = await decideSpecialRefundApproval(spyAdmin as any, SHOP_ID, "ev1", "reject");
   assert.equal(r2.ok, false);

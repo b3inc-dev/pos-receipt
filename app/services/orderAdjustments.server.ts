@@ -6,6 +6,13 @@
 import prisma from "../db.server";
 import { adminGraphqlWithRetry, type AdminGraphqlClient } from "../lib/shopifyGraphqlThrottle.server";
 import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
+import { matchPaymentMethodMaster } from "../utils/paymentMethodMatch.server";
+import {
+  DEFAULT_SPECIAL_REFUND_SETTINGS,
+  SPECIAL_REFUND_SETTINGS_KEY,
+  getAppSetting,
+  type SpecialRefundSettings,
+} from "../utils/appSettings.server";
 import {
   ORDER_ADJUSTMENTS_KEY,
   ORDER_ADJUSTMENTS_NAMESPACE,
@@ -56,8 +63,16 @@ async function loadMethodLabels(shopId: string): Promise<(m: string) => string |
 }
 
 export type OrderAdjustmentsSyncResult =
-  | { ok: true; doc: OrderAdjustmentsDoc; summary: string }
+  /** 書けた（skipped: 店の設定で注文に書かない） */
+  | { ok: true; skipped?: false; doc: OrderAdjustmentsDoc; summary: string }
+  | { ok: true; skipped: true }
   | { ok: false; error: string };
+
+/** その店で、特殊返金・商品券調整を注文メタフィールドに書く・読むか（特殊返金設定。初めはオフ） */
+export async function isOrderAdjustmentsMetafieldEnabled(shopId: string): Promise<boolean> {
+  const raw = await getAppSetting<Partial<SpecialRefundSettings>>(shopId, SPECIAL_REFUND_SETTINGS_KEY);
+  return { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...raw }.writeOrderAdjustmentsMetafield === true;
+}
 
 /** その注文の DB の行から値を作る（書かない）。注文ページのブロックの表示にも使う */
 export async function buildOrderAdjustmentsDocForOrder(
@@ -79,21 +94,22 @@ export async function buildOrderAdjustmentsDocForOrder(
   return { doc, summary: buildOrderAdjustmentsSummary(doc), timeZone };
 }
 
-/**
- * 注文メタフィールドを DB の行から書き直す。失敗しても throw しない（登録は取り消さない）。
- * 書けた・書けなかったは、その注文の行の metafieldSyncedAt / metafieldSyncError に残す。
- */
-export async function syncOrderAdjustmentsMetafield(
+/** 書いたあとに DB の行から作り直して比べる回数（ほかの端末が同時に書いたとき、古い値で上書きしたままにしない） */
+const SYNC_MAX_ATTEMPTS = 3;
+
+async function writeOrderAdjustmentsDoc(
   admin: AdminClient,
-  shopId: string,
-  sourceOrderId: string,
-): Promise<OrderAdjustmentsSyncResult> {
-  const orderGid = toOrderGid(sourceOrderId);
-  const digits = orderGid.replace(/\D/g, "");
-  const orderIdVariants = [...new Set([orderGid, digits, sourceOrderId])];
-  try {
-    const { doc, summary } = await buildOrderAdjustmentsDocForOrder(admin, shopId, sourceOrderId);
-    const res = await admin.graphql(METAFIELDS_SET, {
+  orderGid: string,
+  doc: OrderAdjustmentsDoc,
+  summary: string,
+): Promise<void> {
+  const json = await adminGraphqlWithRetry<{
+    errors?: { message: string }[];
+    data?: { metafieldsSet?: { userErrors?: { message: string }[] } };
+  }>(
+    admin as AdminGraphqlClient,
+    METAFIELDS_SET,
+    {
       variables: {
         metafields: [
           {
@@ -113,21 +129,45 @@ export async function syncOrderAdjustmentsMetafield(
           },
         ],
       },
-    });
-    const json = (await res.json()) as {
-      errors?: { message: string }[];
-      data?: { metafieldsSet?: { userErrors?: { message: string }[] } };
-    };
-    const errs = [
-      ...(json.errors ?? []).map((e) => e.message),
-      ...(json.data?.metafieldsSet?.userErrors ?? []).map((e) => e.message),
-    ];
-    if (errs.length > 0) throw new Error(errs.join("; "));
+    },
+    "orderAdjustmentsSet",
+  );
+  const errs = [
+    ...(json.errors ?? []).map((e) => e.message),
+    ...(json.data?.metafieldsSet?.userErrors ?? []).map((e) => e.message),
+  ];
+  if (errs.length > 0) throw new Error(errs.join("; "));
+}
+
+/**
+ * 注文メタフィールドを DB の行から書き直す。失敗しても throw しない（登録は取り消さない）。
+ * - 店の設定で注文に書かないときは何もしない（skipped）
+ * - 書いたあとに DB の行から作り直し、書いた中身と違えば（ほかの端末が同時に登録した）書き直す
+ * - 書けた・書けなかったは、その注文の行の metafieldSyncedAt / metafieldSyncError に残す
+ */
+export async function syncOrderAdjustmentsMetafield(
+  admin: AdminClient,
+  shopId: string,
+  sourceOrderId: string,
+): Promise<OrderAdjustmentsSyncResult> {
+  const orderGid = toOrderGid(sourceOrderId);
+  const digits = orderGid.replace(/\D/g, "");
+  const orderIdVariants = [...new Set([orderGid, digits, sourceOrderId])];
+  try {
+    if (!(await isOrderAdjustmentsMetafieldEnabled(shopId))) return { ok: true, skipped: true };
+    let built = await buildOrderAdjustmentsDocForOrder(admin, shopId, sourceOrderId);
+    for (let attempt = 1; ; attempt++) {
+      await writeOrderAdjustmentsDoc(admin, orderGid, built.doc, built.summary);
+      const after = await buildOrderAdjustmentsDocForOrder(admin, shopId, sourceOrderId);
+      if (JSON.stringify(after.doc.entries) === JSON.stringify(built.doc.entries)) break;
+      if (attempt >= SYNC_MAX_ATTEMPTS) throw new Error("同じ注文への登録が続いたため、注文の記録を最新にできませんでした");
+      built = after;
+    }
     await prisma.specialRefundEvent.updateMany({
       where: { shopId, sourceOrderId: { in: orderIdVariants } },
       data: { metafieldSyncedAt: new Date(), metafieldSyncError: null },
     });
-    return { ok: true, doc, summary };
+    return { ok: true, doc: built.doc, summary: built.summary };
   } catch (err) {
     const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);
     console.warn(`[order-adjustments] metafield write failed shop=${shopId} order=${orderGid}: ${message}`);
@@ -180,6 +220,7 @@ const ORDER_VOUCHER_TX_QUERY = `#graphql
     order(id: $id) {
       id
       name
+      createdAt
       transactions(first: 100) {
         kind
         status
@@ -192,19 +233,21 @@ const ORDER_VOUCHER_TX_QUERY = `#graphql
 `;
 
 /**
- * 注文の取引から、商品券で払った額（使った額）を出す（④ 額面だけを入れる画面のため）。
- * 読めなければ null（POS では手で入れてもらう）。
+ * 注文の取引から、商品券で払った額（使った額）と注文の日時を出す（④ 額面だけを入れる画面のため）。
+ * 注文が読めなければ null。商品券の取引が見つからなければ applied が null（POS では手で入れてもらう）。
  */
 export async function fetchOrderVoucherApplied(
   admin: AdminClient,
+  shopId: string,
   sourceOrderId: string,
-): Promise<{ applied: number; orderName: string | null } | null> {
+): Promise<{ applied: number | null; orderName: string | null; orderCreatedAt: string | null } | null> {
   try {
     const json = await adminGraphqlWithRetry<{
       errors?: unknown[];
       data?: {
         order?: {
           name?: string | null;
+          createdAt?: string | null;
           transactions?: {
             kind?: string | null;
             status?: string | null;
@@ -223,7 +266,23 @@ export async function fetchOrderVoucherApplied(
       formattedGateway: t.formattedGateway,
       amount: Number(t.amountSet?.shopMoney?.amount ?? 0),
     }));
-    return { applied: voucherAppliedFromTransactions(txs), orderName: json.data.order.name ?? null };
+    const masters = await prisma.paymentMethodMaster.findMany({
+      where: { shopId, enabled: true },
+      select: { rawGatewayPattern: true, formattedGatewayPattern: true, matchType: true, displayLabel: true, isVoucher: true, category: true },
+    });
+    const isVoucherByMaster = (gateway: string, formattedGateway?: string | null) => {
+      const m =
+        matchPaymentMethodMaster(gateway, masters) ??
+        (formattedGateway ? matchPaymentMethodMaster(formattedGateway, masters) : null);
+      return Boolean(m && (m.isVoucher === true || (m as { category?: string | null }).category === "voucher"));
+    };
+    const r = voucherAppliedFromTransactions(txs, isVoucherByMaster);
+    return {
+      // 商品券の取引が見つからないときは null（0 円にすると、お釣り＝額面で登録されてしまう）。POS で手で入れてもらう
+      applied: r.found ? r.applied : null,
+      orderName: json.data.order.name ?? null,
+      orderCreatedAt: json.data.order.createdAt ?? null,
+    };
   } catch (err) {
     console.warn(`[order-adjustments] voucher tx read failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;

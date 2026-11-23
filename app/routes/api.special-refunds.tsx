@@ -31,6 +31,7 @@ import { normalizeLocationGid } from "../utils/locationGid";
 import { initialApprovalStatus } from "../utils/specialRefundApproval";
 import { syncOrderAdjustmentsMetafield } from "../services/orderAdjustments.server";
 import { countDateOf } from "../services/orderAdjustmentsPure.server";
+import { loadRefundMethodResolver } from "../utils/paymentMethod.server";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
 
@@ -83,10 +84,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
       orderBy: { createdAt: "desc" },
     });
 
-    const voidedCount = await countVoidedEventsOnOrder(shop.id, sourceOrderId);
+    const [voidedCount, methodResolver, timezone] = await Promise.all([
+      countVoidedEventsOnOrder(shop.id, sourceOrderId),
+      loadRefundMethodResolver(shop.id),
+      getShopTimezoneForDaily(admin, shop.id),
+    ]);
+    // 店の画面に出すため、支払方法は表示名に、時刻は店のタイムゾーンにする（内部の名前・UTC を出さない）
+    const dateTimeFmt = new Intl.DateTimeFormat("ja-JP", {
+      timeZone: timezone,
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
     return corsJson({
-      items: items.map(serializeEvent),
+      items: items.map((e) => ({
+        ...serializeEvent(e),
+        originalPaymentLabel: e.originalPaymentMethod ? methodResolver.labelForMethod(e.originalPaymentMethod) : null,
+        actualRefundLabel: e.actualRefundMethod ? methodResolver.labelForMethod(e.actualRefundMethod) : null,
+        createdAtLabel: dateTimeFmt.format(e.createdAt),
+      })),
       allowedEventTypes: allowedTypes,
       refundProcessingMode: merged.refundProcessingMode,
       orderCorrectionContext: {

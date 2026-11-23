@@ -81,6 +81,8 @@ export type AdjustmentChangeResult =
       warning: string | null;
       /** 数える日の精算がもう確定している（POS の「更新」で再確定が要る） */
       settlementAlreadyConfirmed: boolean;
+      /** 確定済みで、再確定が要る日（YYYY-MM-DD）。「今日の分にする」では元の日と今日の両方のことがある */
+      confirmedDates: string[];
       metafieldWritten: boolean;
     }
   | { ok: false; status: number; code: string; message: string };
@@ -164,9 +166,10 @@ export async function editAdjustmentEvent(
   for (const d of new Set([oldDate, newDate])) {
     await refreshDailySummaryForAdjustment(admin, shopId, old.locationId, d);
   }
-  const confirmed =
-    (await isSettlementConfirmedFor(shopId, old.locationId, oldDate)) ||
-    (newDate !== oldDate && (await isSettlementConfirmedFor(shopId, old.locationId, newDate)));
+  const confirmedDates: string[] = [];
+  for (const d of new Set([oldDate, newDate])) {
+    if (await isSettlementConfirmedFor(shopId, old.locationId, d)) confirmedDates.push(d);
+  }
 
   return {
     ok: true,
@@ -175,7 +178,8 @@ export async function editAdjustmentEvent(
     sourceOrderId: old.sourceOrderId,
     sourceOrderName: old.sourceOrderName,
     warning: plan.warning,
-    settlementAlreadyConfirmed: confirmed,
+    settlementAlreadyConfirmed: confirmedDates.length > 0,
+    confirmedDates,
     metafieldWritten: sync.ok,
   };
 }
@@ -225,6 +229,7 @@ export async function voidAdjustmentEvent(
     sourceOrderName: existing.sourceOrderName,
     warning,
     settlementAlreadyConfirmed: confirmed,
+    confirmedDates: confirmed ? [date] : [],
     metafieldWritten: sync.ok,
     shopifyRefundStatus: existing.shopifyRefundStatus,
   };

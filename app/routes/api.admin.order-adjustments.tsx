@@ -11,6 +11,7 @@ import prisma from "../db.server";
 import {
   buildOrderAdjustmentsDocForOrder,
   fetchOrderAdjustmentDocs,
+  isOrderAdjustmentsMetafieldEnabled,
 } from "../services/orderAdjustments.server";
 import { orderMetafieldStateOf, toOrderGid } from "../services/orderAdjustmentsPure.server";
 
@@ -26,19 +27,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const shop = await resolveShop(session.shop, admin);
     const orderGid = toOrderGid(orderIdRaw);
     const digits = orderGid.replace(/\D/g, "");
+    const enabled = await isOrderAdjustmentsMetafieldEnabled(shop.id);
     const [rowCount, built, current] = await Promise.all([
       prisma.specialRefundEvent.count({
         where: { shopId: shop.id, sourceOrderId: { in: [orderGid, digits, orderIdRaw] } },
       }),
       buildOrderAdjustmentsDocForOrder(admin, shop.id, orderGid),
-      fetchOrderAdjustmentDocs(admin, [orderGid]),
+      enabled
+        ? fetchOrderAdjustmentDocs(admin, [orderGid])
+        : Promise.resolve({ fetched: false, docs: new Map<string, string | null>() }),
     ]);
-    const metafieldState = orderMetafieldStateOf({
-      rowCount,
-      fetched: current.fetched,
-      currentValue: current.docs.get(orderGid) ?? null,
-      built: built.doc,
-    });
+    // 注文に書かない設定のときは比べない（"off"。表示はアプリの記録）
+    const metafieldState = enabled
+      ? orderMetafieldStateOf({
+          rowCount,
+          fetched: current.fetched,
+          currentValue: current.docs.get(orderGid) ?? null,
+          built: built.doc,
+        })
+      : "off";
     return cors(
       Response.json({
         ok: true,

@@ -73,6 +73,7 @@ export async function action({ request }: ActionFunctionArgs) {
     reflectVoucherAdjustmentToSettlement: bool("reflectVoucherAdjustmentToSettlement", true),
     reflectReceiptCashAdjustmentToSettlement: bool("reflectReceiptCashAdjustmentToSettlement", true),
     requireApprovalForPaymentMethodOverride: bool("requireApprovalForPaymentMethodOverride", false),
+    writeOrderAdjustmentsMetafield: bool("writeOrderAdjustmentsMetafield", false),
     specialRefundUiLabel: str("specialRefundUiLabel", "特殊返金"),
     voucherAdjustmentUiLabel: str("voucherAdjustmentUiLabel", "商品券調整"),
     cashRefundUiLabel: str("cashRefundUiLabel", "現金返金"),
@@ -215,6 +216,22 @@ export default function SpecialRefundSettingsPage() {
                   checked={form.requireApprovalForPaymentMethodOverride}
                   onChange={(v) => set("requireApprovalForPaymentMethodOverride", v)}
                   helpText="オンにすると、POS で登録した返金手段変更は「承認待ち」になり、「特殊返金・商品券調整 履歴」で承認するまで精算・点検・売上サマリーに入りません。却下したものは入りません。Shopify での返金の実行は今までどおりで、承認・却下では Shopify に何もしません。オフのときは今までどおり、登録した時点で精算に入ります。"
+                />
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection
+            title="注文への記録"
+            description="特殊返金・商品券調整を Shopify の注文にも記録するかを選びます。"
+          >
+            <Card>
+              <BlockStack gap="300">
+                <Checkbox
+                  label="特殊返金・商品券調整を注文にも記録する（注文メタフィールド pos.adjustments）"
+                  checked={form.writeOrderAdjustmentsMetafield}
+                  onChange={(v) => set("writeOrderAdjustmentsMetafield", v)}
+                  helpText="オンにすると、登録・変更・無効化のたびに、その注文に記録を書きます。注文を読むほかのアプリ（ciara-system など）が同じ記録で数えられます。精算はアプリの記録で数え、注文の記録が違うときはアプリの記録で書き直します。オフのときは注文に何も書かず、今までどおりアプリの記録だけで数えます。"
                 />
               </BlockStack>
             </Card>

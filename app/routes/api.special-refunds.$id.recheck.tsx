@@ -90,7 +90,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         {
           ok: false,
           error:
-            "この登録は「Shopify 返金を確かめる」（同じ登録のまま送り直す）で確かめてください。",
+            "この登録は「返金を確かめる」（同じ登録のまま送り直す）で確かめてください。",
         },
         { status: 400 },
       );

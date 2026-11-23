@@ -41,6 +41,10 @@ const orders = [mkOrder(0, "cash", 1000), mkOrder(1, "shopify_payments", 2000)];
 /** 合成 Shopify の注文メタフィールド（注文 GID → pos.adjustments の値） */
 const shopifyAdjustments = new Map<string, string>();
 const shopifySummaries = new Map<string, string>();
+/** 注文への書き込みを失敗させる回数（書き込みの失敗の試験） */
+let failWrites = 0;
+/** 書き込みの直前に呼ぶ（同時に登録された場面の試験） */
+let onWrite: (() => void) | null = null;
 /** 商品券の支払いがある注文（④ 額面だけの試験） */
 const voucherOrderTx = [
   { kind: "SALE", status: "SUCCESS", gateway: "商品券釣有り", formattedGateway: "商品券釣有り", amountSet: money(4200) },
@@ -76,6 +80,11 @@ const admin = {
         };
         break;
       case "OrderAdjustmentsSet":
+        if (failWrites > 0) {
+          failWrites--;
+          return { json: async () => ({ errors: [{ message: "Internal error" }] }) };
+        }
+        onWrite?.();
         for (const m of v.metafields as { ownerId: string; key: string; value: string }[]) {
           if (m.key === "adjustments") shopifyAdjustments.set(m.ownerId, m.value);
           if (m.key === "adjustments_summary") shopifySummaries.set(m.ownerId, m.value);
@@ -83,7 +92,7 @@ const admin = {
         data = { metafieldsSet: { metafields: [], userErrors: [] } };
         break;
       case "OrderVoucherTransactions":
-        data = { order: { id: v.id, name: "#5009", transactions: voucherOrderTx } };
+        data = { order: { id: v.id, name: "#5009", createdAt: `${TARGET_DATE}T03:00:00Z`, transactions: voucherOrderTx } };
         break;
       case "LegacyGiftCards":
       case "LegacyGiftCardsFb":
@@ -201,10 +210,16 @@ mock.module(new URL("../utils/posAuth.server.ts", import.meta.url).href, {
   },
 });
 
+/** 特殊返金設定。注文に書く設定（writeOrderAdjustmentsMetafield）は、指定が無ければオン */
 function setSpecialRefundSettings(v: Record<string, unknown>) {
   store.appSetting = store.appSetting.filter((r) => r.key !== "special_refund_settings");
-  store.appSetting.push({ shopId: SHOP_ID, key: "special_refund_settings", valueJson: JSON.stringify(v) });
+  store.appSetting.push({
+    shopId: SHOP_ID,
+    key: "special_refund_settings",
+    valueJson: JSON.stringify({ writeOrderAdjustmentsMetafield: true, ...v }),
+  });
 }
+setSpecialRefundSettings({ refundProcessingMode: "record_only" });
 
 
 /** 一般設定のタイムゾーン（日本時間）。Shopify にも聞かずに済む */
@@ -315,7 +330,7 @@ test("精算: 注文の値と DB が同じなら警告なしで数える（売�
   assert.equal(row.actual, p.netSales);
 });
 
-test("精算: Shopify の画面で金額を書き換えられたら、注文の値で数えて警告（ciara-system と同じ数になる）", async () => {
+test("精算: Shopify の画面で金額を書き換えられても、アプリの記録で数え、注文の値を書き直す（T の決定）", async () => {
   putOverride();
   shopifyAdjustments.clear();
   await writeDoc();
@@ -323,18 +338,81 @@ test("精算: Shopify の画面で金額を書き換えられたら、注文の�
   doc.entries[0].amount = 800;
   shopifyAdjustments.set("gid://shopify/Order/5001", JSON.stringify(doc));
   const p = await preview();
-  assert.equal(p.refundTotal, 800);
-  assert.equal(p.total, 2200);
-  assert.equal(p.adjustmentSourceWarnings?.[0].reason, "metafield_differs");
-  assert.match(String(p.adjustmentSourceWarnings?.[0].message), /#5001.*違います/);
+  assert.equal(p.refundTotal, 500);
+  assert.equal(p.total, 2500);
+  assert.equal(p.adjustmentSourceWarnings, undefined);
+  assert.equal(docOf("gid://shopify/Order/5001").entries[0].amount, 500);
 });
 
-test("精算: 注文にまだ書けていないときは DB の行で数えて警告", async () => {
+test("精算: 注文にまだ書けていない注文は、DB の行で数えて書き直す。書き直せなければ警告", async () => {
   putOverride();
   shopifyAdjustments.clear();
   const p = await preview();
   assert.equal(p.refundTotal, 500);
-  assert.equal(p.adjustmentSourceWarnings?.[0].reason, "metafield_missing");
+  assert.equal(p.adjustmentSourceWarnings, undefined);
+  assert.equal(docOf("gid://shopify/Order/5001").entries.length, 1);
+  shopifyAdjustments.clear();
+  failWrites = 99;
+  const q = await preview();
+  failWrites = 0;
+  assert.equal(q.refundTotal, 500);
+  assert.equal(q.adjustmentSourceWarnings?.[0].reason, "metafield_missing");
+  assert.match(String(q.adjustmentSourceWarnings?.[0].message), /#5001.*アプリの記録で数えて/);
+});
+
+test("変更のあと注文への書き込みが失敗しても、精算は新しい行で数える（前の行で数えない）", async () => {
+  putOverride({ amount: 1000 });
+  shopifyAdjustments.clear();
+  await writeDoc();
+  failWrites = 99;
+  const { status, json } = await callRoute(
+    "/api/special-refunds/ev1/edit",
+    "../routes/api.special-refunds.$id.edit.tsx",
+    { amount: 600, reason: "金額の入れ間違い" },
+    { id: "ev1" },
+  );
+  assert.equal(status, 200, JSON.stringify(json));
+  assert.equal(json.metafieldWritten, false);
+  assert.ok(store.specialRefundEvent[0].metafieldSyncError);
+  const p = await preview();
+  failWrites = 0;
+  assert.equal(p.refundTotal, 600);
+  assert.equal(p.adjustmentSourceWarnings?.[0].reason, "metafield_differs");
+});
+
+test("同時に登録: 書いている間にほかの端末が 2 件目を足しても、書いたあとに作り直して 2 件とも残す", async () => {
+  putOverride();
+  shopifyAdjustments.clear();
+  let added = false;
+  onWrite = () => {
+    if (added) return;
+    added = true;
+    store.specialRefundEvent.push({
+      ...store.specialRefundEvent[0],
+      id: "ev2",
+      amount: 300,
+      createdAt: new Date(dayStartUtc + 6 * 3600_000),
+    });
+  };
+  const r = await writeDoc();
+  onWrite = null;
+  assert.equal(r.ok, true);
+  assert.deepEqual(docOf("gid://shopify/Order/5001").entries.map((e: any) => e.id), ["ev1", "ev2"]);
+});
+
+test("注文に書く設定がオフのときは、注文に何も書かず・読まず、精算は DB で数えて警告もしない", async () => {
+  setSpecialRefundSettings({ refundProcessingMode: "record_only", writeOrderAdjustmentsMetafield: false });
+  putOverride();
+  shopifyAdjustments.clear();
+  shopifyCalls.length = 0;
+  const r = await writeDoc();
+  assert.deepEqual(r, { ok: true, skipped: true });
+  assert.equal(shopifyAdjustments.size, 0);
+  const p = await preview();
+  assert.equal(p.refundTotal, 500);
+  assert.equal(p.adjustmentSourceWarnings, undefined);
+  assert.equal(shopifyAdjustments.size, 0);
+  setSpecialRefundSettings({ refundProcessingMode: "record_only" });
 });
 
 test("前からの行（countDate なし）は登録した日で数える", async () => {
@@ -468,7 +546,24 @@ test("商品券 API: 額面だけ送れば、使った額を注文の取引か�
   const doc = docOf("gid://shopify/Order/5009");
   assert.equal(doc.entries[0].type, "voucher");
   assert.deepEqual(doc.entries[0].voucher, { face: 5000, applied: 4200, change: 800 });
-  // 精算の「商品券釣有り差額」に入る（登録した日）
-  const p = await preview(store.specialRefundEvent[0].countDate);
+  // 数える日は注文の日（T の決定）。精算の「商品券釣有り差額」に入る
+  assert.equal(json.event.countDate, TARGET_DATE);
+  const p = await preview(TARGET_DATE);
   assert.equal(p.voucherChangeAmount, 800);
+});
+
+test("商品券 API: 注文に商品券の支払いが見つからないときは 400（お釣り＝額面で登録しない）", async () => {
+  store.specialRefundEvent = [];
+  const saved = voucherOrderTx.splice(0, voucherOrderTx.length);
+  voucherOrderTx.push({ kind: "SALE", status: "SUCCESS", gateway: "cash", formattedGateway: "cash", amountSet: money(5000) });
+  const { status, json } = await callRoute("/api/voucher-adjustments", "../routes/api.voucher-adjustments.tsx", {
+    sourceOrderId: "gid://shopify/Order/5009",
+    sourceOrderName: "#5009",
+    locationId: LOC_GID,
+    voucherFaceValue: 5000,
+  });
+  voucherOrderTx.splice(0, voucherOrderTx.length, ...saved);
+  assert.equal(status, 400);
+  assert.equal(json.code, "VOUCHER_APPLIED_UNKNOWN");
+  assert.equal(store.specialRefundEvent.length, 0);
 });

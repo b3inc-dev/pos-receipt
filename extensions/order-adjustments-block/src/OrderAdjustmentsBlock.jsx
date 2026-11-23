@@ -119,7 +119,7 @@ function OrderAdjustmentsBlock() {
               <s-stack key={e.id} direction="inline" gap="small-200" alignItems="center">
                 <s-text>{`${shortDate(e.date)} ${entryText(e)}`}</s-text>
                 {STATUS_LABELS[e.status] ? <s-badge tone="warning">{STATUS_LABELS[e.status]}</s-badge> : null}
-                {e.shopifyRefund?.status === "success" ? <s-badge>Shopify で返金済み</s-badge> : null}
+                {e.shopifyRefund?.status === "success" ? <s-badge>返金済</s-badge> : null}
               </s-stack>
             ))}
           </s-stack>

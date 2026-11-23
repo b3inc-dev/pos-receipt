@@ -115,7 +115,7 @@ export function OrderDetailSummary({ order }) {
           {refunds.map((r) => (
             <s-stack key={r.id} gap="extraSmall">
               <Row
-                label={r.createdAt ? String(r.createdAt).slice(0, 16).replace("T", " ") : "返金"}
+                label={r.createdAtLabel ? `返金 ${r.createdAtLabel}` : "返金"}
                 value={fmtYen(r.totalRefunded)}
               />
               {(r.transactions ?? []).map((rtx, i) => (

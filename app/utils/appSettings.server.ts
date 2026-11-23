@@ -274,6 +274,12 @@ export interface SpecialRefundSettings {
    * オンのとき、付け替えは承認待ちで登録し、管理画面の特殊返金履歴で承認するまで精算・売上サマリーに数えない。
    */
   requireApprovalForPaymentMethodOverride: boolean;
+  /**
+   * 特殊返金・商品券調整を注文メタフィールド pos.adjustments に書く（初めはオフ）。
+   * オフのときは注文に書かず・読まず、精算は今までどおりアプリの記録（DB）で数える。
+   * docs/ORDER_ADJUSTMENTS_METAFIELD.md
+   */
+  writeOrderAdjustmentsMetafield: boolean;
   specialRefundUiLabel: string;
   voucherAdjustmentUiLabel: string;
   cashRefundUiLabel: string;
@@ -302,6 +308,7 @@ export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
   reflectVoucherAdjustmentToSettlement: true,
   reflectReceiptCashAdjustmentToSettlement: true,
   requireApprovalForPaymentMethodOverride: false,
+  writeOrderAdjustmentsMetafield: false,
   specialRefundUiLabel: "特殊返金",
   voucherAdjustmentUiLabel: "商品券調整",
   cashRefundUiLabel: "現金返金",

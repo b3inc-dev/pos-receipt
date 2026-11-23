@@ -26,9 +26,10 @@ import { editAdjustmentEvent, voidAdjustmentEvent } from "../services/orderAdjus
 import {
   buildOrderAdjustmentsDocForOrder,
   fetchOrderAdjustmentDocs,
+  isOrderAdjustmentsMetafieldEnabled,
   syncOrderAdjustmentsMetafield,
 } from "../services/orderAdjustments.server";
-import { countDateOf, orderMetafieldStateOf, toOrderGid } from "../services/orderAdjustmentsPure.server";
+import { countDateOf, orderMetafieldStateOf, toOrderGid, type OrderMetafieldState } from "../services/orderAdjustmentsPure.server";
 import { parseAdjustmentEditBody } from "../utils/orderAdjustmentEditInput";
 import { normalizeApprovalStatus } from "../utils/specialRefundApproval";
 
@@ -54,6 +55,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const orderGid = toOrderGid(orderIdRaw);
   const digits = orderGid.replace(/\D/g, "");
+  const metafieldEnabled = await isOrderAdjustmentsMetafieldEnabled(shop.id);
   const [rows, selectable, built, current] = await Promise.all([
     prisma.specialRefundEvent.findMany({
       where: { shopId: shop.id, sourceOrderId: { in: [orderGid, digits, orderIdRaw] } },
@@ -65,15 +67,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
       select: { rawGatewayPattern: true, displayLabel: true },
     }),
     buildOrderAdjustmentsDocForOrder(admin, shop.id, orderGid),
-    fetchOrderAdjustmentDocs(admin, [orderGid]),
+    metafieldEnabled
+      ? fetchOrderAdjustmentDocs(admin, [orderGid])
+      : Promise.resolve({ fetched: false, docs: new Map<string, string | null>() }),
   ]);
   const currentValue = current.docs.get(orderGid) ?? null;
-  const metafieldState = orderMetafieldStateOf({
-    rowCount: rows.length,
-    fetched: current.fetched,
-    currentValue,
-    built: built.doc,
-  });
+  // 注文に書かない設定のときは比べない（"off"）
+  const metafieldState: OrderMetafieldState | "off" = metafieldEnabled
+    ? orderMetafieldStateOf({
+        rowCount: rows.length,
+        fetched: current.fetched,
+        currentValue,
+        built: built.doc,
+      })
+    : "off";
   const labelOf = new Map(selectable.map((m) => [m.rawGatewayPattern.toLowerCase(), m.displayLabel]));
   const methodLabel = (m: string | null) => (m ? (labelOf.get(m.toLowerCase()) ?? m) : null);
   return {
@@ -122,6 +129,9 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === "resync") {
     const orderId = String(form.get("orderId") ?? "");
     const r = await syncOrderAdjustmentsMetafield(admin, shop.id, orderId);
+    if (r.ok && r.skipped) {
+      return { ok: false as const, message: "注文への記録はオフです。特殊返金設定の「注文への記録」をオンにすると書けます。" };
+    }
     return r.ok
       ? { ok: true as const, message: "注文の記録を書き直しました", at: Date.now() }
       : { ok: false as const, message: `注文の記録を書けませんでした（${r.error}）。しばらくしてからもう一度押してください。` };
@@ -139,6 +149,7 @@ export async function action({ request }: ActionFunctionArgs) {
       message: "無効にしました",
       warning: r.warning,
       settlementAlreadyConfirmed: r.settlementAlreadyConfirmed,
+      confirmedDates: r.confirmedDates,
       metafieldWritten: r.metafieldWritten,
       at: Date.now(),
     };
@@ -157,6 +168,7 @@ export async function action({ request }: ActionFunctionArgs) {
       message: "変更しました",
       warning: r.warning,
       settlementAlreadyConfirmed: r.settlementAlreadyConfirmed,
+      confirmedDates: r.confirmedDates,
       metafieldWritten: r.metafieldWritten,
       at: Date.now(),
     };
@@ -220,10 +232,13 @@ function EditPanel({ item, refundMethods, busy, onCancel }: {
               <s-choice value="extra">追加</s-choice>
             </s-choice-list>
           ) : null}
-          <s-choice-list label="数える日" name="dateMode" values={["original"]}>
-            <s-choice value="original">元の日のまま（{item.countDate}）</s-choice>
-            <s-choice value="today">今日の分にする</s-choice>
-          </s-choice-list>
+          {/* 商品券は注文の日で数えるので、数える日は選ばない */}
+          {isVoucher ? null : (
+            <s-choice-list label="数える日" name="dateMode" values={["original"]}>
+              <s-choice value="original">元の日のまま（{item.countDate}）</s-choice>
+              <s-choice value="today">今日の分にする</s-choice>
+            </s-choice-list>
+          )}
           <s-text-field label="直したわけ" name="reason" required placeholder="例: 返金手段の選び間違い" />
           {item.shopifyRefundStatus === "success" ? (
             <Text as="p" variant="bodySm" tone="caution">
@@ -265,18 +280,19 @@ export default function OrderAdjustmentsPage() {
   if (actionData && !actionData.ok) {
     notice = { tone: "critical", heading: "できませんでした", text: actionData.message };
   } else if (actionData?.ok && "settlementAlreadyConfirmed" in actionData && actionData.settlementAlreadyConfirmed) {
+    const days = ("confirmedDates" in actionData ? actionData.confirmedDates ?? [] : []).join("・");
     notice = {
       tone: "warning",
-      heading: "この日の精算はもう確定しています",
-      text: "POS の精算で「更新」を押し、「今の数で再確定する」を押してください。" + (actionData.warning ? ` ${actionData.warning}` : ""),
+      heading: `${days ? `${days} の` : "この日の"}精算はもう確定しています`,
+      text: "POS の精算でその日を開き「更新」を押し、「今の数で再確定する」を押してください。" + (actionData.warning ? ` ${actionData.warning}` : ""),
     };
   } else if (actionData?.ok && "warning" in actionData && actionData.warning) {
-    notice = { tone: "warning", heading: "Shopify の返金は直していません", text: actionData.warning };
+    notice = { tone: "warning", heading: "返金はそのままです", text: actionData.warning };
   } else if (data.metafieldState === "differs") {
     notice = {
       tone: "warning",
       heading: "注文の記録がアプリの記録と違います",
-      text: "Shopify の画面で書き換えられた可能性があります。精算は注文の記録で数えます。アプリの記録に戻すときは「書き直す」を押してください。",
+      text: "Shopify の画面で書き換えられたか、書き込みが途中で失敗した可能性があります。精算はアプリの記録で数えます。「書き直す」を押すと、注文の記録をアプリの記録に戻します。",
     };
   } else if (data.metafieldState === "missing") {
     notice = {
@@ -315,11 +331,15 @@ export default function OrderAdjustmentsPage() {
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center" wrap>
                   <Text as="h2" variant="headingSm">注文の記録</Text>
-                  <Form method="post">
-                    <input type="hidden" name="intent" value="resync" />
-                    <input type="hidden" name="orderId" value={data.orderGid} />
-                    <s-button type="submit" variant="secondary" loading={busy || undefined}>書き直す</s-button>
-                  </Form>
+                  {data.metafieldState === "off" ? (
+                    <Badge>注文への記録はオフ</Badge>
+                  ) : (
+                    <Form method="post">
+                      <input type="hidden" name="intent" value="resync" />
+                      <input type="hidden" name="orderId" value={data.orderGid} />
+                      <s-button type="submit" variant="secondary" loading={busy || undefined}>書き直す</s-button>
+                    </Form>
+                  )}
                 </InlineStack>
                 <Text as="p" variant="bodySm" tone="subdued">
                   {data.summary || "有効な登録はありません"}
@@ -342,7 +362,7 @@ export default function OrderAdjustmentsPage() {
                           <InlineStack gap="200" blockAlign="center">
                             <Text as="span" fontWeight="semibold">{EVENT_TYPE_LABELS[item.eventType] ?? item.eventType}</Text>
                             {statusBadge(item)}
-                            {item.shopifyRefundStatus === "success" ? <Badge tone="info">Shopify 返金済み</Badge> : null}
+                            {item.shopifyRefundStatus === "success" ? <Badge tone="info">返金済</Badge> : null}
                           </InlineStack>
                           <Text as="span" variant="bodySm" tone="subdued">
                             {item.eventType === "voucher_change_adjustment"
@@ -373,7 +393,7 @@ export default function OrderAdjustmentsPage() {
                       </InlineStack>
                       {item.shopifyRefundStatus === "pending" ? (
                         <Text as="p" variant="bodySm" tone="caution">
-                          Shopify 返金の結果が分かっていません。POS の特殊返金で「Shopify 返金を確かめる」を押してから直してください。
+                          返金処理中（結果待ち）です。POS の特殊返金で「返金を確かめる」を押してから直してください。
                         </Text>
                       ) : null}
                       {editingId === item.id ? (

@@ -201,6 +201,16 @@ export function serializeOrderDetail(
   const refunds = refundList.map((r) => ({
     id: r.id,
     createdAt: r.createdAt,
+    // 店のタイムゾーンの「11/23 18:31」（画面は UTC の時刻を出さない）
+    createdAtLabel: r.createdAt
+      ? new Intl.DateTimeFormat("ja-JP", {
+          timeZone: tz,
+          month: "numeric",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(new Date(String(r.createdAt)))
+      : "",
     totalRefunded: moneyAmount(r.totalRefundedSet as MoneyBag),
     currency: moneyCurrency(r.totalRefundedSet as MoneyBag),
     transactions: (

@@ -74,13 +74,20 @@ import {
   sleep,
 } from "../lib/shopifyGraphqlThrottle.server";
 import { readOrdersPageOrThrow } from "./settlementUpstreamPage.server";
-import { fetchOrderAdjustmentDocs } from "./orderAdjustments.server";
+import {
+  fetchOrderAdjustmentDocs,
+  isOrderAdjustmentsMetafieldEnabled,
+  syncOrderAdjustmentsMetafield,
+} from "./orderAdjustments.server";
 import {
   adjustmentSourceWarningMessage,
   resolveSettlementAdjustments,
   type AdjustmentSourceWarning,
 } from "./orderAdjustmentsPure.server";
 import { splitTaxInclusiveToNetAndTax } from "./settlementTaxPure.server";
+
+/** 1 回の精算のプレビューで、注文の特殊返金・商品券調整を書き直す注文の数の上限 */
+const MAX_ADJUSTMENT_RESYNC_PER_PREVIEW = 20;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -126,8 +133,8 @@ export interface SettlementPreviewDTO {
   awaitingApprovalSpecialRefunds?: AwaitingApprovalSpecialRefund[];
   awaitingApprovalWarning?: string;
   /**
-   * 特殊返金・商品券調整の注文メタフィールドが無い・読めない・アプリの記録と違う注文（無いときは入れない）。
-   * 精算は確定できる。読めた注文はメタフィールドの値、読めない注文はアプリの記録で数えている。
+   * 特殊返金・商品券調整の注文メタフィールドが無い・読めない・アプリの記録と違い、書き直せなかった注文（無いときは入れない）。
+   * 精算はいつもアプリの記録で数え、確定できる（注文を読むほかのアプリとずれることがある）。
    */
   adjustmentSourceWarnings?: {
     reason: AdjustmentSourceWarning["reason"] | "metafield_unreadable";
@@ -874,29 +881,41 @@ async function buildSettlementPreviewImpl(
       ],
     },
   });
-  const adjustmentDocs =
-    specialRefundIndexRows.length > 0
-      ? await fetchOrderAdjustmentDocs(
-          admin,
-          specialRefundIndexRows.map((r) => r.sourceOrderId),
-        )
-      : { fetched: true, docs: new Map<string, string | null>() };
-  const { events: specialRefundEvents, warnings: adjustmentSourceWarnings } =
-    resolveSettlementAdjustments({
-      date: targetDate,
-      locationGid,
-      dbRows: specialRefundIndexRows,
-      docs: adjustmentDocs.docs,
-      docsFetched: adjustmentDocs.fetched,
-    });
-  if (!adjustmentDocs.fetched) {
+  // 数えるのはアプリの記録（DB）。注文に書く設定の店は、注文の値と比べ、違う・無い・読めない注文を書き直す
+  // （T の決定 2026-11-23。docs/ORDER_ADJUSTMENTS_METAFIELD.md 4 章）
+  const metafieldEnabled =
+    specialRefundIndexRows.length > 0 && (await isOrderAdjustmentsMetafieldEnabled(shopId));
+  const adjustmentDocs = metafieldEnabled
+    ? await fetchOrderAdjustmentDocs(
+        admin,
+        specialRefundIndexRows.map((r) => r.sourceOrderId),
+      )
+    : { fetched: false, docs: new Map<string, string | null>() };
+  const { events: specialRefundEvents, needsResync } = resolveSettlementAdjustments({
+    date: targetDate,
+    locationGid,
+    dbRows: specialRefundIndexRows,
+    docs: adjustmentDocs.docs,
+    docsFetched: adjustmentDocs.fetched,
+  });
+  const adjustmentSourceWarnings: AdjustmentSourceWarning[] = [];
+  for (const [i, need] of needsResync.entries()) {
+    // 1 回の精算で書き直すのは決まった数まで（残りは警告にして、次に開いたときに書き直す）
+    if (i >= MAX_ADJUSTMENT_RESYNC_PER_PREVIEW) {
+      adjustmentSourceWarnings.push(need);
+      continue;
+    }
+    const r = await syncOrderAdjustmentsMetafield(admin, shopId, need.sourceOrderId);
+    if (!r.ok) adjustmentSourceWarnings.push(need);
+  }
+  if (metafieldEnabled && !adjustmentDocs.fetched) {
     console.warn(
       `[settlement] order adjustments metafield read failed; counted from DB shop=${shopId} location=${locationId} date=${targetDate}`,
     );
   }
-  if (adjustmentSourceWarnings.length > 0) {
+  if (needsResync.length > 0) {
     console.warn(
-      `[settlement] order adjustments metafield warnings count=${adjustmentSourceWarnings.length} reasons=${adjustmentSourceWarnings.map((w) => w.reason).join(",")} shop=${shopId} location=${locationId} date=${targetDate}`,
+      `[settlement] order adjustments metafield resync count=${needsResync.length} failed=${adjustmentSourceWarnings.length} reasons=${needsResync.map((w) => w.reason).join(",")} shop=${shopId} location=${locationId} date=${targetDate}`,
     );
   }
 
@@ -1095,21 +1114,21 @@ async function buildSettlementPreviewImpl(
           };
         })()
       : {}),
-    ...(adjustmentSourceWarnings.length > 0 || !adjustmentDocs.fetched
+    ...(adjustmentSourceWarnings.length > 0 || (metafieldEnabled && !adjustmentDocs.fetched)
       ? {
           adjustmentSourceWarnings: [
             ...adjustmentSourceWarnings.map((w) => ({
               ...w,
               message: adjustmentSourceWarningMessage(w),
             })),
-            ...(!adjustmentDocs.fetched
+            ...(metafieldEnabled && !adjustmentDocs.fetched
               ? [
                   {
                     reason: "metafield_unreadable" as const,
                     sourceOrderId: "",
                     sourceOrderName: null,
                     message:
-                      "注文の「特殊返金・商品券調整」を読めなかったため、アプリの記録で数えました。しばらくしてから更新してください。",
+                      "注文の「特殊返金・商品券調整」を読めず、注文の記録と比べられませんでした。精算はアプリの記録で数えています。しばらくしてから更新してください。",
                   },
                 ]
               : []),

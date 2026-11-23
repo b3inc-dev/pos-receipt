@@ -61,11 +61,11 @@ function hideSpecialRefundConfirmModal() {
 }
 
 const RECHECK_CONFIRM_MESSAGE =
-  "この登録の Shopify 返金を確かめます。\n\nShopify に返金ができていれば、その結果を記録します。" +
+  "この登録の返金を確かめます。\n\nShopify に返金ができていれば、その結果を記録します。" +
   "まだできていなければ、この登録の返金を今実行します（同じ登録なので 2 回にはなりません）。";
 
 const LEGACY_RECHECK_CONFIRM_MESSAGE =
-  "この登録の Shopify 返金を確かめます。\n\nShopify の注文の返金を読み直して、この登録の返金があれば「返金済」と記録します。" +
+  "この登録の返金を確かめます。\n\nShopify の注文の返金を読み直して、この登録の返金があれば「返金済」と記録します。" +
   "この画面からは Shopify の返金を実行しません（お金は動きません）。";
 
 function buildLegacyLinkConfirmMessage(candidate) {
@@ -124,12 +124,12 @@ const EVENT_TYPE_LABELS = {
 
 function buildVoidConfirmMessage(event) {
   let msg =
-    "このイベントを無効化しますか？\n\n精算・アプリの記録からは外れます。";
+    "この登録を無効にしますか？\n\n精算からは外れます（記録は履歴に残ります）。";
   if (event?.shopifyRefundStatus === "pending") {
     msg +=
-      "\n\n【重要】この登録は Shopify 返金の結果が分かっていません。";
+      "\n\n【重要】この登録は返金の結果が分かっていません（返金処理中）。";
     msg += "無効化する前に、Shopify の管理画面でこの注文に返金があるかを確かめ、";
-    msg += "まずこの登録の「Shopify 返金を確かめる」を使ってください。";
+    msg += "まずこの登録の「返金を確かめる」を使ってください。";
     msg +=
       "\n\nShopify に返金があるのに無効化して登録し直すと、記録のみの登録になり、Shopify の返金と二重に数えられます。";
     msg +=
@@ -145,7 +145,7 @@ function buildVoidConfirmMessage(event) {
       "\n\n訂正する場合は、正しい内容で再登録してください（再登録は記録のみになります）。";
   } else if (event?.shopifyRefundStatus === "failed") {
     msg +=
-      "\n\nShopify 返金は失敗しています。無効化後、正しい内容で再登録できます。";
+      "\n\n返金は失敗しています（返金失敗）。無効にしたあと、正しい内容で登録し直せます。";
   } else {
     msg += "\n\n訂正する場合は、正しい内容で再登録してください。";
   }
@@ -170,7 +170,7 @@ function CorrectionModeBanner({ orderCorrectionContext }) {
   return (
     <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
       <s-text tone="info" fontSize="small">
-        この取引には無効化済みの登録があります。次の登録は訂正のため記録のみ（Shopify 実返金なし）になります。
+        この取引には無効化済みの登録があります。次の登録は訂正のため記録のみ（返金はしません）になります。
       </s-text>
     </s-box>
   );
@@ -186,6 +186,27 @@ function formatShopifyRefundNotice(res) {
     };
   }
   return base;
+}
+
+/** 「Shopify 返金を確かめる」の結果（返金を実行したのではなく、結果を確かめた） */
+function formatRecheckNotice(res) {
+  const st = res?.shopifyRefund?.status ?? res?.event?.shopifyRefundStatus;
+  if (st === "success") {
+    return { tone: "success", text: "返金を確かめました。返金済と記録しました。" };
+  }
+  if (st === "failed") {
+    return {
+      tone: "warning",
+      text: "返金は失敗していました（返金失敗）。精算ではアプリの記録として数えます。",
+    };
+  }
+  if (st === "pending") {
+    return {
+      tone: "warning",
+      text: "返金の結果はまだ分かりません（返金処理中）。時間をおいて、もう一度「返金を確かめる」を押してください。",
+    };
+  }
+  return { tone: "info", text: "返金を確かめました。" };
 }
 
 function ApprovalStatusLine({ approvalStatus }) {
@@ -205,18 +226,18 @@ function formatShopifyRefundNoticeBase(res) {
   if (res?.correctionRegistration) {
     return {
       tone: "info",
-      text: "訂正として登録しました（記録のみ。Shopify 返金は行っていません）",
+      text: "訂正として登録しました（記録のみ。返金はしていません）",
     };
   }
   const st = res?.shopifyRefund?.status ?? res?.event?.shopifyRefundStatus;
   const err = res?.shopifyRefund?.error ?? res?.event?.shopifyRefundError;
   if (st === "success") {
-    return { tone: "success", text: "登録完了。Shopify で返金を実行しました。" };
+    return { tone: "success", text: "登録しました。返金もしました（返金済）。" };
   }
   if (st === "failed") {
     return {
       tone: "warning",
-      text: `登録は完了しましたが、Shopify 返金に失敗しました。${err ? `（${err}）` : ""}`,
+      text: `登録しましたが、返金に失敗しました。${err ? `（${err}）` : ""}`,
     };
   }
   if (st === "skipped") {
@@ -224,8 +245,8 @@ function formatShopifyRefundNoticeBase(res) {
     return {
       tone: "info",
       text: isCorrection
-        ? "訂正として登録しました（記録のみ。Shopify 返金は行っていません）"
-        : "登録完了（記録のみ。Shopify 返金は行っていません）",
+        ? "訂正として登録しました（記録のみ。返金はしていません）"
+        : "登録しました（記録のみ。返金はしていません）",
     };
   }
   return { tone: "success", text: "登録しました。" };
@@ -236,22 +257,22 @@ function ShopifyRefundStatusLine({ status, error }) {
   if (status === "pending") {
     return (
       <s-text tone="critical" fontSize="small">
-        Shopify 返金の結果が分かっていません（この日の精算が止まります）{error ? `: ${error}` : ""}
+        返金処理中（結果待ち。この日の精算が止まります）{error ? `: ${error}` : ""}
       </s-text>
     );
   }
   if (status === "success") {
-    return <s-text tone="success" fontSize="small">Shopify 返金済</s-text>;
+    return <s-text tone="success" fontSize="small">返金済</s-text>;
   }
   if (status === "failed") {
     return (
       <s-text tone="critical" fontSize="small">
-        Shopify 返金失敗{error ? `: ${error}` : ""}
+        返金失敗{error ? `: ${error}` : ""}
       </s-text>
     );
   }
   if (status === "skipped") {
-    return <s-text tone="subdued" fontSize="small">記録のみ（Shopify 返金なし）</s-text>;
+    return <s-text tone="subdued" fontSize="small">記録のみ（返金なし）</s-text>;
   }
   return null;
 }
@@ -372,11 +393,11 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
       try {
         const res = await createSpecialRefund(req);
         await refreshEvents();
-        setSubmitNotice(formatShopifyRefundNotice(res));
+        setSubmitNotice(formatRecheckNotice(res));
       } catch (e) {
         await refreshEvents();
         setError(
-          `${toUserMessage(e?.message) || "確かめられませんでした"}。時間をおいて、もう一度「Shopify 返金を確かめる」を押してください。`,
+          `${toUserMessage(e?.message) || "確かめられませんでした"}。時間をおいて、もう一度「返金を確かめる」を押してください。`,
         );
       } finally {
         setLoading(false);
@@ -416,7 +437,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
       } catch (e) {
         await refreshEvents();
         setError(
-          `${toUserMessage(e?.message) || "確かめられませんでした"}。時間をおいて、もう一度「Shopify 返金を確かめる」を押してください。`,
+          `${toUserMessage(e?.message) || "確かめられませんでした"}。時間をおいて、もう一度「返金を確かめる」を押してください。`,
         );
       } finally {
         setLoading(false);
@@ -629,10 +650,16 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
           if (fromOrderEntry && tryDismissModal()) return;
           setStep("order_detail");
         }}
-        onSuccess={async () => {
+        onSuccess={async (res) => {
+          const parts = ["登録しました（商品券調整は記録のみで、返金はしません）。"];
+          if (res?.event?.countDate) parts.push(`注文の日（${shortDateLabel(res.event.countDate)}）の精算に入ります。`);
+          if (res?.settlementAlreadyConfirmed) {
+            parts.push("その日の精算はもう確定しています。精算の画面でその日を開き「更新」を押し、「今の数で再確定する」を押してください。");
+          }
+          if (res?.metafieldWritten === false) parts.push("注文への記録はまだ書けていません。あとで開き直すと書き直します。");
           setSubmitNotice({
-            tone: "info",
-            text: "登録完了（商品券調整は記録のみ。Shopify 返金は行いません）",
+            tone: res?.settlementAlreadyConfirmed ? "warning" : "info",
+            text: parts.join(" "),
           });
           await refreshEvents();
           if (fromOrderEntry && tryDismissModal()) return;
@@ -750,7 +777,7 @@ function OrderDetailView({
 
               <s-divider />
 
-              <s-text fontWeight="bold" size="small">アプリイベント</s-text>
+              <s-text fontWeight="bold" size="small">この注文の登録</s-text>
               {activeEvents.length > 0 ? (
                 <s-stack gap="small">
                   {activeEvents.map((ev) => (
@@ -765,7 +792,7 @@ function OrderDetailView({
                   ))}
                 </s-stack>
               ) : (
-                <s-text tone="subdued" size="small">登録済みのイベントはありません。</s-text>
+                <s-text tone="subdued" size="small">まだ登録はありません。</s-text>
               )}
 
               {voidedEvents.length > 0 ? (
@@ -903,16 +930,16 @@ function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
 
         {event.eventType === "voucher_change_adjustment" ? (
           <s-text tone="subdued" fontSize="small">
-            額面: ¥{Number(event.voucherFaceValue ?? 0).toLocaleString()} /
-            充当: ¥{Number(event.voucherAppliedAmount ?? 0).toLocaleString()} /
-            釣銭: ¥{Number(event.voucherChangeAmount ?? 0).toLocaleString()}
+            額面 ¥{Number(event.voucherFaceValue ?? 0).toLocaleString()} ／
+            商品券で払った額 ¥{Number(event.voucherAppliedAmount ?? 0).toLocaleString()} ／
+            お釣り ¥{Number(event.voucherChangeAmount ?? 0).toLocaleString()}
           </s-text>
         ) : null}
 
-            {event.originalPaymentMethod || event.actualRefundMethod ? (
+        {event.originalPaymentMethod || event.actualRefundMethod ? (
           <s-text tone="subdued" fontSize="small">
-            {event.originalPaymentMethod ? `元: ${event.originalPaymentMethod}` : ""}
-            {event.actualRefundMethod ? ` → 返金: ${event.actualRefundMethod}` : ""}
+            {event.originalPaymentMethod ? `元の支払い: ${event.originalPaymentLabel || event.originalPaymentMethod}` : ""}
+            {event.actualRefundMethod ? ` → 返した手段: ${event.actualRefundLabel || event.actualRefundMethod}` : ""}
           </s-text>
         ) : null}
 
@@ -944,7 +971,7 @@ function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
               }
               disabled={loading}
             >
-              Shopify 返金を確かめる
+              返金を確かめる
             </s-button>
           </s-stack>
         ) : null}
@@ -960,7 +987,12 @@ function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
 
         <s-stack direction="horizontal" align="space-between">
           <s-text tone="subdued" fontSize="small">
-            {event.countDate ? `${event.countDate} の分` : event.createdAt ? event.createdAt.slice(0, 16).replace("T", " ") : ""}
+            {[
+              event.countDate ? `${shortDateLabel(event.countDate)} の精算` : "",
+              event.createdAtLabel ? `登録 ${event.createdAtLabel}` : "",
+            ]
+              .filter(Boolean)
+              .join("・")}
             {event.replacesEventId ? "（変更あり）" : ""}
           </s-text>
           <s-stack direction="inline" gap="small">
@@ -1361,7 +1393,7 @@ function VoucherAdjustmentForm({
     setLoading(true);
     setError("");
     try {
-      await createVoucherAdjustment({
+      const res = await createVoucherAdjustment({
         sourceOrderId: order.orderId,
         sourceOrderName: order.orderName,
         locationId: order.location?.id ?? "",
@@ -1372,7 +1404,7 @@ function VoucherAdjustmentForm({
         note: note.trim() || null,
       });
       setConfirming(false);
-      await onSuccess();
+      await onSuccess(res);
     } catch (e) {
       setError(toUserMessage(e?.message) || "登録に失敗しました");
       setConfirming(false);
@@ -1494,7 +1526,11 @@ function VoucherAdjustmentForm({
 
 /** 「変更」できる登録か（有効で、Shopify 返金の結果が分かっている） */
 function canEditEvent(event) {
-  return event?.status === "active" && event?.shopifyRefundStatus !== "pending";
+  return (
+    event?.status === "active" &&
+    event?.shopifyRefundStatus !== "pending" &&
+    event?.approvalStatus !== "rejected"
+  );
 }
 
 const EDIT_DATE_MODES = [
@@ -1575,7 +1611,10 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
       const parts = ["変更しました（前の登録は無効にして、直した内容で登録しました）。"];
       if (res?.warning) parts.push(res.warning);
       if (res?.settlementAlreadyConfirmed) {
-        parts.push("この日の精算はもう確定しています。精算の画面で「更新」を押し、「今の数で再確定する」を押してください。");
+        const days = (res.confirmedDates ?? []).map(shortDateLabel).join("・");
+        parts.push(
+          `${days ? `${days} の` : "この日の"}精算はもう確定しています。精算の画面でその日を開き「更新」を押し、「今の数で再確定する」を押してください。`,
+        );
       }
       if (res?.metafieldWritten === false) {
         parts.push("注文への記録はまだ書けていません。あとで開き直すと書き直します。");
@@ -1714,15 +1753,18 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
               </s-select>
             ) : null}
 
-            <s-select
-              label="数える日"
-              value={dateMode}
-              onChange={(e) => setDateMode(e?.currentTarget?.value ?? e?.currentValue?.value ?? dateMode)}
-            >
-              {EDIT_DATE_MODES.map((d) => (
-                <s-option key={d.value} value={d.value}>{d.label}</s-option>
-              ))}
-            </s-select>
+            {/* 商品券は注文の日で数えるので、数える日は選ばない */}
+            {isVoucher ? null : (
+              <s-select
+                label="数える日"
+                value={dateMode}
+                onChange={(e) => setDateMode(e?.currentTarget?.value ?? e?.currentValue?.value ?? dateMode)}
+              >
+                {EDIT_DATE_MODES.map((d) => (
+                  <s-option key={d.value} value={d.value}>{d.label}</s-option>
+                ))}
+              </s-select>
+            )}
 
             <s-text-field
               label="直したわけ（必須）"
@@ -1770,4 +1812,10 @@ function refundMethodsMessage(state) {
 
 function paymentLabel(value, methods = FALLBACK_PAYMENT_METHODS) {
   return methods.find((m) => m.value === value)?.label ?? value ?? "-";
+}
+
+/** "2026-11-23" → "11/23" */
+function shortDateLabel(isoDate) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate ?? ""));
+  return m ? `${Number(m[2])}/${Number(m[3])}` : String(isoDate ?? "");
 }

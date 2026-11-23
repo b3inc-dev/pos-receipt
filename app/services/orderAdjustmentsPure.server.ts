@@ -45,12 +45,10 @@ export interface OrderAdjustmentEntry {
   status: AdjustmentEntryStatus;
   replaces: string | null;
   replacedBy: string | null;
-  by: string | null;
+  // 登録した人（by）と直したわけ（reason）は注文に入れない（ほかのアプリからも読める名前空間のため。DB だけに残す）
   /** 登録した時刻（ISO・UTC） */
   at: string;
   voidedAt: string | null;
-  /** 直したわけ・無効にしたわけ */
-  reason: string | null;
 }
 
 export interface OrderAdjustmentsDoc {
@@ -186,10 +184,8 @@ export function eventRowToEntry(
     status: entryStatusOf(row),
     replaces: row.replacesEventId ?? null,
     replacedBy: ctx.replacedBy ?? null,
-    by: row.createdBy ?? null,
     at: row.createdAt.toISOString(),
     voidedAt: row.voidedAt ? row.voidedAt.toISOString() : null,
-    reason: row.voidReason ?? null,
   };
 }
 
@@ -288,10 +284,8 @@ function asEntry(raw: unknown): OrderAdjustmentEntry | null {
     status: status as AdjustmentEntryStatus,
     replaces: str(r.replaces),
     replacedBy: str(r.replacedBy),
-    by: str(r.by),
     at: String(r.at ?? ""),
     voidedAt: str(r.voidedAt),
-    reason: str(r.reason),
   };
 }
 
@@ -413,30 +407,33 @@ export interface AdjustmentSourceWarning {
 
 export function adjustmentSourceWarningMessage(w: AdjustmentSourceWarning): string {
   const order = w.sourceOrderName || w.sourceOrderId.replace(/^gid:\/\/shopify\/Order\//, "");
+  const tail = "精算はアプリの記録で数えています。注文を読むほかのアプリ（ciara-system など）とずれることがあるので、管理画面の注文ごとの記録で「書き直す」を押してください。";
   switch (w.reason) {
     case "metafield_missing":
-      return `注文 ${order}: 特殊返金・商品券の記録が注文に書けていません。アプリの記録で数えました（ciara-system とずれることがあります）。注文ページの「書き直す」か、POS でこの注文を開き直してください。`;
+      return `注文 ${order}: 特殊返金・商品券の記録を注文に書けていません。${tail}`;
     case "metafield_invalid":
-      return `注文 ${order}: 注文の「特殊返金・商品券調整」の形が読めません。アプリの記録で数えました。Shopify の画面で書き換えないでください。注文ページの「書き直す」で直せます。`;
+      return `注文 ${order}: 注文の「特殊返金・商品券調整」の形が読めず、書き直しもできませんでした。${tail}`;
     case "metafield_differs":
-      return `注文 ${order}: 注文の「特殊返金・商品券調整」がアプリの記録と違います。注文の値で数えました。Shopify の画面で書き換えられた可能性があります。直すときはアプリの「変更」を使ってください。`;
+      return `注文 ${order}: 注文の「特殊返金・商品券調整」がアプリの記録と違い、書き直しもできませんでした。${tail}`;
   }
 }
 
+/** 注文の値を書き直す必要がある注文（アプリの記録と違う・無い・読めない） */
+export interface AdjustmentResyncNeed extends AdjustmentSourceWarning {}
+
 /**
- * その日・その店で数える特殊返金・商品券調整を決める。
- * - dbRows: DB の目次（その日・その店の行。無効は除く）
- * - docs: 注文ごとのメタフィールドの値（読めなかった注文は入れない・null）
- * 注文ごとに、メタフィールドが読めればその行で数え、DB と違えば警告。読めなければ DB の行で数えて警告。
+ * その日・その店で数える特殊返金・商品券調整を決める（T の決定 2026-11-23: 違うときはアプリの記録）。
+ * - 数えるのはいつもアプリの記録（DB）。書くのは pos-receipt だけなので、違うときは DB が新しいか、注文の値が外で書き換えられたか
+ * - 注文の値が DB と違う・無い・読めない注文は needsResync に入れる（呼び出し側が注文を書き直し、書けなければ警告にする）
+ * - docsFetched=false（読まなかった・読めなかった・注文に書かない設定）のときは比べない
  */
 export function resolveSettlementAdjustments(input: {
   date: string;
   locationGid: string;
   dbRows: AdjustmentEventRow[];
   docs: Map<string, string | null>;
-  /** メタフィールドを読まなかった（読み取りに失敗した・テスト）ときは false。DB で数え、警告しない */
   docsFetched: boolean;
-}): { events: SettlementAdjustmentEvent[]; warnings: AdjustmentSourceWarning[] } {
+}): { events: SettlementAdjustmentEvent[]; needsResync: AdjustmentResyncNeed[] } {
   const byOrder = new Map<string, AdjustmentEventRow[]>();
   for (const r of input.dbRows) {
     const key = toOrderGid(r.sourceOrderId);
@@ -445,19 +442,16 @@ export function resolveSettlementAdjustments(input: {
     byOrder.set(key, list);
   }
   const events: SettlementAdjustmentEvent[] = [];
-  const warnings: AdjustmentSourceWarning[] = [];
+  const needsResync: AdjustmentResyncNeed[] = [];
   for (const [orderGid, rows] of byOrder) {
     const fromDb = rows.map(dbRowToSettlementEvent);
+    events.push(...fromDb);
+    if (!input.docsFetched) continue;
     const sourceOrderName = rows.find((r) => r.sourceOrderName)?.sourceOrderName ?? null;
     const sourceOrderId = rows[0].sourceOrderId;
-    if (!input.docsFetched) {
-      events.push(...fromDb);
-      continue;
-    }
     const parsed = parseOrderAdjustmentsDoc(input.docs.get(orderGid) ?? null);
     if (!parsed.ok) {
-      events.push(...fromDb);
-      warnings.push({
+      needsResync.push({
         reason: parsed.reason === "missing" ? "metafield_missing" : "metafield_invalid",
         sourceOrderId,
         sourceOrderName,
@@ -469,10 +463,9 @@ export function resolveSettlementAdjustments(input: {
     );
     const a = fromDb.map(fingerprint).sort().join("\n");
     const b = fromDoc.map(fingerprint).sort().join("\n");
-    if (a !== b) warnings.push({ reason: "metafield_differs", sourceOrderId, sourceOrderName });
-    events.push(...fromDoc);
+    if (a !== b) needsResync.push({ reason: "metafield_differs", sourceOrderId, sourceOrderName });
   }
-  return { events, warnings };
+  return { events, needsResync };
 }
 
 /** 注文の値（pos.adjustments）が、アプリの記録から作った値と同じか */
@@ -507,19 +500,27 @@ export function orderMetafieldStateOf(input: {
  */
 export function voucherAppliedFromTransactions(
   txs: { kind?: string | null; status?: string | null; gateway?: string | null; formattedGateway?: string | null; amount: number | string }[],
-): number {
+  /** 支払方法マスタで商品券にした支払方法か（決まった分け方の「商品券」に加えて見る） */
+  isVoucherByMaster: (gateway: string, formattedGateway?: string | null) => boolean = () => false,
+): { applied: number; found: boolean } {
   let applied = 0;
+  let found = false;
   for (const tx of txs) {
     const status = String(tx.status ?? "SUCCESS").toUpperCase();
     if (status !== "SUCCESS") continue;
-    const info = builtinPaymentKeyResolver(tx.gateway ?? "", tx.formattedGateway);
-    if (info.kind !== "voucher") continue;
+    const gateway = tx.gateway ?? "";
+    const isVoucher =
+      builtinPaymentKeyResolver(gateway, tx.formattedGateway).kind === "voucher" ||
+      isVoucherByMaster(gateway, tx.formattedGateway);
+    if (!isVoucher) continue;
     const amt = Math.abs(Number(tx.amount) || 0);
     const kind = String(tx.kind ?? "").toUpperCase();
-    if (kind === "SALE" || kind === "CAPTURE") applied += amt;
-    else if (kind === "REFUND") applied -= amt;
+    if (kind === "SALE" || kind === "CAPTURE") {
+      applied += amt;
+      found = true;
+    } else if (kind === "REFUND") applied -= amt;
   }
-  return Math.max(0, Math.round(applied * 100) / 100);
+  return { applied: Math.max(0, Math.round(applied * 100) / 100), found };
 }
 
 /** 額面と使った額からお釣り */
@@ -580,7 +581,7 @@ export const EDIT_REASON_REQUIRED_CODE = "EDIT_REASON_REQUIRED";
 /**
  * 「変更」の計画（純関数）: 前の行を無効にし、replaces 付きの新しい行を足す。
  * - Shopify の返金はしない。返金済み（success）の行は、返金の記録（status・id）を新しい行に引き継ぐ（二重に数えない）
- * - 返金の結果が分からない（pending）の行は直せない（先に「Shopify 返金を確かめる」）
+ * - 返金の結果が分からない（pending）の行は直せない（先に「返金を確かめる」）
  * - 承認待ちの行を直したら、新しい行も承認待ち。承認済み・対象外はそのまま
  */
 export function planAdjustmentEdit(
@@ -591,11 +592,19 @@ export function planAdjustmentEdit(
   if (old.status !== "active") {
     return { ok: false, code: "NOT_ACTIVE", message: "この登録はもう無効です。画面を読み直してください。" };
   }
+  // 却下した登録は直せない（承認の設定をオフにしたあとで直すと、新しい行が有効になって数えられてしまう）
+  if (String(old.approvalStatus ?? "") === "rejected") {
+    return {
+      ok: false,
+      code: "REJECTED",
+      message: "管理者が却下した登録は変更できません。必要なら新しく登録してください。",
+    };
+  }
   if (String(old.shopifyRefundStatus ?? "") === "pending") {
     return {
       ok: false,
       code: "SHOPIFY_REFUND_PENDING",
-      message: "Shopify 返金の結果が分かっていません。先に「Shopify 返金を確かめる」を押してください。",
+      message: "返金の結果が分かっていません（返金処理中）。先に Shopify の管理画面で返金を確かめ、POS の「返金を確かめる」を押してください。",
     };
   }
   const reason = String(input.reason ?? "").trim();
@@ -621,7 +630,8 @@ export function planAdjustmentEdit(
   const shopifyRefundKept = String(old.shopifyRefundStatus ?? "") === "success";
   const keepRefundRecord = shopifyRefundKept;
   const today = calendarDateInTimeZone(ctx.now, ctx.timeZone);
-  const countDate = input.dateMode === "today" ? today : countDateOf(old, ctx.timeZone);
+  // 商品券は注文の日で数える（T の決定 2026-11-23）ので「今日の分にする」は使わない
+  const countDate = input.dateMode === "today" && !isVoucher ? today : countDateOf(old, ctx.timeZone);
   const pick = <T,>(v: T | null | undefined, fallback: T | null): T | null => (v === undefined ? fallback : v);
   const create = {
     sourceOrderId: old.sourceOrderId,

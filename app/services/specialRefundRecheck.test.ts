@@ -86,17 +86,17 @@ describe("精算が止まったときの案内", () => {
   it("Shopify 管理画面で先に確かめ、同じ登録で確かめ直すよう案内する。登録し直し・無効化は勧めない", () => {
     const msg = new SpecialRefundPendingError(["#1001"]).message;
     assert.match(msg, /Shopify の管理画面/);
-    assert.match(msg, /Shopify 返金を確かめる/);
+    assert.match(msg, /「返金を確かめる」/);
     assert.match(msg, /無効化したり、登録し直したりはしないでください/);
     assert.ok(!msg.includes("同じ内容でもう一度実行"));
   });
 
-  it("POS の登録一覧に pending の表示と確かめ直しのボタン、日別一覧に「返金未確認」がある", () => {
+  it("POS の登録一覧に pending の表示（返金処理中）と確かめ直しのボタン、日別一覧に「返金処理中」がある", () => {
     const modal = readFileSync(new URL("../../extensions/pos-smart-grid/src/SpecialRefundModal.jsx", import.meta.url), "utf8");
-    assert.ok(modal.includes("Shopify 返金の結果が分かっていません"));
-    assert.ok(modal.includes("Shopify 返金を確かめる"));
+    assert.ok(modal.includes("返金処理中（結果待ち。この日の精算が止まります）"));
+    assert.ok(modal.includes("返金を確かめる"));
     assert.ok(modal.includes('event?.shopifyRefundStatus === "pending"'));
     const utils = readFileSync(new URL("../../extensions/pos-smart-grid/src/orderDisplayUtils.js", import.meta.url), "utf8");
-    assert.ok(utils.includes("返金未確認"));
+    assert.ok(utils.includes("返金処理中"));
   });
 });

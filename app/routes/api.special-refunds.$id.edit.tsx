@@ -42,6 +42,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       newEventId: result.newEventId,
       warning: result.warning,
       settlementAlreadyConfirmed: result.settlementAlreadyConfirmed,
+      confirmedDates: result.confirmedDates,
       metafieldWritten: result.metafieldWritten,
     });
   } catch (err) {
