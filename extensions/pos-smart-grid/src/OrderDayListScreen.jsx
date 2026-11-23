@@ -16,6 +16,7 @@ import {
   LIST_SEGMENTS,
   matchesListSegment,
   formatListBadges,
+  formatListBadgesForTile,
   refundBadge,
   fmtYen,
 } from "./orderDisplayUtils.js";
@@ -59,7 +60,7 @@ function ymdToStr(y, m, day) {
 /**
  * 一覧の行に付けるバッジ（色付き）
  * @param {object} item - searchOrders の1件
- * @param {"receipt" | "specialRefund"} badgeMode
+ * @param {"receipt" | "specialRefund" | "refundTile" | "voucherTile"} badgeMode
  * @returns {{ key: string, label: string, tone: string }[]}
  */
 export function formatPosBadges(item, badgeMode) {
@@ -74,6 +75,9 @@ export function formatPosBadges(item, badgeMode) {
       out.push({ key: "voucher", label: "商品券決済", tone: "neutral" });
     return out;
   }
+  // 返金方法変更・商品券釣銭登録のタイル: そのタイルの種類のバッジだけ（T 2026-11-24）
+  if (badgeMode === "refundTile") return formatListBadgesForTile(item, "refunded");
+  if (badgeMode === "voucherTile") return formatListBadgesForTile(item, "voucher_change");
   return formatListBadges(item);
 }
 
