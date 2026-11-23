@@ -101,3 +101,18 @@ describe("店の人に英語のエラーを出さない・名前の許可が無�
     assert.match(detail, /graphqlWithCustomerFallback\(admin, ORDER_DETAIL_QUERY, ORDER_DETAIL_QUERY_NO_CUSTOMER_PII/);
   });
 });
+
+describe("領収書の発行履歴も一覧と同じ作り", () => {
+  it("HistoryView は OrderDayListScreen を使い、発行の記録を読む", () => {
+    const src = readFileSync(`${ROOT}/extensions/pos-smart-grid/src/ReceiptModal.jsx`, "utf8");
+    const hist = src.slice(src.indexOf("function HistoryView"));
+    assert.match(hist, /<OrderDayListScreen/);
+    assert.match(src, /fetchList=\{fetchReceiptHistoryPage\}/);
+  });
+  it("発行履歴の API は店のタイムゾーンで日を区切り、今の店だけを出す", () => {
+    const src = readFileSync(`${ROOT}/app/routes/api.receipts.history.tsx`, "utf8");
+    assert.match(src, /getDayRangeInUtc\(dateFrom, timezone\)/);
+    assert.doesNotMatch(src, /T00:00:00\.000Z/);
+    assert.match(src, /locationId = \{ in:/);
+  });
+});

@@ -85,6 +85,13 @@ export function formatPosBadges(item, badgeMode) {
  * @param {string} [props.noticeError] - 一覧上部に出す一時メッセージ（取引詳細からの起動失敗など）
  * @param {() => void} [props.onDismissNotice]
  * @param {"all" | "refunded" | "voucher_change"} [props.initialSegment] - 開いたときの絞り込み（タイルごとに変える）
+ * @param {(params: object) => Promise<{ items: object[], nextCursor?: string|null, todayLocalDate?: string, fetchedAtTime?: string }>} [props.fetchList]
+ *   一覧の読み込み（既定は注文の検索）。領収書の発行履歴は発行の記録を読む
+ * @param {(item: object, todayKey: string) => { key: string, title: string, amountLabel: string, dateTimeLabel: string, badges: object[], selectId?: string }} [props.toRow]
+ *   1 件を行の形にする（既定は注文）
+ * @param {string} [props.itemNoun] - 「今日の取引はありません」の「取引」
+ * @param {string} [props.searchPlaceholder]
+ * @param {string} [props.searchHint] - 検索で 0 件のときの案内
  */
 export function OrderDayListScreen({
   pageHeading,
@@ -94,6 +101,11 @@ export function OrderDayListScreen({
   noticeError = "",
   onDismissNotice = () => {},
   initialSegment = "all",
+  fetchList = searchOrders,
+  toRow = null,
+  itemNoun = "取引",
+  searchPlaceholder = "注文番号・顧客名で検索",
+  searchHint = "注文番号は数字だけでも探せます。顧客名は 2 文字以上入れてください。",
 }) {
   const t0 = useMemo(() => todayYmd(), []);
   const {
@@ -214,7 +226,7 @@ export function OrderDayListScreen({
     setListLoading(true);
     setListError("");
     try {
-      const res = await searchOrders(buildSearchParams());
+      const res = await fetchList(buildSearchParams());
       setItems(res.items ?? []);
       setNextCursor(res.nextCursor ?? null);
       setTodayLocalDate(res.todayLocalDate || "");
@@ -222,14 +234,14 @@ export function OrderDayListScreen({
     } catch (e) {
       // 店の人に英語や番号のエラーを出さない（T 2026-11-23）
       setListError(
-        "注文を読み込めませんでした。少し待ってから「再読み込み」を押してください。",
+        `${itemNoun === "取引" ? "注文" : "履歴"}を読み込めませんでした。少し待ってから「再読み込み」を押してください。`,
       );
       setItems([]);
       setNextCursor(null);
     } finally {
       setListLoading(false);
     }
-  }, [sessionReady, locationIdParam, buildSearchParams]);
+  }, [sessionReady, locationIdParam, buildSearchParams, fetchList]);
 
   const clearSearch = useCallback(() => {
     setSearchDraft("");
@@ -256,7 +268,7 @@ export function OrderDayListScreen({
     if (!nextCursor || !locationIdParam) return;
     setLoadingMore(true);
     try {
-      const res = await searchOrders(buildSearchParams(nextCursor));
+      const res = await fetchList(buildSearchParams(nextCursor));
       setItems((prev) => [...prev, ...(res.items ?? [])]);
       setNextCursor(res.nextCursor ?? null);
     } catch {
@@ -264,7 +276,7 @@ export function OrderDayListScreen({
     } finally {
       setLoadingMore(false);
     }
-  }, [nextCursor, locationIdParam, buildSearchParams]);
+  }, [nextCursor, locationIdParam, buildSearchParams, fetchList]);
 
   const todayKey = todayLocalDate || ymdToStr(t0.y, t0.m, t0.day);
   const dayChipLabel = formatOrderDayLabel(dateStr, todayKey) || dateStr;
@@ -317,7 +329,7 @@ export function OrderDayListScreen({
         >
           <s-stack gap="small">
             <s-search-field
-              placeholder="注文番号・顧客名で検索"
+              placeholder={searchPlaceholder}
               value={searchDraft}
               onInput={(e) => setSearchDraft(e?.currentTarget?.value ?? "")}
             />
@@ -554,13 +566,13 @@ export function OrderDayListScreen({
                 <s-stack gap="small-300">
                   <s-text>
                     {isSearchMode
-                      ? "該当する取引は見つかりませんでした。"
-                      : `${dayChipLabel}の取引はありません。`}
+                      ? `該当する${itemNoun}は見つかりませんでした。`
+                      : `${dayChipLabel}の${itemNoun}はありません。`}
                   </s-text>
                   <s-text type="small" color="subdued">
                     {isSearchMode
-                      ? "注文番号は数字だけでも探せます。顧客名は 2 文字以上入れてください。"
-                      : "ほかの日は年・月・日のボタンから選べます。上の欄で注文番号や顧客名から探すこともできます。"}
+                      ? searchHint
+                      : "ほかの日は年・月・日のボタンから選べます。上の欄から探すこともできます。"}
                   </s-text>
                   {!isSearchMode ? (
                     <s-button variant="secondary" onClick={reloadList}>
@@ -587,16 +599,32 @@ export function OrderDayListScreen({
                       </s-button>
                     </s-stack>
                   ) : null}
-                  {visibleItems.map((order) => (
-                    <OrderListRow
-                      key={order.orderId}
-                      title={formatOrderTitle(order)}
-                      amountLabel={fmtYen(order.totalPrice)}
-                      dateTimeLabel={formatOrderDateTimeLabel(order, todayKey)}
-                      badges={formatPosBadges(order, badgeMode)}
-                      onClick={() => onSelectOrderId(order.orderId)}
-                    />
-                  ))}
+                  {visibleItems.map((item) => {
+                    const row = toRow
+                      ? toRow(item, todayKey)
+                      : {
+                          key: item.orderId,
+                          title: formatOrderTitle(item),
+                          amountLabel: fmtYen(item.totalPrice),
+                          dateTimeLabel: formatOrderDateTimeLabel(item, todayKey),
+                          badges: formatPosBadges(item, badgeMode),
+                          selectId: item.orderId,
+                        };
+                    return (
+                      <OrderListRow
+                        key={row.key}
+                        title={row.title}
+                        amountLabel={row.amountLabel}
+                        dateTimeLabel={row.dateTimeLabel}
+                        badges={row.badges}
+                        onClick={
+                          onSelectOrderId && row.selectId
+                            ? () => onSelectOrderId(row.selectId)
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
                   {nextCursor ? (
                     <s-box paddingBlockStart="base">
                       <s-button
