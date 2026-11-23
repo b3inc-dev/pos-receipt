@@ -1169,6 +1169,9 @@ function SettlementPrintControls({ settlementId, allowReprint = true }) {
   return (
     <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
       <s-stack gap="small">
+        <s-text tone="subdued" fontSize="small">
+          保存した金額で印刷します。印刷し直しても売上・精算は増えません。
+        </s-text>
         <s-button variant="primary" onClick={() => runPrint(false)} disabled={printBusy}>
           {printBusy ? "印刷中…" : "レシートを印刷する"}
         </s-button>

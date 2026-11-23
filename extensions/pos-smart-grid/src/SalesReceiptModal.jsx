@@ -100,7 +100,7 @@ function SalesReceiptModal() {
 
   if (step === "done") {
     return (
-      <s-page heading="印刷しました">
+      <s-page heading="プリンタに送りました">
         <s-box padding="base">
           <s-stack gap="base">
             <s-text fontWeight="bold">
