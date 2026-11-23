@@ -237,6 +237,14 @@ export default function SpecialRefundHistoryPage() {
     setSearchParams(params);
   };
 
+  // 注文ごとの記録（変更・無効化・書き直し）の画面へ。埋め込みの host などは引き継ぐ
+  const openOrderAdjustments = (orderId: string) => {
+    const params = new URLSearchParams(location.search);
+    for (const k of ["page", "dateFrom", "dateTo", "eventType", "approval"]) params.delete(k);
+    params.set("orderId", orderId);
+    navigate(`/app/order-adjustments?${params.toString()}`);
+  };
+
   const resourceName = { singular: "イベント", plural: "イベント" };
 
   return (
@@ -367,6 +375,11 @@ export default function SpecialRefundHistoryPage() {
                             担当: {item.createdBy}
                           </Text>
                         )}
+                        <InlineStack>
+                          <Button variant="plain" onClick={() => openOrderAdjustments(item.sourceOrderId)}>
+                            この注文の記録・変更
+                          </Button>
+                        </InlineStack>
                       </BlockStack>
                     </IndexTable.Cell>
                     <IndexTable.Cell>

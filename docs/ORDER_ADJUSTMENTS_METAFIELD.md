@@ -141,3 +141,9 @@
 ## 7. 商品券は額面だけ
 
 `POST /api/voucher-adjustments` は額面（`voucherFaceValue`）だけでよい。使った額は注文の取引から出す（決まった分け方で「商品券」の種類になる支払方法の、成功した売上から返金を引いた額）。お釣りはサーバーで出す（額面 − 使った額）。取引が読めないときは 400（`VOUCHER_APPLIED_UNKNOWN`）で、POS で使った額を手で入れる。`GET /api/voucher-adjustments?sourceOrderId=…` は、その注文の使った額を返す（POS の画面に先に出すため）。
+
+## 8. 画面
+
+- POS: 「返金・商品券」タイルは返金・キャンセルのある注文、「商品券」タイルは商品券釣有りの注文を、ログイン中の店・その日で初めに出す（検索も使える）。登録の行の「変更」で直す。
+- 管理画面: `/app/order-adjustments?orderId=…`（特殊返金履歴の行の「この注文の記録・変更」から開く）。その注文の行を出し、「変更」「無効化」と、注文の値をアプリの記録で書き直す「書き直す」ができる。注文の値とアプリの記録が違う・無い・読めないときは知らせる（表示名 `fromLabel`/`toLabel` の違いは見ない）。
+- Shopify の注文ページ: ブロック拡張 `extensions/order-adjustments-block`（`admin.order-details.block.render`）。`GET /api/admin/order-adjustments?orderId=…` を読んで行を出すだけ。「変更・履歴を開く」でアプリの画面へ（リンクは `app:/app/order-adjustments?orderId=…`。管理画面で開けるかは開発ストアで要確認）。ブロックは、注文ページの「アプリ」のブロックから足す。

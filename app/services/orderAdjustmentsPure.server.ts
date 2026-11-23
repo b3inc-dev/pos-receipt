@@ -475,6 +475,32 @@ export function resolveSettlementAdjustments(input: {
   return { events, warnings };
 }
 
+/** 注文の値（pos.adjustments）が、アプリの記録から作った値と同じか */
+export type OrderMetafieldState = "same" | "differs" | "missing" | "invalid" | "unreadable" | "none";
+
+/** 表示名（fromLabel / toLabel）はマスタの名前を変えると変わるので比べない */
+function comparableEntries(doc: OrderAdjustmentsDoc): string {
+  return JSON.stringify(doc.entries.map(({ fromLabel: _f, toLabel: _t, ...rest }) => rest));
+}
+
+export function orderMetafieldStateOf(input: {
+  /** アプリの記録（DB）の行の数 */
+  rowCount: number;
+  /** メタフィールドを読めたか */
+  fetched: boolean;
+  currentValue: string | null | undefined;
+  built: OrderAdjustmentsDoc;
+}): OrderMetafieldState {
+  if (!input.fetched) return "unreadable";
+  const parsed = parseOrderAdjustmentsDoc(input.currentValue);
+  if (!parsed.ok) {
+    if (input.rowCount === 0) return "none";
+    return parsed.reason === "missing" ? "missing" : "invalid";
+  }
+  if (input.rowCount === 0 && parsed.doc.entries.length === 0) return "none";
+  return comparableEntries(parsed.doc) === comparableEntries(input.built) ? "same" : "differs";
+}
+
 /**
  * 注文の取引から、商品券で払った額（使った額）を出す。
  * 決まった分け方で「商品券」の種類になる支払方法の、成功した売上（SALE・CAPTURE）を足し、返金を引く。

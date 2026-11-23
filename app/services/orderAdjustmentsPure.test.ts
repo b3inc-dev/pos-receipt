@@ -9,6 +9,7 @@ import {
   calendarDateInTimeZone,
   countDateOf,
   entriesForDayAndLocation,
+  orderMetafieldStateOf,
   parseOrderAdjustmentsDoc,
   planAdjustmentEdit,
   resolveSettlementAdjustments,
@@ -306,4 +307,18 @@ test("変更: 商品券は額面を直すとお釣りを出し直す（使った
     assert.equal(plan.create.voucherChangeAmount, 5800);
     assert.equal(plan.create.amount, 5800);
   }
+});
+
+test("注文ページの表示: 注文の値とアプリの記録が同じか（表示名の違いは見ない）", () => {
+  const rows = [row({ id: "a" })];
+  const built = buildOrderAdjustmentsDoc(rows, { timeZone: TZ, labelOf: () => "現金" });
+  const sameButLabel = JSON.stringify({ ...built, entries: built.entries.map((e) => ({ ...e, toLabel: "げんきん" })) });
+  const changed = JSON.stringify({ ...built, entries: built.entries.map((e) => ({ ...e, amount: 999 })) });
+  assert.equal(orderMetafieldStateOf({ rowCount: 1, fetched: true, currentValue: sameButLabel, built }), "same");
+  assert.equal(orderMetafieldStateOf({ rowCount: 1, fetched: true, currentValue: changed, built }), "differs");
+  assert.equal(orderMetafieldStateOf({ rowCount: 1, fetched: true, currentValue: null, built }), "missing");
+  assert.equal(orderMetafieldStateOf({ rowCount: 1, fetched: true, currentValue: "{x", built }), "invalid");
+  assert.equal(orderMetafieldStateOf({ rowCount: 1, fetched: false, currentValue: null, built }), "unreadable");
+  const empty = buildOrderAdjustmentsDoc([], { timeZone: TZ, labelOf: () => null });
+  assert.equal(orderMetafieldStateOf({ rowCount: 0, fetched: true, currentValue: null, built: empty }), "none");
 });
