@@ -11,7 +11,7 @@ function SpecialRefundTile() {
   return (
     <s-tile
       heading="返金方法変更"
-      subheading="返金方法変更処理・履歴一覧"
+      subheading="登録・履歴"
       onClick={() => shopify.action.presentModal()}
     />
   );
