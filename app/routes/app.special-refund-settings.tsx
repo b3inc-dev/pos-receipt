@@ -276,15 +276,15 @@ export default function SpecialRefundSettingsPage() {
 
           <Layout.AnnotatedSection
             title="管理者の承認"
-            description="返金手段変更を、管理者が承認してから精算に入れるかを選びます。"
+            description="付け替え（返金手段変更・現金返金）を、管理者が承認してから精算に入れるかを選びます。"
           >
             <Card>
               <BlockStack gap="300">
                 <Checkbox
-                  label="返金手段変更は管理者の承認のあとで精算に入れる"
+                  label="付け替えは管理者の承認のあとで精算に入れる"
                   checked={form.requireApprovalForPaymentMethodOverride}
                   onChange={(v) => set("requireApprovalForPaymentMethodOverride", v)}
-                  helpText="オンにすると、POS で登録した返金手段変更は「承認待ち」になり、「特殊返金・商品券調整 履歴」で承認するまで精算・点検・売上サマリーに入りません。却下したものは入りません。Shopify での返金の実行は今までどおりで、承認・却下では Shopify に何もしません。オフのときは今までどおり、登録した時点で精算に入ります。"
+                  helpText="オンにすると、POS で登録した返金手段変更と現金返金（純正の返金の付け替え・返金の予約を含む）は「承認待ち」になり、「特殊返金・商品券調整 履歴」で承認するまで精算・点検・売上サマリーに入りません。却下したものは入りません。Shopify での返金の実行は今までどおりで、承認・却下では Shopify に何もしません。オフのときは今までどおり、登録した時点で精算に入ります。"
                 />
               </BlockStack>
             </Card>

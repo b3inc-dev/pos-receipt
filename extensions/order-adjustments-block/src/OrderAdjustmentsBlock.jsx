@@ -112,7 +112,7 @@ function OrderAdjustmentsBlock() {
       <s-stack gap="base">
         {notice ? <s-banner tone="warning">{notice}</s-banner> : null}
         {shown.length === 0 ? (
-          <s-text color="subdued">この注文の登録はありません。登録は POS の「返金・商品券」タイルから行います。</s-text>
+          <s-text color="subdued">この注文の登録はありません。登録は POS の「返金」「商品券」タイルから行います。</s-text>
         ) : (
           <s-stack gap="small-200">
             {shown.map((e) => (
