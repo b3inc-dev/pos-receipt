@@ -19,10 +19,11 @@ test("初めの値はオフ（今までどおり承認なしで精算に入る�
   assert.equal(initialApprovalStatus({}, "payment_method_override"), "none");
 });
 
-test("オンのときは返金手段変更だけ承認待ち", () => {
+test("オンのときは付け替え（返金手段変更・現金返金）だけ承認待ち", () => {
   const on = { requireApprovalForPaymentMethodOverride: true };
   assert.equal(initialApprovalStatus(on, "payment_method_override"), "pending");
-  for (const t of ["cash_refund", "receipt_cash_adjustment", "voucher_change_adjustment"]) {
+  assert.equal(initialApprovalStatus(on, "cash_refund"), "pending");
+  for (const t of ["receipt_cash_adjustment", "voucher_change_adjustment"]) {
     assert.equal(initialApprovalStatus(on, t), "none", t);
   }
 });

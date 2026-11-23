@@ -348,10 +348,33 @@ test("登録 API: 設定オフ（初めの値）は今までどおり（承認�
   assert.equal(json.event.approvalStatus, "none");
 });
 
-test("登録 API: 設定オンでも現金返金は承認の対象外", async () => {
+test("登録 API: 設定オンなら現金返金（現金への付け替え）も承認待ち。精算・売上サマリーに入らない", async () => {
   store.specialRefundEvent = [];
   setSpecialRefundSettings({ refundProcessingMode: "record_only", requireApprovalForPaymentMethodOverride: true });
-  const { status, json } = await postSpecialRefund({ ...overrideBody, eventType: "cash_refund", originalPaymentMethod: null });
+  const { status, json } = await postSpecialRefund({ ...overrideBody, eventType: "cash_refund" });
+  assert.equal(status, 201, JSON.stringify(json));
+  assert.equal(json.approvalRequired, true);
+  assert.equal(json.event.approvalStatus, "pending");
+  // 登録は「今」なので、合成データの日に移して数える（#93 では数える日 countDate も登録した日になるので一緒に移す）
+  store.specialRefundEvent[0].createdAt = new Date(dayStartUtc + 5 * 3600_000);
+  store.specialRefundEvent[0].countDate = TARGET_DATE;
+  const { preview, row, cache } = await runBoth();
+  assert.equal(preview.total, 3000);
+  assert.equal(preview.refundTotal, 0);
+  assert.equal(preview.awaitingApprovalSpecialRefunds?.length, 1);
+  assert.equal(row.actual, preview.netSales);
+  assert.equal(Number(cache.actual), preview.netSales);
+});
+
+test("登録 API: 設定オンでもレシート現金調整は承認の対象外", async () => {
+  store.specialRefundEvent = [];
+  setSpecialRefundSettings({ refundProcessingMode: "record_only", requireApprovalForPaymentMethodOverride: true });
+  const { status, json } = await postSpecialRefund({
+    ...overrideBody,
+    eventType: "receipt_cash_adjustment",
+    adjustKind: "undo",
+    originalPaymentMethod: null,
+  });
   assert.equal(status, 201, JSON.stringify(json));
   assert.equal(json.event.approvalStatus, "none");
 });
