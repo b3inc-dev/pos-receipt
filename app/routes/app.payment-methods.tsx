@@ -246,7 +246,7 @@ export default function PaymentMethodsPage() {
         <Layout>
           <Layout.Section>
             <Banner tone="info">
-              精算レシートの支払方法表示名・特殊返金で選択可能な手段をここで設定します。直近90日のPOS取引から決済名は自動登録されます。必要に応じて表示名・商品券フラグを手直ししてください。
+              精算レシートの支払方法表示名・特殊返金で選択可能な返金方法をここで設定します。直近90日のPOS取引から決済名は自動登録されます。必要に応じて表示名・商品券フラグを手直ししてください。
             </Banner>
             {syncResult && syncResult.created > 0 ? (
               <Banner tone="success">
@@ -373,7 +373,7 @@ export default function PaymentMethodsPage() {
               onChange={(v) => setForm((p) => ({ ...p, selectableForReceiptCashAdjustment: v }))}
             />
             <Checkbox
-              label="返金手段変更で選択可能"
+              label="返金方法変更で選択可能"
               checked={form.selectableForPaymentOverride}
               onChange={(v) => setForm((p) => ({ ...p, selectableForPaymentOverride: v }))}
             />

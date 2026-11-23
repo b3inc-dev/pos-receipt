@@ -354,7 +354,7 @@ export async function applyRefundReservationsForOrder(
           status: "needs_review",
           appliedRefundId: picked.refundId,
           appliedEventIds: JSON.stringify(createdIds),
-          reviewReason: `自動の返金方法変更が途中で止まりました（${failure}）。返金の一覧から残りの返金方法を変更してください。`,
+          reviewReason: `自動の返金方法変更が途中で止まりました（${failure}）。「返金方法変更」タイルの一覧から残りの返金方法を変更してください。`,
         },
       });
       result.review += 1;

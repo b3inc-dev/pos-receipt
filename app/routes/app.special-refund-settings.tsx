@@ -97,7 +97,7 @@ export async function action({ request }: ActionFunctionArgs) {
     specialRefundUiLabel: str("specialRefundUiLabel", "特殊返金"),
     voucherAdjustmentUiLabel: str("voucherAdjustmentUiLabel", "商品券調整"),
     cashRefundUiLabel: str("cashRefundUiLabel", "現金返金"),
-    paymentOverrideUiLabel: str("paymentOverrideUiLabel", "返金手段変更"),
+    paymentOverrideUiLabel: str("paymentOverrideUiLabel", "返金方法変更"),
   };
   await setAppSetting(shop.id, SPECIAL_REFUND_SETTINGS_KEY, settings);
   return Response.json({ ok: true });
@@ -151,12 +151,12 @@ export default function SpecialRefundSettingsPage() {
           <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
           <Layout.Section>
             {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-            <AdminIntro><p>POS の「返金」タイルで使う登録の種類と、Shopify の注文に返金を作るか・精算に入れるかを決めます。オフにした種類は POS で登録できなくなります。</p></AdminIntro>
+            <AdminIntro><p>POS の「返金方法変更」タイルで使う登録の種類と、Shopify の注文に返金を作るか・精算に入れるかを決めます。オフにした種類は POS で登録できなくなります。</p></AdminIntro>
           </Layout.Section>
 
           <Layout.AnnotatedSection
             title="Shopify 返金の実行"
-            description="返金は POS の純正の返金で行い、タイルでは返金方法を変更します。純正で返金した注文の返金方法変更は、ここの選び方に関係なく Shopify では返金しません（金額は純正の返金のまま）。ここで選ぶのは、純正の返金が無い注文で返金方法を登録したときだけです。商品券釣銭調整とレシートの現金を直すは、いつも記録だけです。"
+            description="返金は POS の純正の返金で行い、タイルでは返金方法を変更します。純正で返金した注文の返金方法変更は、ここの選び方に関係なく Shopify では返金しません（金額は純正の返金のまま）。ここで選ぶのは、純正の返金が無い注文で返金方法変更を登録したときだけです。商品券釣銭調整とレシートの現金を直すは、いつも記録だけです。"
           >
             <Card>
               <BlockStack gap="400">
@@ -187,7 +187,7 @@ export default function SpecialRefundSettingsPage() {
                 {form.refundProcessingMode === "shopify_execute" ? (
                   <>
                     <Divider />
-                    {/* 現金で返した（cash_refund）・ほかの手段で返した（payment_method_override）は POS では 1 つの「返金方法変更」。設定の値は 2 つのまま、まとめて切り替える */}
+                    {/* 現金で返した（cash_refund）・ほかの返金方法で返した（payment_method_override）は POS では 1 つの「返金方法変更」。設定の値は 2 つのまま、まとめて切り替える */}
                     <Checkbox
                       label="返金方法変更で、Shopify で返金まで行う"
                       checked={form.shopifyExecuteCashRefund || form.shopifyExecutePaymentMethodOverride}

@@ -136,16 +136,16 @@ export function planReservation(
   expectedAmount?: number | null,
 ): ReservationPlan {
   if (refundLines.length !== 1) {
-    return { ok: false, reason: "返金が複数の支払方法に分かれていたので、自動では返金方法を変更していません。返金の一覧から返金方法を変更してください。" };
+    return { ok: false, reason: "返金が複数の支払方法に分かれていたので、自動では返金方法を変更していません。「返金方法変更」タイルの一覧から返金方法を変更してください。" };
   }
   const line = refundLines[0];
   const total = money(line.amount);
-  if (rows.length === 0) return { ok: false, reason: "予約の内容が読めませんでした。返金の一覧から返金方法を変更してください。" };
+  if (rows.length === 0) return { ok: false, reason: "予約の内容が読めませんでした。「返金方法変更」タイルの一覧から返金方法を変更してください。" };
   // 返金額が予約の金額と違う: 別の返金かもしれないので、自動では返金方法を変更しない（T 2026-11-23）
   if (expectedAmount != null && money(expectedAmount) !== total) {
     return {
       ok: false,
-      reason: `返金額（¥${total.toLocaleString()}）が予約の金額（¥${money(expectedAmount).toLocaleString()}）と違ったので、自動では返金方法を変更していません。返金の一覧から返金方法を変更してください。`,
+      reason: `返金額（¥${total.toLocaleString()}）が予約の金額（¥${money(expectedAmount).toLocaleString()}）と違ったので、自動では返金方法を変更していません。「返金方法変更」タイルの一覧から返金方法を変更してください。`,
     };
   }
   const fixed = rows.slice(0, -1).reduce((s, r) => s + money(r.amount), 0);
@@ -153,7 +153,7 @@ export function planReservation(
   if (last < 0) {
     return {
       ok: false,
-      reason: `予約の金額（¥${fixed.toLocaleString()}）が返金額（¥${total.toLocaleString()}）より大きいので、自動では返金方法を変更していません。返金の一覧から返金方法を変更してください。`,
+      reason: `予約の金額（¥${fixed.toLocaleString()}）が返金額（¥${total.toLocaleString()}）より大きいので、自動では返金方法を変更していません。「返金方法変更」タイルの一覧から返金方法を変更してください。`,
     };
   }
   const planned: PlannedRow[] = rows.map((r, i) => ({ ...r, index: i, amount: i === rows.length - 1 ? last : money(r.amount) }));

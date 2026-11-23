@@ -14,7 +14,7 @@
 | namespace.key | 型 | 中身 |
 |---|---|---|
 | `pos.adjustments` | `json` | 記録の本体（下の形） |
-| `pos.adjustments_summary` | `single_line_text_field` | 人が読むための 1 行（表示用。数えるときは使わない）。例: `11/23 返金手段の付け替え クレジット→現金 ¥1,200 ／ 11/23 商品券 額面¥5,000 お釣り¥800`。行が無いときは「なし」 |
+| `pos.adjustments_summary` | `single_line_text_field` | 人が読むための 1 行（表示用。数えるときは使わない）。例: `11/23 返金方法変更 クレジット→現金 ¥1,200 ／ 11/23 商品券 額面¥5,000 お釣り¥800`。行が無いときは「なし」 |
 
 - 名前空間は `pos`（アプリ専用の `$app` ではない）。ほかのアプリ（ciara-system）からも読めるようにするため。`pos.refund_aggregation_location_gid` と同じ場所です。
 - 名前付きの定義（「POS 特殊返金・商品券調整」）は、インストールのとき（`auth.$`）か `POST /api/admin/settlement-metafields/ensure` で作ります。定義が無くても値は書けます。
@@ -72,7 +72,7 @@
 |---|---|
 | `id` | 行の番号（DB の `SpecialRefundEvent.id`。変わらない） |
 | `type` | `special_refund`（③）か `voucher`（④） |
-| `kind` | `cash_refund`（現金返金）・`payment_method_override`（返金手段の付け替え）・`receipt_cash_adjustment`（レシートの現金調整）・`voucher_change_adjustment`（商品券） |
+| `kind` | `cash_refund`（現金返金）・`payment_method_override`（返金方法変更）・`receipt_cash_adjustment`（レシートの現金調整）・`voucher_change_adjustment`（商品券） |
 | `adjustKind` | `receipt_cash_adjustment` のときだけ。`undo`（取り消し）か `extra`（追加） |
 | `date` | 数える日。店のタイムゾーン（Ciara は日本時間）の `YYYY-MM-DD`。特殊返金は登録した日（「変更」で「今日の分にする」も選べる）で、注文の日と違ってよい（先月の注文を今日返したときなど）。**商品券は注文の日**（T の決定 2026-11-23。お釣りはその会計のもので、自動の判定と同じ日に入れる） |
 | `locationGid` | 数える店。`gid://shopify/Location/<数字>` |
