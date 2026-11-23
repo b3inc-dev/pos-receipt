@@ -8,6 +8,8 @@
  */
 import { useState, useEffect } from "preact/hooks";
 import { PosChoiceField } from "./PosChoiceField.jsx";
+import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
+import { FormHeading, FormHero, FormLine } from "./AdjustFormParts.jsx";
 import { createSpecialRefund, voidSpecialRefund } from "../../common/specialRefundApi.js";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
@@ -29,15 +31,6 @@ function newKey() {
 
 function yen(v) {
   return `¥${Number(v ?? 0).toLocaleString()}`;
-}
-
-function Row({ label, value }) {
-  return (
-    <s-stack direction="horizontal" align="space-between">
-      <s-text tone="subdued">{label}</s-text>
-      <s-text>{value}</s-text>
-    </s-stack>
-  );
 }
 
 const emptyRow = () => ({ amount: "", method: "" });
@@ -211,197 +204,222 @@ export function NativeRefundReassignForm({
     }
   };
 
-  // ── 付け替え直すの確認 ──
+  // 入力・確認の画面は注文の詳細と同じ形（T 2026-11-24）: 見出しで区切り「左に項目名・右に値」、
+  // 確かめる所（変更する額・変更後の返金方法）は大きく。下は固定: 左に「戻る」、右に主のボタン
+  const origLabel = (line) => line?.label || line?.gateway || "-";
+  const isSameMethod = (r) =>
+    String(r.method ?? "").trim().toLowerCase() === String(selected?.gateway ?? "").trim().toLowerCase() ||
+    methodLabel(r.method) === origLabel(selected);
+
+  // ── 変更し直すの確認 ──
   if (redoLine) {
     const targets = activeReassignEvents(events, redoLine);
     return (
       <s-page heading="返金方法を変更し直す">
         <s-scroll-box>
           <s-box padding="base">
-            <s-stack gap="base">
-              <s-text type="strong">前の返金方法変更を無効にして、選び直します</s-text>
-              <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <Row label="純正の返金" value={nativeRefundLineLabel(redoLine)} />
-                  {targets.map((e) => (
-                    <Row
-                      key={e.id}
-                      label={`${e.originalPaymentLabel || e.originalPaymentMethod} → ${e.actualRefundLabel || e.actualRefundMethod}`}
-                      value={yen(e.amount)}
-                    />
-                  ))}
-                </s-stack>
+            <s-stack gap="none">
+              <s-text>前の返金方法変更を無効にして、返金方法を選び直します。</s-text>
+              <FormHeading>純正の返金</FormHeading>
+              <FormLine label={redoLine.createdAtLabel || "返金"} value={`${origLabel(redoLine)} ${yen(redoLine.amount)}`} strong />
+              <FormHeading>無効にする返金方法変更</FormHeading>
+              {targets.map((e) => (
+                <FormLine
+                  key={e.id}
+                  label={`${e.originalPaymentLabel || e.originalPaymentMethod} → ${e.actualRefundLabel || e.actualRefundMethod}`}
+                  value={yen(e.amount)}
+                />
+              ))}
+              <s-box paddingBlockStart="base">
+                <s-text type="small" color="subdued">
+                  無効にした分は、いったん元の支払方法の返金に戻ります。続けて返金方法を選んでください。Shopify では何もしません。
+                </s-text>
               </s-box>
-              <s-text type="small" color="subdued">
-                無効にした分は、いったん元の支払方法の返金に戻ります。続けて返金方法を選んでください。Shopify では何もしません。
-              </s-text>
-              {error ? <s-text tone="critical">{error}</s-text> : null}
-              <s-stack gap="small">
-                <s-button variant="primary" onClick={runRedo} loading={loading} disabled={targets.length === 0}>
-                  無効にして選び直す
-                </s-button>
-                <s-button variant="secondary" onClick={() => setRedoLine(null)} disabled={loading}>
-                  戻る
-                </s-button>
-              </s-stack>
+              {error ? (
+                <s-box paddingBlockStart="base">
+                  <s-text tone="critical">{error}</s-text>
+                </s-box>
+              ) : null}
             </s-stack>
           </s-box>
         </s-scroll-box>
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={() => setRedoLine(null)}
+          leftDisabled={loading}
+          rightLabel="無効にして選び直す"
+          onRight={runRedo}
+          rightDisabled={loading || targets.length === 0}
+          rightLoading={loading}
+        />
       </s-page>
     );
   }
 
   // ── 確認 ──
   if (confirming && selected) {
+    const single = rows.length === 1;
     return (
       <s-page heading="返金方法変更">
         <s-scroll-box>
           <s-box padding="base">
-            <s-stack gap="base">
-              <s-text type="strong">この内容で返金方法を変更します</s-text>
-              <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <Row label="取引" value={order?.orderName ?? "-"} />
-                  <Row label="純正の返金" value={nativeRefundLineLabel(selected)} />
-                  {rows.map((r, i) => (
-                    <Row
-                      key={i}
-                      label={
-                        String(r.method ?? "").trim().toLowerCase() === String(selected.gateway ?? "").trim().toLowerCase() ||
-                        methodLabel(r.method) === (selected.label || selected.gateway)
-                          ? `${methodLabel(r.method)}のまま（変更なし）`
-                          : `${selected.label || selected.gateway} → ${methodLabel(r.method)}`
-                      }
-                      value={yen(amounts.amounts[i])}
-                    />
-                  ))}
-                  <Row label="合計" value={yen(total)} />
-                  {note ? <Row label="メモ" value={note} /> : null}
-                </s-stack>
+            <s-stack gap="none">
+              <s-text>この内容で返金方法を変更します。</s-text>
+              <s-box paddingBlockStart="base">
+                <FormHero
+                  label="変更する額"
+                  value={yen(total)}
+                  sub={single ? `${origLabel(selected)} → ${methodLabel(rows[0].method)}` : `${rows.length} つの返金方法に分けます`}
+                />
               </s-box>
-              <s-text type="small" color="subdued">
-                Shopify では返金しません。精算では、この返金を元の支払方法から選んだ返金方法へ移します（返金の合計は変わりません）。
-              </s-text>
-              {error ? <s-text tone="critical">{error}</s-text> : null}
-              <s-stack gap="small">
-                <s-button variant="primary" onClick={handleSubmit} loading={loading}>
-                  変更する
-                </s-button>
-                <s-button variant="secondary" onClick={() => setConfirming(false)} disabled={loading}>
-                  修正する
-                </s-button>
-              </s-stack>
+              <FormHeading>変更前</FormHeading>
+              <FormLine label={`純正の返金（${selected.createdAtLabel || order?.orderName || ""}）`} value={`${origLabel(selected)} ${yen(total)}`} />
+              <FormHeading>変更後</FormHeading>
+              {rows.map((r, i) => (
+                <FormLine
+                  key={i}
+                  label={isSameMethod(r) ? `${methodLabel(r.method)}のまま（変更なし）` : methodLabel(r.method)}
+                  value={yen(amounts.amounts[i])}
+                  strong
+                />
+              ))}
+              <FormHeading>取引</FormHeading>
+              <FormLine label="取引" value={order?.orderName ?? "-"} />
+              {note ? <FormLine label="メモ" value={note} /> : null}
+              <s-box paddingBlockStart="base">
+                <s-text type="small" color="subdued">
+                  Shopify では返金しません。精算では、この返金を元の支払方法から選んだ返金方法へ移します（返金の合計は変わりません）。
+                </s-text>
+              </s-box>
+              {error ? (
+                <s-box paddingBlockStart="base">
+                  <s-text tone="critical">{error}</s-text>
+                </s-box>
+              ) : null}
             </s-stack>
           </s-box>
         </s-scroll-box>
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={() => setConfirming(false)}
+          leftDisabled={loading}
+          rightLabel="変更する"
+          onRight={handleSubmit}
+          rightDisabled={loading}
+          rightLoading={loading}
+        />
       </s-page>
     );
   }
 
-  // ── 手段を選ぶ（分割） ──
+  // ── 返金方法を選ぶ（分割） ──
   if (selected) {
     return (
       <s-page heading="返金方法変更">
         <s-scroll-box>
           <s-box padding="base">
-            <s-stack gap="base">
-              <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <Row label="純正の返金" value={nativeRefundLineLabel(selected)} />
-                  <Row label="変更する額" value={yen(total)} />
-                </s-stack>
+            <s-stack gap="none">
+              <FormHeading>純正の返金</FormHeading>
+              <FormLine label={selected.createdAtLabel || "返金"} value={origLabel(selected)} />
+              <FormLine label="変更する額" value={yen(total)} strong />
+
+              <FormHeading>変更後の返金方法</FormHeading>
+              <s-stack gap="small">
+                {refundMethods.length === 0 ? (
+                  <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} type="small">
+                    {methodsMessage}
+                  </s-text>
+                ) : !split ? (
+                  <PosChoiceField
+                    label="返金方法"
+                    value={rows[0].method}
+                    options={refundMethods}
+                    onChange={(v) => setRow(0, { method: v })}
+                  />
+                ) : (
+                  rows.map((r, i) => {
+                    const isLast = i === rows.length - 1;
+                    return (
+                      <s-box key={i} padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                        <s-stack gap="small">
+                          {isLast ? (
+                            <FormLine label={`${i + 1} 行目（残り・自動）`} value={amounts.lastAmount > 0 ? yen(amounts.lastAmount) : "-"} strong />
+                          ) : (
+                            <s-text-field
+                              label={`${i + 1} 行目の金額（円）`}
+                              value={r.amount}
+                              type="number"
+                              onInput={(e) => setRow(i, { amount: e?.currentTarget?.value ?? "" })}
+                              placeholder="例: 1000"
+                            />
+                          )}
+                          <PosChoiceField
+                            label="返金方法"
+                            value={r.method}
+                            options={refundMethods}
+                            onChange={(v) => setRow(i, { method: v })}
+                          />
+                          {!isLast ? (
+                            <s-button variant="secondary" onClick={() => removeRow(i)} disabled={loading}>
+                              この行を消す
+                            </s-button>
+                          ) : null}
+                        </s-stack>
+                      </s-box>
+                    );
+                  })
+                )}
+
+                {refundMethods.length > 0 ? (
+                  split ? (
+                    <s-stack direction="inline" gap="small">
+                      <s-button variant="secondary" onClick={addRow} disabled={loading}>
+                        行を追加
+                      </s-button>
+                      <s-button variant="secondary" onClick={stopSplit} disabled={loading}>
+                        分割をやめる
+                      </s-button>
+                    </s-stack>
+                  ) : (
+                    <s-button variant="secondary" onClick={startSplit} disabled={loading}>
+                      分割
+                    </s-button>
+                  )
+                ) : null}
+              </s-stack>
+
+              <s-box paddingBlockStart="base">
+                <s-text-field
+                  label="メモ（任意）"
+                  value={note}
+                  onInput={(e) => setNote(e?.currentTarget?.value ?? "")}
+                  placeholder="補足説明など"
+                />
               </s-box>
 
-              {refundMethods.length === 0 ? (
-                <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} type="small">
-                  {methodsMessage}
-                </s-text>
-              ) : !split ? (
-                <PosChoiceField
-                  label="返金方法"
-                  value={rows[0].method}
-                  options={refundMethods}
-                  onChange={(v) => setRow(0, { method: v })}
-                />
-              ) : (
-                rows.map((r, i) => {
-                  const isLast = i === rows.length - 1;
-                  return (
-                    <s-box key={i} padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                      <s-stack gap="small">
-                        {isLast ? (
-                          <Row label={`${i + 1} 行目（残額・自動）`} value={amounts.lastAmount > 0 ? yen(amounts.lastAmount) : "-"} />
-                        ) : (
-                          <s-text-field
-                            label={`${i + 1} 行目の金額（円）`}
-                            value={r.amount}
-                            type="number"
-                            onInput={(e) => setRow(i, { amount: e?.currentTarget?.value ?? "" })}
-                            placeholder="例: 1000"
-                          />
-                        )}
-                        <PosChoiceField
-                          label="返金方法"
-                          value={r.method}
-                          options={refundMethods}
-                          onChange={(v) => setRow(i, { method: v })}
-                        />
-                        {!isLast ? (
-                          <s-button variant="secondary" onClick={() => removeRow(i)} disabled={loading}>
-                            この行を消す
-                          </s-button>
-                        ) : null}
-                      </s-stack>
-                    </s-box>
-                  );
-                })
-              )}
-
-              {refundMethods.length > 0 ? (
-                split ? (
-                  <s-stack gap="small">
-                    <s-button variant="secondary" onClick={addRow} disabled={loading}>
-                      行を追加
-                    </s-button>
-                    <s-button variant="secondary" onClick={stopSplit} disabled={loading}>
-                      分割をやめる
-                    </s-button>
-                  </s-stack>
-                ) : (
-                  <s-button variant="secondary" onClick={startSplit} disabled={loading}>
-                    分割
-                  </s-button>
-                )
+              {error ? (
+                <s-box paddingBlockStart="base">
+                  <s-text tone="critical">{error}</s-text>
+                </s-box>
               ) : null}
-
-              <s-text-field
-                label="メモ（任意）"
-                value={note}
-                onInput={(e) => setNote(e?.currentTarget?.value ?? "")}
-                placeholder="補足説明など"
-              />
-
-              {error ? <s-text tone="critical">{error}</s-text> : null}
-
-              <s-stack gap="small">
-                <s-button variant="primary" onClick={handleConfirm} disabled={loading || refundMethods.length === 0}>
-                  確認する
-                </s-button>
-                <s-button
-                  variant="secondary"
-                  onClick={() => {
-                    setError("");
-                    setSelected(null);
-                    setRows([emptyRow()]);
-                  }}
-                  disabled={loading}
-                >
-                  戻る
-                </s-button>
-              </s-stack>
             </s-stack>
           </s-box>
         </s-scroll-box>
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={() => {
+            setError("");
+            setSelected(null);
+            setRows([emptyRow()]);
+          }}
+          leftDisabled={loading}
+          rightLabel="確認する"
+          onRight={handleConfirm}
+          rightDisabled={loading || refundMethods.length === 0}
+        />
       </s-page>
     );
   }
@@ -468,13 +486,11 @@ export function NativeRefundReassignForm({
                   レシートの現金を直す
                 </s-button>
               ) : null}
-              <s-button variant="secondary" onClick={onBack} disabled={loading}>
-                戻る
-              </s-button>
             </s-stack>
           </s-stack>
         </s-box>
       </s-scroll-box>
+      <FixedFooterNavBar centerAlignWithButtons leftLabel="戻る" onLeft={onBack} leftDisabled={loading} />
     </s-page>
   );
 }
