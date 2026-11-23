@@ -82,16 +82,16 @@ export function postReturnMessage(items, now = Date.now()) {
   if (!recent) return null;
   if (recent.status === "applied") {
     const rows = (recent.rows ?? []).map((row) => reservationRowText(row)).join("・");
-    return { tone: "success", text: `返金の予約どおり付け替えました（${rows}）` };
+    return { tone: "success", text: `返金の予約どおり返金方法を変更しました（${rows}）` };
   }
   if (recent.status === "needs_review") {
-    return { tone: "warning", text: recent.reviewReason || "返金の予約は自動では付け替えていません。「返金」タイルで確かめてください" };
+    return { tone: "warning", text: recent.reviewReason || "返金の予約は自動では返金方法を変更していません。「返金」タイルで確かめてください" };
   }
   if (recent.status === "pending") {
     return { tone: "neutral", text: "返金の予約はまだ使っていません。少したってから「返金」タイルで確かめてください" };
   }
   if (recent.status === "expired") {
-    return { tone: "warning", text: "返金の予約は期限が切れていたので使っていません。「返金」タイルから付け替えてください" };
+    return { tone: "warning", text: "返金の予約は期限が切れていたので使っていません。「返金」タイルから返金方法を変更してください" };
   }
   return null;
 }
