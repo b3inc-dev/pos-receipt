@@ -3,22 +3,32 @@
  * 「Load failed」等は履歴の有無ではなく読み込み失敗のエラーなので、その旨が分かる文言に変換する。
  */
 
-const FALLBACK = "読み込みに失敗しました。接続先と認証を確認してください。";
+/*
+ * 店の人が読む文なので、技術の言葉（接続先・認証・URL など）を出さず、取れる行動で書く。
+ * 前の文「読み込みに失敗しました。接続先と認証を確認してください。」で調べるときは
+ * docs/POS_READ_FAILED_CONNECTION_AUTH.md を見る（原因は同じ: Load failed 等）。
+ */
+const CONTACT = "直らないときは、管理者に連絡してください。";
+const LOAD_FAILED = `読み込めませんでした。通信を確かめて、もう一度読み込んでください。${CONTACT}`;
+/** 理由がわからないとき（読み込み・保存のどちらでも出るので「読み込み」と言い切らない） */
+const FALLBACK = `うまくいきませんでした。通信を確かめて、もう一度お試しください。${CONTACT}`;
+const NETWORK = `通信がつながりませんでした。通信を確かめて、もう一度お試しください。${CONTACT}`;
+const BUSY = "混雑しています。しばらくしてからお試しください。";
 
 const MAP = {
-  "load failed": FALLBACK,
-  "load failed.": FALLBACK,
-  "failed to load": FALLBACK,
-  "failed to fetch": "サーバーに接続できません。ネットワークとURLを確認してください。",
-  "network error": "ネットワークエラーです。接続を確認してください。",
-  "network request failed": "ネットワークエラーです。接続を確認してください。",
-  "401": "認証に失敗しました。アプリの再読み込みを試してください。",
-  "403": "アクセスが拒否されました。",
-  "404": "見つかりません。",
-  "500": "サーバーエラーです。しばらくしてから再試行してください。",
-  "503": "混雑しています。しばらくしてからお試しください。",
-  throttled: "混雑しています。しばらくしてからお試しください。",
-  "混雑しています。しばらくしてからお試しください。": "混雑しています。しばらくしてからお試しください。",
+  "load failed": LOAD_FAILED,
+  "load failed.": LOAD_FAILED,
+  "failed to load": LOAD_FAILED,
+  "failed to fetch": NETWORK,
+  "network error": NETWORK,
+  "network request failed": NETWORK,
+  "401": `ログインの確かめに失敗しました。この画面を閉じて、開き直してください。${CONTACT}`,
+  "403": "この操作はできません。管理者に連絡してください。",
+  "404": "見つかりませんでした。もう一度読み込んでください。",
+  "500": `うまく処理できませんでした。しばらくしてから、もう一度お試しください。${CONTACT}`,
+  "503": BUSY,
+  throttled: BUSY,
+  [BUSY]: BUSY,
 };
 
 /**
@@ -35,7 +45,7 @@ export function toUserMessage(msg) {
     const code = t.replace(/^http\s+/, "").split(/\s/)[0];
     if (MAP[code]) return MAP[code];
   }
-  if (t.includes("load failed")) return FALLBACK;
+  if (t.includes("load failed")) return LOAD_FAILED;
   if (t.includes("failed to fetch")) return MAP["failed to fetch"];
   if (t.includes("network")) return MAP["network error"];
   if (t.includes("unauthorized") || t === "401") return MAP["401"];
