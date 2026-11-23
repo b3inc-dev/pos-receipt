@@ -2,7 +2,7 @@
  * 会計の前に入れた商品券の額面から、注文ができたあとに商品券調整を自動で登録する。
  *
  * 流れ（docs/VOUCHER_CART_ENTRY.md）:
- *   1. POS「商品券」タイルで、会計の前に額面を入れる → カートの見えない項目 `_pos_receipt_voucher_face` に入る
+ *   1. POS「商品券釣銭調整」タイルで、会計の前に額面を入れる → カートの見えない項目 `_pos_receipt_voucher_face` に入る
  *   2. 会計すると、その項目は注文の customAttributes に残る（shopify.dev: 「_」始まりは POS・レシートに出ないが注文に書かれる）
  *   3. 会計後の画面（pos.purchase.post.block.render）が POST /api/voucher-adjustments/from-cart を呼ぶ
  *      → この関数が注文を読み直し、タイルから後で登録したときと同じ記録（SpecialRefundEvent・pos.adjustments）を作る

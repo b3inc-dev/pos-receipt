@@ -60,7 +60,7 @@ function VoucherPostPurchaseBlock() {
       } catch (e) {
         console.error("[VoucherPostPurchaseBlock]", e);
         if (alive) {
-          setMessage({ tone: "critical", text: "商品券を登録できませんでした。あとで「商品券」タイルから確かめてください" });
+          setMessage({ tone: "critical", text: "商品券を登録できませんでした。あとで「商品券釣銭調整」タイルから確かめてください" });
         }
       }
     })();

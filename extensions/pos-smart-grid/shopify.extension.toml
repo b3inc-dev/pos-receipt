@@ -1,17 +1,17 @@
 api_version = "2026-07"
 
 # ============================================================
-# 返金（ホームタイル + 取引詳細メニュー）。商品券は下の「商品券」タイルに分けた（T の決定 2026-11-23）
+# 返金（ホームタイル + 取引詳細メニュー）。商品券は下の「商品券釣銭調整」タイルに分けた（T の決定 2026-11-23）
 # name … POS のタイル一覧・取引詳細メニューのラベル（同一）
 # タイル上の文言は SpecialRefundTile.jsx の heading / subheading
 # 取引詳細を「特殊返金調整」と短く出す行は pos-voucher-adjustment と別拡張で分割
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "返金 / 返金方法変更"
+name = "返金方法変更 / 登録・履歴"
 uid = "149c1d23-b280-f51c-42ee-3a558fd9cf8a2b8ba0cd"
 handle = "pos-special-refund"
-description = "返金 / 返金方法変更"
+description = "返金方法変更 / 登録・履歴"
 
 [[extensions.targeting]]
 module = "./src/SpecialRefundTile.jsx"
@@ -57,10 +57,10 @@ target = "pos.exchange.post.action.render"
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "商品券 / 会計前の入力・釣銭調整"
+name = "商品券釣銭調整 / 登録・履歴"
 uid = "b8e4f2a1-6c3d-4e5f-9a0b-1d2e3f4a5b6c7d8e9f0a"
 handle = "pos-voucher-adjustment"
-description = "商品券 / 会計前の入力・釣銭調整"
+description = "商品券釣銭調整 / 登録・履歴"
 
 [[extensions.targeting]]
 module = "./src/VoucherTile.jsx"

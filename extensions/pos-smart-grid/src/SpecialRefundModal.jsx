@@ -9,7 +9,7 @@
  *   form_voucher → 商品券調整フォーム（額面だけ入れる。使った額は注文の取引から）
  *   form_edit    → 登録の「変更」（前の登録を無効にし、直した内容の登録を足す。Shopify の返金はしない）
  *
- * タイルごとに一覧の最初の絞り込みを変える: 「返金」タイルは返金・キャンセル、「商品券」タイルは商品券釣有り
+ * タイルごとに一覧の最初の絞り込みを変える: 「返金方法変更」タイルは返金・キャンセル、「商品券釣銭調整」タイルは商品券釣有り
  * （VoucherModal.jsx が initialListSegment="voucher_change" で開く）
  *
  * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券調整」→ form_voucher へ直行
@@ -507,7 +507,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
   }, [confirmAction, runVoid, runRecheck, runLegacyRecheck, runRedoDraft]);
 
   // タイルを分けた（T 2026-11-23）: 見出しは開いたタイルの名前
-  const pageHeading = initialListSegment === "voucher_change" ? "商品券" : "返金";
+  const pageHeading = initialListSegment === "voucher_change" ? "商品券釣銭調整" : "返金方法変更";
   if (orderEntryLoading) {
     return (
       <s-page heading={pageHeading}>
