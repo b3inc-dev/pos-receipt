@@ -2,7 +2,6 @@
 -- AlterTable
 ALTER TABLE "SpecialRefundEvent" ADD COLUMN "approvalStatus" TEXT NOT NULL DEFAULT 'none';
 ALTER TABLE "SpecialRefundEvent" ADD COLUMN "approvalReviewedAt" TIMESTAMP(3);
-ALTER TABLE "SpecialRefundEvent" ADD COLUMN "approvalDecidedBy" TEXT;
 
 -- CreateIndex
 CREATE INDEX "SpecialRefundEvent_shopId_approvalStatus_idx" ON "SpecialRefundEvent"("shopId", "approvalStatus");
