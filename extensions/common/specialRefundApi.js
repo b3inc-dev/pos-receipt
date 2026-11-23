@@ -88,6 +88,29 @@ export async function createVoucherAdjustment(data) {
 }
 
 /**
+ * 返金の予約（docs/REFUND_RESERVATION.md）
+ * GET  /api/refund-reservations?sourceOrderId=  … 開くと、できた純正の返金へ当て直す
+ * POST /api/refund-reservations                  … { sourceOrderId, sourceOrderName, locationId, rows, note }
+ * POST /api/refund-reservations/:id/cancel
+ */
+export async function listRefundReservations(sourceOrderId) {
+  return apiGet("/api/refund-reservations", { sourceOrderId });
+}
+
+/** GET /api/refund-reservations（注文なし）→ { enabled }（管理画面の「返金の予約」がオンか） */
+export async function getRefundReservationEnabled() {
+  return apiGet("/api/refund-reservations");
+}
+
+export async function createRefundReservation(data) {
+  return apiPost("/api/refund-reservations", data);
+}
+
+export async function cancelRefundReservation(id) {
+  return apiPost(`/api/refund-reservations/${id}/cancel`, {});
+}
+
+/**
  * POST /api/special-refunds/:id/void
  * @param {string} id
  * @returns {Promise<{ ok: boolean, event: Object }>}

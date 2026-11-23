@@ -128,6 +128,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               where: { shopId: dbShop.id, sourceOrderId: { in: orderIds }, voidReason: { not: null } },
               data: { voidReason: "[redacted]" },
             }),
+            // 返金の予約のメモ（自由に書ける文）も消す
+            prisma.refundReservation.updateMany({
+              where: { shopId: dbShop.id, sourceOrderId: { in: orderIds }, note: { not: null } },
+              data: { note: "[redacted]" },
+            }),
           ]);
         }
       }

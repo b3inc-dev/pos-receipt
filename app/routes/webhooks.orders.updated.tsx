@@ -11,6 +11,7 @@ import { runSalesSummaryRefreshFromOrderWebhook } from "../services/salesSummary
 import { enqueueSalesSummaryOrdersUpdatedJob } from "../services/salesSummaryWebhookQueue.server";
 import { syncRefundAggregationFromWebhookPayload } from "../services/refundAggregation.server";
 import { backgroundRefreshNeedsRetry } from "../services/salesSummaryBackgroundSlice.server";
+import { runOrderAutoAdjustmentsFromWebhook } from "../services/orderAutoAdjustments.server";
 
 export const loader = async (_: LoaderFunctionArgs) => {
   return new Response("Method Not Allowed", { status: 405 });
@@ -52,14 +53,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const disabled = process.env.SALES_SUMMARY_WEBHOOK_REFRESH_DISABLED;
     if (disabled === "1" || disabled === "true") {
+      // 売上サマリーを止めていても、商品券・返金の予約の自動の調整は動かす
+      await runOrderAutoAdjustmentsFromWebhook(admin, dbShop.id, shop, payload);
       return new Response("OK", { status: 200 });
     }
 
+    // キューに積めたときは、自動の調整もキューの中で動く（salesSummaryWebhookQueue.server.ts）
     const queued = await enqueueSalesSummaryOrdersUpdatedJob(shop, payload);
     if (queued) {
       console.log(`[orders/updated][pos-receipt] sales-summary queued shop=${shop}`);
       return new Response("OK", { status: 200 });
     }
+
+    await runOrderAutoAdjustmentsFromWebhook(admin, dbShop.id, shop, payload);
 
     const { targetDates, errors } = await runSalesSummaryRefreshFromOrderWebhook(
       admin,

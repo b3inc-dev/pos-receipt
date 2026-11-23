@@ -86,6 +86,7 @@ export async function action({ request }: ActionFunctionArgs) {
     reflectVoucherAdjustmentToSettlement: bool("reflectVoucherAdjustmentToSettlement", true),
     reflectReceiptCashAdjustmentToSettlement: bool("reflectReceiptCashAdjustmentToSettlement", true),
     requireApprovalForPaymentMethodOverride: bool("requireApprovalForPaymentMethodOverride", false),
+    refundReservationEnabled: bool("refundReservationEnabled", false),
     writeOrderAdjustmentsMetafield: bool("writeOrderAdjustmentsMetafield", false),
     specialRefundUiLabel: str("specialRefundUiLabel", "特殊返金"),
     voucherAdjustmentUiLabel: str("voucherAdjustmentUiLabel", "商品券釣銭登録"),
@@ -144,7 +145,7 @@ export default function SpecialRefundSettingsPage() {
           <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
           <Layout.Section>
             {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-            <AdminIntro><p>POS の「返金」タイルで使う登録の種類と、Shopify の注文に返金を作るか・精算に入れるかを決めます。オフにした種類は POS で登録できなくなります。</p></AdminIntro>
+            <AdminIntro><p>POS の「返金方法変更」タイルで使う登録の種類と、Shopify の注文に返金を作るか・精算に入れるかを決めます。オフにした種類は POS で登録できなくなります。</p></AdminIntro>
           </Layout.Section>
 
           <Layout.AnnotatedSection
@@ -245,6 +246,22 @@ export default function SpecialRefundSettingsPage() {
                   checked={form.enableVoucherChangeAdjustment}
                   onChange={(v) => set("enableVoucherChangeAdjustment", v)}
                   helpText="商品券で払ってお釣りを現金で渡したときの記録です。数え方は「商品券設定」で決めます。"
+                />
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection
+            title="返金の予約"
+            description="POS で返金する前に、実際の返金方法を決めておけるようにするかを選びます。"
+          >
+            <Card>
+              <BlockStack gap="300">
+                <Checkbox
+                  label="返金の前に、実際の返金方法を予約できるようにする"
+                  checked={form.refundReservationEnabled}
+                  onChange={(v) => set("refundReservationEnabled", v)}
+                  helpText="オンにすると、まだ返金していない注文で「返金」を押したときに、返金方法と返金する額を先に入れられます。そのあと POS で返金すると、額が合えば自動でその返金方法に変えます（Shopify では返金しません）。初めはオフです。"
                 />
               </BlockStack>
             </Card>
