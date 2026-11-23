@@ -12,6 +12,14 @@ import {
   isPointRedemption,
   type PointRedemptionRules,
 } from "../utils/pointRedemptionRules";
+import {
+  lineChargedAmount,
+  lineTaxAmount,
+  nonSalesFeeLineIds,
+  refundLineChargedAmount,
+  type FeeLineItemLike,
+  type FeeRefundLineItemLike,
+} from "./nonSalesFeeLines";
 
 export type GasAggregateAttributionOpts = {
   attributionCtx: RefundAggregationContext;
@@ -34,8 +42,10 @@ export interface GasStyleOrder {
   totalPriceSet: { shopMoney: { amount: string; currencyCode?: string } };
   currentTotalTaxSet?: { shopMoney: { amount: string } } | null;
   totalTaxSet?: { shopMoney: { amount: string } };
+  /** 税込価格の店か（売上に含めない手数料の明細の金額計算に使う。無ければ税込とみなす） */
+  taxesIncluded?: boolean | null;
   lineItems?: {
-    nodes: {
+    nodes: (Omit<FeeLineItemLike, "quantity" | "discountAllocations"> & {
       quantity: number;
       discountAllocations?: {
         allocatedAmountSet: { shopMoney: { amount: string } };
@@ -45,7 +55,7 @@ export interface GasStyleOrder {
           title?: string | null;
         } | null;
       }[];
-    }[];
+    })[];
   };
   transactions?: Array<{
     id: string;
@@ -57,7 +67,7 @@ export interface GasStyleOrder {
   }>;
   refunds?: Array<{
     createdAt?: string;
-    refundLineItems?: { quantity: number }[];
+    refundLineItems?: (Omit<FeeRefundLineItemLike, "quantity"> & { quantity: number })[];
     transactions?: Array<{
       id: string;
       kind?: string;
@@ -231,6 +241,11 @@ export function aggregateGasStyleForOrders(
   taxTotalShopify: number;
   /** GAS _voucher_change_total 相当（ノート・現金お釣りヒューリスティックの観測値のみ） */
   voucherChangeObserved: number;
+  /**
+   * 売上に含めない手数料の明細（`_lsi_fee="1"` かつ `_lsi_fee_sales="0"`）の当日分（売った分 − 計上対象の返金分）。
+   * 支払方法別の金額（pay）には入ったまま。総売上はここを引く（settlementEngine）。
+   */
+  nonSalesFeeTotal: number;
 } {
   const pay: Record<string, GasPayBucket> = {};
   let refundsGross = 0;
@@ -241,8 +256,10 @@ export function aggregateGasStyleForOrders(
   let itemCount = 0;
   let taxTotalShopify = 0;
   let voucherChangeObserved = 0;
+  let nonSalesFeeTotal = 0;
 
   for (const o of orders) {
+    const feeLineIds = nonSalesFeeLineIds(o.lineItems?.nodes);
     const countRefundsForThisLocation = orderRefundsCountForSettlement(
       o,
       inRange,
@@ -363,23 +380,45 @@ export function aggregateGasStyleForOrders(
       saleOrderSet.add(o.id);
     }
 
+    // 売上に含めない手数料の明細は点数・割引・税・総売上から外す（支払方法別の金額はそのまま）
+    let orderFeeSoldToday = 0;
+    let orderFeeTaxSoldToday = 0;
     if (effectiveOrderSaleToday > 0) {
       const nodes = o.lineItems?.nodes ?? [];
-      itemCount += nodes.reduce((s, n) => s + Number(n.quantity ?? 0), 0);
+      itemCount += nodes.reduce(
+        (s, n) => s + (n.id && feeLineIds.has(String(n.id)) ? 0 : Number(n.quantity ?? 0)),
+        0,
+      );
+      if (feeLineIds.size > 0) {
+        // 分けて払った注文（複数日）でも二重に引かないよう、当日の支払の割合で按分する
+        const paidShare = orderFinal > 0 ? Math.min(1, effectiveOrderSaleToday / orderFinal) : 1;
+        for (const n of nodes) {
+          if (!n.id || !feeLineIds.has(String(n.id))) continue;
+          orderFeeSoldToday += lineChargedAmount(n, o.taxesIncluded) * paidShare;
+          orderFeeTaxSoldToday += lineTaxAmount(n) * paidShare;
+        }
+      }
     }
+    let orderFeeRefundedToday = 0;
     if (countRefundsForThisLocation && orderRefundToday > 0) {
       for (const r of o.refunds ?? []) {
         if (!inRange(r.createdAt)) continue;
         for (const ri of r.refundLineItems ?? []) {
+          if (ri.lineItem?.id && feeLineIds.has(String(ri.lineItem.id))) {
+            orderFeeRefundedToday += refundLineChargedAmount(ri, o.taxesIncluded);
+            continue;
+          }
           itemCount -= Number(ri.quantity ?? 0);
         }
       }
       refundOrderSet.add(o.id);
     }
+    nonSalesFeeTotal += orderFeeSoldToday - orderFeeRefundedToday;
 
     let orderDiscount = 0;
     let orderVip = 0;
     for (const li of o.lineItems?.nodes ?? []) {
+      if (li.id && feeLineIds.has(String(li.id))) continue;
       for (const da of li.discountAllocations ?? []) {
         const alloc = Number(da.allocatedAmountSet?.shopMoney?.amount ?? 0);
         const typ = da.discountApplication?.__typename ?? "";
@@ -408,7 +447,7 @@ export function aggregateGasStyleForOrders(
     const oTax = Number(
       o.currentTotalTaxSet?.shopMoney?.amount ?? o.totalTaxSet?.shopMoney?.amount ?? 0,
     );
-    taxTotalShopify += oTax * keepRatioToday;
+    taxTotalShopify += oTax * keepRatioToday - orderFeeTaxSoldToday * keepRatioToday;
   }
 
   return {
@@ -421,6 +460,7 @@ export function aggregateGasStyleForOrders(
     itemCount,
     taxTotalShopify: Math.round(taxTotalShopify),
     voucherChangeObserved: Math.round(voucherChangeObserved),
+    nonSalesFeeTotal: Math.round(nonSalesFeeTotal),
   };
 }
 

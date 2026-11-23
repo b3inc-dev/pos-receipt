@@ -17,6 +17,7 @@ import { previewReceipt, issueReceipt, getReceiptHistory } from "../../common/re
 import { printGiftReceipt, getPrintSettings } from "../../common/printApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
+import { PosToggleField } from "./PosChoiceField.jsx";
 
 const STORAGE_KEY = "pos_receipt_order_id";
 
@@ -258,13 +259,7 @@ function FormView({
             />
 
             {/* 再発行フラグ */}
-            <s-stack direction="horizontal" align="space-between">
-              <s-text>再発行として記録する</s-text>
-              <s-checkbox
-                checked={isReissue}
-                onChange={(e) => setIsReissue(e?.currentTarget?.checked ?? isReissue)}
-              />
-            </s-stack>
+            <PosToggleField label="再発行として記録する" checked={isReissue} onChange={setIsReissue} />
 
             {error ? <s-text tone="critical">{error}</s-text> : null}
 

@@ -55,6 +55,8 @@ export type SettlementReceiptPrintModel = {
   refundCount: number;
   itemCount: number;
   voucherChangeAmount: number;
+  /** 売上に含めない送料等（支払方法別には入っている分）。0・無しなら印字しない */
+  nonSalesFeeTotal?: number;
   paymentSections: { label: string; net: number; txCount?: number; refund?: number; refundCount?: number }[];
   paperWidthMm: 58 | 80;
 };
@@ -237,6 +239,11 @@ ${
     ? `<div class="row"><span>商品券釣有り差額</span><span>${esc(yen(m.voucherChangeAmount, m.currency))}</span></div>`
     : ""
 }
+${
+  m.nonSalesFeeTotal
+    ? `<div class="row"><span>売上に含めない送料等</span><span>${esc(yen(m.nonSalesFeeTotal, m.currency))}</span></div>`
+    : ""
+}
 <div class="hr"></div>
 ${payments}
 `;
@@ -291,6 +298,7 @@ export function settlementPreviewToPrintModel(
     refundCount: number;
     itemCount: number;
     voucherChangeAmount: number;
+    nonSalesFeeTotal?: number;
     paymentSections: {
       label: string;
       net: number;
@@ -316,6 +324,7 @@ export function settlementPreviewToPrintModel(
     refundCount: preview.refundCount,
     itemCount: preview.itemCount,
     voucherChangeAmount: preview.voucherChangeAmount,
+    nonSalesFeeTotal: preview.nonSalesFeeTotal ?? 0,
     paymentSections: preview.paymentSections,
     paperWidthMm: opts?.paperWidthMm ?? 80,
   };
