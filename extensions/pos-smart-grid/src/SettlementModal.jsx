@@ -1153,16 +1153,10 @@ function PreviewView({
  * 案内・確認の中身・発行ボタンがスクロールなしで見えるよう、上から 何をするか → 結果の案内 → 中身 の順に置く。
  */
 function SettlementIssueConfirmView({ preview, isInspection, loading, error, onExecute, onBack }) {
-  const rows = [
-    { label: "ロケーション", value: preview?.locationName ?? "-" },
-    { label: "対象日", value: formatYmdSlash(preview?.targetDate ?? "-") },
-    { label: "総売上", value: `¥${Number(preview?.total ?? 0).toLocaleString()}`, valueBold: true },
-    { label: "件数", value: `${preview?.orderCount ?? 0}件` },
-  ];
-
-  const title = isInspection ? "点検レシートを発行します" : "精算を確定して、精算レシートを発行します";
+  // 確認の作り（T の決まり）: 見出し＝処理名、本文は 1 文、ボタンは動詞。
+  // 見た目は注文詳細と同じ: 灰色の小見出し、左に項目名・右に値、要の金額（総売上）は大きく。
   const note = isInspection
-    ? "点検ではこの日の精算は確定しません。何回でも発行できます。"
+    ? "点検では精算は確定しません。何回でも発行できます。"
     : "確定すると、この日の数が精算履歴に残ります。";
 
   return (
@@ -1178,21 +1172,13 @@ function SettlementIssueConfirmView({ preview, isInspection, loading, error, onE
           <s-box padding="base">
             <s-stack gap="base">
               <LoadingNotice loading={loading} error={error} busyLabel="発行中です。画面を閉じずにお待ちください。" />
-              <s-text type="strong">{title}</s-text>
               <s-text color="subdued">{note}</s-text>
-              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="none">
-                  {rows.map((row, i, arr) => (
-                    <SummaryRow
-                      key={row.label}
-                      label={row.label}
-                      value={row.value}
-                      valueBold={row.valueBold}
-                      divider={i < arr.length - 1}
-                    />
-                  ))}
-                </s-stack>
-              </s-box>
+              <IssueAmountSummary
+                storeName={preview?.locationName}
+                targetDate={preview?.targetDate}
+                total={preview?.total}
+                orderCount={preview?.orderCount}
+              />
             </s-stack>
           </s-box>
         </s-scroll-box>
@@ -1212,7 +1198,30 @@ function SettlementIssueConfirmView({ preview, isInspection, loading, error, onE
   );
 }
 
-function SettlementPrintControls({ settlementId, allowReprint = true }) {
+/**
+ * 発行の確認・完了で使う金額のまとめ（注文詳細と同じ並び）。
+ *   総売上            ← 灰色の小見出し
+ *   ¥15,275           ← 大きく
+ *   内容
+ *   店舗        BBB渋谷店
+ *   対象日      2026/11/24（火）
+ *   件数        6件
+ */
+function IssueAmountSummary({ storeName, targetDate, total, orderCount }) {
+  return (
+    <s-box>
+      <SummaryHeading first>総売上</SummaryHeading>
+      <s-heading>{total != null ? formatYen(total) : "—"}</s-heading>
+      <SummaryHeading>内容</SummaryHeading>
+      {storeName ? <SummaryLine label="店舗" value={storeName} /> : null}
+      <SummaryLine label="対象日" value={formatYmdWithWeekday(targetDate ?? "")} />
+      {orderCount != null ? <SummaryLine label="件数" value={`${Number(orderCount)}件`} /> : null}
+    </s-box>
+  );
+}
+
+/** 精算レシートの印刷（完了画面の右下のボタンと、履歴の明細で使う） */
+function useSettlementPrint(settlementId) {
   const [printBusy, setPrintBusy] = useState(false);
   const [printMsg, setPrintMsg] = useState("");
   const [canDialog, setCanDialog] = useState(false);
@@ -1242,6 +1251,31 @@ function SettlementPrintControls({ settlementId, allowReprint = true }) {
     }
   };
 
+  return { runPrint, printBusy, printMsg, canDialog, outcome };
+}
+
+/** 印刷の結果の文と「ほかのプリンタを選んで印刷する」（出せるときだけ） */
+function SettlementPrintResult({ print }) {
+  if (!print.printMsg && !print.canDialog) return null;
+  return (
+    <s-stack gap="small">
+      {print.printMsg ? (
+        <s-text tone={print.outcome === PRINT_OUTCOME.DIRECT_ACCEPTED ? "subdued" : "caution"}>
+          {print.printMsg}
+        </s-text>
+      ) : null}
+      {print.canDialog ? (
+        <s-button onClick={() => print.runPrint(true)} disabled={print.printBusy}>
+          ほかのプリンタを選んで印刷する
+        </s-button>
+      ) : null}
+    </s-stack>
+  );
+}
+
+function SettlementPrintControls({ settlementId, allowReprint = true }) {
+  const print = useSettlementPrint(settlementId);
+
   if (!settlementId) {
     return <s-text tone="critical">精算の記録が見つからないため印刷できません</s-text>;
   }
@@ -1250,26 +1284,15 @@ function SettlementPrintControls({ settlementId, allowReprint = true }) {
   }
 
   return (
-    <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-      <s-stack gap="small">
-        <s-text tone="subdued" fontSize="small">
-          保存した金額で印刷します。印刷し直しても売上・精算は増えません。
-        </s-text>
-        <s-button variant="primary" onClick={() => runPrint(false)} disabled={printBusy}>
-          {printBusy ? "印刷中…" : "レシートを印刷する"}
-        </s-button>
-        {canDialog ? (
-          <s-button onClick={() => runPrint(true)} disabled={printBusy}>
-            ほかのプリンタを選んで印刷する
-          </s-button>
-        ) : null}
-        {printMsg ? (
-          <s-text tone={outcome === PRINT_OUTCOME.DIRECT_ACCEPTED ? "subdued" : "caution"}>
-            {printMsg}
-          </s-text>
-        ) : null}
-      </s-stack>
-    </s-box>
+    <s-stack gap="small">
+      <s-text type="small" color="subdued">
+        保存した金額で印刷します。印刷し直しても売上・精算は増えません。
+      </s-text>
+      <s-button variant="primary" onClick={() => print.runPrint(false)} disabled={print.printBusy}>
+        {print.printBusy ? "印刷中…" : "レシートを印刷する"}
+      </s-button>
+      <SettlementPrintResult print={print} />
+    </s-stack>
   );
 }
 
@@ -1284,70 +1307,63 @@ function settlementStatusLabel(status) {
 
 // ── 完了画面 ──────────────────────────────────────────────────────────────────
 function DoneView({ result, isInspection, targetDateYmd, onBack }) {
-  const doneTargetDate = result?.preview?.targetDate ?? result?.targetDate ?? targetDateYmd ?? "-";
+  const doneTargetDate = result?.preview?.targetDate ?? result?.targetDate ?? targetDateYmd ?? "";
   const doneTotal = result?.preview?.total;
-  const kindLabel = isInspection ? "点検" : "精算";
+  const settlementId = result?.settlementId;
+  const print = useSettlementPrint(settlementId);
+
+  // 本文は 1 文（状況によって入れ替える）
+  const message = isInspection
+    ? "点検レシートを発行しました。精算はまだ確定していません。"
+    : result?.idempotent
+      ? "この日はすでに精算済みです。保存済みの精算を表示しています。"
+      : result?.reconfirmed === true
+        ? "今の数で精算を確定し直しました。前の確定値は履歴に残っています。"
+        : "この日の精算を確定し、履歴に残しました。";
 
   return (
     <s-page heading="発行完了">
-      <s-scroll-box>
-        <s-box padding="base">
-          <s-stack gap="base">
-            <s-text fontWeight="bold">
-              {isInspection ? "点検レシートを発行しました" : "精算レシートを発行しました"}
-            </s-text>
-            <s-text tone="subdued" fontSize="small">
-              {isInspection
-                ? "発行した時点の金額を履歴に残しました。精算（その日の確定）はまだです。点検は何回でも発行できます。"
-                : result?.idempotent
-                  ? "この日はすでに精算済みです。保存済みの精算レシートを表示しています。"
-                  : "この日の精算を確定し、履歴に残しました。"}
-            </s-text>
-            {result?.reconfirmed === true ? (
-              <s-text tone="subdued">今の数で確定し直しました。前の確定値は履歴に残っています。</s-text>
-            ) : null}
-            {result?.reconfirmed === false ? (
-              <s-text tone="subdued">確定値と今の数は同じでした。確定値はそのままです。</s-text>
-            ) : null}
-            {result?.warning ? <s-text tone="caution">{result.warning}</s-text> : null}
-
-            <SettlementPrintControls settlementId={result?.settlementId} />
-
-            <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="none">
-                {[
-                  { label: "種別", value: kindLabel },
-                  { label: "対象日", value: formatYmdSlash(doneTargetDate) },
-                  {
-                    label: "記録ID",
-                    value: result?.settlementId ? `…${result.settlementId.slice(-8)}` : "-",
-                  },
-                  {
-                    label: "総売上",
-                    value:
-                      doneTotal != null
-                        ? `¥${Number(doneTotal).toLocaleString()}`
-                        : "（履歴から確認）",
-                    valueBold: true,
-                  },
-                ].map((row, i, arr) => (
-                  <SummaryRow
-                    key={row.label}
-                    label={row.label}
-                    value={row.value}
-                    valueBold={row.valueBold}
-                    divider={i < arr.length - 1}
-                  />
-                ))}
-              </s-stack>
-            </s-box>
-
-            <s-button kind="primary" onClick={onBack}>
-              閉じる
-            </s-button>
-          </s-stack>
-        </s-box>
-      </s-scroll-box>
+      <s-stack
+        gap="none"
+        blockSize="100%"
+        inlineSize="100%"
+        minBlockSize="0"
+        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+      >
+        <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
+          <s-box padding="base">
+            <s-stack gap="base">
+              <s-text color="subdued">{message}</s-text>
+              {result?.reconfirmed === false ? (
+                <s-text color="subdued">確定値と今の数は同じだったので、確定値はそのままです。</s-text>
+              ) : null}
+              {result?.warning ? <s-text tone="caution">{result.warning}</s-text> : null}
+              {!settlementId ? (
+                <s-text tone="critical">精算の記録が見つからないため印刷できません。</s-text>
+              ) : null}
+              <SettlementPrintResult print={print} />
+              <IssueAmountSummary
+                storeName={result?.preview?.locationName}
+                targetDate={doneTargetDate}
+                total={doneTotal}
+                orderCount={result?.preview?.orderCount}
+              />
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+        <s-divider />
+        {/* 閉じるは左下、主のボタン（印刷）は右下に 1 つ */}
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="閉じる"
+          onLeft={onBack}
+          leftDisabled={print.printBusy}
+          rightLabel={settlementId ? (print.printBusy ? "印刷中.." : "レシートを印刷する") : undefined}
+          onRight={settlementId ? () => print.runPrint(false) : undefined}
+          rightTone="success"
+          rightDisabled={print.printBusy}
+        />
+      </s-stack>
     </s-page>
   );
 }
