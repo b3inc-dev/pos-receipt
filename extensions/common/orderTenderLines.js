@@ -68,3 +68,20 @@ export function matchMethodValue(items, gateway) {
   const exact = (items ?? []).find((m) => keyOf(m?.value) === g);
   return exact?.value ?? null;
 }
+
+/**
+ * 特殊返金の「元の支払手段」に出す選択肢: この注文で実際に払われた支払方法だけ（T 2026-11-23「元の支払い方法は固定」）。
+ * value は取引の gateway そのもの（精算が支払方法を分ける値と同じ）。label は取引の表示名。
+ */
+export function originalMethodChoices(lines) {
+  return (lines ?? [])
+    .filter((l) => l.paid > 0 && String(l.gateway ?? "").trim())
+    .map((l) => ({ value: l.gateway, label: l.label }));
+}
+
+/** 元の支払手段の初めの値: 返金のある支払方法（返金の多い順）、無ければ支払った額の多いもの */
+export function defaultOriginalMethod(lines) {
+  const paid = (lines ?? []).filter((l) => l.paid > 0 && String(l.gateway ?? "").trim());
+  const refunded = [...paid].filter((l) => l.refunded > 0).sort((a, b) => b.refunded - a.refunded);
+  return (refunded[0] ?? paid[0])?.gateway ?? null;
+}

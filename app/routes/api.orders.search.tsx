@@ -169,17 +169,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
           where: {
             shopId: shop.id,
             sourceOrderId: { in: [...idKeys, ...idKeys.map((k) => `gid://shopify/Order/${k}`)] },
-            status: "active",
+            // 無効化した登録も読む（有効な登録が無く無効化だけの注文に「登録を無効化」の印を付ける）
+            status: { in: ["active", "voided"] },
           },
-          select: { sourceOrderId: true, eventType: true, shopifyRefundStatus: true },
+          select: { sourceOrderId: true, eventType: true, shopifyRefundStatus: true, status: true, approvalStatus: true },
         }),
       ]);
       const receiptSet = new Set(receiptRows.map((r) => normalizeOrderIdKey(r.orderId)));
       const eventsByOrder = new Map<string, string[]>();
       // Shopify 返金の結果が分かっていない（pending）登録がある注文。精算を止めるので一覧で分かるようにする
       const pendingOrders = new Set<string>();
+      const voidedOrders = new Set<string>();
+      const approvalPendingOrders = new Set<string>();
       for (const e of eventRows) {
         const oid = normalizeOrderIdKey(e.sourceOrderId);
+        if (e.status === "voided") {
+          voidedOrders.add(oid);
+          continue;
+        }
+        if (e.approvalStatus === "pending") approvalPendingOrders.add(oid);
         if (!eventsByOrder.has(oid)) eventsByOrder.set(oid, []);
         eventsByOrder.get(oid)!.push(e.eventType);
         if (isShopifyRefundPending(e.shopifyRefundStatus)) pendingOrders.add(oid);
@@ -198,6 +206,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
             hasVoucherAdjustment,
             appSpecialApplied: hasSpecialRefund,
             hasPendingShopifyRefund: pendingOrders.has(oid),
+            hasApprovalPending: approvalPendingOrders.has(oid),
+            // 有効な登録が無く、無効化した登録だけがある
+            onlyVoidedAdjustments: types.length === 0 && voidedOrders.has(oid),
           },
         };
       });

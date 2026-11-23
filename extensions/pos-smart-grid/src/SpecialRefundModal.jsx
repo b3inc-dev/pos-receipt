@@ -37,7 +37,14 @@ import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
-import { orderTenderLines, fullAmountForRefund, matchMethodValue, roundMoney } from "../../common/orderTenderLines.js";
+import {
+  orderTenderLines,
+  fullAmountForRefund,
+  matchMethodValue,
+  roundMoney,
+  originalMethodChoices,
+  defaultOriginalMethod,
+} from "../../common/orderTenderLines.js";
 import {
   paymentMethodsWithOrderGateway,
   primarySaleTransaction,
@@ -1080,19 +1087,25 @@ function SpecialRefundForm({
     FALLBACK_PAYMENT_METHODS,
     order,
   );
+  const tenderLines = orderTenderLines(order);
+  // 元の支払手段は、この注文で実際に払われた支払方法だけ（1 つなら固定、複数ならその中から選ぶ）。
+  // 注文の支払いを読めなかったときだけ、前のとおりマスタの候補から選ぶ
+  const orderMethodChoices = originalMethodChoices(tenderLines);
+  const originalFromOrder = orderMethodChoices.length > 0;
   const [eventType, setEventType] = useState("cash_refund");
   const [amount, setAmount] = useState("");
-  const [paymentMethods, setPaymentMethods] = useState(fallbackPaymentMethods);
+  const [paymentMethods, setPaymentMethods] = useState(originalFromOrder ? orderMethodChoices : fallbackPaymentMethods);
   // 実際の返金手段は支払方法マスタ（特殊返金で選べるもの）からだけ選ぶ。注文の決済手段や既定の候補は足さない
   const [refundMethods, setRefundMethods] = useState([]);
   const [refundMethodsState, setRefundMethodsState] = useState("loading"); // loading | ready | empty | error
-  const [originalPaymentMethod, setOriginalPaymentMethod] = useState(orderGateway || "cash");
+  const [originalPaymentMethod, setOriginalPaymentMethod] = useState(
+    (originalFromOrder ? defaultOriginalMethod(tenderLines) : null) || orderGateway || "cash",
+  );
   const [actualRefundMethod, setActualRefundMethod] = useState("");
   const [idempotencyKey, setIdempotencyKey] = useState(null);
   const [adjustKind, setAdjustKind] = useState("undo");
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
-  const tenderLines = orderTenderLines(order);
 
   // 全額反映: その支払方法の返金した額（無ければ支払った額）を金額に入れ、元の支払手段もその方法にする
   const fillFromTender = (line) => {
@@ -1115,7 +1128,8 @@ function SpecialRefundForm({
         const masterCash = masterItems.find((m) => m.category === "cash" || m.value === "cash");
         setActualRefundMethod(masterCash?.value ?? masterItems[0]?.value ?? "");
         const items = paymentMethodsWithOrderGateway(masterItems, order);
-        if (items.length > 0) {
+        // 注文の支払いから決めたときは、元の支払手段の候補をマスタで置き換えない
+        if (!originalFromOrder && items.length > 0) {
           setPaymentMethods(items);
           const normalizedOrderGateway = orderGateway.toLowerCase();
           const orderMethod = items.find((m) => {
@@ -1130,8 +1144,10 @@ function SpecialRefundForm({
         }
       })
       .catch(() => {
-        setPaymentMethods(fallbackPaymentMethods);
-        setOriginalPaymentMethod(orderGateway || fallbackPaymentMethods[0].value);
+        if (!originalFromOrder) {
+          setPaymentMethods(fallbackPaymentMethods);
+          setOriginalPaymentMethod(orderGateway || fallbackPaymentMethods[0].value);
+        }
         setRefundMethods([]);
         setRefundMethodsState("error");
         setActualRefundMethod("");
@@ -1258,12 +1274,19 @@ function SpecialRefundForm({
             {/* 支払手段（cash_refund / payment_method_override） */}
             {showPaymentFields ? (
               <>
-                <PosChoiceField
-                  label="元の支払手段"
-                  value={originalPaymentMethod}
-                  options={paymentMethods}
-                  onChange={setOriginalPaymentMethod}
-                />
+                {originalFromOrder && paymentMethods.length === 1 ? (
+                  <s-stack gap="none">
+                    <s-text tone="subdued" fontSize="small">元の支払手段（この注文の支払い）</s-text>
+                    <s-text fontWeight="bold">{paymentMethods[0].label}</s-text>
+                  </s-stack>
+                ) : (
+                  <PosChoiceField
+                    label={originalFromOrder ? "元の支払手段（この注文で払われたものから選ぶ）" : "元の支払手段"}
+                    value={originalPaymentMethod}
+                    options={paymentMethods}
+                    onChange={setOriginalPaymentMethod}
+                  />
+                )}
                 {refundMethods.length > 0 ? (
                   <PosChoiceField
                     label="実際の返金手段"

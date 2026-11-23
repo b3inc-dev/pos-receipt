@@ -3,7 +3,14 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { orderTenderLines, fullAmountForRefund, matchMethodValue, roundMoney } from "../../extensions/common/orderTenderLines.js";
+import {
+  orderTenderLines,
+  fullAmountForRefund,
+  matchMethodValue,
+  roundMoney,
+  originalMethodChoices,
+  defaultOriginalMethod,
+} from "../../extensions/common/orderTenderLines.js";
 
 const order = {
   transactions: [
@@ -49,4 +56,18 @@ test("端数のある通貨でも全額反映で切り捨てない", () => {
   assert.deepEqual(lines.map((l: { paid: number; refunded: number }) => [l.paid, l.refunded]), [[12.34, 5.5]]);
   assert.equal(fullAmountForRefund(lines[0]), 5.5);
   assert.equal(roundMoney("1000"), 1000);
+});
+
+test("元の支払手段: この注文で払われた支払方法だけ。初めは返金のある方法、無ければ多く払った方法", () => {
+  const lines = orderTenderLines(order);
+  assert.deepEqual(originalMethodChoices(lines), [
+    { value: "商品券", label: "商品券" },
+    { value: "shopify_payments", label: "クレジット" },
+  ]);
+  assert.equal(defaultOriginalMethod(lines), "shopify_payments");
+  const single = orderTenderLines({ transactions: [{ kind: "SALE", status: "SUCCESS", gateway: "cash", displayName: "現金", amount: "3325" }] });
+  assert.deepEqual(originalMethodChoices(single), [{ value: "cash", label: "現金" }]);
+  assert.equal(defaultOriginalMethod(single), "cash");
+  assert.deepEqual(originalMethodChoices([]), []);
+  assert.equal(defaultOriginalMethod([]), null);
 });

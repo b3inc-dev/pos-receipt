@@ -22,9 +22,11 @@ export function formatListBadges(item) {
   if (b.hasPendingShopifyRefund) out.push({ key: "pending", label: "返金処理中", tone: "critical" });
   if (b.cancelled) out.push({ key: "cancelled", label: "キャンセル", tone: "critical" });
   if (b.refundedShopify) out.push({ key: "refund", label: "返金", tone: "warning" });
-  if (b.hasVoucherAdjustment) out.push({ key: "vadj", label: "釣調整済", tone: "success" });
-  if (b.hasSpecialRefund || b.appSpecialApplied) out.push({ key: "special", label: "特殊適用", tone: "info" });
-  if (b.hasVoucherChange) out.push({ key: "vchg", label: "釣有り", tone: "caution" });
+  if (b.hasApprovalPending) out.push({ key: "approval", label: "承認待ち", tone: "caution" });
+  if (b.hasSpecialRefund || b.appSpecialApplied) out.push({ key: "special", label: "特殊返金 登録済", tone: "info" });
+  if (b.hasVoucherAdjustment) out.push({ key: "vadj", label: "商品券 登録済", tone: "success" });
+  if (b.onlyVoidedAdjustments) out.push({ key: "voided", label: "登録を無効化", tone: "neutral" });
+  if (b.hasVoucherChange) out.push({ key: "vchg", label: "商品券釣有り", tone: "caution" });
   else if (b.voucherLikeGateway) out.push({ key: "voucher", label: "商品券", tone: "neutral" });
   if (b.receiptIssued) out.push({ key: "receipt", label: "領収書", tone: "neutral" });
   return out;
