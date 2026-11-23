@@ -132,7 +132,8 @@ export function OrderDetailSummary({ order }) {
       ) : null}
 
       <Heading>金額の内訳</Heading>
-      <Line label="小計" value={fmtYen(order.subtotalPrice?.amount)} />
+      {/* Shopify の subtotalPrice は割引のあとの額。純正と同じく「小計（割引前）→ 割引 → 合計」と読めるよう、割引を足し戻して出す */}
+      <Line label="小計" value={fmtYen(Number(order.subtotalPrice?.amount || 0) + discount)} />
       <Line label="割引" value={discount > 0 ? `−${fmtYen(discount)}` : fmtYen(0)} tone={discount > 0 ? "critical" : undefined} />
       <Line label={taxesIncluded ? "税（込）" : "税"} value={fmtYen(order.totalTax?.amount)} />
 
