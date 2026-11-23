@@ -16,9 +16,9 @@ import {
   BlockStack,
   Banner,
   InlineStack,
-  Select,
+  ChoiceList,
 } from "@shopify/polaris";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
@@ -33,13 +33,26 @@ import {
   resolveVoucherSettings,
   VOUCHER_SETTINGS_VERSION,
 } from "../services/voucherChangePure.server";
+import { compileVoucherNoteRegex as compileNoteRegexForPreview, parseVoucherFaceFromNote } from "../utils/voucherNoteParse";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 
-const PRIORITY_OPTIONS = [
-  { label: "手動優先", value: "manual_first" },
-  { label: "自動優先", value: "auto_first" },
+const PRIORITY_CHOICES = [
+  {
+    label: "POS で手で入れた額を使う（おすすめ）",
+    value: "manual_first",
+    helpText: "スタッフが「商品券釣銭調整」で入れた額を正しいものとして、自動で見つけた額は数えません。",
+  },
+  {
+    label: "自動で見つけた額を使う",
+    value: "auto_first",
+    helpText: "注文から自動で見つけた額を使い、手で入れた額は数えません。",
+  },
 ];
+
+/** 額面の読み方（式が空＝初めの読み方） */
+const NOTE_FORMAT_STANDARD = "standard";
+const NOTE_FORMAT_CUSTOM = "custom";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
@@ -106,6 +119,19 @@ export default function VoucherSettingsPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const keyword = form.voucherDefaultLabel.trim() || "商品券";
+  const [noteFormat, setNoteFormat] = useState(
+    initial.voucherNoteParseRegex.trim() ? NOTE_FORMAT_CUSTOM : NOTE_FORMAT_STANDARD,
+  );
+  const [sampleNote, setSampleNote] = useState(`${keyword} 2000円`);
+  const regexCheck = useMemo(() => compileNoteRegexForPreview(form.voucherNoteParseRegex), [form.voucherNoteParseRegex]);
+  const regexError = regexCheck.error;
+  const samplePreview = useMemo(() => {
+    if (regexError) return "詳しい設定の「メモの読み方」を直すと試せます。";
+    const face = parseVoucherFaceFromNote(sampleNote, keyword, regexCheck.regex);
+    return face > 0 ? `このメモは額面 ${face.toLocaleString()} 円と読みます。` : "このメモからは額面を読めません。";
+  }, [sampleNote, keyword, regexCheck, regexError]);
+
   return (
     <PolarisPageWrapper>
       <Page
@@ -159,36 +185,85 @@ export default function VoucherSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="額面読取ルール">
+          <Layout.AnnotatedSection
+            title="注文メモの額面"
+            description="スタッフが注文メモに商品券の額面を書いたとき、その額からお釣りを見つけます。"
+          >
             <Card>
               <BlockStack gap="400">
                 <Checkbox label="注文メモから額面を読み取る" checked={form.voucherNoteParseEnabled} onChange={(v) => set("voucherNoteParseEnabled", v)} />
-                <TextField
-                  label="読取用正規表現"
-                  helpText="空のときは「（商品券の言葉） 2000円」の形を読みます。自分で書くときは、金額の部分を ( ) で囲みます。"
-                  value={form.voucherNoteParseRegex}
-                  onChange={(v) => set("voucherNoteParseRegex", v)}
-                  autoComplete="off"
-                />
-                <TextField
-                  label="商品券とみなす言葉"
-                  helpText="注文メモや支払方法の名前にこの言葉があると商品券の注文とみなします。支払方法「（言葉）釣有り」「（言葉）釣無し」「（言葉）」は額面どおりに数えます。"
-                  value={form.voucherDefaultLabel}
-                  onChange={(v) => set("voucherDefaultLabel", v)}
-                  autoComplete="off"
-                />
+                {form.voucherNoteParseEnabled ? (
+                  <>
+                    <ChoiceList
+                      title="メモの書き方"
+                      choices={[
+                        {
+                          label: `「${keyword} 2000円」のように書く`,
+                          value: NOTE_FORMAT_STANDARD,
+                          helpText: `例:「${keyword} 2000円」「${keyword}２，０００円」「${keyword}5000」。どれも額面として読みます。`,
+                        },
+                        {
+                          label: "自分で決めた書き方",
+                          value: NOTE_FORMAT_CUSTOM,
+                          helpText: "下の「詳しい設定」の「メモの読み方」で決めます。",
+                        },
+                      ]}
+                      selected={[noteFormat]}
+                      onChange={(v) => {
+                        const next = v[0] ?? NOTE_FORMAT_STANDARD;
+                        setNoteFormat(next);
+                        if (next === NOTE_FORMAT_STANDARD) set("voucherNoteParseRegex", "");
+                      }}
+                    />
+                    <TextField label="メモの例で試す" value={sampleNote} onChange={setSampleNote} autoComplete="off" helpText={samplePreview} />
+                  </>
+                ) : null}
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="判定優先順位・精算反映">
+          <Layout.AnnotatedSection title="自動と手入力が重なったとき">
             <Card>
               <BlockStack gap="400">
-                <Select label="判定優先順位" helpText="同じ注文に自動判定と手動調整の両方があるとき、どちらを数えるか。もう片方は数えません（同じ日・同じ店の精算の中で）。" options={PRIORITY_OPTIONS} value={form.voucherAdjustmentPriority} onChange={(v) => set("voucherAdjustmentPriority", v as "manual_first" | "auto_first")} />
-                <Checkbox label="精算に商品券おつりを反映する" checked={form.reflectVoucherChangeInSettlement} onChange={(v) => set("reflectVoucherChangeInSettlement", v)} />
+                <ChoiceList
+                  title="同じ注文に、自動で見つけた額と POS で手で入れた額の両方があるとき"
+                  choices={PRIORITY_CHOICES}
+                  selected={[form.voucherAdjustmentPriority]}
+                  onChange={(v) => set("voucherAdjustmentPriority", (v[0] as "manual_first" | "auto_first") ?? "manual_first")}
+                />
+                <Text as="p" variant="bodySm" tone="subdued">
+                  どちらか片方だけを数えるので、差額が 2 回足されることはありません（同じ日・同じ店の精算の中で）。
+                </Text>
+                <Checkbox label="精算に商品券のお釣りを反映する" checked={form.reflectVoucherChangeInSettlement} onChange={(v) => set("reflectVoucherChangeInSettlement", v)} />
                 <Text as="p" variant="bodySm" tone="subdued">
                   精算レシートに差額の行を出すかは「精算レシート印字レイアウト」の「商品券釣有り差額行を含める」で決めます。
                 </Text>
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          {/* 詳しい設定は別の項目にまとめ、ふだん触る項目と分ける（開け閉めのボタンだけの行は作らない: UI_RULES 4章） */}
+          <Layout.AnnotatedSection title="詳しい設定" description="ふつうは変えなくてかまいません。">
+            <Card>
+              <BlockStack gap="400">
+                <TextField
+                  label="商品券とみなす言葉"
+                  helpText="注文メモや支払方法の名前にこの言葉があると商品券の注文とみなします。初めは「商品券」です。"
+                  value={form.voucherDefaultLabel}
+                  onChange={(v) => set("voucherDefaultLabel", v)}
+                  autoComplete="off"
+                />
+                <TextField
+                  label="メモの読み方（正規表現）"
+                  helpText="「自分で決めた書き方」のときに使います。金額の部分を ( ) で囲みます。例: 額面=([0-9]+)"
+                  value={form.voucherNoteParseRegex}
+                  onChange={(v) => {
+                    set("voucherNoteParseRegex", v);
+                    setNoteFormat(v.trim() ? NOTE_FORMAT_CUSTOM : NOTE_FORMAT_STANDARD);
+                  }}
+                  error={regexError ?? undefined}
+                  autoComplete="off"
+                />
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>

@@ -10,6 +10,15 @@
  * - 精算に反映 OFF … 精算の「商品券釣有り差額」を 0 にする
  */
 import type { VoucherSettings } from "../utils/appSettings.server";
+import {
+  compileVoucherNoteRegex,
+  DEFAULT_VOUCHER_KEYWORD,
+  escapeRegExp,
+  parseVoucherFaceFromNote,
+  VOUCHER_NOTE_REGEX_MAX_LENGTH,
+} from "../utils/voucherNoteParse";
+
+export { compileVoucherNoteRegex, DEFAULT_VOUCHER_KEYWORD, escapeRegExp, VOUCHER_NOTE_REGEX_MAX_LENGTH };
 
 /** 商品券設定の「保存の版」。これより前に保存した設定は、配線前の画面で保存したもの */
 export const VOUCHER_SETTINGS_VERSION = 2;
@@ -26,41 +35,12 @@ export interface VoucherDetectionRules {
   noteRegex: RegExp | null;
 }
 
-export const DEFAULT_VOUCHER_KEYWORD = "商品券";
-/** 読取用正規表現の長さの上限（重い式で集計が止まらないように） */
-export const VOUCHER_NOTE_REGEX_MAX_LENGTH = 100;
-
 export const DEFAULT_VOUCHER_DETECTION_RULES: VoucherDetectionRules = {
   autoDetectionEnabled: true,
   noteParseEnabled: true,
   keyword: DEFAULT_VOUCHER_KEYWORD,
   noteRegex: null,
 };
-
-export function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** 読取用正規表現の文字列を確かめる。空なら null（初めの式を使う）。不正・かっこ無しはエラー文 */
-export function compileVoucherNoteRegex(src: string | null | undefined): { regex: RegExp | null; error: string | null } {
-  const s = String(src ?? "").trim();
-  if (!s) return { regex: null, error: null };
-  if (s.length > VOUCHER_NOTE_REGEX_MAX_LENGTH) {
-    return { regex: null, error: `読取用正規表現は ${VOUCHER_NOTE_REGEX_MAX_LENGTH} 文字までにしてください` };
-  }
-  let re: RegExp;
-  try {
-    re = new RegExp(s);
-  } catch {
-    return { regex: null, error: "読取用正規表現の書き方が正しくありません" };
-  }
-  // かっこ（金額の部分）が 1 つ以上あるか: 空文字に「何にも当たらない」選択肢を足して数える
-  const groups = new RegExp(`${s}|`).exec("")?.length ?? 1;
-  if (groups < 2) {
-    return { regex: null, error: "読取用正規表現に、金額の部分を ( ) で 1 つ入れてください" };
-  }
-  return { regex: re, error: null };
-}
 
 /**
  * 保存された商品券設定を精算で使う形に直す。
@@ -92,28 +72,13 @@ export function voucherDetectionRulesFromSettings(s: VoucherSettings): VoucherDe
   };
 }
 
-/** 全角数字・読点を除いて半角化（GAS z2hDigits） */
-function z2hDigits(input: string): string {
-  let s = "";
-  for (const ch of String(input ?? "")) {
-    const code = ch.charCodeAt(0);
-    s += code >= 0xff10 && code <= 0xff19 ? String.fromCharCode(code - 0xfee0) : ch;
-  }
-  return s.replace(/[，、,]/g, "");
-}
-
 /** 注文メモから額面を読む（GAS parseVoucherFaceFromNote。言葉と式は設定から） */
 export function parseVoucherFaceFromNoteWithRules(
   note: string | null | undefined,
   rules: VoucherDetectionRules,
 ): number {
   if (!rules.noteParseEnabled) return 0;
-  const s = z2hDigits(note ?? "");
-  const re =
-    rules.noteRegex ?? new RegExp(`${escapeRegExp(rules.keyword)}\\s*([0-9]+)\\s*(?:円|えん)?`);
-  const m = s.match(re);
-  const n = m ? Number(z2hDigits(String(m[1] ?? "")).replace(/[^0-9.]/g, "")) : 0;
-  return Number.isFinite(n) && n > 0 ? n : 0;
+  return parseVoucherFaceFromNote(note, rules.keyword, rules.noteRegex);
 }
 
 /** 商品券として額面をそのまま数える支払方法名（初めの言葉なら GAS と同じ 3 つ） */
