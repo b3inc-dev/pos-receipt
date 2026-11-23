@@ -6,6 +6,7 @@ import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import { locationData, settlementTemplateData } from "./receiptLayoutAdapters";
 import { getSettlementCalc, renderLayoutForPrint } from "./receiptLayoutPrint.server";
 import type { ReceiptLayout } from "./receiptLayoutSchema";
+import { printMarkTemplateValues } from "./printMarks";
 import { parsePaymentSectionsJson, settlementReceiptTitle } from "./settlementPrintSnapshot.server";
 import type { SettlementRowLike } from "./printUnification.server";
 import { nonSalesFeeTotalFromSaved } from "./nonSalesFeeLines";
@@ -26,7 +27,14 @@ export async function layoutSettlementHtml(
   shopId: string,
   row: Row,
   layout: ReceiptLayout,
-  opts: { currentLocationName: string; paperWidthMm: 58 | 80 },
+  opts: {
+    currentLocationName: string;
+    paperWidthMm: 58 | 80;
+    /** 再印字・再精算の印（printMarksFor の結果）。レイアウトに印のブロックがあればそこに出る */
+    printMarks?: string[];
+    isReprint?: boolean;
+    isResettlement?: boolean;
+  },
 ): Promise<string | null> {
   const parsed = parsePaymentSectionsJson(row.paymentSectionsJson);
   const snapshot = parsed.snapshot;
@@ -84,5 +92,11 @@ export async function layoutSettlementHtml(
     // 今までの印字と同じ部品で出す（総売上 = 支払方法別の合計 − 売上に含めない送料等）
     nonSalesFee: nonSalesFeeTotalFromSaved(n(printRow.total), sectionsParsed),
   });
-  return renderLayoutForPrint(layout, data, opts.paperWidthMm);
+  // 再印字・再精算の印。レイアウトに印のブロックが無いときは呼ぶ側で上に出す
+  const withMarks = {
+    ...data,
+    ...printMarkTemplateValues(opts.printMarks ?? [], !!opts.isReprint),
+    settlement: { ...data.settlement, is_resettlement: !!opts.isResettlement },
+  } as typeof data;
+  return renderLayoutForPrint(layout, withMarks, opts.paperWidthMm);
 }

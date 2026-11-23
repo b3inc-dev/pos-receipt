@@ -170,18 +170,44 @@ export async function printHtml(relativeOrAbsoluteSrc, options = {}) {
   }
 }
 
+/**
+ * 印刷を受け付けたことをサーバーに残す（次からの印刷を「再印字」と見分けるため）。
+ * 失敗しても印刷の結果は変えない（印が付かないだけ）。精算は markSettlementPrinted を使う。
+ * @param {"receipt"|"sales"|"gift"} kind
+ */
+export async function markReceiptPrinted(kind, id) {
+  try {
+    const session = globalThis?.shopify?.session;
+    const token = session?.getSessionToken ? await session.getSessionToken() : null;
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    await fetch(`${getAppUrl()}/api/print/printed`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ kind, id: String(id ?? "") }),
+    });
+  } catch (_) {
+    /* 記録できなくても印刷は終わっている */
+  }
+}
+
 export async function printSalesReceipt(orderId, options = {}) {
   const id = String(orderId || "").replace("gid://shopify/Order/", "");
   const suffix = options.gift ? "?copy=gift" : "";
-  return printHtml(`/api/print/sales/${encodeURIComponent(id)}${suffix}`, options);
+  const res = await printHtml(`/api/print/sales/${encodeURIComponent(id)}${suffix}`, options);
+  if (res?.ok) await markReceiptPrinted(options.gift ? "gift" : "sales", id);
+  return res;
 }
 
 export async function printSettlementReceipt(settlementId, options = {}) {
   return printHtml(`/api/print/settlement/${encodeURIComponent(settlementId)}`, options);
 }
 
+/** 領収書（関数名は昔のまま）。印刷を受け付けたら記録を残す */
 export async function printGiftReceipt(receiptIssueId, options = {}) {
-  return printHtml(`/api/print/receipt/${encodeURIComponent(receiptIssueId)}`, options);
+  const res = await printHtml(`/api/print/receipt/${encodeURIComponent(receiptIssueId)}`, options);
+  if (res?.ok) await markReceiptPrinted("receipt", receiptIssueId);
+  return res;
 }
 
 /**

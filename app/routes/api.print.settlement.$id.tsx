@@ -18,7 +18,13 @@ import {
   type PrintSettings,
 } from "../utils/appSettings.server";
 import { resolvePaperWidthMm } from "../services/printUnification.server";
-import { buildSettlementReprintView } from "../services/settlementPrintSnapshot.server";
+import {
+  buildSettlementReprintView,
+  isResettlementRow,
+  parsePaymentSectionsJson,
+} from "../services/settlementPrintSnapshot.server";
+import { applyPrintMarksToLayoutHtml, insertPrintMarkAtTop, printMarksFor } from "../services/printMarks";
+import { getPrintMarkSettings } from "../services/printMarks.server";
 import { getPrintLayout, PRINT_CSP } from "../services/receiptLayoutPrint.server";
 import { layoutSettlementHtml } from "../services/receiptLayoutSettlementPrint.server";
 
@@ -53,26 +59,41 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
     const devicePaperWidthMm = resolvePaperWidthMm(printSettings);
 
+    // 再印字・再精算の印（管理画面の印字設定でオンにした店だけ。点検には付けない）
+    const isInspection =
+      parsePaymentSectionsJson(settlement.paymentSectionsJson).snapshot?.isInspection ??
+      String(settlement.periodLabel ?? "").startsWith("点検");
+    const isReprint = settlement.printedAt != null;
+    const isResettlement = isResettlementRow(settlement);
+    const printMarks = printMarksFor(
+      "settlement",
+      { isReprint, isResettlement, isInspection },
+      await getPrintMarkSettings(shop.id),
+    );
+
     // 管理画面のレイアウト（#69）を「印字に使う」にしているときだけ。作れなければ今までの印字
     const layout = await getPrintLayout(shop.id, "settlement");
     if (layout) {
       const html = await layoutSettlementHtml(admin, shop.id, settlement, layout, {
         currentLocationName,
         paperWidthMm: devicePaperWidthMm,
+        printMarks,
+        isReprint,
+        isResettlement,
       }).catch((e: unknown) => {
         console.warn("[receipt-layout] settlement print failed; falling back", {
           error: (e instanceof Error ? e.message : String(e)).slice(0, 200),
         });
         return null;
       });
-      if (html) return corsHtml(request, html, { headers: { "Content-Security-Policy": PRINT_CSP } });
+      if (html) return corsHtml(request, applyPrintMarksToLayoutHtml(html, layout, printMarks), { headers: { "Content-Security-Policy": PRINT_CSP } });
     }
 
     const reprint = buildSettlementReprintView(settlement, {
       currentLocationName,
       devicePaperWidthMm,
     });
-    return corsHtml(request, reprint.html);
+    return corsHtml(request, insertPrintMarkAtTop(reprint.html, printMarks));
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
