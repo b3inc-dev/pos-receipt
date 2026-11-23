@@ -37,7 +37,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | Order（location_id 検索、transactions, refunds, lineItems, tags, note, tax, total） | 精算集計 |
 | Order.retailLocation | 領収書ロケーション、注文検索フィルタ、返金帰属 |
 | Discount allocations / VIP- codes | 割引・VIP 集計 |
-| staffMember on lineItems | 注文詳細表示のみ |
+| （staffMember on lineItems は読まない。`read_users` が要るため） | — |
 | customAttributes | 取得のみ（精算・領収書 UI では未使用） |
 | DraftOrder → Order（SETTLEMENT / INSPECTION） | order_based 印字用 |
 | Fulfillment create（V2→フォールバック） | 精算注文クローズ |
