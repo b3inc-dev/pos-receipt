@@ -1541,7 +1541,7 @@ function VoucherAdjustmentForm({
 
   if (confirming) {
     return (
-      <s-page heading="商品券釣銭調整を登録">
+      <s-page heading="商品券釣銭を登録">
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">

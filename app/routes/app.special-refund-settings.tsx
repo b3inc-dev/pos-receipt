@@ -156,7 +156,7 @@ export default function SpecialRefundSettingsPage() {
 
           <Layout.AnnotatedSection
             title="Shopify 返金の実行"
-            description="返金は POS の純正の返金で行い、タイルでは返金方法を変更します。純正で返金した注文の返金方法変更は、ここの選び方に関係なく Shopify では返金しません（金額は純正の返金のまま）。ここで選ぶのは、純正の返金が無い注文で返金方法変更を登録したときだけです。商品券釣銭調整とレシートの現金を直すは、いつも記録だけです。"
+            description="返金は POS の純正の返金で行い、タイルでは返金方法を変更します。純正で返金した注文の返金方法変更は、ここの選び方に関係なく Shopify では返金しません（金額は純正の返金のまま）。ここで選ぶのは、純正の返金が無い注文で返金方法変更を登録したときだけです。商品券釣銭登録とレシートの現金を直すは、いつも記録だけです。"
           >
             <Card>
               <BlockStack gap="400">
@@ -273,7 +273,7 @@ export default function SpecialRefundSettingsPage() {
                   helpText="返金ではありません。レシートと実際の現金が違ったとき、精算の数字だけを直します。"
                 />
                 <Checkbox
-                  label="商品券釣銭調整"
+                  label="商品券釣銭登録"
                   checked={form.enableVoucherChangeAdjustment}
                   onChange={(v) => set("enableVoucherChangeAdjustment", v)}
                   helpText="商品券で払ってお釣りを現金で渡したときの記録です。数え方は「商品券設定」で決めます。"
@@ -389,7 +389,7 @@ export default function SpecialRefundSettingsPage() {
                       : undefined
                   }
                 />
-                <Checkbox label="商品券釣銭調整を精算に入れる" checked={form.reflectVoucherAdjustmentToSettlement} onChange={(v) => set("reflectVoucherAdjustmentToSettlement", v)} />
+                <Checkbox label="商品券釣銭登録を精算に入れる" checked={form.reflectVoucherAdjustmentToSettlement} onChange={(v) => set("reflectVoucherAdjustmentToSettlement", v)} />
                 <Checkbox label="レシートの現金を直すを精算に入れる" checked={form.reflectReceiptCashAdjustmentToSettlement} onChange={(v) => set("reflectReceiptCashAdjustmentToSettlement", v)} />
               </BlockStack>
             </Card>
