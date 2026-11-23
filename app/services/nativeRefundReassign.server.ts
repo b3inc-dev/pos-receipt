@@ -5,8 +5,10 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { adminGraphqlWithRetry } from "../lib/shopifyGraphqlThrottle.server";
+import { loadRefundAggregationContext } from "./refundAggregation.server";
 import {
   checkNativeReassign,
+  nativeRefundCountLocationGid,
   nativeRefundLines,
   NATIVE_REFUND_SOURCE,
   remainingFor,
@@ -22,6 +24,8 @@ const ORDER_REFUNDS_FOR_REASSIGN_QUERY = `#graphql
   query OrderRefundsForReassign($id: ID!) {
     order(id: $id) {
       id
+      retailLocation { id }
+      refundAggregation: metafield(namespace: "pos", key: "refund_aggregation_location_gid") { value }
       refunds {
         id
         createdAt
@@ -33,6 +37,7 @@ const ORDER_REFUNDS_FOR_REASSIGN_QUERY = `#graphql
             gateway
             formattedGateway
             amountSet { shopMoney { amount } }
+            location { id }
           }
         }
       }
@@ -46,19 +51,40 @@ function orderGid(sourceOrderId: string): string {
   return `gid://shopify/Order/${s.replace(/\D/g, "")}`;
 }
 
-/** 注文の純正の返金（1 件・支払方法 1 つずつ）。読めなければ throw */
+/**
+ * 注文の純正の返金（1 件・支払方法 1 つずつ）。読めなければ throw。
+ * shopId を渡すと、返金ごとに「精算で数える店」（countLocationGid）も入れる
+ */
 export async function fetchNativeRefundLines(
   admin: AdminClient,
   sourceOrderId: string,
+  opts?: { shopId?: string },
 ): Promise<NativeRefundLine[]> {
   const json = await adminGraphqlWithRetry<{
-    data?: { order?: { refunds?: ShopifyRefundForReassign[] } | null };
+    data?: {
+      order?: {
+        refunds?: ShopifyRefundForReassign[];
+        retailLocation?: { id?: string | null } | null;
+        refundAggregation?: { value?: string | null } | null;
+      } | null;
+    };
     errors?: { message?: string }[];
   }>(admin, ORDER_REFUNDS_FOR_REASSIGN_QUERY, { variables: { id: orderGid(sourceOrderId) } });
   if (json.errors?.length) {
     throw new Error(json.errors.map((e) => e.message).join("; "));
   }
-  return nativeRefundLines(json.data?.order?.refunds ?? []);
+  const order = json.data?.order;
+  const lines = nativeRefundLines(order?.refunds ?? []);
+  if (!opts?.shopId || lines.length === 0) return lines;
+  const ctx = await loadRefundAggregationContext(opts.shopId);
+  const countCtx = {
+    mode: ctx.mode,
+    nonPosRefundTargetLocationGid: ctx.nonPosRefundTargetLocationGid,
+    nonPosRefundFallbackMode: ctx.nonPosRefundFallbackMode,
+    retailLocationGid: order?.retailLocation?.id ?? null,
+    aggregationMetafieldGid: order?.refundAggregation?.value ?? null,
+  };
+  return lines.map((l) => ({ ...l, countLocationGid: nativeRefundCountLocationGid(l, countCtx) }));
 }
 
 /** POS に出す形: 純正の返金ごとの額・付け替えた額・残り */
@@ -67,7 +93,7 @@ export async function nativeRefundsForOrder(
   shopId: string,
   sourceOrderId: string,
 ): Promise<Array<NativeRefundLine & { reassigned: number; remaining: number }>> {
-  const lines = await fetchNativeRefundLines(admin, sourceOrderId);
+  const lines = await fetchNativeRefundLines(admin, sourceOrderId, { shopId });
   if (lines.length === 0) return [];
   const events = await prisma.specialRefundEvent.findMany({
     where: { shopId, sourceOrderId, refundSource: NATIVE_REFUND_SOURCE },
@@ -118,6 +144,9 @@ export async function createNativeRefundReassign(
         return tx.specialRefundEvent.create({
           data: {
             ...data,
+            // 純正の返金を精算で数える店に付ける（「返品があった店で集計」の店では返品した店）。
+            // 決められないときは POS から来た店（注文の店）のまま
+            locationId: check.line.countLocationGid || data.locationId,
             // 元の手段の名前は Shopify の返金の gateway にそろえる（精算の行を探すため）
             originalPaymentMethod: check.line.gateway,
             refundSource: NATIVE_REFUND_SOURCE,

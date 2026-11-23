@@ -384,7 +384,7 @@ export async function action({ request }: ActionFunctionArgs) {
     ) {
       let nativeLines: Awaited<ReturnType<typeof fetchNativeRefundLines>>;
       try {
-        nativeLines = await fetchNativeRefundLines(admin, sourceOrderIdStr);
+        nativeLines = await fetchNativeRefundLines(admin, sourceOrderIdStr, { shopId: shop.id });
       } catch (e) {
         console.error("[special-refunds] native refunds read failed", e);
         return corsJson(
@@ -602,7 +602,7 @@ async function registerNativeRefundReassign(args: {
   const { admin, shopId, corsJson, data } = args;
   let lines;
   try {
-    lines = await fetchNativeRefundLines(admin, String(data.sourceOrderId));
+    lines = await fetchNativeRefundLines(admin, String(data.sourceOrderId), { shopId });
   } catch (e) {
     console.warn("[special-refunds] native refund read failed", e);
     return corsJson(

@@ -245,7 +245,7 @@ export async function applyRefundReservationsForOrder(
   if (settings.refundReservationEnabled !== true) return result;
 
   const timezone = await getShopTimezoneForDaily(admin, shopId);
-  const lines = await fetchNativeRefundLines(admin, orderId);
+  const lines = await fetchNativeRefundLines(admin, orderId, { shopId });
   const refundDay = (l: { createdAt?: string | null }) =>
     getCalendarDateStringInTimeZone(l.createdAt ? new Date(l.createdAt) : new Date(), timezone);
   const today = getCalendarDateStringInTimeZone(new Date(), timezone);
