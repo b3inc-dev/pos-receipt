@@ -109,7 +109,7 @@ export function VoucherCartScreen({ onOpenList }) {
   };
 
   return (
-    <s-page heading="会計前に登録">
+    <s-page heading="会計前登録">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
