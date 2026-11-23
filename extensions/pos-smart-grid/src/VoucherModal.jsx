@@ -66,15 +66,14 @@ function VoucherModal() {
       alive = false;
     };
   }, [screen]);
-  // カートが空で一覧を出すとき: 会計の前に額面を入れる使い方を一行で案内する（スイッチがオンの店だけ）
+  // カートが空で一覧を出すとき: 先に額面を入れる入口を一覧の上に出す（スイッチがオンの店だけ。T 2026-11-24）
+  const [canEnterBeforeItems, setCanEnterBeforeItems] = useState(false);
   useEffect(() => {
     if (screen !== "list" || listNote || fromOrder || cartHasItems()) return;
     let alive = true;
     getVoucherCartEntryEnabled()
       .then((res) => {
-        if (alive && res?.enabled === true) {
-          setListNote("会計の前に額面を入れるときは、商品をカートに入れてから「商品券」タイルを開きます。");
-        }
+        if (alive && res?.enabled === true) setCanEnterBeforeItems(true);
       })
       .catch(() => {});
     return () => {
@@ -93,5 +92,13 @@ function VoucherModal() {
   if (screen === "cart") {
     return <VoucherCartScreen onOpenList={() => setScreen("list")} />;
   }
-  return <SpecialRefundModal initialListSegment="voucher_change" listNote={listNote} />;
+  return (
+    <SpecialRefundModal
+      initialListSegment="voucher_change"
+      listNote={listNote}
+      listAction={
+        canEnterBeforeItems ? { label: "会計の前に額面を入れる", onClick: () => setScreen("cart") } : null
+      }
+    />
+  );
 }

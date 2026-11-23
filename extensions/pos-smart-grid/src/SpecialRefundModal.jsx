@@ -249,7 +249,7 @@ export default async () => {
 /**
  * @param {{ initialListSegment?: "all" | "refunded" | "voucher_change" }} props
  */
-export function SpecialRefundModal({ initialListSegment = "refunded", listNote = "" }) {
+export function SpecialRefundModal({ initialListSegment = "refunded", listNote = "", listAction = null }) {
   const [step, setStep] = useState("day_list");
   // 「変更」する登録
   const [editingEvent, setEditingEvent] = useState(null);
@@ -524,6 +524,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         initialSegment={initialListSegment}
         segments={listSegmentsForTile(initialListSegment)}
         listNote={listNote}
+        listAction={listAction}
       />
     );
   }
