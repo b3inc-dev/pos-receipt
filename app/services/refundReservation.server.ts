@@ -114,7 +114,7 @@ export async function createRefundReservation(
     }
   }
 
-  // 返す手段は支払方法マスタ（有効・特殊返金で選べる）からだけ（D 特殊返金の決まりと同じ）
+  // 返金方法は支払方法マスタ（有効・特殊返金で選べる）からだけ（D 特殊返金の決まりと同じ）
   const selectable = await prisma.paymentMethodMaster.findMany({
     where: { shopId, enabled: true, selectableForSpecialRefund: true },
     select: { rawGatewayPattern: true, displayLabel: true },
@@ -125,7 +125,7 @@ export async function createRefundReservation(
         ok: false,
         status: 400,
         code: "REFUND_METHOD_NOT_IN_MASTER",
-        message: "選んだ返す手段が、管理画面の「支払方法」で特殊返金に選べる手段にありません。",
+        message: "選んだ返金方法が、管理画面の「支払方法」で特殊返金に選べるものにありません。",
       };
     }
   }
