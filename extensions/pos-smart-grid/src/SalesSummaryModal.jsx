@@ -24,7 +24,9 @@ import { getAvailableMonths } from "../../common/settlementApi.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
-import { formatYmdSlash } from "../../common/dateDisplay.js";
+import { formatYmdSlash, formatJstHm } from "../../common/dateDisplay.js";
+import { MetricCard } from "./SummaryTable.jsx";
+import { formatYmdWithWeekday } from "../../common/summaryTableLayout.js";
 
 export default async () => {
   render(<SalesSummaryModal />, document.body);
@@ -125,16 +127,11 @@ function isTodayDate(ymd, shopCalendarToday) {
   return ymd === cap;
 }
 
+/** 「21:05 更新」（日本時間。端末の時刻帯によらない） */
 function formatUpdatedTimeLabel(dateObj) {
   if (!dateObj) return "";
-  const hh = pad2(dateObj.getHours());
-  const mm = pad2(dateObj.getMinutes());
-  return `${hh}:${mm}更新`;
-}
-
-function UpdatedAtBadge({ dateObj }) {
-  if (!dateObj) return null;
-  return <s-badge tone="info">{formatUpdatedTimeLabel(dateObj)}</s-badge>;
+  const hm = formatJstHm(dateObj);
+  return hm ? `${hm} 更新` : "";
 }
 
 function fmtNum(n, dec = 0) {
@@ -295,53 +292,6 @@ function FootfallReportModalHost({
   );
 }
 
-// ── Summary 1行（精算プレビューと同型）──────────────────────────────────────────
-
-function SummaryRow({ label, value, valueBold = false, labelBold = false, divider = true }) {
-  return (
-    <s-stack gap="none">
-      <s-box padding="small">
-        <s-stack
-          direction="inline"
-          justifyContent="space-between"
-          alignItems="center"
-          gap="small"
-          style={{ width: "100%" }}
-        >
-          <s-box style={{ flex: "1 1 0", minInlineSize: 0, paddingInlineEnd: "small" }}>
-            <s-text tone="subdued" size="small" fontWeight={labelBold ? "bold" : undefined}>
-              {label}
-            </s-text>
-          </s-box>
-          <s-box style={{ flex: "0 1 auto", minInlineSize: 0, textAlign: "end" }}>
-            <s-text fontWeight={valueBold ? "bold" : undefined} size="small">
-              {value}
-            </s-text>
-          </s-box>
-        </s-stack>
-      </s-box>
-      {divider ? <s-divider /> : null}
-    </s-stack>
-  );
-}
-
-function MetricBlock({ title, children }) {
-  return (
-    <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-      <s-box padding="small" paddingBlockEnd="none">
-        {typeof title === "string" ? (
-          <s-text emphasis="bold" size="small">
-            {title}
-          </s-text>
-        ) : (
-          title
-        )}
-      </s-box>
-      <s-stack gap="none">{children}</s-stack>
-    </s-box>
-  );
-}
-
 // ── 日次・月次の行データ ─────────────────────────────────────────────────────
 
 function dailyKpiRows(row, o) {
@@ -353,6 +303,7 @@ function dailyKpiRows(row, o) {
     rows.push({
       label: "予算比",
       value: fmtPct(row.budgetRatio),
+      ratio: row.budgetRatio,
       tone: row.budgetRatio >= 1 ? "success" : "critical",
     });
   }
@@ -363,24 +314,14 @@ function dailyKpiRows(row, o) {
   if (o.showAtv && row.atv !== null) rows.push({ label: "客単価", value: fmtAmount(row.atv) });
   if (o.showSetRate && row.setRate !== null)
     rows.push({ label: "セット率", value: fmtNum(row.setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   if (o.showUnitPrice && row.unit !== null) rows.push({ label: "一品単価", value: fmtAmount(row.unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   return rows;
 }
 
-/** tone は SummaryRow が未対応のため value に含めずそのまま表示 */
-function DailyMetricRows({ row, o, periodRow }) {
-  const base = dailyKpiRows(row, o);
-  const items = mergeDailyRowsWithMonthKpi(base, periodRow, o);
-  return items.map((r, i) => (
-    <SummaryRow
-      key={`${r.label}-${i}`}
-      label={r.label}
-      value={r.value}
-      valueBold={r.valueBold}
-      divider={i < items.length - 1}
-    />
-  ));
+/** 日次の店（またはチャネル）の行。月の数を出す設定なら日の数の後ろに足す */
+function dailyMetricItems(row, o, periodRow) {
+  return mergeDailyRowsWithMonthKpi(dailyKpiRows(row, o), periodRow, o);
 }
 
 function periodKpiRows(row, o) {
@@ -392,6 +333,7 @@ function periodKpiRows(row, o) {
     rows.push({
       label: "達成率",
       value: fmtPct(row.achievementRate),
+      ratio: row.achievementRate,
     });
   }
   if (row.progressBudgetToday > 0 && o.showProgressToday) {
@@ -409,22 +351,9 @@ function periodKpiRows(row, o) {
   if (o.showAtv && row.atv !== null) rows.push({ label: "客単価", value: fmtAmount(row.atv) });
   if (o.showSetRate && row.setRate !== null)
     rows.push({ label: "セット率", value: fmtNum(row.setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   if (o.showUnitPrice && row.unit !== null) rows.push({ label: "一品単価", value: fmtAmount(row.unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   return rows;
-}
-
-function PeriodMetricRows({ row, o }) {
-  const items = periodKpiRows(row, o);
-  return items.map((r, i) => (
-    <SummaryRow
-      key={`${r.label}-${i}`}
-      label={r.label}
-      value={r.value}
-      valueBold={r.valueBold}
-      divider={i < items.length - 1}
-    />
-  ));
 }
 
 function totalsDailyRows(totals, o) {
@@ -434,7 +363,7 @@ function totalsDailyRows(totals, o) {
   const budgetRatio =
     totals.budget != null && totals.budget > 0 ? totals.actual / totals.budget : null;
   if (o.showBudgetRatio && budgetRatio !== null) {
-    rows.push({ label: "予算比", value: fmtPct(budgetRatio) });
+    rows.push({ label: "予算比", value: fmtPct(budgetRatio), ratio: budgetRatio });
   }
   if (o.showOrders) rows.push({ label: "件数", value: `${fmtNum(totals.orders)}件` });
   if (o.showVisitors && totals.visitors !== null)
@@ -446,9 +375,9 @@ function totalsDailyRows(totals, o) {
   if (o.showAtv && atv !== null) rows.push({ label: "客単価", value: fmtAmount(atv) });
   const setRate = totals.orders > 0 ? totals.items / totals.orders : null;
   if (o.showSetRate && setRate !== null) rows.push({ label: "セット率", value: fmtNum(setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   const unit = totals.items > 0 ? totals.actual / totals.items : null;
   if (o.showUnitPrice && unit !== null) rows.push({ label: "一品単価", value: fmtAmount(unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   return rows;
 }
 
@@ -475,7 +404,7 @@ function totalsToPseudoPeriodRow(totals, locationRows = []) {
   };
 }
 
-/** 月予算→月実績→達成率→遂行…（日次で一品単価の直後に挿入） */
+/** 月予算→月実績→達成率→遂行…（日次では日の数の後ろに足し、「今月」の見出しの下に出す） */
 function monthKpiRowsOrderedFromPeriodRow(row, o) {
   const items = [];
   if (!row) return items;
@@ -487,6 +416,7 @@ function monthKpiRowsOrderedFromPeriodRow(row, o) {
     items.push({
       label: "達成率",
       value: fmtPct(row.achievementRate),
+      ratio: row.achievementRate,
     });
   }
   if (row.progressBudgetToday > 0 && o.showProgressToday) {
@@ -497,7 +427,8 @@ function monthKpiRowsOrderedFromPeriodRow(row, o) {
     items.push({ label: "遂行予算(前日)", value: fmtAmount(row.progressBudgetPrev) });
     items.push({ label: "遂行率(前日)", value: fmtPct(row.progressRatePrev) });
   }
-  return items;
+  // 日次のカードでは「今月」の見出しの下にまとめて出す（日の数と混ざらないように）
+  return items.map((it) => ({ ...it, group: "month" }));
 }
 
 function mergeDailyRowsWithMonthKpi(baseItems, periodRow, o) {
@@ -511,9 +442,8 @@ function mergeDailyRowsWithMonthKpi(baseItems, periodRow, o) {
   if (!wantMonth) return baseItems;
   const extra = monthKpiRowsOrderedFromPeriodRow(periodRow, o);
   if (extra.length === 0) return baseItems;
-  const idx = baseItems.findIndex((r) => r.label === "一品単価");
-  if (idx === -1) return [...baseItems, ...extra];
-  return [...baseItems.slice(0, idx + 1), ...extra, ...baseItems.slice(idx + 1)];
+  // 月の数はカードの「今月」の見出しの下にまとめて出すので、日の数の後ろに足す
+  return [...baseItems, ...extra];
 }
 
 /** 日次の1行（店舗 or チャネル）に対応する期間API行 */
@@ -539,6 +469,7 @@ function totalsPeriodRows(totals, o, locationRows = []) {
     rows.push({
       label: "達成率",
       value: fmtPct(actualTotal / totals.budgetTotal),
+      ratio: actualTotal / totals.budgetTotal,
     });
   }
   const progressBudgetToday =
@@ -564,8 +495,8 @@ function totalsPeriodRows(totals, o, locationRows = []) {
   if (o.showAtv && totals.atv !== null) rows.push({ label: "客単価", value: fmtAmount(totals.atv) });
   if (o.showSetRate && totals.setRate !== null)
     rows.push({ label: "セット率", value: fmtNum(totals.setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   if (o.showUnitPrice && totals.unit !== null) rows.push({ label: "一品単価", value: fmtAmount(totals.unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   return rows;
 }
 
@@ -1180,9 +1111,7 @@ function HistoryDailyDetailView({
                 <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setViewDate(addDays(viewDate, -1))}>
                   前日
                 </s-button>
-                <s-text emphasis="bold" size="small">
-                  {formatYmdSlash(viewDate)}
-                </s-text>
+                <s-text type="strong">{formatYmdWithWeekday(viewDate)}</s-text>
                 <s-button kind="secondary" disabled={!canNextDay} onClick={() => setViewDate(addDays(viewDate, 1))}>
                   翌日
                 </s-button>
@@ -1230,52 +1159,24 @@ function HistoryDailyDetailView({
                     ) : (
                       <>
                         {showTotalsSection ? (
-                          <MetricBlock title="全店合計">
-                            {totalsDaily.map((r, i, arr) => (
-                              <SummaryRow
-                                key={r.label}
-                                label={r.label}
-                                value={r.value}
-                                valueBold={r.valueBold}
-                                divider={i < arr.length - 1}
-                              />
-                            ))}
-                          </MetricBlock>
+                          <MetricCard title="全店合計" items={totalsDaily} />
                         ) : null}
 
                         {rowsForUi.map((row) => (
                           <s-stack key={row.locationId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-stack
-                                  direction="inline"
-                                  justifyContent="space-between"
-                                  alignItems="center"
-                                  gap="small"
-                                  style={{ width: "100%" }}
-                                >
-                                  <s-text emphasis="bold" size="small">
-                                    {row.locationName ?? row.locationId}
-                                  </s-text>
-                                  {showUpdatedBadge ? <UpdatedAtBadge dateObj={lastLoadedAt} /> : null}
-                                </s-stack>
-                              }
-                            >
-                              <DailyMetricRows row={row} o={o} />
-                            </MetricBlock>
+                            <MetricCard
+                              title={row.locationName ?? row.locationId}
+                              items={dailyMetricItems(row, o)}
+                              updatedLabel={showUpdatedBadge ? formatUpdatedTimeLabel(lastLoadedAt) : ""}
+                            />
                           </s-stack>
                         ))}
                         {channelRowsForUi.map((row) => (
                           <s-stack key={row.channelId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-text emphasis="bold" size="small">
-                                  [{row.channelName ?? row.channelId}]
-                                </s-text>
-                              }
-                            >
-                              <DailyMetricRows row={row} o={o} />
-                            </MetricBlock>
+                            <MetricCard
+                              title={`[${row.channelName ?? row.channelId}]`}
+                              items={dailyMetricItems(row, o)}
+                            />
                           </s-stack>
                         ))}
                       </>
@@ -1982,9 +1883,7 @@ function SalesSummaryModal() {
                   <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setTargetDate(addDays(targetDate, -1))}>
                     前日
                   </s-button>
-                  <s-text emphasis="bold" size="small">
-                    {formatYmdSlash(targetDate)}
-                  </s-text>
+                  <s-text type="strong">{formatYmdWithWeekday(targetDate)}</s-text>
                   <s-button kind="secondary" disabled={!canNextDay} onClick={() => setTargetDate(addDays(targetDate, 1))}>
                     翌日
                   </s-button>
@@ -2404,81 +2303,35 @@ function SalesSummaryModal() {
                     ) : (
                       <>
                         {showTotalsSectionDaily ? (
-                          <MetricBlock title="全店合計">
-                            {totalsDaily.map((r, i, arr) => (
-                              <SummaryRow
-                                key={r.label}
-                                label={r.label}
-                                value={r.value}
-                                valueBold={r.valueBold}
-                                divider={i < arr.length - 1}
-                              />
-                            ))}
-                          </MetricBlock>
+                          <MetricCard title="全店合計" items={totalsDaily} />
                         ) : null}
                         {showTotalsSectionMonthly ? (
-                          <MetricBlock title="全店合計">
-                            {totalsPeriod.map((r, i, arr) => (
-                              <SummaryRow
-                                key={r.label}
-                                label={r.label}
-                                value={r.value}
-                                valueBold={r.valueBold}
-                                divider={i < arr.length - 1}
-                              />
-                            ))}
-                          </MetricBlock>
+                          <MetricCard title="全店合計" items={totalsPeriod} />
                         ) : null}
 
                         {rowsForUi.map((row) => (
                           <s-stack key={row.locationId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-stack
-                                  direction="inline"
-                                  justifyContent="space-between"
-                                  alignItems="center"
-                                  gap="small"
-                                  style={{ width: "100%" }}
-                                >
-                                  <s-text emphasis="bold" size="small">
-                                    {row.locationName ?? row.locationId}
-                                  </s-text>
-                                  {showUpdatedBadge ? <UpdatedAtBadge dateObj={lastLoadedAt} /> : null}
-                                </s-stack>
+                            <MetricCard
+                              title={row.locationName ?? row.locationId}
+                              items={
+                                grain === "daily"
+                                  ? dailyMetricItems(row, o, pickPeriodRowForDailyLine(dailyMonthPeriod, row))
+                                  : periodKpiRows(row, o)
                               }
-                            >
-                              {grain === "daily" ? (
-                                <DailyMetricRows
-                                  row={row}
-                                  o={o}
-                                  periodRow={pickPeriodRowForDailyLine(dailyMonthPeriod, row)}
-                                />
-                              ) : (
-                                <PeriodMetricRows row={row} o={o} />
-                              )}
-                            </MetricBlock>
+                              updatedLabel={showUpdatedBadge ? formatUpdatedTimeLabel(lastLoadedAt) : ""}
+                            />
                           </s-stack>
                         ))}
                         {channelRowsForUi.map((row) => (
                           <s-stack key={row.channelId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-text emphasis="bold" size="small">
-                                  [{row.channelName ?? row.channelId}]
-                                </s-text>
+                            <MetricCard
+                              title={`[${row.channelName ?? row.channelId}]`}
+                              items={
+                                grain === "daily"
+                                  ? dailyMetricItems(row, o, pickPeriodRowForDailyLine(dailyMonthPeriod, row))
+                                  : periodKpiRows(row, o)
                               }
-                            >
-                              {grain === "daily" ? (
-                                <DailyMetricRows
-                                  row={row}
-                                  o={o}
-                                  periodRow={pickPeriodRowForDailyLine(dailyMonthPeriod, row)}
-                                />
-                              ) : (
-                                <PeriodMetricRows row={row} o={o} />
-                              )}
-                            </MetricBlock>
+                            />
                           </s-stack>
                         ))}
                       </>

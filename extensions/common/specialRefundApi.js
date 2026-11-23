@@ -2,7 +2,7 @@
  * 返金方法変更・商品券釣銭登録 API クライアント
  * 要件書 21.4 対応
  */
-import { toUserMessage } from "./errorMessage.js";
+import { toUserMessage, withStatus } from "./errorMessage.js";
 
 async function getToken() {
   const session = globalThis?.shopify?.session;
@@ -39,7 +39,7 @@ async function apiGet(path, params = {}) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = toUserMessage(json.error || `HTTP ${res.status}`);
-    throw new Error(msg + (res.status ? ` (HTTP ${res.status})` : ""));
+    throw withStatus(new Error(msg), res.status);
   }
   return json;
 }
@@ -55,7 +55,7 @@ async function apiPost(path, body) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = toUserMessage(json.error || `HTTP ${res.status}`);
-    throw new Error(msg + (res.status ? ` (HTTP ${res.status})` : ""));
+    throw withStatus(new Error(msg), res.status);
   }
   return json;
 }

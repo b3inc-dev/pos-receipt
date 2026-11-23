@@ -4,7 +4,8 @@
  *
  * Steps:
  *   main     → 固定ヘッダー（ロケーション・年/月）+ 履歴一覧 + 固定フッター
- *   preview  → 精算（集計結果表示）。発行確認は s-modal で重ね表示
+ *   preview  → 精算（集計結果表示）。大事な案内（読み込み中・エラー等）は一覧の上に出す
+ *   confirm  → 点検／精算の発行確認（画面ごと切り替える。重ね表示は使わない）
  *   done     → 完了（印字方式別メッセージ）
  *   historyDetail → 精算履歴明細
  */
@@ -22,13 +23,17 @@ import { getAppUrl } from "../../common/appUrl.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
-import { formatYmdSlash } from "../../common/dateDisplay.js";
+import { formatYmdSlash, formatJstHm } from "../../common/dateDisplay.js";
+import { specialRefundEventTypeLabel } from "../../common/specialRefundLabels.js";
 import { printSettlementReceipt, getPrintSettings } from "../../common/printApi.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
+import { SummaryHeading, SummaryLine, PaymentLine } from "./SummaryTable.jsx";
+import { formatYen, formatDeduction, formatYmdWithWeekday } from "../../common/summaryTableLayout.js";
 
 /**
- * 発行確認モーダル（POS Stock / 入庫確定と同型）
- * s-modal は常時マウントし、フッターの s-button に command="--show" commandFor={id} で開く。
+ * 以前の発行確認モーダルの id。
+ * 発行確認は「confirm」の画面に切り替える形にした（iPhone の POS で、点検を押しても確認が出ず
+ * 見出しだけ変わって見えたため）。s-modal はもう置いていないが、閉じる呼び出しは残しても害はない。
  */
 const SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID = "pos-receipt-settlement-issue-inspection";
 const SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID = "pos-receipt-settlement-issue-settle";
@@ -78,6 +83,8 @@ function SettlementModal() {
   const [isInspection, setIsInspection] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  /** 精算の数を読み込んだ時刻（ms）。画面に「HH:MM 時点」と出して、更新が効いたことをわかるようにする */
+  const [previewLoadedAt, setPreviewLoadedAt] = useState(null);
   const [locationLoadError, setLocationLoadError] = useState("");
   const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
 
@@ -226,6 +233,7 @@ function SettlementModal() {
         });
         setTargetDate(date);
         setPreview(res.preview);
+        setPreviewLoadedAt(Date.now());
         setStep(openStep);
         if (refreshMonthRows) {
           await loadMonthRows(selectedLocation.locationId, selectedYear, selectedMonth);
@@ -309,6 +317,7 @@ function SettlementModal() {
       });
       setTargetDate(d);
       setPreview(res.preview);
+      setPreviewLoadedAt(Date.now());
       setStep("preview");
     } catch (e) {
       setError(toUserMessage(e?.message) || "日別明細の取得に失敗しました");
@@ -339,6 +348,7 @@ function SettlementModal() {
             }
           : res.preview,
       );
+      setPreviewLoadedAt(Date.now());
     } catch (e) {
       setError(toUserMessage(e?.message) || "再集計に失敗しました");
     } finally {
@@ -417,42 +427,51 @@ function SettlementModal() {
 
   if (step === "preview") {
     return (
-      <>
-        <PreviewView
-          preview={preview}
-          targetDate={targetDate}
-          canPrevDay={targetDate > "2020-01-01"}
-          canNextDay={targetDate < todayStr()}
-          isInspection={isInspection}
-          loading={loading}
-          error={error}
-          onPickDate={(d) => fetchPreviewForDate({ date: d, inspection: isInspection, openStep: "preview" })}
-          onRecalculate={handleRecalculate}
-          onReconfirm={handleReconfirm}
-          onPrepareInspectionIssue={() => {
-            setIsInspection(true);
-            setError("");
-          }}
-          onPrepareSettleIssue={() => {
-            setIsInspection(false);
-            setError("");
-          }}
-          onBackToHistory={() => {
-            hideSettlementIssueConfirmModals();
-            setStep("main");
-          }}
-        />
-        <SettlementIssueConfirmModals
-          preview={preview}
-          printMode={selectedLocation?.printMode ?? "order_based"}
-          loading={loading}
-          error={error}
-          onExecute={handleCreate}
-          onRequestClose={() => {
-            if (!loading) setError("");
-          }}
-        />
-      </>
+      <PreviewView
+        preview={preview}
+        targetDate={targetDate}
+        canPrevDay={targetDate > "2020-01-01"}
+        canNextDay={targetDate < todayStr()}
+        loading={loading}
+        error={error}
+        loadedAt={previewLoadedAt}
+        onPickDate={(d) => fetchPreviewForDate({ date: d, inspection: false, openStep: "preview" })}
+        onRecalculate={handleRecalculate}
+        onReconfirm={handleReconfirm}
+        onPrepareInspectionIssue={() => {
+          setIsInspection(true);
+          setError("");
+          setStep("confirm");
+        }}
+        onPrepareSettleIssue={() => {
+          setIsInspection(false);
+          setError("");
+          setStep("confirm");
+        }}
+        onBackToHistory={() => {
+          hideSettlementIssueConfirmModals();
+          setStep("main");
+        }}
+      />
+    );
+  }
+
+  if (step === "confirm") {
+    return (
+      <SettlementIssueConfirmView
+        preview={preview}
+        printMode={selectedLocation?.printMode ?? "order_based"}
+        isInspection={isInspection}
+        loading={loading}
+        error={error}
+        onExecute={handleCreate}
+        onBack={() => {
+          if (loading) return;
+          setError("");
+          setIsInspection(false);
+          setStep("preview");
+        }}
+      />
     );
   }
 
@@ -563,7 +582,7 @@ function MainView({
                     ) : (
                       <s-stack gap="small">
                         <s-text tone="subdued" size="small">ロケーションが見つかりません</s-text>
-                        <s-button kind="plain" onClick={onRetryLocations}>再読み込み</s-button>
+                        <s-button kind="plain" onClick={onRetryLocations}>再読込</s-button>
                       </s-stack>
                     )}
                   </s-box>
@@ -762,9 +781,9 @@ function PreviewView({
   targetDate,
   canPrevDay,
   canNextDay,
-  isInspection,
   loading,
   error,
+  loadedAt,
   onPickDate,
   onRecalculate,
   onReconfirm,
@@ -774,7 +793,7 @@ function PreviewView({
 }) {
   if (!preview) {
     return (
-      <s-page heading={isInspection ? "点検レシート" : "精算"}>
+      <s-page heading="精算">
         <s-stack
           gap="none"
           blockSize="100%"
@@ -796,9 +815,7 @@ function PreviewView({
               <s-button kind="secondary" disabled={!canPrevDay || loading} onClick={() => onPickDate(addDays(targetDate, -1))}>
                 前日
               </s-button>
-              <s-text emphasis="bold" size="small">
-                {formatYmdSlash(targetDate)}
-              </s-text>
+              <s-text type="strong">{formatYmdWithWeekday(targetDate)}</s-text>
               <s-button kind="secondary" disabled={!canNextDay || loading} onClick={() => onPickDate(addDays(targetDate, 1))}>
                 翌日
               </s-button>
@@ -808,8 +825,10 @@ function PreviewView({
           <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
             <s-box padding="base">
               <s-stack gap="base">
-                <s-text tone="subdued" size="small">当日の精算を読み込み中…</s-text>
-                {error ? <s-text tone="critical">{error}</s-text> : null}
+                <SettlementTopNotices loading={loading} error={error} />
+                {!loading && !error ? (
+                  <s-text tone="subdued" size="small">精算の数を読み込み中…</s-text>
+                ) : null}
                 {!loading ? (
                   <s-button kind="secondary" onClick={() => onPickDate(targetDate)}>
                     再読み込み
@@ -826,13 +845,9 @@ function PreviewView({
             leftDisabled={loading}
             middleLabel="点検"
             onMiddle={onPrepareInspectionIssue}
-            middleCommand="--show"
-            middleCommandFor={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID}
             middleDisabled
             rightLabel="精算"
             onRight={onPrepareSettleIssue}
-            rightCommand="--show"
-            rightCommandFor={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID}
             rightTone="success"
             rightDisabled
           />
@@ -841,43 +856,41 @@ function PreviewView({
     );
   }
 
-  const headerRows = [
-    { label: "ロケーション", value: preview.locationName ?? "-", valueBold: true },
-    { label: "対象日", value: formatYmdSlash(preview.targetDate ?? "-") },
-  ];
-
-  const summaryRows = [
-    { label: "総売上", value: `¥${Number(preview.total).toLocaleString()}`, valueBold: true },
-    { label: "純売上", value: `¥${Number(preview.netSales).toLocaleString()}` },
-    { label: "消費税", value: `¥${Number(preview.tax).toLocaleString()}` },
-    { label: "割引", value: `▲¥${Number(preview.discounts).toLocaleString()}` },
-    { label: "返金", value: `▲¥${Number(preview.refundTotal).toLocaleString()}` },
+  // 見出しで区切る形（案B, 2026-11-23）。数は preview のまま、並べ方と書き方だけ。
+  // 店名と日付は上の帯に出ているので、表の中には繰り返さない。
+  const discount = formatDeduction(preview.discounts);
+  const refund = formatDeduction(preview.refundTotal);
+  const salesLines = [
+    { key: "total", label: "総売上", value: formatYen(preview.total), strong: true },
+    { key: "net", label: "純売上", value: formatYen(preview.netSales), indent: true },
+    { key: "tax", label: "消費税", value: formatYen(preview.tax), indent: true },
+    { key: "discount", label: "割引", value: discount.text, tone: discount.tone },
+    { key: "refund", label: "返金", value: refund.text, tone: refund.tone },
   ];
   if (Number(preview.voucherChangeAmount) > 0) {
-    summaryRows.push({
+    salesLines.push({
+      key: "voucherChange",
       label: "商品券釣有り差額",
-      value: `¥${Number(preview.voucherChangeAmount).toLocaleString()}`,
+      value: formatYen(preview.voucherChangeAmount),
     });
   }
   // 売上に含めない送料等（支払方法別には入っている分。総売上には入れていない）
   if (Number(preview.nonSalesFeeTotal ?? 0) !== 0) {
-    summaryRows.push({
+    salesLines.push({
+      key: "nonSalesFee",
       label: "売上に含めない送料等",
-      value: `¥${Number(preview.nonSalesFeeTotal).toLocaleString()}`,
+      value: formatYen(preview.nonSalesFeeTotal),
     });
   }
 
-  const countRows = [
-    { label: "売上件数", value: `${preview.orderCount}件` },
-    { label: "返金件数", value: `${preview.refundCount}件` },
-    { label: "点数", value: `${preview.itemCount}点` },
-  ];
+  const countLabel = `売上 ${Number(preview.orderCount ?? 0)}件　・　返金 ${Number(preview.refundCount ?? 0)}件`;
+  const itemCountLabel = `${Number(preview.itemCount ?? 0)}点`;
 
-  /** 納金金額ブロック用（現金セクションの net − refund − 商品券の釣銭） */
+  /** 納金（現金セクションの net − refund − 商品券の釣銭） */
   const cashDepositRows = [];
   const voucherCashDeduction = Math.max(0, Math.round(Number(preview.voucherChangeBreakdown?.cashDepositDeduction ?? 0)));
-  /** 支払方法 | 件数 | 金額（返金行は ラベル[返金]） */
-  const paymentTripleRows = [];
+  /** 支払方法 | 件数 | 金額（返金は字下げした「返金」の行・赤） */
+  const paymentLines = [];
   if (preview.paymentSections?.length > 0) {
     for (const section of preview.paymentSections) {
       const methodLabel = section.label ?? section.gateway ?? "-";
@@ -888,23 +901,24 @@ function PreviewView({
         cashDepositRows.push({
           key: `deposit-${section.gateway}-${cashDepositRows.length}`,
           label: methodLabel,
-          value: `¥${deposit.toLocaleString()}`,
+          value: formatYen(deposit),
         });
       }
-      paymentTripleRows.push({
+      paymentLines.push({
         key: `${section.gateway}-sale`,
-        left: methodLabel,
-        middle: `${Number(section.txCount ?? 0)}件`,
-        right: `¥${Number(section.net ?? 0).toLocaleString()}`,
-        leftBold: true,
+        label: methodLabel,
+        count: `${Number(section.txCount ?? 0)}件`,
+        amount: formatYen(section.net ?? 0),
       });
       if (Number(section.refund) > 0) {
-        paymentTripleRows.push({
+        const r = formatDeduction(section.refund);
+        paymentLines.push({
           key: `${section.gateway}-refund`,
-          left: `${methodLabel}[返金]`,
-          middle: `${Number(section.refundCount ?? 0)}件`,
-          right: `¥${Number(section.refund).toLocaleString()}`,
-          leftBold: false,
+          label: "返金",
+          count: `${Number(section.refundCount ?? 0)}件`,
+          amount: r.text,
+          tone: r.tone,
+          indent: true,
         });
       }
     }
@@ -926,15 +940,15 @@ function PreviewView({
   for (const ev of preview.appliedSpecialRefundEvents ?? []) {
     eventRows.push({
       key: `sr-${ev.id}`,
-      label: `${ev.sourceOrderName ?? "-"}（${ev.eventType ?? "-"}）`,
-      value: `¥${Number(ev.amount).toLocaleString()}`,
+      label: `${ev.sourceOrderName ?? "-"}（${specialRefundEventTypeLabel(ev.eventType)}）`,
+      value: formatYen(ev.amount),
     });
   }
   for (const ev of preview.appliedVoucherAdjustments ?? []) {
     eventRows.push({
       key: `va-${ev.id}`,
       label: `${ev.sourceOrderName ?? "-"}（商品券釣有り）`,
-      value: `¥${Number(ev.voucherChangeAmount).toLocaleString()}`,
+      value: formatYen(ev.voucherChangeAmount),
     });
   }
   // 同じ注文に自動判定と手入力の両方があり、判定優先順位で片方を外した額（商品券設定）
@@ -955,7 +969,7 @@ function PreviewView({
   }
 
   return (
-    <s-page heading={isInspection ? "点検レシート" : "精算"}>
+    <s-page heading="精算">
       <s-stack
         gap="none"
         blockSize="100%"
@@ -976,7 +990,7 @@ function PreviewView({
           <s-stack gap="small">
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
               <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <s-text type="strong">
                   {preview.locationName ?? "-"}
                 </s-text>
               </s-box>
@@ -990,9 +1004,12 @@ function PreviewView({
               <s-button kind="secondary" disabled={!canPrevDay || loading} onClick={() => onPickDate(addDays(targetDate, -1))}>
                 前日
               </s-button>
-              <s-text emphasis="bold" size="small">
-                {formatYmdSlash(targetDate)}
-              </s-text>
+              <s-stack gap="none" alignItems="center">
+                <s-text type="strong">{formatYmdWithWeekday(targetDate)}</s-text>
+                <s-text type="small" color="subdued">
+                  {loading ? "読み込み中…" : loadedAt ? `${formatJstHm(loadedAt)} 時点の数` : ""}
+                </s-text>
+              </s-stack>
               <s-button kind="secondary" disabled={!canNextDay || loading} onClick={() => onPickDate(addDays(targetDate, 1))}>
                 翌日
               </s-button>
@@ -1005,132 +1022,31 @@ function PreviewView({
         <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
           <s-box padding="base">
             <s-stack gap="base">
-              {/* 精算内容 */}
-              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="none">
-                  {headerRows.map((row, i) => (
-                    <SummaryRow
-                      key={row.label}
-                      label={row.label}
-                      value={row.value}
-                      valueBold={row.valueBold}
-                      divider={i < headerRows.length - 1}
-                    />
-                  ))}
-                </s-stack>
-              </s-box>
+              {/*
+                大事な案内は一覧の「上」に出す（下に出すと iPhone ではスクロールしないと気づけない）。
+                確定済み・確定のあとに数が変わった・返金処理中などの案内を足すときも、ここに置く。
+              */}
+              <SettlementTopNotices loading={loading} error={error} />
 
-              {/* 集計サマリー */}
-              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="none">
-                  {summaryRows.map((row, i) => (
-                    <SummaryRow
-                      key={row.label}
-                      label={row.label}
-                      value={row.value}
-                      valueBold={row.valueBold}
-                      divider={i < summaryRows.length - 1}
-                    />
-                  ))}
-                </s-stack>
-              </s-box>
-
-              {/* 件数・点数 */}
-              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="none">
-                  {countRows.map((row, i) => (
-                    <SummaryRow
-                      key={row.label}
-                      label={row.label}
-                      value={row.value}
-                      divider={i < countRows.length - 1}
-                    />
-                  ))}
-                </s-stack>
-              </s-box>
-
-              {/* 納金金額（現金の差引額のみ・件数なし） */}
-              {cashDepositRows.length > 0 ? (
-                <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="none">
-                    <s-box padding="small">
-                      <s-text fontWeight="bold" fontSize="small">納金金額</s-text>
-                    </s-box>
-                    <s-divider />
-                    {cashDepositRows.map((row, i) => (
-                      <SummaryRow
-                        key={row.key}
-                        label={row.label}
-                        value={row.value}
-                        valueBold
-                        divider={i < cashDepositRows.length - 1}
-                      />
-                    ))}
-                  </s-stack>
-                </s-box>
-              ) : null}
-
+              {/* 確定済み・再確定・承認待ち・返金処理中・支払方法の行に入れられなかった返金（#93 系。#98 の決まりで表の上に置く） */}
               {/* 特殊返金の返金方法が支払方法マスタに無い等（精算は確定できる。合計は正しい） */}
               {(preview.unmatchedRefundMethods ?? []).length > 0 ? (
                 <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
                   <s-stack gap="small">
-                    <s-text fontWeight="bold" tone="caution">
+                    <s-text type="strong" tone="caution">
                       支払方法の行に入れられなかった特殊返金があります
                     </s-text>
                     {preview.unmatchedRefundMethods.map((w, i) => (
-                      <s-text key={`unmatched-${i}`} tone="caution" fontSize="small">
+                      <s-text key={`unmatched-${i}`} tone="caution" type="small">
                         {w.message}
                       </s-text>
                     ))}
-                    <s-text tone="subdued" fontSize="small">
+                    <s-text tone="subdued" type="small">
                       合計は正しいまま精算できます。管理画面の「支払方法」に登録すると、次の更新から正しい行に入ります。
                     </s-text>
                   </s-stack>
                 </s-box>
               ) : null}
-
-              {/* 支払方法別内訳：支払方法 / 件数 / 金額（返金は 方法[返金]） */}
-              {paymentTripleRows.length > 0 ? (
-                <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="none">
-                    <s-box padding="small">
-                      <s-text fontWeight="bold" fontSize="small">支払方法別内訳</s-text>
-                    </s-box>
-                    <s-divider />
-                    {paymentTripleRows.map((row, i) => (
-                      <PaymentMethodTripleRow
-                        key={row.key}
-                        left={row.left}
-                        middle={row.middle}
-                        right={row.right}
-                        leftBold={row.leftBold}
-                        divider={i < paymentTripleRows.length - 1}
-                      />
-                    ))}
-                  </s-stack>
-                </s-box>
-              ) : null}
-
-              {/* 適用済み返金方法変更・商品券釣銭登録 */}
-              {eventRows.length > 0 ? (
-                <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="none">
-                    <s-box padding="small">
-                      <s-text fontWeight="bold" fontSize="small">適用済みイベント</s-text>
-                    </s-box>
-                    <s-divider />
-                    {eventRows.map((row, i) => (
-                      <SummaryRow
-                        key={row.key}
-                        label={row.label}
-                        value={row.value}
-                        divider={i < eventRows.length - 1}
-                      />
-                    ))}
-                  </s-stack>
-                </s-box>
-              ) : null}
-
               {preview.awaitingApprovalSpecialRefunds?.length ? (
                 <s-text tone="caution">
                   {preview.awaitingApprovalWarning ??
@@ -1157,7 +1073,57 @@ function PreviewView({
                   </s-button>
                 </s-stack>
               ) : null}
-              {error ? <s-text tone="critical">{error}</s-text> : null}
+
+              <s-box>
+                <SummaryHeading first>売上</SummaryHeading>
+                {salesLines.map((l) => (
+                  <SummaryLine
+                    key={l.key}
+                    label={l.label}
+                    value={l.value}
+                    strong={l.strong}
+                    indent={l.indent}
+                    tone={l.tone}
+                  />
+                ))}
+
+                <SummaryHeading>件数</SummaryHeading>
+                <SummaryLine label={countLabel} value={itemCountLabel} />
+
+                {paymentLines.length > 0 ? (
+                  <>
+                    <SummaryHeading>支払方法別</SummaryHeading>
+                    {paymentLines.map((l) => (
+                      <PaymentLine
+                        key={l.key}
+                        label={l.label}
+                        count={l.count}
+                        amount={l.amount}
+                        indent={l.indent}
+                        tone={l.tone}
+                      />
+                    ))}
+                  </>
+                ) : null}
+
+                {cashDepositRows.length > 0 ? (
+                  <>
+                    <SummaryHeading>納金</SummaryHeading>
+                    {cashDepositRows.map((l) => (
+                      <SummaryLine key={l.key} label={l.label} value={l.value} strong tone="success" />
+                    ))}
+                  </>
+                ) : null}
+
+                {eventRows.length > 0 ? (
+                  <>
+                    <SummaryHeading>返金方法変更・商品券釣銭登録</SummaryHeading>
+                    {eventRows.map((l) => (
+                      <SummaryLine key={l.key} label={l.label} value={l.value} />
+                    ))}
+                  </>
+                ) : null}
+              </s-box>
             </s-stack>
           </s-box>
         </s-scroll-box>
@@ -1171,13 +1137,9 @@ function PreviewView({
           leftDisabled={loading}
           middleLabel="点検"
           onMiddle={onPrepareInspectionIssue}
-          middleCommand="--show"
-          middleCommandFor={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID}
           middleDisabled={loading}
           rightLabel="精算"
           onRight={onPrepareSettleIssue}
-          rightCommand="--show"
-          rightCommandFor={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID}
           rightTone="success"
           rightDisabled={loading}
         />
@@ -1186,80 +1148,87 @@ function PreviewView({
   );
 }
 
-/** 精算・点検それぞれ専用の s-modal（POS Stock: ボタン command + commandFor で開閉） */
-function SettlementIssueConfirmModals({ preview, printMode, loading, error, onExecute, onRequestClose }) {
+/**
+ * 精算画面の上に出す案内（読み込み中・エラー）。
+ * s-banner は POS にある部品。文は見出し（heading）に入れる（端末によって本文が畳まれることがあるため）。
+ */
+function SettlementTopNotices({ loading, error, busyLabel = "読み込み中です。少しお待ちください。" }) {
+  if (!loading && !error) return null;
+  return (
+    <s-stack gap="small">
+      {loading ? <s-banner tone="info" heading={busyLabel} /> : null}
+      {!loading && error ? <s-banner tone="critical" heading={error} /> : null}
+    </s-stack>
+  );
+}
+
+/**
+ * 点検／精算の発行確認。画面ごと切り替える（重ね表示の s-modal は使わない）。
+ * 案内・確認の中身・発行ボタンがスクロールなしで見えるよう、上から 何をするか → 結果の案内 → 中身 の順に置く。
+ */
+function SettlementIssueConfirmView({ preview, printMode, isInspection, loading, error, onExecute, onBack }) {
   const printModeLabel =
     printMode === "cloudprnt_direct"
-      ? "CloudPRNT直印字"
-      : "注文経由印字（精算注文を作成します）";
+      ? "プリンタへ直接印字"
+      : "注文経由で印字（精算用の注文を作ります）";
 
   const rows = [
     { label: "ロケーション", value: preview?.locationName ?? "-" },
     { label: "対象日", value: formatYmdSlash(preview?.targetDate ?? "-") },
     { label: "総売上", value: `¥${Number(preview?.total ?? 0).toLocaleString()}`, valueBold: true },
     { label: "件数", value: `${preview?.orderCount ?? 0}件` },
-    { label: "印字方式", value: printModeLabel },
   ];
+  if (!isInspection) rows.push({ label: "印字", value: printModeLabel });
 
-  const body = (headingLine) => (
-    <s-scroll-box>
-      <s-box padding="base">
-        <s-stack gap="base">
-          <s-text fontWeight="bold">{headingLine}</s-text>
-          <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-            <s-stack gap="none">
-              {rows.map((row, i, arr) => (
-                <SummaryRow
-                  key={row.label}
-                  label={row.label}
-                  value={row.value}
-                  valueBold={row.valueBold}
-                  divider={i < arr.length - 1}
-                />
-              ))}
-            </s-stack>
-          </s-box>
-          {error ? <s-text tone="critical">{error}</s-text> : null}
-        </s-stack>
-      </s-box>
-    </s-scroll-box>
-  );
+  const title = isInspection ? "点検レシートを発行します" : "精算を確定して、精算レシートを発行します";
+  const note = isInspection
+    ? "点検ではこの日の精算は確定しません。"
+    : "確定すると、この日の数が精算履歴に残ります。";
 
   return (
-    <>
-      <s-modal id={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID} heading="発行確認">
-        {body("点検レシートを発行します")}
-        <s-button
-          slot="secondary-actions"
-          kind="secondary"
-          command="--hide"
-          commandFor={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID}
-          onClick={onRequestClose}
-          disabled={loading}
-        >
-          戻る
-        </s-button>
-        <s-button slot="primary-action" onClick={onExecute} disabled={loading}>
-          {loading ? "発行中.." : "発行する"}
-        </s-button>
-      </s-modal>
-      <s-modal id={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID} heading="発行確認">
-        {body("精算レシートを発行します")}
-        <s-button
-          slot="secondary-actions"
-          kind="secondary"
-          command="--hide"
-          commandFor={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID}
-          onClick={onRequestClose}
-          disabled={loading}
-        >
-          戻る
-        </s-button>
-        <s-button slot="primary-action" onClick={onExecute} disabled={loading}>
-          {loading ? "発行中.." : "発行する"}
-        </s-button>
-      </s-modal>
-    </>
+    <s-page heading={isInspection ? "点検レシートの発行" : "精算の発行"}>
+      <s-stack
+        gap="none"
+        blockSize="100%"
+        inlineSize="100%"
+        minBlockSize="0"
+        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+      >
+        <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
+          <s-box padding="base">
+            <s-stack gap="base">
+              <SettlementTopNotices loading={loading} error={error} busyLabel="発行中です。画面を閉じずにお待ちください。" />
+              <s-text fontWeight="bold">{title}</s-text>
+              <s-text tone="subdued" size="small">{note}</s-text>
+              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
+                <s-stack gap="none">
+                  {rows.map((row, i, arr) => (
+                    <SummaryRow
+                      key={row.label}
+                      label={row.label}
+                      value={row.value}
+                      valueBold={row.valueBold}
+                      divider={i < arr.length - 1}
+                    />
+                  ))}
+                </s-stack>
+              </s-box>
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+        <s-divider />
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={onBack}
+          leftDisabled={loading}
+          rightLabel={loading ? "発行中.." : "発行する"}
+          onRight={onExecute}
+          rightTone="success"
+          rightDisabled={loading || !preview}
+        />
+      </s-stack>
+    </s-page>
   );
 }
 
@@ -1512,7 +1481,14 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
 function HistoryDetailView({ item, onBack }) {
   return (
     <s-page heading="精算履歴明細">
-      <s-scroll-box>
+      <s-stack
+        gap="none"
+        blockSize="100%"
+        inlineSize="100%"
+        minBlockSize="0"
+        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+      >
+      <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
         <s-box padding="base">
           {!item ? (
             <s-text tone="subdued">明細データがありません。</s-text>
@@ -1551,10 +1527,11 @@ function HistoryDetailView({ item, onBack }) {
             </s-stack>
           )}
         </s-box>
-        <s-box padding="base">
-          <s-button kind="plain" onClick={onBack}>← 戻る</s-button>
-        </s-box>
       </s-scroll-box>
+      <s-divider />
+      {/* 一覧に戻るボタンは、下の固定の左寄せに「戻る」でそろえる（T, 2026-11-23） */}
+      <FixedFooterNavBar centerAlignWithButtons leftLabel="戻る" onLeft={onBack} />
+      </s-stack>
     </s-page>
   );
 }
@@ -1572,46 +1549,6 @@ function isCashPaymentSection(section) {
   if (g === "現金" || l === "現金" || lNorm === "現金") return true;
   if (g === "cash" || l.toLowerCase() === "cash") return true;
   return /^現金/.test(lNorm);
-}
-
-/**
- * 支払内訳1行：支払方法・件数・金額を1行に並べる。
- *
- * POS UI 制約（@shopify/ui-extensions の point-of-sale `Box.d.ts`）:
- * - `s-box` の公開 props に **`style` はない**。`style={{ display: "grid" }}` は無視され、
- *   子 `s-box` が縦に積まれる（スクリーンショットの「方法→件数→金額」の3行になる）。
- * - レイアウトは **`s-stack` の `direction="inline"`** と、子 **`s-box` の `inlineSize`（`%` または `px`）**
- *   など、型定義にあるプロパティに寄せる。
- */
-function PaymentMethodTripleRow({ left, middle, right, leftBold = false, divider = true }) {
-  return (
-    <s-stack gap="none">
-      <s-box padding="small">
-        <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
-          <s-box padding="none" inlineSize="56%" minInlineSize="0" maxInlineSize="56%">
-            <s-text size="small" fontWeight={leftBold ? "bold" : undefined}>
-              {left}
-            </s-text>
-          </s-box>
-          <s-box padding="none" inlineSize="18%" minInlineSize="44px" maxInlineSize="18%">
-            <s-stack direction="block" alignItems="end">
-              <s-text size="small" tone="subdued">
-                {middle}
-              </s-text>
-            </s-stack>
-          </s-box>
-          <s-box padding="none" inlineSize="26%" minInlineSize="70px" maxInlineSize="26%">
-            <s-stack direction="block" alignItems="end">
-              <s-text size="small" fontWeight="bold">
-                {right}
-              </s-text>
-            </s-stack>
-          </s-box>
-        </s-stack>
-      </s-box>
-      {divider ? <s-divider /> : null}
-    </s-stack>
-  );
 }
 
 /** 明細1行：左に項目名、右寄せに値。下に区切り線（最下行は divider=false） */
