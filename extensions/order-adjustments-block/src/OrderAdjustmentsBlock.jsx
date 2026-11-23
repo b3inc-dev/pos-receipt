@@ -89,14 +89,14 @@ function OrderAdjustmentsBlock() {
 
   if (state.loading) {
     return (
-      <s-admin-block heading="返金方法変更・商品券釣銭調整">
+      <s-admin-block heading="返金方法変更・商品券釣銭登録">
         <s-text color="subdued">読み込み中…</s-text>
       </s-admin-block>
     );
   }
   if (state.error) {
     return (
-      <s-admin-block heading="返金方法変更・商品券釣銭調整">
+      <s-admin-block heading="返金方法変更・商品券釣銭登録">
         <s-banner tone="critical">{state.error}</s-banner>
       </s-admin-block>
     );
@@ -108,11 +108,11 @@ function OrderAdjustmentsBlock() {
   const notice = STATE_NOTICES[state.data?.metafieldState];
 
   return (
-    <s-admin-block heading="返金方法変更・商品券釣銭調整">
+    <s-admin-block heading="返金方法変更・商品券釣銭登録">
       <s-stack gap="base">
         {notice ? <s-banner tone="warning">{notice}</s-banner> : null}
         {shown.length === 0 ? (
-          <s-text color="subdued">この注文の登録はありません。登録は POS の「返金方法変更」「商品券釣銭調整」タイルから行います。</s-text>
+          <s-text color="subdued">この注文の登録はありません。登録は POS の「返金方法変更」「商品券釣銭登録」タイルから行います。</s-text>
         ) : (
           <s-stack gap="small-200">
             {shown.map((e) => (

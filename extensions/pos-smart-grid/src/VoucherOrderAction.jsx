@@ -1,5 +1,5 @@
 /**
- * 「商品券釣銭調整」の行（取引詳細のメニュー・会計が終わった画面の「管理」。1ボタン＝1行）
+ * 「商品券釣銭登録」の行（取引詳細のメニュー・会計が終わった画面の「管理」。1ボタン＝1行）
  * モーダルは同じパッケージの VoucherModal → SpecialRefundModal を共有
  *
  * T のカード 2026-11-24「釣有りの会計だけ押せる」:
@@ -62,7 +62,7 @@ function VoucherOrderAction() {
 
   return (
     <s-button onClick={onClick} disabled={state !== "ok"}>
-      商品券釣銭調整
+      商品券釣銭登録
     </s-button>
   );
 }

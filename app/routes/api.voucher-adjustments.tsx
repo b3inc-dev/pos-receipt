@@ -88,7 +88,7 @@ export async function action({ request }: ActionFunctionArgs) {
         {
           ok: false,
           code: "VOUCHER_ALREADY_REGISTERED",
-          error: "この注文には、もう商品券釣銭調整があります。直すときは、調整履歴の「変更」を使ってください。",
+          error: "この注文には、もう商品券釣銭の登録があります。直すときは、調整履歴の「変更」を使ってください。",
         },
         { status: 409 },
       );

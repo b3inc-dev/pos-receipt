@@ -87,7 +87,7 @@ describe("調整履歴の行", async () => {
   });
 });
 
-it("商品券釣銭調整には「記録のみ」を出さない（ほかの記録のみの登録には出す）", async () => {
+it("商品券釣銭登録には「記録のみ」を出さない（ほかの記録のみの登録には出す）", async () => {
   const { adjustmentBadges } = await import("../../extensions/common/orderDetailLayout.js");
   assert.deepEqual(adjustmentBadges({ eventType: "voucher_change_adjustment", shopifyRefundStatus: "skipped" }), []);
   assert.equal(adjustmentBadges({ eventType: "payment_method_override", shopifyRefundStatus: "skipped" })[0].label, "記録のみ");

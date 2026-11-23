@@ -1,5 +1,5 @@
 /**
- * 会計の前に入れる商品券の額面（POS「商品券釣銭調整」タイル → 会計後の画面）。
+ * 会計の前に入れる商品券の額面（POS「商品券釣銭登録」タイル → 会計後の画面）。
  * キーはサーバー app/services/voucherCartEntryPure.ts と同じにする。
  * 「_」始まりのカートの項目は、POS の画面・レシートには出ず、注文には書かれる（shopify.dev Cart API）。
  */
@@ -54,10 +54,10 @@ export function postPurchaseMessage(res) {
     case "face_too_small":
       return {
         tone: "warning",
-        text: `額面 ${yen(res.face)} が商品券で払った額 ${yen(res.applied)} より小さいので、登録していません。「商品券釣銭調整」タイルから額面を確かめて登録してください`,
+        text: `額面 ${yen(res.face)} が商品券で払った額 ${yen(res.applied)} より小さいので、登録していません。「商品券釣銭登録」タイルから額面を確かめて登録してください`,
       };
     case "settlement_confirmed":
-      return { tone: "warning", text: "この日の精算はもう確定しているので、商品券は登録していません。「商品券釣銭調整」タイルから登録してください" };
+      return { tone: "warning", text: "この日の精算はもう確定しているので、商品券は登録していません。「商品券釣銭登録」タイルから登録してください" };
     case "too_late":
       return null;
     case "disabled":
@@ -65,7 +65,7 @@ export function postPurchaseMessage(res) {
     case "cancelled":
       return { tone: "warning", text: "キャンセルした注文なので、商品券は登録していません" };
     case "order_unreadable":
-      return { tone: "critical", text: "注文を読めませんでした。あとで「商品券釣銭調整」タイルから登録してください" };
+      return { tone: "critical", text: "注文を読めませんでした。あとで「商品券釣銭登録」タイルから登録してください" };
     default:
       return null;
   }

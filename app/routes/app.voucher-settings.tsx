@@ -123,7 +123,7 @@ export default function VoucherSettingsPage() {
                 <Checkbox label="手動調整を有効にする" checked={form.voucherManualAdjustmentEnabled} onChange={(v) => set("voucherManualAdjustmentEnabled", v)} />
                 <Checkbox
                   label="会計の前に額面を入れる"
-                  helpText="POS の「商品券釣銭調整」タイルで会計の前に額面を入れると、会計のあとに商品券釣銭調整を自動で登録します。初めはオフです。"
+                  helpText="POS の「商品券釣銭登録」タイルで会計の前に額面を入れると、会計のあとに商品券釣銭を自動で登録します。初めはオフです。"
                   checked={form.voucherCartEntryEnabled}
                   onChange={(v) => set("voucherCartEntryEnabled", v)}
                 />

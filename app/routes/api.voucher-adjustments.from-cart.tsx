@@ -1,5 +1,5 @@
 /**
- * GET  /api/voucher-adjustments/from-cart → { enabled }（POS の「商品券釣銭調整」タイルが、会計前の額面入力を出すか決める）
+ * GET  /api/voucher-adjustments/from-cart → { enabled }（POS の「商品券釣銭登録」タイルが、会計前の額面入力を出すか決める）
  * POST /api/voucher-adjustments/from-cart
  * 会計後の画面（POS「商品券」の会計後の枠）から呼ぶ。本文: { sourceOrderId, locationId?, createdBy? }
  * 会計の前に入れた額面（注文の見えない項目）があれば、商品券調整を 1 件だけ登録する（docs/VOUCHER_CART_ENTRY.md）。

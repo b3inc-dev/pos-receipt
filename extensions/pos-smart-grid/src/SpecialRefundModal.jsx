@@ -9,7 +9,7 @@
  *   form_voucher → 商品券調整フォーム（額面だけ入れる。使った額は注文の取引から）
  *   form_edit    → 登録の「変更」（前の登録を無効にし、直した内容の登録を足す。Shopify の返金はしない）
  *
- * タイルごとに一覧の最初の絞り込みを変える: 「返金方法変更」タイルは返金・キャンセル、「商品券釣銭調整」タイルは商品券釣有り
+ * タイルごとに一覧の最初の絞り込みを変える: 「返金方法変更」タイルは返金・キャンセル、「商品券釣銭登録」タイルは商品券釣有り
  * （VoucherModal.jsx が initialListSegment="voucher_change" で開く）
  *
  * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券調整」→ form_voucher へ直行
@@ -289,7 +289,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
     } catch (_) {
       /* 読めないときは下の Order API だけで決める */
     }
-    // 会計が終わった画面の「商品券釣銭調整」の行から開いたとき: この画面が受け取る注文（Order API）を使う
+    // 会計が終わった画面の「商品券釣銭登録」の行から開いたとき: この画面が受け取る注文（Order API）を使う
     if (!vid && !rid && initialListSegment === "voucher_change") {
       try {
         const oid = globalThis?.shopify?.order?.id;
@@ -324,7 +324,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
           setStep("form_refund");
           return;
         }
-        // 商品券釣銭調整: 登録済みなら調整履歴、釣有りでない会計なら案内を出す（T のカード 2026-11-24）
+        // 商品券釣銭登録: 登録済みなら調整履歴、釣有りでない会計なら案内を出す（T のカード 2026-11-24）
         const next = voucherShortcutStep(order, res.items ?? []);
         if (next === "form_voucher") {
           setStep("form_voucher");
@@ -332,8 +332,8 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         }
         setSubmitNotice(
           next === "order_detail_registered"
-            ? { tone: "info", text: "この会計の商品券釣銭調整は、もう登録してあります。直すときは、調整履歴の「変更」を押してください。" }
-            : { tone: "warning", text: "この会計は商品券釣有りではないので、商品券釣銭調整は登録できません。" },
+            ? { tone: "info", text: "この会計の商品券釣銭は、もう登録してあります。直すときは、調整履歴の「変更」を押してください。" }
+            : { tone: "warning", text: "この会計は商品券釣有りではないので、商品券釣銭は登録できません。" },
         );
         setStep("order_detail");
       })
@@ -542,7 +542,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
   }, [confirmAction, runVoid, runRecheck, runLegacyRecheck, runRedoDraft]);
 
   // タイルを分けた（T 2026-11-23）: 見出しは開いたタイルの名前
-  const pageHeading = initialListSegment === "voucher_change" ? "商品券釣銭調整" : "返金方法変更";
+  const pageHeading = initialListSegment === "voucher_change" ? "商品券釣銭登録" : "返金方法変更";
   if (orderEntryLoading) {
     return (
       <s-page heading={pageHeading}>
@@ -801,14 +801,14 @@ function OrderDetailView({
 }) {
   const activeEvents = events.filter((e) => e.status === "active");
   const voidedEvents = events.filter((e) => e.status === "voided");
-  // 商品券釣銭調整は「商品券釣有り」の注文だけ（一覧の「商品券釣有り」の印と同じ判定: 支払方法マスタの
+  // 商品券釣銭登録は「商品券釣有り」の注文だけ（一覧の「商品券釣有り」の印と同じ判定: 支払方法マスタの
   // 釣り有りの商品券で払った、またはメモに「商品券」）。支払いが 1 件も読めない注文は判定できないので押せるまま。
   const voucherAdjustable = isVoucherAdjustableOrder(order);
-  // 入口ごとに、関係するボタンだけを右下に出す（T 2026-11-24）: 商品券釣銭調整タイル・会計後の行 → 商品券釣銭調整、返金方法変更タイル → 返金方法変更
+  // 入口ごとに、関係するボタンだけを右下に出す（T 2026-11-24）: 商品券釣銭登録タイル・会計後の行 → 商品券釣銭登録、返金方法変更タイル → 返金方法変更
   const isVoucherEntry = entry === "voucher";
 
   return (
-    <s-page heading={isVoucherEntry ? "商品券釣銭調整" : "返金方法変更"}>
+    <s-page heading={isVoucherEntry ? "商品券釣銭登録" : "返金方法変更"}>
       <s-stack
         gap="none"
         blockSize="100%"
@@ -925,7 +925,7 @@ function OrderDetailView({
           leftLabel={fromOrderEntry ? "閉じる" : "戻る"}
           onLeft={onBack}
           leftDisabled={loading}
-          rightLabel={isVoucherEntry ? "商品券釣銭調整" : "返金方法変更"}
+          rightLabel={isVoucherEntry ? "商品券釣銭登録" : "返金方法変更"}
           onRight={isVoucherEntry ? onVoucher : onRefund}
           rightDisabled={loading || (isVoucherEntry && !voucherAdjustable)}
         />
@@ -1572,7 +1572,7 @@ function VoucherAdjustmentForm({
   }
 
   return (
-    <s-page heading="商品券釣銭調整を登録">
+    <s-page heading="商品券釣銭を登録">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
