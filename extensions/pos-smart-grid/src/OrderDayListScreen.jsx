@@ -451,23 +451,31 @@ export function OrderDayListScreen({
             ) : null}
 
             {badgeMode === "specialRefund" ? (
-              <s-stack direction="inline" gap="small-300" alignItems="center">
-                {LIST_SEGMENTS.map((seg) => (
-                  <s-button
+              /* 幅いっぱいに均等（POS Stock の「未入庫／入庫済み」と同じ。T 2026-11-23）。
+                 s-button に幅の指定は無いので、幅を割った s-box に入れる */
+              <s-stack direction="inline" gap="none" alignItems="center">
+                {LIST_SEGMENTS.map((seg, i) => (
+                  <s-box
                     key={seg.value}
-                    variant={
-                      effectiveSegment === seg.value ? "primary" : "secondary"
-                    }
-                    onClick={() => {
-                      setListSegment(seg.value);
-                      if (isSearchMode) {
-                        setSearchDraft("");
-                        setSearchQuery("");
-                      }
-                    }}
+                    inlineSize={`${(100 / LIST_SEGMENTS.length).toFixed(2)}%`}
+                    paddingInlineStart={i === 0 ? "none" : "small-500"}
+                    paddingInlineEnd={i === LIST_SEGMENTS.length - 1 ? "none" : "small-500"}
                   >
-                    {seg.label}
-                  </s-button>
+                    <s-button
+                      variant={
+                        effectiveSegment === seg.value ? "primary" : "secondary"
+                      }
+                      onClick={() => {
+                        setListSegment(seg.value);
+                        if (isSearchMode) {
+                          setSearchDraft("");
+                          setSearchQuery("");
+                        }
+                      }}
+                    >
+                      {seg.label}
+                    </s-button>
+                  </s-box>
                 ))}
               </s-stack>
             ) : null}
