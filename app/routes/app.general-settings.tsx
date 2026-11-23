@@ -41,6 +41,12 @@ const PLAN_OPTIONS = [
   { label: "Pro", value: "pro" },
 ];
 const LANG_OPTIONS = [{ label: "日本語", value: "ja" }];
+const TIMEZONE_OPTIONS = [{ label: "日本時間", value: "Asia/Tokyo" }];
+const CURRENCY_OPTIONS = [{ label: "日本円", value: "JPY" }];
+/** 一覧に無い値がすでに保存されているときは、その値も選べるように残す（黙って変えない） */
+function withCurrent(options: { label: string; value: string }[], current: string) {
+  return !current || options.some((o) => o.value === current) ? options : [...options, { label: current, value: current }];
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
@@ -148,7 +154,7 @@ export default function GeneralSettingsPage() {
             )}
             <Layout.Section>
               {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-              <AdminIntro><p>{isDevStore ? "アプリ全体の基本情報・タイムゾーン・デバッグ表示を設定します。" : "アプリ全体の基本情報・タイムゾーンを設定します。"}</p></AdminIntro>
+              <AdminIntro><p>{isDevStore ? "アプリ全体の基本情報・時間帯・デバッグ表示を設定します。" : "アプリ全体の基本情報・時間帯を設定します。"}</p></AdminIntro>
             </Layout.Section>
 
             <Layout.AnnotatedSection title="アプリ基本情報">
@@ -162,17 +168,18 @@ export default function GeneralSettingsPage() {
                     onChange={(v) => set("privacyPolicyUrl", v)}
                     type="url"
                     autoComplete="off"
-                    helpText="https で始まる公開 URL。未設定時はサーバー環境変数 PRIVACY_POLICY_URL があればそれを使います。ダミー URL は置かないでください。"
+                    helpText="https で始まる公開ページの URL。空欄のときは、アプリの運営元が用意したページを使います。仮の URL は入れないでください。"
                   />
                   {effectivePrivacyPolicyUrl && (
                     <Text as="p" tone="subdued">
                       {/* 下線の文字リンクにしない（UI ルール v1.1 4章）。URL は文字だけで出す */}
                       現在有効: {effectivePrivacyPolicyUrl}
-                      {privacyPolicyFromEnvOnly ? "（環境変数）" : ""}
+                      {privacyPolicyFromEnvOnly ? "（アプリの運営元のページ）" : ""}
                     </Text>
                   )}
-                  <TextField label="デフォルトタイムゾーン" value={form.defaultTimezone} onChange={(v) => set("defaultTimezone", v)} helpText="例: Asia/Tokyo" autoComplete="off" />
-                  <TextField label="デフォルト通貨" value={form.defaultCurrency} onChange={(v) => set("defaultCurrency", v)} autoComplete="off" />
+                  {/* 店の言葉で選ぶ（Asia/Tokyo・JPY のような値は出さない。全画面点検 11/23）。保存する値は今までと同じ */}
+                  <Select label="時間帯" options={withCurrent(TIMEZONE_OPTIONS, form.defaultTimezone)} value={form.defaultTimezone} onChange={(v) => set("defaultTimezone", v)} />
+                  <Select label="通貨" options={withCurrent(CURRENCY_OPTIONS, form.defaultCurrency)} value={form.defaultCurrency} onChange={(v) => set("defaultCurrency", v)} />
                 </BlockStack>
               </Card>
             </Layout.AnnotatedSection>
@@ -184,7 +191,7 @@ export default function GeneralSettingsPage() {
                   {isDevStore && (
                     <>
                       <Select label="プラン（表示用）" options={PLAN_OPTIONS} value={form.currentPlanCode} onChange={(v) => set("currentPlanCode", v)} />
-                      <TextField label="有効機能 JSON（表示用）" value={form.enabledFeaturesJson} onChange={(v) => set("enabledFeaturesJson", v)} multiline={2} autoComplete="off" />
+                      <TextField label="有効にする機能の一覧（表示用・開発ストアだけ）" value={form.enabledFeaturesJson} onChange={(v) => set("enabledFeaturesJson", v)} multiline={2} autoComplete="off" />
                     </>
                   )}
                   <Select label="管理画面言語" options={LANG_OPTIONS} value={form.adminLanguage} onChange={(v) => set("adminLanguage", v)} />
