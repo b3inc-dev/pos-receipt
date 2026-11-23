@@ -172,7 +172,7 @@ function CorrectionModeBanner({ orderCorrectionContext }) {
 
 function formatShopifyRefundNotice(res) {
   const base = formatShopifyRefundNoticeBase(res);
-  // 管理者の承認が要る店（設定でオン）の返金手段変更は、承認されるまで精算に入らない
+  // 管理者の承認が要る店（設定でオン）の付け替え（返金手段変更・現金返金）は、承認されるまで精算に入らない
   if (res?.approvalRequired || res?.event?.approvalStatus === "pending") {
     return {
       tone: base.tone === "warning" ? "warning" : "info",

@@ -190,7 +190,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-/** 返金手段変更の承認／却下（設定「管理者の承認」がオンのときに承認待ちになったもの）。Shopify には何も書かない */
+/** 付け替え（返金手段変更・現金返金）の承認／却下（設定「管理者の承認」がオンのときに承認待ちになったもの）。Shopify には何も書かない */
 export async function action({ request }: ActionFunctionArgs) {
   const auth = await authenticate.admin(request);
   const { admin, session } = auth;
@@ -286,7 +286,7 @@ export default function SpecialRefundHistoryPage() {
             if (pendingApprovalCount > 0 && approval !== "pending") {
               return (
                 <Layout.Section>
-                  <StatusBanner tone="info" heading={`承認待ちの返金手段変更が ${pendingApprovalCount} 件あります`}>
+                  <StatusBanner tone="info" heading={`承認待ちの付け替えが ${pendingApprovalCount} 件あります`}>
                     承認するまで精算・売上サマリーに入りません。「承認」で絞り込むと一覧で確かめられます。
                   </StatusBanner>
                 </Layout.Section>
@@ -430,14 +430,14 @@ export default function SpecialRefundHistoryPage() {
                             <ConfirmAction
                               trigger="secondary"
                               label="承認"
-                              heading="返金手段変更を承認しますか"
+                              heading={`${eventTypeLabel(item.eventType)}を承認しますか`}
                               message={`${item.sourceOrderName ?? "この登録"} の ${fmtYen(item.amount)}（${item.originalPaymentMethod ?? "—"} → ${item.actualRefundMethod ?? "—"}）を登録した日の精算・売上サマリーに入れます。Shopify には何もしません。`}
                               confirmLabel="承認する"
                               fields={{ intent: "approval", eventId: item.id, decision: "approve" }}
                             />
                             <ConfirmAction
                               label="却下"
-                              heading="返金手段変更を却下しますか"
+                              heading={`${eventTypeLabel(item.eventType)}を却下しますか`}
                               message={`${item.sourceOrderName ?? "この登録"} の ${fmtYen(item.amount)} は精算・売上サマリーに入りません。あとから承認には戻せません。Shopify の返金は取り消されません。`}
                               confirmLabel="却下する"
                               fields={{ intent: "approval", eventId: item.id, decision: "reject" }}
