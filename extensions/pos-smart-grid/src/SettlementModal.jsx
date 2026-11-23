@@ -802,7 +802,7 @@ function PreviewView({
           <s-divider />
           <FixedFooterNavBar
             centerAlignWithButtons
-            leftLabel="戻る"
+            leftLabel="履歴一覧"
             onLeft={onBackToHistory}
             leftDisabled={loading}
             middleLabel="点検"
@@ -1017,7 +1017,7 @@ function PreviewView({
 
         <FixedFooterNavBar
           centerAlignWithButtons
-          leftLabel="戻る"
+          leftLabel="履歴一覧"
           onLeft={onBackToHistory}
           leftDisabled={loading}
           middleLabel="点検"
