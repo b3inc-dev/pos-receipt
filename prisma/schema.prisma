@@ -49,6 +49,7 @@ model Shop {
   paymentMethodMasters  PaymentMethodMaster[]
   settlements           Settlement[]
   specialRefundEvents SpecialRefundEvent[]
+  refundReservations RefundReservation[]
   receiptTemplates ReceiptTemplate[]
   receiptIssues    ReceiptIssue[]
   budgets          Budget[]
@@ -214,6 +215,8 @@ model SpecialRefundEvent {
   countDate               String?
   /// 「変更」で置き換えた前の行の id（前の行は voided にする）
   replacesEventId         String?
+  /// どの返金の記録か: null = 今まで（アプリが返金した・記録だけ）| native = POS 純正の返金の付け替え（金額は純正の返金で決まる）
+  refundSource            String?
   voidedAt                DateTime?
   voidedBy                String?
   /// 無効にしたわけ・直したわけ
@@ -228,7 +231,40 @@ model SpecialRefundEvent {
   @@index([locationId, createdAt])
   @@index([eventType, createdAt])
   @@index([shopId, approvalStatus])
+  @@index([shopId, sourceOrderId, refundSource])
   @@index([shopId, locationId, countDate])
+}
+
+/// 返金の予約（T の決定 2026-11-23）: 純正で返金する前に「実際に返す手段」を決めておき、
+/// 予約のあとにできた最初の純正の返金に、付け替え（SpecialRefundEvent, refundSource=native）を自動で作る。
+/// docs/REFUND_RESERVATION.md
+model RefundReservation {
+  id               String    @id @default(cuid())
+  shopId           String
+  shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  /// gid://shopify/Order/...
+  sourceOrderId    String
+  sourceOrderName  String?
+  locationId       String
+  /// [{ actualRefundMethod, eventType, amount|null }]。最後の行は残り（amount null）
+  rowsJson         String
+  note             String?
+  createdBy        String?
+  /// pending | applied | cancelled | expired | needs_review
+  status           String    @default("pending")
+  /// 予約した日（店のタイムゾーン、YYYY-MM-DD）。この日が終わると使わない（expired）
+  businessDate     String
+  /// 使った純正の返金（gid）と、作った付け替えの id
+  appliedRefundId  String?
+  appliedEventIds  String?
+  appliedAt        DateTime?
+  /// needs_review のわけ（店の人向けの文）
+  reviewReason     String?
+  cancelledAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([shopId, sourceOrderId, status])
 }
 
 // ========== 20.6 領収書テンプレート（MVP は 1 件のみ active） ==========
