@@ -77,13 +77,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     );
     const settings = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...settingsRaw };
 
-    const res = await adminGraphqlWithRetry(admin, REDO_CART_ORDER_QUERY, {
-      variables: { id: gid },
-    });
-    const json = (await res.json()) as {
+    // adminGraphqlWithRetry は JSON を読んだ結果を返す（Response ではない）
+    const json = await adminGraphqlWithRetry<{
       data?: { order?: (RedoCartSourceOrder & Record<string, unknown>) | null };
       errors?: { message?: string }[];
-    };
+    }>(admin, REDO_CART_ORDER_QUERY, {
+      variables: { id: gid },
+    });
     if (json.errors?.length) {
       return corsJson({ ok: false, error: "注文を読み込めませんでした" }, { status: 500 });
     }
@@ -114,8 +114,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
     return corsJson({ ok: true, plan });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return corsErrorJson(request, { ok: false, error: message }, 500);
+    // 中の英語のエラーは店の画面に出さない（ログにだけ残す）
+    console.error("[redo-cart]", err);
+    return corsErrorJson(
+      request,
+      { ok: false, error: "注文を読み込めませんでした。しばらくしてから、もう一度押してください。" },
+      500,
+    );
   }
 }
 
