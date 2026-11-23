@@ -39,6 +39,7 @@ import {
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
+import { FormHeading, FormHero, FormLine, yen } from "./AdjustFormParts.jsx";
 import { adjustmentBadges, adjustmentKindLabel, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
 import { financialStatusLabel } from "./orderDisplayUtils.js";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
@@ -991,7 +992,7 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
             <s-text fontSize="small">
               ¥{Number(c.amount ?? 0).toLocaleString()} ・
               {` ${localDateTimeLabel(c.createdAt)}`}
-              {c.looksLikeThisEvent ? "（特殊返金のメモ・金額が合う）" : ""}
+              {c.looksLikeThisEvent ? "（この登録のメモ・金額が合う）" : ""}
             </s-text>
             {c.note ? <s-text tone="subdued" fontSize="small">メモ: {c.note}</s-text> : null}
             <s-button
@@ -1135,39 +1136,32 @@ function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
 // ──────────────────────────────────────────────
 /** 元の支払い（支払方法ごとの支払った額・返金した額）と、1 行ずつの「全額反映」 */
 function OrderTenderPanel({ order, lines, onFill, fillLabel = "全額反映", disabled }) {
+  // 注文の詳細と同じ形（T 2026-11-24）: 見出し「取引」、左に支払方法・右に額。返金の「全額反映」は行の右に小さく
   const total = roundMoney(order?.totalPrice?.amount ?? 0);
   return (
-    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-      <s-stack gap="small">
-        <s-text tone="subdued">対象取引: {order?.orderName ?? "-"}（合計 ¥{total.toLocaleString()}）</s-text>
-        {lines.length === 0 ? (
-          <s-text tone="subdued" fontSize="small">注文の支払いを読めませんでした。金額は手で入れてください。</s-text>
-        ) : (
-          lines.map((line) => (
-            <s-stack
-              key={line.gateway || line.label}
-              direction="inline"
-              justifyContent="space-between"
-              alignItems="center"
-              gap="small"
-            >
+    <s-stack gap="none">
+      <FormHeading>取引</FormHeading>
+      <FormLine label={order?.orderName ?? "この取引"} value={`合計 ${yen(total)}`} strong />
+      {lines.length === 0 ? (
+        <s-text type="small" color="subdued">注文の支払いを読めませんでした。金額は手で入れてください。</s-text>
+      ) : (
+        lines.map((line) => (
+          <s-box key={line.gateway || line.label} paddingBlock="small-300">
+            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small">
               <s-stack gap="none">
-                <s-text fontWeight="bold">{line.label}</s-text>
-                <s-text tone="subdued" fontSize="small">
-                  {`支払い ¥${line.paid.toLocaleString()}`}
-                  {line.refunded > 0 ? ` ／ 返金 ¥${line.refunded.toLocaleString()}` : ""}
-                </s-text>
+                <s-text color="subdued">{line.label}</s-text>
+                <s-text>{line.refunded > 0 ? `${yen(line.paid)}（返金 ${yen(line.refunded)}）` : yen(line.paid)}</s-text>
               </s-stack>
               {onFill ? (
-                <s-button kind="secondary" onClick={() => onFill(line)} disabled={disabled}>
+                <s-button variant="secondary" onClick={() => onFill(line)} disabled={disabled}>
                   {fillLabel}
                 </s-button>
               ) : null}
             </s-stack>
-          ))
-        )}
-      </s-stack>
-    </s-box>
+          </s-box>
+        ))
+      )}
+    </s-stack>
   );
 }
 
@@ -1311,48 +1305,66 @@ function SpecialRefundForm({
     }
   };
 
+  // 入力・確認は注文の詳細と同じ形（T 2026-11-24）: 見出しで区切り、確かめる所は大きく。下は固定の「戻る」と主のボタン
+  const formHeading = currentMode === "receipt" ? "レシートの現金を直す" : "返金方法変更";
   if (confirming) {
     return (
-      <s-page heading={currentMode === "receipt" ? "レシートの現金を直す" : "返金方法変更を登録"}>
+      <s-page heading={formHeading}>
         <s-scroll-box>
           <s-box padding="base">
-            <s-stack gap="base">
-              <s-text type="strong">この内容で登録します</s-text>
-              <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <Row label="取引" value={order?.orderName ?? "-"} />
-                  <Row label="内容" value={REFUND_MODES.find((m) => m.value === currentMode)?.label ?? ""} />
-                  <Row label="金額" value={`¥${Number(amount).toLocaleString()}`} />
-                  {showPaymentFields ? (
-                    <>
-                      <Row label="元の支払方法" value={paymentLabel(originalPaymentMethod, paymentMethods)} />
-                      <Row label="返金方法" value={paymentLabel(actualRefundMethod, refundMethods)} />
-                    </>
-                  ) : null}
-                  {showAdjustKind ? (
-                    <Row label="調整種別" value={ADJUST_KINDS.find((k) => k.value === adjustKind)?.label ?? adjustKind} />
-                  ) : null}
-                  {note ? <Row label="メモ" value={note} /> : null}
-                </s-stack>
+            <s-stack gap="none">
+              <s-text>この内容で登録します。</s-text>
+              <s-box paddingBlockStart="base">
+                <FormHero
+                  label={REFUND_MODES.find((m) => m.value === currentMode)?.label ?? "金額"}
+                  value={yen(amount)}
+                  sub={
+                    showPaymentFields
+                      ? `${paymentLabel(originalPaymentMethod, paymentMethods)} → ${paymentLabel(actualRefundMethod, refundMethods)}`
+                      : showAdjustKind
+                        ? ADJUST_KINDS.find((k) => k.value === adjustKind)?.label ?? adjustKind
+                        : undefined
+                  }
+                />
               </s-box>
-              {error ? <s-text tone="critical">{error}</s-text> : null}
-              <s-stack gap="small">
-                <s-button kind="primary" onClick={handleSubmit} loading={loading}>
-                  登録する
-                </s-button>
-                <s-button kind="secondary" onClick={() => setConfirming(false)} disabled={loading}>
-                  修正する
-                </s-button>
-              </s-stack>
+              {showPaymentFields ? (
+                <>
+                  <FormHeading>変更前</FormHeading>
+                  <FormLine label="元の支払方法" value={paymentLabel(originalPaymentMethod, paymentMethods)} />
+                  <FormHeading>変更後</FormHeading>
+                  <FormLine label="返金方法" value={paymentLabel(actualRefundMethod, refundMethods)} strong />
+                </>
+              ) : null}
+              <FormHeading>取引</FormHeading>
+              <FormLine label="取引" value={order?.orderName ?? "-"} />
+              {showAdjustKind ? (
+                <FormLine label="調整種別" value={ADJUST_KINDS.find((k) => k.value === adjustKind)?.label ?? adjustKind} />
+              ) : null}
+              {note ? <FormLine label="メモ" value={note} /> : null}
+              {error ? (
+                <s-box paddingBlockStart="base">
+                  <s-text tone="critical">{error}</s-text>
+                </s-box>
+              ) : null}
             </s-stack>
           </s-box>
         </s-scroll-box>
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={() => setConfirming(false)}
+          leftDisabled={loading}
+          rightLabel="登録する"
+          onRight={handleSubmit}
+          rightDisabled={loading}
+          rightLoading={loading}
+        />
       </s-page>
     );
   }
 
   return (
-    <s-page heading="特殊返金調整を登録">
+    <s-page heading={formHeading}>
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
@@ -1377,9 +1389,9 @@ function SpecialRefundForm({
                 onChange={setMode}
               />
             ) : (
-              <s-text fontWeight="bold">{modes[0]?.label ?? ""}</s-text>
+              <s-text type="strong">{modes[0]?.label ?? ""}</s-text>
             )}
-            <s-text tone="subdued" fontSize="small">{modes.find((m) => m.value === currentMode)?.help ?? ""}</s-text>
+            <s-text type="small" color="subdued">{modes.find((m) => m.value === currentMode)?.help ?? ""}</s-text>
 
             {/* 金額 */}
             <s-text-field
@@ -1395,8 +1407,8 @@ function SpecialRefundForm({
               <>
                 {originalFromOrder && paymentMethods.length === 1 ? (
                   <s-stack gap="none">
-                    <s-text tone="subdued" fontSize="small">元の支払方法（この注文の支払い）</s-text>
-                    <s-text fontWeight="bold">{paymentMethods[0].label}</s-text>
+                    <s-text type="small" color="subdued">元の支払方法（この注文の支払い）</s-text>
+                    <s-text type="strong">{paymentMethods[0].label}</s-text>
                   </s-stack>
                 ) : (
                   <PosChoiceField
@@ -1441,17 +1453,18 @@ function SpecialRefundForm({
 
             {error ? <s-text tone="critical">{error}</s-text> : null}
 
-            <s-stack gap="small">
-              <s-button kind="primary" onClick={handleConfirm} disabled={loading}>
-                確認する
-              </s-button>
-              <s-button kind="secondary" onClick={onBack} disabled={loading}>
-                戻る
-              </s-button>
-            </s-stack>
           </s-stack>
         </s-box>
       </s-scroll-box>
+      <FixedFooterNavBar
+        centerAlignWithButtons
+        leftLabel="戻る"
+        onLeft={onBack}
+        leftDisabled={loading}
+        rightLabel="確認する"
+        onRight={handleConfirm}
+        rightDisabled={loading}
+      />
     </s-page>
   );
 }
@@ -1760,47 +1773,69 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
   const label = adjustmentKindLabel(event);
   const methodLabel = (v) => refundMethods.find((m) => m.value === v)?.label ?? v ?? "-";
 
+  // 入力・確認は注文の詳細と同じ形（T 2026-11-24）: 見出しで区切り、確かめる所は大きく。下は固定の「戻る」と主のボタン
   if (confirming) {
     return (
       <s-page heading={`${label}を変更`}>
         <s-scroll-box>
           <s-box padding="base">
-            <s-stack gap="base">
-              <s-text type="strong">前の登録を無効にして、次の内容で登録し直します</s-text>
-              <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <Row label="取引" value={order?.orderName ?? "-"} />
-                  <Row label="種別" value={label} />
-                  {isVoucher ? (
-                    <>
-                      <Row label="商品券額面" value={`¥${face.toLocaleString()}`} />
-                      <Row label="お釣り" value={`¥${Number(change ?? 0).toLocaleString()}`} />
-                    </>
-                  ) : (
-                    <Row label="金額" value={`¥${Number(amount).toLocaleString()}`} />
-                  )}
-                  {needsMethod ? <Row label="返金方法" value={methodLabel(actualRefundMethod)} /> : null}
-                  <Row label="数える日" value={EDIT_DATE_MODES.find((d) => d.value === dateMode)?.label ?? dateMode} />
-                  <Row label="わけ" value={reason.trim()} />
-                </s-stack>
+            <s-stack gap="none">
+              <s-text>前の登録を無効にして、次の内容で登録し直します。</s-text>
+              <s-box paddingBlockStart="base">
+                {isVoucher ? (
+                  <FormHero label="釣銭" value={yen(change)} sub={`額面 ${yen(face)} − 商品券で払った額 ${yen(applied)}`} />
+                ) : (
+                  <FormHero
+                    label="金額"
+                    value={yen(amount)}
+                    sub={needsMethod ? `${event.originalPaymentLabel || event.originalPaymentMethod || "元の支払方法"} → ${methodLabel(actualRefundMethod)}` : undefined}
+                  />
+                )}
               </s-box>
+              <FormHeading>変更前</FormHeading>
+              {isVoucher ? (
+                <FormLine label="商品券の額面" value={yen(event.voucherFaceValue)} />
+              ) : (
+                <FormLine label="金額" value={yen(event.amount)} />
+              )}
+              {needsMethod ? <FormLine label="返金方法" value={event.actualRefundLabel || methodLabel(event.actualRefundMethod)} /> : null}
+              <FormHeading>変更後</FormHeading>
+              {isVoucher ? (
+                <FormLine label="商品券の額面" value={yen(face)} strong />
+              ) : (
+                <FormLine label="金額" value={yen(amount)} strong />
+              )}
+              {needsMethod ? <FormLine label="返金方法" value={methodLabel(actualRefundMethod)} strong /> : null}
+              <FormHeading>取引</FormHeading>
+              <FormLine label="取引" value={order?.orderName ?? "-"} />
+              <FormLine label="種類" value={label} />
+              {isVoucher || isNative ? null : (
+                <FormLine label="数える日" value={EDIT_DATE_MODES.find((d) => d.value === dateMode)?.label ?? dateMode} />
+              )}
+              <FormLine label="わけ" value={reason.trim()} />
               {refundDone ? (
-                <s-text tone="critical" fontSize="small">
-                  Shopify の返金は直しません（アプリの記録だけを直します）。
-                </s-text>
+                <s-box paddingBlockStart="base">
+                  <s-text type="small" tone="critical">Shopify の返金は直しません（アプリの記録だけを直します）。</s-text>
+                </s-box>
               ) : null}
-              {error ? <s-text tone="critical">{error}</s-text> : null}
-              <s-stack gap="small">
-                <s-button kind="primary" onClick={handleSubmit} loading={loading}>
-                  変更する
-                </s-button>
-                <s-button kind="secondary" onClick={() => setConfirming(false)} disabled={loading}>
-                  修正する
-                </s-button>
-              </s-stack>
+              {error ? (
+                <s-box paddingBlockStart="base">
+                  <s-text tone="critical">{error}</s-text>
+                </s-box>
+              ) : null}
             </s-stack>
           </s-box>
         </s-scroll-box>
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={() => setConfirming(false)}
+          leftDisabled={loading}
+          rightLabel="変更する"
+          onRight={handleSubmit}
+          rightDisabled={loading}
+          rightLoading={loading}
+        />
       </s-page>
     );
   }
@@ -1819,11 +1854,11 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
             />
             <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
               <s-stack gap="extraSmall">
-                <s-text tone="subdued" fontSize="small">
+                <s-text type="small" color="subdued">
                   前の登録は無効にして残し、直した内容で登録し直します。
                 </s-text>
                 {refundDone ? (
-                  <s-text tone="critical" fontSize="small">
+                  <s-text type="small" tone="critical">
                     この登録は Shopify でも返金済みです。Shopify の返金は直りません。金額を変えるときは Shopify の管理画面でも直してください。
                   </s-text>
                 ) : null}
@@ -1839,12 +1874,12 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
                   onInput={(e) => setFaceValue(e?.currentTarget?.value ?? "")}
                 />
                 <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
-                <Row label="お釣り" value={change == null ? "-" : `¥${change.toLocaleString()}`} />
+                <FormLine label="釣銭" value={change == null ? "-" : yen(change)} strong />
               </>
             ) : isNative ? (
               <s-stack gap="none">
                 <Row label="金額（純正の返金のまま）" value={`¥${Number(amount).toLocaleString()}`} />
-                <s-text tone="subdued" fontSize="small">分け方を変えるときは、無効にしてから変更し直してください。</s-text>
+                <s-text type="small" color="subdued">分け方を変えるときは、無効にしてから変更し直してください。</s-text>
               </s-stack>
             ) : (
               <s-text-field
@@ -1898,17 +1933,18 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
 
             {error ? <s-text tone="critical">{error}</s-text> : null}
 
-            <s-stack gap="small">
-              <s-button kind="primary" onClick={handleConfirm} disabled={loading}>
-                確認する
-              </s-button>
-              <s-button kind="secondary" onClick={onBack} disabled={loading}>
-                戻る
-              </s-button>
-            </s-stack>
           </s-stack>
         </s-box>
       </s-scroll-box>
+      <FixedFooterNavBar
+        centerAlignWithButtons
+        leftLabel="戻る"
+        onLeft={onBack}
+        leftDisabled={loading}
+        rightLabel="確認する"
+        onRight={handleConfirm}
+        rightDisabled={loading}
+      />
     </s-page>
   );
 }
@@ -1929,7 +1965,7 @@ function Row({ label, value }) {
 function refundMethodsMessage(state) {
   if (state === "loading") return "支払方法を読み込み中…";
   if (state === "error") return "支払方法を読み込めませんでした。通信を確かめて、この画面を開き直してください。";
-  if (state === "empty") return "特殊返金で選べる支払方法がありません。管理画面の「支払方法」で登録してください。";
+  if (state === "empty") return "返金方法に選べる支払方法がありません。管理画面の「支払方法」で「特殊返金で選べる」をオンにしてください。";
   return "";
 }
 

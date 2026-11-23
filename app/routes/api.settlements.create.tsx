@@ -132,8 +132,8 @@ function pendingSpecialRefundWarning(labels: string[]): string {
   const shown = labels.slice(0, 5).join("、");
   const more = labels.length > 5 ? ` ほか ${labels.length - 5} 件` : "";
   return (
-    `返金処理中の特殊返金があります（注文: ${shown}${more}）。この返金は点検の金額に入っていません。` +
-    "精算（確定）の前に、POS の特殊返金で「返金を確かめる」を押してください（自動の確定をオンにした店では、数分たつと自動で読み直します）。"
+    `返金処理中の返金方法変更があります（注文: ${shown}${more}）。この返金は点検の金額に入っていません。` +
+    "精算（確定）の前に、POS の「返金方法変更」タイルでその注文を開き、「返金を確かめる」を押してください（自動の確定をオンにした店では、数分たつと自動で読み直します）。"
   );
 }
 

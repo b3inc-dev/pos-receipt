@@ -152,7 +152,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
       : methodsState === "error"
         ? "支払方法を読み込めませんでした。通信を確かめて、この画面を開き直してください。"
         : methodsState === "empty"
-          ? "特殊返金で選べる支払方法がありません。管理画面の「支払方法」で登録してください。"
+          ? "返金方法に選べる支払方法がありません。管理画面の「支払方法」で「特殊返金で選べる」をオンにしてください。"
           : "";
 
   const submit = async () => {
