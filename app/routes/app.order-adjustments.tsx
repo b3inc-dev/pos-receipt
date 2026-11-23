@@ -228,8 +228,8 @@ function EditPanel({ item, refundMethods, busy, onCancel }: {
           ) : null}
           {item.eventType === "receipt_cash_adjustment" ? (
             <s-choice-list label="調整の種類" name="adjustKind" values={[item.adjustKind ?? "undo"]}>
-              <s-choice value="undo">取り消し</s-choice>
-              <s-choice value="extra">追加</s-choice>
+              <s-choice value="undo">返金を取り消す（売上に戻す）</s-choice>
+              <s-choice value="extra">現金を足す（売上に足す）</s-choice>
             </s-choice-list>
           ) : null}
           {/* 商品券は注文の日で数えるので、数える日は選ばない */}

@@ -164,7 +164,7 @@ Location Stock の POS Lite 配送では、送料が注文の配送料でなく 
 | eventType | 反映内容（概略） |
 |-----------|------------------|
 | `cash_refund` | 返金額を支払セクション／refundTotal 等へ（設定 `reflectCashRefundToSettlement`） |
-| `receipt_cash_adjustment` | undo/extra に応じ増減（設定依存） |
+| `receipt_cash_adjustment` | 記録だけ（Shopify では返金しない。T 決定 2026-11-23）。`undo`＝返金を取り消して売上に戻す（返金の合計と支払方法の行の返金から引く）、`extra`＝現金を売上に足す |
 | `payment_method_override` | 実際の返金手段側へ寄せる（設定依存） |
 | `voucher_change_adjustment` | `voucherChangeAmount` に加算（設定依存） |
 

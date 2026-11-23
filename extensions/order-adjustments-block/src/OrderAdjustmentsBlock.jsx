@@ -44,7 +44,7 @@ function entryText(e) {
   const from = e.fromLabel ?? e.fromMethod ?? "";
   const to = e.toLabel ?? e.toMethod ?? "";
   const methods = from || to ? `${from || "—"}→${to || "—"}` : "";
-  const adjust = e.adjustKind === "undo" ? "（取り消し）" : e.adjustKind === "extra" ? "（追加）" : "";
+  const adjust = e.adjustKind === "undo" ? "（返金を取り消す）" : e.adjustKind === "extra" ? "（現金を足す）" : "";
   return [kind + adjust, methods, yen(e.amount)].filter(Boolean).join(" ");
 }
 

@@ -193,11 +193,7 @@ export default function SpecialRefundSettingsPage() {
                       checked={form.shopifyExecutePaymentMethodOverride}
                       onChange={(v) => set("shopifyExecutePaymentMethodOverride", v)}
                     />
-                    <Checkbox
-                      label="レシート現金調整（取消のみ。追加徴収は実返金しません）"
-                      checked={form.shopifyExecuteReceiptCashAdjustment}
-                      onChange={(v) => set("shopifyExecuteReceiptCashAdjustment", v)}
-                    />
+                    <Text as="p" tone="subdued">レシート現金調整は精算の数字を直すだけで、Shopify では返金しません。</Text>
                   </>
                 ) : null}
                 <Checkbox

@@ -100,7 +100,7 @@
 |---|---|---|
 | `cash_refund`・`payment_method_override` | `success` | Shopify の返金はもう `fromMethod` の行に入っているので、`amount` を `fromMethod` の返金から `toMethod` の返金へ移すだけ。返金の総額は変えない（`fromMethod` の行がその日に無ければ移さず警告） |
 | 同上 | `none`・`skipped`・`failed` | `toMethod` の行の返金と、返金の総額に `amount` を足す |
-| `receipt_cash_adjustment` | `success` | 何もしない（Shopify の取引に入っている） |
+| `receipt_cash_adjustment` | `success` | 何もしない（Shopify の取引に入っている）。2026-11-23 からレシート現金調整は Shopify で返金しない（記録だけ）ので、`success` は前からの行だけ |
 | 同上 `undo` | それ以外 | 返金の総額と `fromMethod` の行の返金から `amount` を引く |
 | 同上 `extra` | それ以外 | 売上の総額と `fromMethod` の行の売上に `amount` を足す |
 | どれでも | `pending` | 数えない。pos-receipt は精算を確定しない（先に「返金を確かめる」） |

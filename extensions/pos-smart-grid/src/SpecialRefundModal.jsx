@@ -113,8 +113,8 @@ const FALLBACK_PAYMENT_METHODS = [
 ];
 
 const ADJUST_KINDS = [
-  { value: "undo", label: "取消（返金）" },
-  { value: "extra", label: "追加徴収" },
+  { value: "undo", label: "返金を取り消す（売上に戻す）" },
+  { value: "extra", label: "現金を足す（売上に足す）" },
 ];
 
 // イベント種別の日本語ラベル
