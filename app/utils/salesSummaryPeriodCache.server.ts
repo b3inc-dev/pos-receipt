@@ -45,3 +45,61 @@ export function needsLocationDayCompute(
   if (!shouldRecompute && hasCache) return false;
   return true;
 }
+
+/**
+ * POS の期間（当月）の読み込みで、1 回のリクエストの中で数えてよい時間（ミリ秒）。
+ * 環境変数 SALES_SUMMARY_POS_PERIOD_TIME_BUDGET_MS（0=制限なし、未設定時は 20 秒）。
+ * 時間を超えた「店×日」は裏で数える（salesSummaryFillQueue）。POS の待ち時間を超えて切れないため。
+ */
+export function getSalesSummaryPosPeriodTimeBudgetMs(): number {
+  return parseEnvIntWithZeroUnlimited("SALES_SUMMARY_POS_PERIOD_TIME_BUDGET_MS", 20000, 1000, 600000);
+}
+
+/**
+ * 数えるのに失敗した「店×日」を少しのあいだ覚え、開くたびに同じ分を数え直さない。
+ * 覚える時間は SALES_SUMMARY_COMPUTE_FAILURE_TTL_SECONDS（未設定時は 10 分）。
+ */
+const failedComputes = new Map<string, number>();
+const FAILED_MAX_ENTRIES = 5000;
+
+function failureTtlMs(): number {
+  const raw = Number(process.env.SALES_SUMMARY_COMPUTE_FAILURE_TTL_SECONDS);
+  const sec = Number.isFinite(raw) && raw >= 0 ? Math.trunc(raw) : 600;
+  return sec * 1000;
+}
+
+export function markSalesSummaryComputeFailed(key: string, now = Date.now()): void {
+  const ttl = failureTtlMs();
+  if (ttl <= 0) return;
+  failedComputes.set(key, now + ttl);
+  while (failedComputes.size > FAILED_MAX_ENTRIES) {
+    const first = failedComputes.keys().next().value;
+    if (first === undefined) break;
+    failedComputes.delete(first);
+  }
+}
+
+export function isSalesSummaryComputeRecentlyFailed(key: string, now = Date.now()): boolean {
+  const until = failedComputes.get(key);
+  if (until === undefined) return false;
+  if (until <= now) {
+    failedComputes.delete(key);
+    return false;
+  }
+  return true;
+}
+
+export function clearSalesSummaryComputeFailed(key: string): void {
+  failedComputes.delete(key);
+}
+
+/** 試験用 */
+export function __resetSalesSummaryComputeFailuresForTest() {
+  failedComputes.clear();
+}
+
+/** ログに出す失敗の理由（長さを切る。個人情報は入れない前提のエラー文だけ） */
+export function computeFailureReason(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.replace(/\s+/g, " ").slice(0, 200);
+}

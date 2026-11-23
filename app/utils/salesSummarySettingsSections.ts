@@ -14,7 +14,7 @@ type BoolKey = {
 
 export const SECTION_TITLES: Record<SalesSummarySectionKey, string> = {
   basic: "使い方",
-  display: "出す店と行",
+  display: "出す行",
   numbers: "出す数字",
   footfall: "入店数の報告",
   link: "ブラウザで見るリンク",
@@ -22,7 +22,7 @@ export const SECTION_TITLES: Record<SalesSummarySectionKey, string> = {
 
 export const SECTION_DESCRIPTIONS: Record<SalesSummarySectionKey, string> = {
   basic: "売上サマリーを使うか、1日・期間で見られるか、週の始まりを決めます。",
-  display: "POS の売上サマリーに出す店と、合計などの行を決めます。",
+  display: "POS の売上サマリーに出す、合計などの行を決めます。出す店は、店舗の設定の「売上サマリーで集計する」で決めます。",
   numbers: "売上サマリーに出す数字を選びます。外した数字は出ません。",
   footfall: "POS の売上サマリーから入店数を報告できるようにします。",
   link: "Shopify にログインしなくても、リンクを開くだけで全店の売上サマリーを見られます。",
@@ -98,7 +98,6 @@ export function readSectionForm(
   const out: Partial<SalesSummarySettings> = {};
   for (const key of SECTION_BOOLS[section]) (out as Record<string, boolean>)[key] = form.get(key) === "on";
   if (section === "basic") out.weekStartsOn = form.get("weekStartsOn") === "sunday" ? "sunday" : "monday";
-  if (section === "display") out.visibleLocationIds = readIds(form, "visibleLocationIds", knownLocationIds);
   if (section === "numbers") {
     const label = String(form.get("loyaltyUsageSummaryLabel") ?? "").trim().slice(0, 30);
     out.loyaltyUsageSummaryLabel = label || "ポイント利用額";
@@ -130,7 +129,7 @@ export function sectionSummary(
     }
     case "display": {
       const rows = DISPLAY_CHECKS.filter((c) => s[c.key]).map((c) => c.label.replace(/を出す$|も出す$/, "").replace(/^POS のタイルに /, "タイルに "));
-      return `${rows.length ? rows.join("・") : "行を出さない"}／出す店: ${storeText(s.visibleLocationIds, names, locations.length)}`;
+      return rows.length ? rows.join("・") : "行を出さない";
     }
     case "numbers": {
       const on = NUMBER_CHECKS.filter((c) => s[c.key]).map((c) => c.label);

@@ -48,6 +48,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       name: loc.displayName || loc.name,
       shopifyName: loc.name,
       features: featureSummary(loc, "features"),
+      // 売上サマリーに出すかは店舗設定だけで決まる（T さん 2026-11-24）。一覧で 1 目で分かるようにする。プランで使えない店では出さない
+      salesSummary: locked.includes("salesSummaryEnabled") ? null : loc.salesSummaryEnabled,
       differing: differingKeys(loc, defaults).map((key) => ({ key, label: DEFAULTABLE_LABELS[key], on: loc[key] })),
       nonPosRefund: loc.nonPosRefundAttributionEnabled,
     })),
@@ -171,6 +173,7 @@ export default function StoresPage() {
                     </div>
                     <div className="Admin-sum-text">
                       使う機能: {loc.features}
+                      {loc.salesSummary === null ? "" : `　／　売上サマリー: ${loc.salesSummary ? "出す" : "出さない"}`}
                       {loc.differing.length > 0 ? `　／　違う所: ${loc.differing.map((d) => `${d.label}（${d.on ? "する" : "しない"}）`).join("・")}` : ""}
                     </div>
                     {loc.shopifyName !== loc.name ? <div className="Admin-sum-text">Shopify の名前: {loc.shopifyName}</div> : null}

@@ -12,7 +12,11 @@ import {
 } from "../utils/appSettings.server";
 import {
   buildLocationDayCacheSet,
+  clearSalesSummaryComputeFailed,
+  computeFailureReason,
   getSalesSummaryPeriodMaxComputes,
+  isSalesSummaryComputeRecentlyFailed,
+  markSalesSummaryComputeFailed,
   needsLocationDayCompute,
 } from "../utils/salesSummaryPeriodCache.server";
 import {
@@ -29,7 +33,7 @@ import {
   tryLoadPeriodAggregatesFromRollup,
   syncRollupsMatchingPeriodRequest,
 } from "./salesSummaryPeriodRollup.server";
-import { shareWithinLoad } from "../utils/salesSummaryLoadShare.server";
+import { shareSalesSummaryCompute } from "../utils/salesSummaryLoadShare.server";
 import type { Shop } from "@prisma/client";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
@@ -59,6 +63,8 @@ function resolveCanonicalLocationGid(
 
 type PeriodAdmin = Parameters<typeof computeAndCacheDailySummary>[0];
 
+export type PendingLocation = { locationId: string; locationName: string; days: number };
+
 export type PeriodSalesSummaryPayload = {
   rows: unknown[];
   channelRows: unknown[];
@@ -68,6 +74,10 @@ export type PeriodSalesSummaryPayload = {
   displayOptions: ReturnType<typeof mergeAndNormalizeSalesSummarySettings>;
   periodCachePartial: boolean;
   pendingComputeEstimate: number;
+  /** 数えきれず裏で数えている店と、その日数（POS の「取り込み中」の案内用） */
+  pendingLocations?: PendingLocation[];
+  /** そのうち数えるのに失敗した「店×日」の数 */
+  pendingFailedCount?: number;
   /** cachedOnly のときだけ付く。false = 保存済みが足りず rows は空（画面は数え直しを待つ） */
   cacheComplete?: boolean;
 };
@@ -87,6 +97,15 @@ export type BuildPeriodSalesSummaryOptions = {
    * POS の全店表示で「○時○分時点」の月実績を先に出すため。足りない日があれば cacheComplete=false。
    */
   cachedOnly?: boolean;
+  /**
+   * このリクエストの中で数えてよい時間（ミリ秒。0 や未指定は制限なし＝今まで通り）。
+   * 超えた「店×日」は数えずに返し、backgroundShopDomain があれば裏のキューに積む。
+   */
+  computeTimeBudgetMs?: number;
+  /** 画面が閉じられた（リクエストが切れた）ら、新しく数え始めない */
+  signal?: AbortSignal;
+  /** 数えきれなかった分を裏で数えるときのショップのドメイン */
+  backgroundShopDomain?: string;
 };
 
 export async function buildPeriodSalesSummaryPayload(
@@ -145,7 +164,7 @@ export async function buildPeriodSalesSummaryPayload(
     });
   }
 
-  let targetLocations: SalesSummaryLocationRow[] =
+  const targetLocations: SalesSummaryLocationRow[] =
     locationIdsParam.length > 0
       ? allLocations.filter((l: SalesSummaryLocationRow) => {
           const lNum = l.shopifyLocationGid.replace("gid://shopify/Location/", "");
@@ -157,11 +176,8 @@ export async function buildPeriodSalesSummaryPayload(
         })
       : allLocations;
 
-  if (merged.visibleLocationIds.length > 0) {
-    targetLocations = targetLocations.filter((l: SalesSummaryLocationRow) =>
-      merged.visibleLocationIds.includes(l.shopifyLocationGid),
-    );
-  }
+  // 出す店は店舗設定（Location.salesSummaryEnabled）だけで決める。
+  // 売上サマリー設定の「出す店」（visibleLocationIds）は読まない（T さん 2026-11-24 のカード）。
 
   const locationGids = targetLocations.map((l) => l.shopifyLocationGid);
   const locationIdsForQuery = expandLocationIdsForCacheQuery(targetLocations);
@@ -190,6 +206,8 @@ export async function buildPeriodSalesSummaryPayload(
 
   let periodCachePartial = false;
   let pendingComputeEstimate = 0;
+  let pendingLocations: PendingLocation[] = [];
+  let pendingFailedCount = 0;
 
   if (dateFrom && dateTo) {
     const start = new Date(dateFrom + "T00:00:00Z").getTime();
@@ -224,7 +242,13 @@ export async function buildPeriodSalesSummaryPayload(
         locationWork.push({ day, loc });
       }
     }
-    locationWork.sort((a, b) => a.day.localeCompare(b.day) || a.loc.name.localeCompare(b.loc.name));
+    // 今日の分（日次と同じ読み込みで共有する）を先に、そのあと古い日から。時間を超えた残りは裏で数える
+    locationWork.sort(
+      (a, b) =>
+        Number(b.day >= today) - Number(a.day >= today) ||
+        a.day.localeCompare(b.day) ||
+        a.loc.name.localeCompare(b.loc.name),
+    );
 
     const prefetchChannelCaches =
       enabledChannels.length === 0
@@ -293,28 +317,53 @@ export async function buildPeriodSalesSummaryPayload(
 
     const maxPeriod = getSalesSummaryPeriodMaxComputes();
     let budget = maxPeriod === 0 ? Number.MAX_SAFE_INTEGER : maxPeriod;
+    const timeBudgetMs = options.computeTimeBudgetMs ?? 0;
+    const startedAt = Date.now();
+    /** POS の待ち時間・中断・上限を超えたら、残りはこのリクエストでは数えない */
+    const outOfTime = () =>
+      budget <= 0 ||
+      options.signal?.aborted === true ||
+      (timeBudgetMs > 0 && Date.now() - startedAt >= timeBudgetMs);
 
-    let locAttempts = 0;
-    for (const { day, loc } of locationWork) {
-      if (budget <= 0) break;
-      locAttempts += 1;
+    const deferred: Array<{ day: string; loc: SalesSummaryLocationRow }> = [];
+    let failedCount = 0;
+    for (const item of locationWork) {
+      const { day, loc } = item;
+      const key = `loc|${shop.id}|${loc.shopifyLocationGid}|${day}`;
+      // 少し前に失敗した「店×日」は、開くたびに数え直さない（裏で数え直す）
+      if (isSalesSummaryComputeRecentlyFailed(key)) {
+        failedCount += 1;
+        deferred.push(item);
+        continue;
+      }
+      if (outOfTime()) {
+        deferred.push(item);
+        continue;
+      }
       try {
-        await shareWithinLoad(loadId, `loc|${shop.id}|${loc.shopifyLocationGid}|${day}`, () =>
+        await shareSalesSummaryCompute(loadId, key, () =>
           computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, day),
         );
-      } catch {
-        /* ignore */
+        clearSalesSummaryComputeFailed(key);
+      } catch (e) {
+        failedCount += 1;
+        markSalesSummaryComputeFailed(key);
+        deferred.push(item);
+        console.warn(
+          `[sales-summary period] compute failed shop=${shop.id} location=${loc.shopifyLocationGid.replace("gid://shopify/Location/", "")} day=${day} reason=${computeFailureReason(e)}`,
+        );
       }
       budget -= 1;
     }
-    const skippedLoc = Math.max(0, locationWork.length - locAttempts);
+    const skippedLoc = deferred.length;
 
     let chAttempts = 0;
     for (const { day, ch } of channelWork) {
-      if (budget <= 0) break;
+      if (outOfTime()) break;
       chAttempts += 1;
+      const key = `ch|${shop.id}|${ch.id}|${day}`;
       try {
-        await shareWithinLoad(loadId, `ch|${shop.id}|${ch.id}|${day}`, () =>
+        await shareSalesSummaryCompute(loadId, key, () =>
           computeAndCacheChannelDailySummary(
             admin,
             shop.id,
@@ -324,15 +373,43 @@ export async function buildPeriodSalesSummaryPayload(
             day,
           ),
         );
-      } catch {
-        /* ignore */
+      } catch (e) {
+        failedCount += 1;
+        console.warn(
+          `[sales-summary period] channel compute failed shop=${shop.id} channel=${ch.id} day=${day} reason=${computeFailureReason(e)}`,
+        );
       }
       budget -= 1;
     }
     const skippedCh = Math.max(0, channelWork.length - chAttempts);
 
+    // 数えきれなかった「店×日」は裏で数える（積めなければ、今までどおり次に開いたときに数える）
+    if (deferred.length > 0 && options.backgroundShopDomain) {
+      const items = deferred.map(({ day, loc }) => ({
+        locationGid: loc.shopifyLocationGid,
+        locationName: loc.name,
+        day,
+      }));
+      void import("./salesSummaryFillQueue.server")
+        .then(({ enqueueSalesSummaryFill }) => enqueueSalesSummaryFill(options.backgroundShopDomain!, shop.id, items))
+        .catch((e) => console.warn("[sales-summary period] background fill:", computeFailureReason(e)));
+    }
+
+    const byLoc = new Map<string, { locationId: string; locationName: string; days: number }>();
+    for (const { loc } of deferred) {
+      const cur = byLoc.get(loc.shopifyLocationGid) ?? {
+        locationId: loc.shopifyLocationGid,
+        locationName: loc.name,
+        days: 0,
+      };
+      cur.days += 1;
+      byLoc.set(loc.shopifyLocationGid, cur);
+    }
+    pendingLocations = [...byLoc.values()];
+    pendingFailedCount = failedCount;
+
     pendingComputeEstimate = skippedLoc + skippedCh;
-    periodCachePartial = maxPeriod !== 0 && pendingComputeEstimate > 0;
+    periodCachePartial = pendingComputeEstimate > 0;
   }
 
   const whereTargetDate: Record<string, string> = {};
@@ -571,6 +648,7 @@ export async function buildPeriodSalesSummaryPayload(
     displayOptions: merged,
     periodCachePartial,
     pendingComputeEstimate,
+    ...(pendingLocations.length > 0 ? { pendingLocations, pendingFailedCount } : {}),
     ...(cachedOnly ? { cacheComplete: true } : {}),
   };
 }

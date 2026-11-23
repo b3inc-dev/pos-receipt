@@ -155,6 +155,19 @@ function fmtAmount(n) {
 }
 
 /** 「15:42時点」形式（端末の時刻。店舗の端末は日本時間）。時刻が無ければ「保存済み」 */
+/**
+ * 期間（当月）の数字に、まだ数え終わっていない店があるときの案内（裏で数えている）。
+ * 例: 「まだ数え終わっていない日があります（北千住店 あと5日分 ほか2店）。少したってから「更新」を押すと、数字がそろいます。」
+ */
+function pendingCountNotice(period) {
+  const list = Array.isArray(period?.pendingLocations) ? period.pendingLocations.filter((p) => p && p.days > 0) : [];
+  if (list.length === 0) return "";
+  const first = list[0];
+  const name = String(first.locationName || "店");
+  const more = list.length > 1 ? ` ほか${list.length - 1}店` : "";
+  return `まだ数え終わっていない日があります（${name} あと${first.days}日分${more}）。少したってから「更新」を押すと、数字がそろいます。`;
+}
+
 function cachedAsOfLabel(cached) {
   const d = cached?.at;
   if (!d || Number.isNaN(d.getTime())) return "保存済み";
@@ -1282,6 +1295,8 @@ function SalesSummaryModal() {
   const [data, setData] = useState(null);
   /** 日次タブ: 当月MTDの期間API結果（一品単価の下の月次KPI用） */
   const [dailyMonthPeriod, setDailyMonthPeriod] = useState(null);
+  /** 日別で、日の数字を出したあと当月の列を読み込んでいる途中か */
+  const [monthLoading, setMonthLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState(null);
@@ -1428,6 +1443,7 @@ function SalesSummaryModal() {
     setCachedAsOf(null);
     setRefreshing(false);
     setRefreshFailed(false);
+    setMonthLoading(false);
     try {
       if (scope === "single" && !sessionGid) {
         setData(null);
@@ -1477,30 +1493,34 @@ function SalesSummaryModal() {
 
         // 日次と当月の期間で同じ「今日・その店」を数えるので、同じ loadId を付けて 1 回にまとめる
         const loadId = newSalesSummaryLoadId();
-        const [dailySettled, monthSettled] = await Promise.allSettled([
-          getDailySummary({ targetDate, locationIds: locationIdsForApi, loadId }),
-          mr
-            ? getPeriodSummary({
-                dateFrom: mr.dateFrom,
-                dateTo: mr.dateTo,
-                budgetDateTo: mr.budgetDateTo,
-                progressAsOfDate: targetDate,
-                locationIds: locationIdsForApi,
-                loadId,
-              })
-            : Promise.resolve(null),
-        ]);
+        const monthPromise = mr
+          ? getPeriodSummary({
+              dateFrom: mr.dateFrom,
+              dateTo: mr.dateTo,
+              budgetDateTo: mr.budgetDateTo,
+              progressAsOfDate: targetDate,
+              locationIds: locationIdsForApi,
+              loadId,
+            })
+          : Promise.resolve(null);
+        // 当月の列は日の数字を出したあとで埋める（当月を待って日の数字まで遅れないように。2026-11-24）
+        if (!shownCached) setDailyMonthPeriod(null);
+        setMonthLoading(Boolean(mr));
+        monthPromise.then(
+          (month) => {
+            if (stale()) return;
+            setDailyMonthPeriod(month?.rows ? month : null);
+            setMonthLoading(false);
+          },
+          () => {
+            if (stale()) return;
+            // 当月が取れなくても日の数字は出したまま。前に出していた保存済みの当月はそのまま残す
+            if (!shownCached) setDailyMonthPeriod(null);
+            setMonthLoading(false);
+          },
+        );
+        result = await getDailySummary({ targetDate, locationIds: locationIdsForApi, loadId });
         if (stale()) return;
-        if (dailySettled.status === "rejected") {
-          const reason = dailySettled.reason;
-          throw reason instanceof Error ? reason : new Error(String(reason));
-        }
-        result = dailySettled.value;
-        if (monthSettled.status === "fulfilled" && monthSettled.value?.rows) {
-          setDailyMonthPeriod(monthSettled.value);
-        } else {
-          setDailyMonthPeriod(null);
-        }
       } else if (grain === "monthly") {
         setDailyMonthPeriod(null);
         const { dateFrom, dateTo, budgetDateTo } = monthRange(selectedYear, selectedMonth);
@@ -1509,6 +1529,7 @@ function SalesSummaryModal() {
           dateTo,
           budgetDateTo,
           locationIds: locationIdsForApi,
+          loadId: newSalesSummaryLoadId(),
         });
         if (stale()) return;
       } else {
@@ -1522,7 +1543,7 @@ function SalesSummaryModal() {
           setError("開始日は終了日以前にしてください");
           return;
         }
-        result = await getPeriodSummary({ dateFrom, dateTo, locationIds: locationIdsForApi });
+        result = await getPeriodSummary({ dateFrom, dateTo, locationIds: locationIdsForApi, loadId: newSalesSummaryLoadId() });
         if (stale()) return;
       }
       setData(result);
@@ -1756,6 +1777,7 @@ function SalesSummaryModal() {
   const canPrevDay = targetDate > "2020-01-01";
   const todayCap = shopCalendarDay ?? todayStr();
   const canNextDay = targetDate < todayCap;
+  const pendingNotice = pendingCountNotice(grain === "daily" ? dailyMonthPeriod : data);
   const periodDateFrom = ymd(periodStartYear, periodStartMonth, periodStartDay);
   const periodDateTo = ymd(periodEndYear, periodEndMonth, periodEndDay);
   const periodRangeInvalid = periodDateFrom > periodDateTo;
@@ -2261,6 +2283,12 @@ function SalesSummaryModal() {
                     tone="warning"
                     heading={`最新の数字を取れませんでした。${cachedAsOfLabel(cachedAsOf)}の数字を表示しています。「更新」でもう一度試せます。`}
                   />
+                ) : null}
+                {!summaryShowLoading && grain === "daily" && monthLoading ? (
+                  <s-text type="small" color="subdued">当月の数字は読み込み中…</s-text>
+                ) : null}
+                {!summaryShowLoading && pendingNotice ? (
+                  <s-banner tone="info" heading={pendingNotice} />
                 ) : null}
                 {grain === "period" && periodRangeInvalid ? (
                   <s-banner tone="critical" heading="開始日が終了日より後になっています。日付を見直してください。" />
