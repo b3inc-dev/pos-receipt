@@ -453,7 +453,7 @@ export function OrderDayListScreen({
             {badgeMode === "specialRefund" ? (
               /* 幅いっぱいに均等（POS Stock の「未入庫／入庫済み」と同じ。T 2026-11-23）。
                  s-button に幅の指定は無いので、幅を割った s-box に入れる */
-              <s-stack direction="inline" gap="none" alignItems="center">
+              <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
                 {LIST_SEGMENTS.map((seg, i) => (
                   <s-box
                     key={seg.value}
