@@ -16,6 +16,7 @@ import {
   LIST_SEGMENTS,
   matchesListSegment,
   formatListBadges,
+  refundBadge,
   fmtYen,
 } from "./orderDisplayUtils.js";
 import {
@@ -68,7 +69,7 @@ export function formatPosBadges(item, badgeMode) {
     if (b.receiptIssued)
       out.push({ key: "receipt", label: "領収書発行済", tone: "success" });
     if (b.refundedShopify)
-      out.push({ key: "refund", label: "返金済", tone: "warning" });
+      out.push(refundBadge(item));
     if (b.voucherLikeGateway)
       out.push({ key: "voucher", label: "商品券決済", tone: "neutral" });
     return out;
