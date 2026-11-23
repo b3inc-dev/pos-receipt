@@ -30,9 +30,9 @@ export async function runOrderAutoAdjustmentsFromWebhook(
   if (webhookPayloadHasVoucherCartFace(payload)) {
     try {
       const r = await registerVoucherFromCartEntry(admin, shopId, orderId);
-      if (r.status === "created") {
-        console.log(`[order-auto-adjust] voucher from cart entry registered shop=${shopDomain}`);
-      }
+      console.log(
+        `[order-auto-adjust] voucher from cart entry order=${orderId.replace(/\D/g, "")} status=${r.status} shop=${shopDomain}`,
+      );
     } catch (e) {
       console.warn(`[order-auto-adjust] voucher from cart entry failed shop=${shopDomain}`, e);
     }

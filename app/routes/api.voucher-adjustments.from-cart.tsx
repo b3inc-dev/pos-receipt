@@ -39,6 +39,8 @@ export async function action({ request }: ActionFunctionArgs) {
       locationId: body.locationId != null ? String(body.locationId) : null,
       createdBy: body.createdBy != null ? String(body.createdBy) : null,
     });
+    // 開発ストアで確かめるための一行（注文の番号と結果だけ。顧客の情報は出さない）
+    console.log(`[voucher-cart-entry] post-purchase order=${sourceOrderId.replace(/\D/g, "")} status=${result.status}`);
     return corsJson({ ok: true, ...result }, { status: result.status === "created" ? 201 : 200 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
