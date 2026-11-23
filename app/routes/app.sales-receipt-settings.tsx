@@ -113,7 +113,7 @@ export default function SalesReceiptSettingsPage() {
             <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
             <Layout.Section>
               {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-              <AdminIntro><p>Lite プラン以上で利用できます。注文まとめて（order customAttributes）／商品別（line properties）の末尾印字を個別に ON/OFF できます。</p></AdminIntro>
+              <AdminIntro><p>Lite プラン以上で使えます。POS で入れた追加の項目を、注文ごとにレシートの最後へ、商品ごとに各商品の下へ印字するかを選べます。</p></AdminIntro>
             </Layout.Section>
             <Layout.AnnotatedSection title="有効化" description="POS の販売レシート印字">
               <Card>
@@ -138,18 +138,18 @@ export default function SalesReceiptSettingsPage() {
               </Card>
             </Layout.AnnotatedSection>
             <Layout.AnnotatedSection
-              title="属性末尾印字"
-              description="注文まとめて／商品別の ON/OFF"
+              title="POS で入れた追加の項目"
+              description="レシートに印字するかを、注文ごと・商品ごとに選びます"
             >
               <Card>
                 <BlockStack gap="400">
                   <Checkbox
-                    label="注文属性を末尾に印字（注文まとめて）"
+                    label="注文ごとの追加の項目をレシートの最後に印字する"
                     checked={form.printOrderAttributes}
                     onChange={(v) => setForm((p) => ({ ...p, printOrderAttributes: v }))}
                   />
                   <Checkbox
-                    label="商品属性を各行末尾に印字（商品別）"
+                    label="商品ごとの追加の項目を各商品の下に印字する"
                     checked={form.printLineAttributes}
                     onChange={(v) => setForm((p) => ({ ...p, printLineAttributes: v }))}
                   />

@@ -200,8 +200,9 @@ export default function PaymentMethodsPage() {
     <tr key={item.id}>
       <td data-label="表示名" className="History-text">
         <Text as="span" variant="bodyMd" fontWeight="semibold">{item.displayLabel}</Text>
+        {/* Shopify 側の名前（cash・shopify_payments など）は英字のまま主役にせず、小さく添えるだけ（全画面点検 11/23） */}
+        <span className="History-memo">Shopify での名前: {item.rawGatewayPattern}</span>
       </td>
-      <td data-label="Gateway パターン" className="History-text">{item.rawGatewayPattern}</td>
       <td data-label="分類" className="History-keep">
         {CATEGORY_OPTIONS.find((o) => o.value === item.category)?.label ?? item.category}
       </td>
@@ -269,7 +270,6 @@ export default function PaymentMethodsPage() {
                     <thead>
                       <tr>
                         <th scope="col">表示名</th>
-                        <th scope="col">Gateway パターン</th>
                         <th scope="col">分類</th>
                         <th scope="col">商品券</th>
                         <th scope="col">釣銭あり</th>
@@ -319,14 +319,14 @@ export default function PaymentMethodsPage() {
         <Modal.Section>
           <BlockStack gap="400">
             <TextField
-              label="Gateway パターン（必須）"
+              label="Shopify での支払方法の名前（必須）"
               value={form.rawGatewayPattern}
               onChange={(v) => setForm((p) => ({ ...p, rawGatewayPattern: v }))}
-              helpText="Shopify の gateway 名に含まれる文字列。例: Cash, Credit, 現金"
+              helpText="Shopify の取引に記録される支払方法の名前（またはその一部）。例: 現金、cash"
               autoComplete="off"
             />
             <TextField
-              label="Formatted gateway パターン（任意）"
+              label="Shopify の画面に出る支払方法の名前（任意）"
               value={form.formattedGatewayPattern}
               onChange={(v) => setForm((p) => ({ ...p, formattedGatewayPattern: v }))}
               autoComplete="off"

@@ -16,8 +16,8 @@ test("一般設定のデバッグ・診断の欄は isDevStore のときだけ�
   }
 });
 
-test("「プラン（表示用）」「有効機能 JSON（表示用）」も isDevStore のときだけ出す", () => {
-  for (const label of ["プラン（表示用）", "有効機能 JSON（表示用）"]) {
+test("「プラン（表示用）」「有効にする機能の一覧」も isDevStore のときだけ出す", () => {
+  for (const label of ["プラン（表示用）", "有効にする機能の一覧（表示用・開発ストアだけ）"]) {
     const at = page.indexOf(`label="${label}"`);
     const guard = page.lastIndexOf("{isDevStore && (", at);
     assert.ok(at > 0 && guard > 0, `${label} の前に isDevStore の分かれ目がない`);
