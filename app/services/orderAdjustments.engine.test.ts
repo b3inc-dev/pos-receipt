@@ -326,7 +326,7 @@ test("登録 API: 特殊返金を登録すると注文メタフィールドに 1
   assert.match(e.date, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(store.specialRefundEvent[0].countDate, e.date);
   assert.ok(store.specialRefundEvent[0].metafieldSyncedAt instanceof Date);
-  assert.match(String(shopifySummaries.get("gid://shopify/Order/5001")), /付け替え .*→現金 ¥500/);
+  assert.match(String(shopifySummaries.get("gid://shopify/Order/5001")), /返金方法変更 .*→現金 ¥500/);
 });
 
 test("精算: 注文の値と DB が同じなら警告なしで数える（売上サマリーも同じ）", async () => {
