@@ -54,6 +54,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | `app/uninstalled` | `/webhooks/app/uninstalled` | アンインストール処理 |
 | compliance（customers/data_request, customers/redact, shop/redact） | `/webhooks/compliance` | GDPR。`data_request` は DB 列挙＋根拠ログ後に 200（email/phone 非保存。開示は運用）。`customers/redact` は `ReceiptIssue.recipientName` と `SpecialRefundEvent.note` を `[redacted]` に対称化。詳細は `gdprCustomerDataRequest.server.ts` |
 | `orders/updated` | `/webhooks/orders/updated` | 売上サマリー更新キュー + 返金計上 metafield 同期 |
+| `orders/create` | `/webhooks/orders/create` | 会計の前に入れた商品券の額面（`_pos_receipt_voucher_face`）がある注文だけ、商品券調整を自動で登録（docs/VOUCHER_CART_ENTRY.md）。ほかの注文は何もしない |
 
 ## 6. メタフィールド
 

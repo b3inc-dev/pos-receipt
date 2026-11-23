@@ -26,6 +26,11 @@ uri = "/webhooks/compliance"
 topics = ["orders/updated"]
 uri = "/webhooks/orders/updated"
 
+# 会計の前に入れた商品券の額面がある注文だけ、作成時に商品券調整を自動で登録する（会計後の画面の予備。docs/VOUCHER_CART_ENTRY.md）
+[[webhooks.subscriptions]]
+topics = ["orders/create"]
+uri = "/webhooks/orders/create"
+
 [access_scopes]
 scopes = "read_orders,read_locations,read_gift_cards,read_products,write_draft_orders,write_orders"
 
