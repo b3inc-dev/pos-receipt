@@ -347,10 +347,22 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
       try {
         const res = await voidSpecialRefund(id);
         await refreshEvents();
-        if (res.warning) {
+        // 精算を確定した日の登録を無効にしたときは、精算の再確定を案内する（確定した数は自動では変わらない）
+        const parts = [res.warning].filter(Boolean);
+        if (res.settlementAlreadyConfirmed) {
+          const days = (res.confirmedDates ?? []).map(shortDateLabel).join("・");
+          parts.push(
+            `${days ? `${days} の` : "その日の"}精算はもう確定しています。精算の画面でその日を開き「更新」を押し、「今の数で再確定する」を押してください。`,
+          );
+        }
+        if (res.metafieldWritten === false) parts.push("注文への記録はまだ書けていません。あとで開き直すと書き直します。");
+        if (parts.length > 0) {
           setSubmitNotice({
-            tone: ev?.shopifyRefundStatus === "success" ? "warning" : "info",
-            text: res.warning,
+            tone:
+              res.settlementAlreadyConfirmed || (ev?.shopifyRefundStatus === "success" && ev?.refundSource !== "native")
+                ? "warning"
+                : "info",
+            text: parts.join(" "),
           });
         }
       } catch (e) {
@@ -581,6 +593,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
       <NativeRefundReassignForm
         order={selectedOrder}
         nativeRefunds={nativeRefunds}
+        events={events}
         allowedEventTypes={allowedEventTypes}
         loading={loading}
         error={error}
