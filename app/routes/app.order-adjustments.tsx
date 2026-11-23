@@ -35,7 +35,7 @@ import { normalizeApprovalStatus } from "../utils/specialRefundApproval";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   cash_refund: "現金返金",
-  payment_method_override: "返金手段の付け替え",
+  payment_method_override: "返金方法変更",
   voucher_change_adjustment: "商品券",
   receipt_cash_adjustment: "レシート現金調整",
 };
@@ -220,7 +220,7 @@ function EditPanel({ item, refundMethods, busy, onCancel }: {
             />
           )}
           {needsMethod ? (
-            <s-select label="実際の返金手段" name="actualRefundMethod" value={item.actualRefundMethod ?? ""}>
+            <s-select label="返金方法" name="actualRefundMethod" value={item.actualRefundMethod ?? ""}>
               {refundMethods.map((m) => (
                 <s-option key={m.value} value={m.value}>{m.label}</s-option>
               ))}
@@ -239,7 +239,7 @@ function EditPanel({ item, refundMethods, busy, onCancel }: {
               <s-choice value="today">今日の分にする</s-choice>
             </s-choice-list>
           )}
-          <s-text-field label="直したわけ" name="reason" required placeholder="例: 返金手段の選び間違い" />
+          <s-text-field label="直したわけ" name="reason" required placeholder="例: 返金方法の選び間違い" />
           {item.shopifyRefundStatus === "success" ? (
             <Text as="p" variant="bodySm" tone="caution">
               この登録は Shopify でも返金済みです。Shopify の返金は直りません（アプリの記録だけを直します）。
