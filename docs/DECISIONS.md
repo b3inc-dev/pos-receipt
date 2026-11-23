@@ -103,5 +103,5 @@
 
 - **POS の UI 拡張では `@shopify/ui-extensions` の point-of-sale にある部品だけを使う**。`s-select`・`s-option`・`s-checkbox` は POS に無く、エラーも出さずに何も描かれない。2843ee7（2026-03-10）から特殊返金の「返金種別」「元の支払手段」「実際の返金手段」「調整種別」が `s-select` で、選ぶ欄が出ないまま初めの値（現金返金・現金）で登録されていた。精算のロケーション選択（`s-select`）と領収書の「再発行として記録する」（`s-checkbox`）も同じく出ていなかった。
 - 1 つを選ぶ欄は `extensions/pos-smart-grid/src/PosChoiceField.jsx` の `PosChoiceField`（`s-choice-list`）、オン・オフは `PosToggleField` を使う。精算のロケーションは年・月と同じくボタンで開く一覧にした。
-- `scripts/lib/posExtensionComponents.test.mjs` が `extensions/` のすべてのソースを見て、POS に無い部品があると落ちる。部品の一覧は `@shopify/ui-extensions` 2025.10.x のもの。版を上げたら一覧を見直す（版が変わると試験が落ちて知らせる）。
+- `scripts/lib/posExtensionComponents.test.mjs` が POS の拡張（target がすべて `pos.` の拡張と `extensions/common`）のソースを見て、POS に無い部品があると落ちる。部品の一覧は `@shopify/ui-extensions` 2025.10.x のもの。版を上げたら一覧を見直す（版が変わると試験が落ちて知らせる）。
 - POS の実機ではまだ見ていない（選ぶ欄の見た目・押したときの動きは実機で確かめる）。

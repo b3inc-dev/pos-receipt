@@ -89,6 +89,31 @@ export function findComponentTags(src) {
   return tags;
 }
 
+/**
+ * 見る対象: shopify.extension.toml の target がすべて pos. で始まる拡張と、extensions/common。
+ * 管理画面の拡張（admin. の target）は部品の一覧が違うので見ない。
+ */
+export function listPosSourceDirs(extDir = EXT_DIR) {
+  const dirs = [];
+  for (const name of readdirSync(extDir)) {
+    const dir = join(extDir, name);
+    if (!statSync(dir).isDirectory()) continue;
+    if (name === "common") {
+      dirs.push(dir);
+      continue;
+    }
+    let toml;
+    try {
+      toml = readFileSync(join(dir, "shopify.extension.toml"), "utf8");
+    } catch {
+      continue;
+    }
+    const targets = [...toml.matchAll(/^\s*target\s*=\s*"([^"]+)"/gm)].map((m) => m[1]);
+    if (targets.length > 0 && targets.every((t) => t.startsWith("pos."))) dirs.push(dir);
+  }
+  return dirs;
+}
+
 describe("POS UI 拡張の部品", () => {
   it("拾い方の確かめ: s-select・s-checkbox を拾い、コメントの中は拾わない", () => {
     const src = `// <s-select> はダメ\n<s-stack><s-select label="a"><s-option value="x" /></s-select><s-checkbox /></s-stack>`;
@@ -101,9 +126,11 @@ describe("POS UI 拡張の部品", () => {
     assert.equal(pkg.dependencies["@shopify/ui-extensions"], "2025.10.x");
   });
 
-  it("extensions/ では POS にある部品だけを使う", () => {
-    const files = listSourceFiles(EXT_DIR);
-    assert.ok(files.length > 0, "extensions/ のソースが見つからない");
+  it("POS の拡張では POS にある部品だけを使う", () => {
+    const dirs = listPosSourceDirs();
+    assert.ok(dirs.some((d) => d.endsWith("pos-smart-grid")), "POS の拡張が見つからない");
+    const files = dirs.flatMap((d) => listSourceFiles(d));
+    assert.ok(files.length > 0, "POS の拡張のソースが見つからない");
     const bad = [];
     for (const f of files) {
       for (const { tag, line } of findComponentTags(readFileSync(f, "utf8"))) {
