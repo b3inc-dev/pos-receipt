@@ -1,5 +1,5 @@
 /**
- * 返品・交換が終わった画面の「管理」の行: 返金の手段の変更（その注文の返金の画面を開く。T 2026-11-24）
+ * 返品・交換が終わった画面の「管理」の行: 返金方法変更（その注文の返金の画面を開く。T 2026-11-24）
  */
 import { render } from "preact";
 
@@ -23,5 +23,5 @@ function RefundPostReturnAction() {
     }
   };
 
-  return <s-button onClick={onClick}>返金の手段の変更</s-button>;
+  return <s-button onClick={onClick}>返金方法変更</s-button>;
 }

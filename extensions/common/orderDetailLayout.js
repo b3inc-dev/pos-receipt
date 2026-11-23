@@ -80,7 +80,7 @@ export function adjustmentBadges(event) {
   const out = [];
   // 純正の返金の付け替え: Shopify の返金は純正の返金（このアプリでは返金していない）
   if (event?.refundSource === "native") {
-    out.push({ key: "refund", label: "純正返金の付け替え", tone: "success" });
+    out.push({ key: "refund", label: "純正返金", tone: "success" });
   } else switch (event?.shopifyRefundStatus) {
     case "pending":
       out.push({ key: "refund", label: "返金処理中", tone: "critical" });
@@ -145,7 +145,7 @@ export function adjustmentSubLines(event) {
   }
   const from = event?.originalPaymentMethod ? event.originalPaymentLabel || event.originalPaymentMethod : "";
   const to = event?.actualRefundMethod ? event.actualRefundLabel || event.actualRefundMethod : "";
-  if (from && to && sameRefundMethod(event)) lines.push(`${to}のまま（手段の変更なし）`);
+  if (from && to && sameRefundMethod(event)) lines.push(`${to}のまま（返金方法の変更なし）`);
   else if (from && to) lines.push(`${from} → ${to} で返金`);
   else if (from) lines.push(`元の支払い ${from}`);
   else if (to) lines.push(`${to} で返金`);
@@ -164,7 +164,7 @@ export function adjustmentKindLabel(event) {
     case "cash_refund":
     case "payment_method_override":
       // 純正の返金の付け替えも同じ名前。違いはバッジ「純正返金の付け替え」で分かる
-      return "返金の手段の変更";
+      return "返金方法変更";
     case "receipt_cash_adjustment":
       return "レシート現金調整";
     case "voucher_change_adjustment":
@@ -202,6 +202,6 @@ export function reassignmentSummaryLines(events) {
     .filter(([, v]) => v.amount > 0)
     .map(([k, v]) => ({
       key: `reassign-${k}`,
-      text: `うち ${yen(v.amount)} は${v.toLabel}で返金（${v.fromLabel ? `${v.fromLabel}から` : ""}付け替え${v.pending ? "・承認待ち" : ""}）`,
+      text: `うち ${yen(v.amount)} は${v.toLabel}で返金（${v.fromLabel ? `${v.fromLabel}から` : ""}返金方法変更${v.pending ? "・承認待ち" : ""}）`,
     }));
 }

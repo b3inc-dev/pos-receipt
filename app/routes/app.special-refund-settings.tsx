@@ -284,15 +284,15 @@ export default function SpecialRefundSettingsPage() {
 
           <Layout.AnnotatedSection
             title="返金の予約"
-            description="POS で返金する前に、実際に返す手段を決めておけるようにするかを選びます。"
+            description="POS で返金する前に、実際の返金方法を決めておけるようにするかを選びます。"
           >
             <Card>
               <BlockStack gap="300">
                 <Checkbox
-                  label="返金の前に、実際に返す手段を予約できるようにする"
+                  label="返金の前に、実際の返金方法を予約できるようにする"
                   checked={form.refundReservationEnabled}
                   onChange={(v) => set("refundReservationEnabled", v)}
-                  helpText="オンにすると、まだ返金していない注文で「返金」を押したときに、返す手段と返金する額を先に入れられます。そのあと POS で返金すると、額が合えば自動でその手段に付け替えます（Shopify では返金しません）。初めはオフです。"
+                  helpText="オンにすると、まだ返金していない注文で「返金」を押したときに、返金方法と返金する額を先に入れられます。そのあと POS で返金すると、額が合えば自動でその返金方法に変えます（Shopify では返金しません）。初めはオフです。"
                 />
               </BlockStack>
             </Card>

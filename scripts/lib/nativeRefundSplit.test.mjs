@@ -27,7 +27,7 @@ describe("純正の返金の付け替え（POS の計算）", () => {
   });
   it("残りが無い行は付け替えできず「付け替え済み」", () => {
     assert.equal(canReassign({ remaining: 0 }), false);
-    assert.equal(nativeRefundLineStatus({ remaining: 0, reassigned: 3000 }), "付け替え済み");
+    assert.equal(nativeRefundLineStatus({ remaining: 0, reassigned: 3000 }), "返金方法変更済み");
     assert.match(nativeRefundLineStatus({ remaining: 1000, reassigned: 2000 }), /残り ¥1,000/);
     assert.equal(nativeRefundLineStatus({ remaining: 3000, reassigned: 0 }), "");
   });

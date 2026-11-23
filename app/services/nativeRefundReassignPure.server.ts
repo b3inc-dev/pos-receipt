@@ -157,8 +157,8 @@ export function checkNativeReassign(
       code: NATIVE_REFUND_AMOUNT_EXCEEDED_CODE,
       message:
         remaining > 0
-          ? `この返金で付け替えられる残りは ¥${remaining.toLocaleString()} です。画面を読み直してください。`
-          : "この返金はもう付け替え済みです。直すときは調整履歴の「変更」を使ってください。",
+          ? `この返金で返金方法を変更できる残りは ¥${remaining.toLocaleString()} です。画面を読み直してください。`
+          : "この返金はもう返金方法変更済みです。直すときは調整履歴の「変更」を使ってください。",
     };
   }
   return { ok: true, line, remaining };

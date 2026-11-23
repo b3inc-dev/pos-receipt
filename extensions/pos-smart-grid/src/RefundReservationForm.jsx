@@ -1,7 +1,7 @@
 /**
- * 返金の手段を先に決める（返金の予約）。まだ純正で返金していない注文で、返金の前に開く画面。
+ * 返金方法を先に決める（返金の予約）。まだ純正で返金していない注文で、返金の前に開く画面。
  *
- * - 「実際に返す手段」を選んで予約する（分割可・最後の行は残り＝純正で返金した額から自動）
+ * - 「実際の返金方法」を選んで予約する（分割可・最後の行は残り＝純正で返金した額から自動）
  * - そのあと、いつもどおり POS 純正で返品・返金する。返金ができたら、アプリが付け替えを自動で作る
  *   （金額は純正の返金額で固定・Shopify では返金しない）
  * - 予約はその日の営業が終わると使わない。ここでやめることもできる
@@ -46,10 +46,10 @@ function ReservationCard({ item, onCancel, loading }) {
           <s-text key={i}>{reservationRowText(row)}</s-text>
         ))}
         {item.status === "pending" ? (
-          <s-text tone="neutral">このあと POS で同じ金額を返金すると、自動でこの手段に付け替えます。金額が違うときは「要確認」になります。</s-text>
+          <s-text tone="neutral">このあと POS で同じ金額を返金すると、自動でこの返金方法に変えます。金額が違うときは「要確認」になります。</s-text>
         ) : null}
         {item.status === "applied" ? (
-          <s-text tone="neutral">純正の返金に付け替えました。調整履歴に出ています。</s-text>
+          <s-text tone="neutral">純正の返金の返金方法を変えました。調整履歴に出ています。</s-text>
         ) : null}
         {item.status === "needs_review" && item.reviewReason ? <s-text tone="caution">{item.reviewReason}</s-text> : null}
       </s-stack>
@@ -178,7 +178,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
           <s-stack gap="base">
             {error ? <s-banner tone="critical">{error}</s-banner> : notice ? <s-banner tone="success">{notice}</s-banner> : null}
             <s-text tone="neutral">
-              {`${order?.orderName ?? "この取引"} をこれから POS で返金するときに、実際に返す手段を先に決めておけます。返金が終わると、返金した額のまま自動で付け替えます。Shopify では返金しません。`}
+              {`${order?.orderName ?? "この取引"} をこれから POS で返金するときに、実際の返金方法を先に決めておけます。返金が終わると、返金した額のまま自動で返金方法を変えます。Shopify では返金しません。`}
             </s-text>
 
             {state === "loading" ? <s-text tone="neutral">読み込み中…</s-text> : null}
@@ -186,7 +186,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
             {open ? (
               <ReservationCard item={open} onCancel={cancel} loading={loading} />
             ) : state === "ready" ? (
-              <s-section heading="実際に返す手段">
+              <s-section heading="実際の返金方法">
                 <s-stack gap="small">
                   <s-text-field
                     label="返金する金額（円）"
@@ -199,7 +199,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                     <s-text tone={methodsState === "loading" ? "subdued" : "critical"}>{methodsMessage}</s-text>
                   ) : !split ? (
                     <PosChoiceField
-                      label="返す手段"
+                      label="返金方法"
                       value={rows[0].method}
                       options={methods}
                       onChange={(v) => setRow(0, { method: v })}
@@ -222,7 +222,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                               />
                             )}
                             <PosChoiceField
-                              label="返す手段"
+                              label="返金方法"
                               value={r.method}
                               options={methods}
                               onChange={(v) => setRow(i, { method: v })}
@@ -256,7 +256,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                   <s-button variant="primary" onClick={submit} disabled={loading || methods.length === 0}>
                     予約する
                   </s-button>
-                  <s-text tone="neutral">予約はその日のうちの返金にだけ使います。返金した額が「返金する金額」と違うときは、自動では付け替えません。</s-text>
+                  <s-text tone="neutral">予約はその日のうちの返金にだけ使います。返金した額が「返金する金額」と違うときは、自動では返金方法を変えません。</s-text>
                 </s-stack>
               </s-section>
             ) : null}

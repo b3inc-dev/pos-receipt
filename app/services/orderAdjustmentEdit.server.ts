@@ -216,7 +216,7 @@ export async function voidAdjustmentEvent(
 
   let warning: string;
   if (existing.refundSource === "native") {
-    warning = "付け替えを無効にしました。純正の返金はそのままで、元の支払方法の返金に戻ります。必要なら、もう一度付け替えてください。";
+    warning = "返金方法変更を無効にしました。純正の返金はそのままで、元の支払方法の返金に戻ります。必要なら、もう一度返金方法を変更してください。";
   } else if (existing.shopifyRefundStatus === "success") {
     warning =
       "Shopify 上の返金は自動では取り消されません。必要な場合は Shopify 管理画面で手動対応してください。直すときは「変更」を使うと、Shopify の返金を引き継いだまま記録だけ直せます。";

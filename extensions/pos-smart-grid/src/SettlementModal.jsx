@@ -1103,7 +1103,7 @@ function PreviewView({
               {preview.awaitingApprovalSpecialRefunds?.length ? (
                 <s-text tone="caution">
                   {preview.awaitingApprovalWarning ??
-                    `管理者の承認待ちの付け替えが ${preview.awaitingApprovalSpecialRefunds.length} 件あります。承認されるまで上の金額に入っていません。`}
+                    `管理者の承認待ちの返金方法変更が ${preview.awaitingApprovalSpecialRefunds.length} 件あります。承認されるまで上の金額に入っていません。`}
                 </s-text>
               ) : null}
               {preview.pendingSpecialRefundOrderLabels?.length ? (

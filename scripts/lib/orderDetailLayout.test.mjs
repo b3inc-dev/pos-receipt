@@ -73,7 +73,7 @@ describe("調整履歴の行", async () => {
         countDate: "2026-11-23",
         createdAtLabel: "11/23 18:21",
       }),
-      ["現金のまま（手段の変更なし）", "11/23 の精算 ・ 登録 11/23 18:21"],
+      ["現金のまま（返金方法の変更なし）", "11/23 の精算 ・ 登録 11/23 18:21"],
     );
   });
   it("商品券は額面・払った額・釣銭を出す", () => {
@@ -102,19 +102,19 @@ test("reassignmentSummaryLines: 付け替えた手段ごとの内訳（同じ手
     { status: "active", eventType: "cash_refund", amount: 900, originalPaymentMethod: "cash", actualRefundMethod: "wespo", approvalStatus: "rejected" },
     { status: "active", eventType: "receipt_cash_adjustment", amount: 50 },
   ]);
-  assert.deepEqual(lines.map((l) => l.text), ["うち ¥600 はクレジットカードで返金（現金から付け替え・承認待ち）"]);
+  assert.deepEqual(lines.map((l) => l.text), ["うち ¥600 はクレジットカードで返金（現金から返金方法変更・承認待ち）"]);
 });
 
 test("adjustmentKindLabel: 返金の付け替えは手段を変えても同じ名前", () => {
-  assert.equal(adjustmentKindLabel({ eventType: "cash_refund" }), "返金の手段の変更");
-  assert.equal(adjustmentKindLabel({ eventType: "payment_method_override" }), "返金の手段の変更");
-  assert.equal(adjustmentKindLabel({ eventType: "cash_refund", refundSource: "native" }), "返金の手段の変更");
+  assert.equal(adjustmentKindLabel({ eventType: "cash_refund" }), "返金方法変更");
+  assert.equal(adjustmentKindLabel({ eventType: "payment_method_override" }), "返金方法変更");
+  assert.equal(adjustmentKindLabel({ eventType: "cash_refund", refundSource: "native" }), "返金方法変更");
   assert.equal(adjustmentKindLabel({ eventType: "voucher_change_adjustment" }), "商品券調整");
 });
 
-test("adjustmentSubLines: 手段が変わらない行は「のまま（手段の変更なし）」", () => {
+test("adjustmentSubLines: 手段が変わらない行は「のまま（返金方法の変更なし）」", () => {
   const lines = adjustmentSubLines({ eventType: "cash_refund", originalPaymentMethod: "cash", originalPaymentLabel: "現金", actualRefundMethod: "Cash", actualRefundLabel: "現金" });
-  assert.equal(lines[0], "現金のまま（手段の変更なし）");
+  assert.equal(lines[0], "現金のまま（返金方法の変更なし）");
   const moved = adjustmentSubLines({ eventType: "payment_method_override", originalPaymentMethod: "cash", originalPaymentLabel: "現金", actualRefundMethod: "credit", actualRefundLabel: "クレジットカード" });
   assert.equal(moved[0], "現金 → クレジットカード で返金");
 });
