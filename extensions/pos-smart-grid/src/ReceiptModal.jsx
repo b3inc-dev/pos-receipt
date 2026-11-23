@@ -555,11 +555,7 @@ function HistoryView({ onBack }) {
       itemNoun="発行"
       searchPlaceholder="注文番号・宛名で検索"
       searchHint="注文番号は数字だけでも探せます。宛名は 2 文字以上入れてください。"
-      footerTrailing={(
-        <s-button variant="secondary" onClick={onBack}>
-          注文一覧に戻る
-        </s-button>
-      )}
+      onBack={onBack}
     />
   );
 }
