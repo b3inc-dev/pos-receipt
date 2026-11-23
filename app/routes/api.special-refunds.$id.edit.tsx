@@ -1,6 +1,6 @@
 /**
  * POST /api/special-refunds/:id/edit
- * 特殊返金・商品券調整の「変更」: 前の行を無効にし、replaces 付きの新しい行を足す（Shopify の返金はしない）。
+ * 返金方法変更・商品券釣銭登録の「変更」: 前の行を無効にし、replaces 付きの新しい行を足す（Shopify の返金はしない）。
  * 本文（JSON）: {
  *   reason: string（必須・直したわけ）, by?: string,
  *   dateMode?: "original"（初めの値・元の日のまま）| "today",

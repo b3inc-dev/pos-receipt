@@ -1,5 +1,5 @@
 /**
- * /app/order-adjustments?orderId=… — 1 件の注文の特殊返金・商品券調整（③④）を見て、「変更」「無効化」「書き直す」
+ * /app/order-adjustments?orderId=… — 1 件の注文の返金方法変更・商品券釣銭登録（③④）を見て、「変更」「無効化」「書き直す」
  * 特殊返金履歴の行の「変更」と、Shopify の注文ページのブロック（order-adjustments-block）の「変更」から開く。
  * 記録は注文メタフィールド pos.adjustments（docs/ORDER_ADJUSTMENTS_METAFIELD.md）。直すと前の行は無効にして残す。
  */
@@ -268,7 +268,7 @@ export default function OrderAdjustmentsPage() {
   if (!data.ok) {
     return (
       <PolarisPageWrapper>
-        <Page title="特殊返金・商品券調整" backAction={{ content: "特殊返金履歴", onAction: back }}>
+        <Page title="返金方法変更・商品券釣銭登録" backAction={{ content: "特殊返金履歴", onAction: back }}>
           <StatusBanner tone="critical" heading="注文を開けませんでした">{data.message}</StatusBanner>
         </Page>
       </PolarisPageWrapper>
@@ -316,7 +316,7 @@ export default function OrderAdjustmentsPage() {
   return (
     <PolarisPageWrapper>
       <Page
-        title={`${data.orderName} の特殊返金・商品券調整`}
+        title={`${data.orderName} の返金方法変更・商品券釣銭登録`}
         backAction={{ content: "特殊返金履歴", onAction: back }}
       >
         <SuccessToast message={actionData?.ok ? actionData.message : null} trigger={actionData} />

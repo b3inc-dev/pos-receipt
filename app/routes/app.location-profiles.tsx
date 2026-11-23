@@ -49,7 +49,7 @@ const FIELD_LABELS: Record<keyof LocationProfileFields, string> = {
   settlementEnabled: "精算",
   receiptEnabled: "領収書",
   specialRefundEnabled: "特殊返金",
-  voucherAdjustmentEnabled: "商品券調整",
+  voucherAdjustmentEnabled: "商品券釣銭登録",
   inspectionReceiptEnabled: "点検レシート",
   includeInStoreTotals: "店舗合計に含める",
   includeInOverallTotals: "全体合計に含める",

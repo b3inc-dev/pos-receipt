@@ -1,5 +1,5 @@
 /**
- * 特殊返金・商品券調整 API クライアント
+ * 返金方法変更・商品券釣銭登録 API クライアント
  * 要件書 21.4 対応
  */
 import { toUserMessage } from "./errorMessage.js";

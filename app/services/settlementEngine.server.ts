@@ -4,7 +4,7 @@
  *
  * - Shopify注文データから日次売上を集計（ショップタイムゾーンで「その日」の境界を算出）
  * - 支払方法別内訳（payment sections）を算出
- * - 特殊返金・商品券調整イベントを合計・payment sections に反映
+ * - 返金方法変更・商品券釣銭登録イベントを合計・payment sections に反映
  * - 支払方法マスタ・ポイント/会員施策設定を参照
  */
 import prisma from "../db.server";
@@ -97,11 +97,11 @@ import {
 import { autoResolveStalePendingSpecialRefunds } from "./specialRefundAutoResolve.server";
 import { splitTaxInclusiveToNetAndTax } from "./settlementTaxPure.server";
 
-/** 1 回の精算のプレビューで、注文の特殊返金・商品券調整を書き直す注文の数の上限 */
+/** 1 回の精算のプレビューで、注文の返金方法変更・商品券釣銭登録を書き直す注文の数の上限 */
 const MAX_ADJUSTMENT_RESYNC_PER_PREVIEW = 20;
 
 /**
- * 精算で注文の特殊返金・商品券調整を書き直した時刻（店と注文ごと）。
+ * 精算で注文の返金方法変更・商品券釣銭登録を書き直した時刻（店と注文ごと）。
  * 少し前に書き直した注文がまた違うときは、続けて書き換えずに知らせる（ほかのアプリと書き合いにならないように）。
  * サーバーの中だけで持つ（再起動で消える。消えても 1 回書き直すだけ）。
  */
@@ -175,7 +175,7 @@ export interface SettlementPreviewDTO {
   awaitingApprovalSpecialRefunds?: AwaitingApprovalSpecialRefund[];
   awaitingApprovalWarning?: string;
   /**
-   * 特殊返金・商品券調整の注文メタフィールドが無い・読めない・アプリの記録と違い、書き直せなかった注文（無いときは入れない）。
+   * 返金方法変更・商品券釣銭登録の注文メタフィールドが無い・読めない・アプリの記録と違い、書き直せなかった注文（無いときは入れない）。
    * 精算はいつもアプリの記録で数え、確定できる（注文を読むほかのアプリとずれることがある）。
    */
   adjustmentSourceWarnings?: {
@@ -232,7 +232,7 @@ export interface SettlementPreviewOptions {
    */
   allowPendingSpecialRefunds?: boolean;
   /**
-   * false のとき、注文の特殊返金・商品券調整が違っても書き直さず、警告だけ出す（調べるだけの呼び出し用。見直し P3）。
+   * false のとき、注文の返金方法変更・商品券釣銭登録が違っても書き直さず、警告だけ出す（調べるだけの呼び出し用。見直し P3）。
    * 初めは true。
    */
   resyncOrderAdjustments?: boolean;
@@ -1239,7 +1239,7 @@ async function buildSettlementPreviewImpl(
                     sourceOrderId: "",
                     sourceOrderName: null,
                     message:
-                      "注文の「特殊返金・商品券調整」を読めず、注文の記録と比べられませんでした。精算はアプリの記録で数えています。しばらくしてから更新してください。",
+                      "注文の「返金方法変更・商品券釣銭登録」を読めず、注文の記録と比べられませんでした。精算はアプリの記録で数えています。しばらくしてから更新してください。",
                   },
                 ]
               : []),
