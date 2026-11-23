@@ -172,6 +172,8 @@ function SpecialRefundModal() {
   const [orderEntryLoading, setOrderEntryLoading] = useState(false);
   const [submitNotice, setSubmitNotice] = useState(null);
   const [orderCorrectionContext, setOrderCorrectionContext] = useState(null);
+  /** 管理画面「商品券設定」で手動調整がオフなら false（古いサーバーは値なし＝true） */
+  const [voucherAllowed, setVoucherAllowed] = useState(true);
 
   // 取引詳細: 「特殊返金」または「商品券調整」から起動
   useEffect(() => {
@@ -192,8 +194,15 @@ function SpecialRefundModal() {
         const res = await listSpecialRefunds(order.orderId ?? preId);
         setEvents(res.items ?? []);
         setOrderCorrectionContext(res.orderCorrectionContext ?? null);
+        setVoucherAllowed(res.voucherAdjustmentAllowed !== false);
         // 取引詳細メニューからは一覧を挟まず、各処理のフォームへ直行
-        setStep(voucherShortcut ? "form_voucher" : "form_refund");
+        setStep(
+          voucherShortcut
+            ? res.voucherAdjustmentAllowed === false
+              ? "order_detail"
+              : "form_voucher"
+            : "form_refund",
+        );
       })
       .catch((e) => setBootstrapError(toUserMessage(e?.message) || "取得に失敗しました"))
       .finally(() => setOrderEntryLoading(false));
@@ -209,6 +218,7 @@ function SpecialRefundModal() {
       const res = await listSpecialRefunds(order.orderId ?? orderId);
       setEvents(res.items ?? []);
       setOrderCorrectionContext(res.orderCorrectionContext ?? null);
+        setVoucherAllowed(res.voucherAdjustmentAllowed !== false);
       setFromOrderEntry(false);
       setStep("order_detail");
     } catch (e) {
@@ -224,6 +234,7 @@ function SpecialRefundModal() {
       const res = await listSpecialRefunds(selectedOrder.orderId);
       setEvents(res.items ?? []);
       setOrderCorrectionContext(res.orderCorrectionContext ?? null);
+        setVoucherAllowed(res.voucherAdjustmentAllowed !== false);
     } catch {
       // silent
     }
@@ -344,6 +355,7 @@ function SpecialRefundModal() {
         }}
         onRefund={() => setStep("form_refund")}
         onVoucher={() => setStep("form_voucher")}
+        voucherAllowed={voucherAllowed}
         onVoid={handleVoid}
         onRedoDraft={handleRedoDraft}
         submitNotice={submitNotice}
@@ -417,6 +429,7 @@ function OrderDetailView({
   onBack,
   onRefund,
   onVoucher,
+  voucherAllowed = true,
   onVoid,
   onRedoDraft,
   submitNotice,
@@ -538,7 +551,7 @@ function OrderDetailView({
           middleDisabled={loading}
           rightLabel="商品券釣銭調整"
           onRight={onVoucher}
-          rightDisabled={loading}
+          rightDisabled={loading || !voucherAllowed}
         />
       </s-stack>
     </s-page>

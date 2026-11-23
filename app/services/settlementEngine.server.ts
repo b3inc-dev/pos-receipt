@@ -21,8 +21,16 @@ import {
   DEFAULT_SPECIAL_REFUND_SETTINGS,
   type SettlementSettings,
   type SpecialRefundSettings,
+  VOUCHER_SETTINGS_KEY,
+  DEFAULT_VOUCHER_SETTINGS,
+  type VoucherSettings,
 } from "../utils/appSettings.server";
 import { fetchLegacyGiftCardIssuanceForDay } from "./settlementLegacyGiftCards.server";
+import {
+  resolveVoucherChange,
+  resolveVoucherSettings,
+  voucherDetectionRulesFromSettings,
+} from "./voucherChangePure.server";
 import {
   getShopTimezoneForDaily,
   getDayRangeInUtc,
@@ -728,7 +736,17 @@ async function buildSettlementPreviewImpl(
   const loyaltySettings = await getAppSetting<Partial<LoyaltySettings>>(shopId, LOYALTY_SETTINGS_KEY);
   const pointRules = resolvePointRedemptionRules(loyaltySettings);
 
-  const gas = aggregateGasStyleForOrders(ordersUnion, inDay, attributionOpts, pointRules);
+  const voucherSettings = resolveVoucherSettings(
+    await getAppSetting<Partial<VoucherSettings> & { settingsVersion?: number }>(shopId, VOUCHER_SETTINGS_KEY),
+    DEFAULT_VOUCHER_SETTINGS,
+  );
+  const gas = aggregateGasStyleForOrders(
+    ordersUnion,
+    inDay,
+    attributionOpts,
+    pointRules,
+    voucherDetectionRulesFromSettings(voucherSettings),
+  );
 
   const settlementSettings = await getAppSetting<Partial<SettlementSettings>>(shopId, SETTLEMENT_SETTINGS_KEY);
   const settlementMerged: SettlementSettings = { ...DEFAULT_SETTLEMENT_SETTINGS, ...settlementSettings };
@@ -802,9 +820,17 @@ async function buildSettlementPreviewImpl(
     (e) => e.eventType !== "voucher_change_adjustment",
   );
 
-  const voucherAdjustments = srSettings.reflectVoucherAdjustmentToSettlement
-    ? voucherAdjustmentsAll
-    : [];
+  // 商品券設定（機能・自動判定・手動調整・判定優先順位・精算に反映）と特殊返金設定「商品券調整を精算に反映」を合わせる。
+  // 同じ注文に自動判定と手入力の両方があるときは、判定優先順位の方だけを数える（二重計上の防止）。
+  const voucherResolution = resolveVoucherChange({
+    settings: voucherSettings,
+    reflectManualFromSpecialRefundSettings: srSettings.reflectVoucherAdjustmentToSettlement,
+    autoByOrder: gas.voucherChangeByOrder,
+    manualEvents: voucherAdjustmentsAll,
+  });
+  const voucherAdjustments = voucherAdjustmentsAll.filter((e) =>
+    voucherResolution.appliedManual.includes(e),
+  );
   const otherEvents = otherEventsAll.filter((e) => {
     if (e.eventType === "cash_refund") return srSettings.reflectCashRefundToSettlement;
     if (e.eventType === "payment_method_override") {
@@ -816,10 +842,8 @@ async function buildSettlementPreviewImpl(
     return true;
   });
 
-  /** DB の手入力調整 + ノート観測（GAS _voucher_change_total と同系） */
-  const voucherChangeAmount =
-    Math.round(gas.voucherChangeObserved) +
-    voucherAdjustments.reduce((sum, e) => sum + Number(e.voucherChangeAmount ?? 0), 0);
+  /** 自動判定（GAS _voucher_change_total と同系）＋ DB の手入力調整。同じ注文は片方だけ */
+  const voucherChangeAmount = voucherResolution.total;
   /** lineItems のポイント利用の割引（pointRules）の按分のみ（特殊返金の points は後続フェーズで合成可） */
   const vipPointsUsed = gas.vipPointsUsed;
 

@@ -229,7 +229,7 @@ export const DEFAULT_VOUCHER_SETTINGS: VoucherSettings = {
   voucherFeatureEnabled: true,
   voucherAutoDetectionEnabled: true,
   voucherManualAdjustmentEnabled: true,
-  voucherNoteParseEnabled: false,
+  voucherNoteParseEnabled: true,
   voucherNoteParseRegex: "",
   voucherDefaultLabel: "商品券",
   voucherAdjustmentPriority: "manual_first",
