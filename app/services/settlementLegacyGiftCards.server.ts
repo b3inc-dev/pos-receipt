@@ -5,6 +5,7 @@
  * - 注文がある場合は retailLocation でロケーション一致、無い場合は GAS 同型 LOC:店名 をギフトカード note で判定
  * - 取得が途中で失敗したら途中までの額を返さず止める（精算を確定しない）
  */
+import { searchDateRange } from "../utils/shopifySearchDate";
 import type { DayRangeUtc } from "../utils/shopTimezone.server";
 import {
   adminGraphqlWithRetry,
@@ -247,7 +248,7 @@ export async function fetchLegacyGiftCardIssuanceForDay(
   const endMs = dayRange.endUtc.getTime();
   const result = { amount: 0, count: 0 };
 
-  const q = `created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso}`;
+  const q = searchDateRange("created_at", dayRange.startUtcIso, dayRange.endUtcIso);
 
   let cursor: string | null = null;
   let hasNext = true;

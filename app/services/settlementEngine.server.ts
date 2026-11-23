@@ -7,6 +7,7 @@
  * - 返金方法変更・商品券釣銭登録イベントを合計・payment sections に反映
  * - 支払方法マスタ・ポイント/会員施策設定を参照
  */
+import { searchDateRange } from "../utils/shopifySearchDate";
 import prisma from "../db.server";
 import {
   loadPaymentKeyMasters,
@@ -664,7 +665,7 @@ export async function getRefundOverlayForDay(
   const startIso = dayRange.startUtc.toISOString().replace(/\.000Z$/, "Z");
   const endIso = dayRange.endUtc.toISOString();
   const locationGid = `gid://shopify/Location/${locIdRaw}`;
-  const updatedQuery = `location_id:${locIdRaw} updated_at:>=${startIso} updated_at:<=${endIso} tag_not:settlement`;
+  const updatedQuery = `location_id:${locIdRaw} ${searchDateRange("updated_at", startIso, endIso)} tag_not:settlement`;
   const ordersUpdated = await fetchOrdersUpdatedInDayRange(admin, updatedQuery);
   const ordersUpdatedAtLocation = filterOrdersUpdatedByRetailLocation(ordersUpdated, locationGid, locIdRaw);
   const overlay = computeRefundsOnlyForDay(ordersUpdatedAtLocation, orderIdsCreatedInDay, dayRange);
@@ -793,13 +794,13 @@ async function buildSettlementPreviewImpl(
   // - 絞り込みは location_id（数値）+ 日付レンジ + tag_not:settlement のみ
   // - source_name:pos は付けない（注文検索ピッカーとは意図的に異なる）
   // - retailLocation 二次フィルタもメイン集計では行わない（GAS fetchAllOrdersSmart 同型）
-  const qCreated   = `location_id:${locIdRaw} created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
-  const qUpdated   = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement -status:cancelled`;
-  const qCancelled = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement status:cancelled`;
+  const qCreated   = `location_id:${locIdRaw} ${searchDateRange("created_at", dayRange.startUtcIso, dayRange.endUtcIso)} tag_not:settlement -status:cancelled`;
+  const qUpdated   = `location_id:${locIdRaw} ${searchDateRange("updated_at", dayRange.startUtcIso, dayRange.endUtcIso)} tag_not:settlement -status:cancelled`;
+  const qCancelled = `location_id:${locIdRaw} ${searchDateRange("updated_at", dayRange.startUtcIso, dayRange.endUtcIso)} tag_not:settlement status:cancelled`;
   // 販売店舗とは別の店舗で処理した返金も拾う。後段で対象店舗の返金 TX のみに
   // 縮約してから union するため、他店舗の売上は混入しない。
-  // 値は二重引用符で囲む（囲まないと時刻が効かず前の日の注文が混ざる。#102 の shopifySearchDate.ts と同じ形）
-  const qRefundUpdated = `updated_at:>="${dayRange.startUtcIso}" updated_at:<="${dayRange.endUtcIso}" tag_not:settlement`;
+  // 値は二重引用符で囲む（囲まないと時刻が効かず前の日の注文が混ざる。shopifySearchDate.ts）
+  const qRefundUpdated = `${searchDateRange("updated_at", dayRange.startUtcIso, dayRange.endUtcIso)} tag_not:settlement`;
 
   const createdRaw   = await fetchAllOrders(admin, qCreated, "CREATED_AT");
   await sleep(GRAPHQL_PAGE_DELAY_MS);
@@ -840,7 +841,7 @@ async function buildSettlementPreviewImpl(
   // GAS fetchAllOrdersSmart ③: 0件のとき processed_at（店舗TZの暦日）でフォールバック
   if (ordersUnion.length === 0) {
     const processedRange = getDayRangeShopifySearchIso(targetDate, timezone);
-    const qProcessed = `location_id:${locIdRaw} processed_at:>=${processedRange.start} processed_at:<=${processedRange.end} tag_not:settlement -status:cancelled`;
+    const qProcessed = `location_id:${locIdRaw} ${searchDateRange("processed_at", processedRange.start, processedRange.end)} tag_not:settlement -status:cancelled`;
     const processedRaw = await fetchAllOrders(admin, qProcessed, "CREATED_AT");
     ordersUnion = processedRaw.filter((o) => {
       if (!o.processedAt) return false;

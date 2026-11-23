@@ -9,6 +9,7 @@
  *   日付だけのときは店のタイムゾーンの暦日として比べる。
  * - 取得に失敗したときは 0 円にせず、エラーにする（返金が抜けたまま精算を確定しない）。
  */
+import { searchDateRange } from "../utils/shopifySearchDate";
 import type { DayRangeUtc } from "../utils/shopTimezone.server";
 import { adminGraphqlWithRetry, GRAPHQL_PAGE_DELAY_MS, sleep } from "../lib/shopifyGraphqlThrottle.server";
 
@@ -152,7 +153,8 @@ export async function fetchGiftCardRefundsForDay(
   const endMs = args.dayRange.endUtc.getTime() + 2 * 24 * 60 * 60 * 1000;
   const startIso = new Date(startMs).toISOString().replace(/\.\d{3}Z$/, "Z");
   const endIso = new Date(endMs).toISOString().replace(/\.\d{3}Z$/, "Z");
-  const query = `created_at:>=${startIso} created_at:<=${endIso}`;
+  // 日時は二重引用符で囲む（#102 の決まり。囲まないと時刻が効かない）
+  const query = searchDateRange("created_at", startIso, endIso);
 
   const nodes: GiftCardRefundNode[] = [];
   let cursor: string | null = null;

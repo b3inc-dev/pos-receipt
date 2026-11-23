@@ -5,6 +5,7 @@
  * - fulfillAllForOrder（発送済み化）
  * - LOC:店名 / SETL- 一意タグ / 精算・点検用顧客
  */
+import { searchDateRange } from "../utils/shopifySearchDate";
 import type { SettlementPreviewDTO } from "./settlementEngine.server";
 import {
   getShopTimezoneForDaily,
@@ -361,7 +362,7 @@ function buildGasInspectionNote(
 }
 
 function buildSettlementSearchQuery(start: string, end: string): string {
-  return `tag:SETTLEMENT created_at:>=${start} created_at:<=${end}`;
+  return `tag:SETTLEMENT ${searchDateRange("created_at", start, end)}`;
 }
 
 type OrderHit = {
