@@ -109,12 +109,12 @@ export function VoucherCartScreen({ onOpenList }) {
   };
 
   return (
-    <s-page heading="商品券">
+    <s-page heading="会計の前に額面を入れる">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
             {error ? <s-banner tone="critical">{error}</s-banner> : null}
-            <s-section heading="会計の前に額面を入れる">
+            <s-section heading="額面">
               <s-stack gap="small">
                 <s-text tone="subdued">
                   入れたあと、いつもどおり「商品券釣有り」で会計してください。会計が終わると、商品券の釣銭を自動で登録します。
