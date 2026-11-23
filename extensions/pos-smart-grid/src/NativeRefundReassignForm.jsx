@@ -219,7 +219,7 @@ export function NativeRefundReassignForm({
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
-              <s-text fontWeight="bold">前の付け替えを無効にして、選び直します</s-text>
+              <s-text type="strong">前の付け替えを無効にして、選び直します</s-text>
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <Row label="純正の返金" value={nativeRefundLineLabel(redoLine)} />
@@ -232,15 +232,15 @@ export function NativeRefundReassignForm({
                   ))}
                 </s-stack>
               </s-box>
-              <s-text tone="subdued" fontSize="small">
+              <s-text type="small" color="subdued">
                 無効にした分は、いったん元の支払方法の返金に戻ります。続けて返した手段を選んでください。Shopify では何もしません。
               </s-text>
               {error ? <s-text tone="critical">{error}</s-text> : null}
               <s-stack gap="small">
-                <s-button kind="primary" onClick={runRedo} loading={loading} disabled={targets.length === 0}>
+                <s-button variant="primary" onClick={runRedo} loading={loading} disabled={targets.length === 0}>
                   無効にして選び直す
                 </s-button>
-                <s-button kind="secondary" onClick={() => setRedoLine(null)} disabled={loading}>
+                <s-button variant="secondary" onClick={() => setRedoLine(null)} disabled={loading}>
                   戻る
                 </s-button>
               </s-stack>
@@ -254,11 +254,11 @@ export function NativeRefundReassignForm({
   // ── 確認 ──
   if (confirming && selected) {
     return (
-      <s-page heading="付け替えの確認">
+      <s-page heading="返金の手段を付け替える">
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
-              <s-text fontWeight="bold">以下の内容で付け替えます</s-text>
+              <s-text type="strong">この内容で付け替えます</s-text>
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <Row label="取引" value={order?.orderName ?? "-"} />
@@ -270,15 +270,15 @@ export function NativeRefundReassignForm({
                   {note ? <Row label="メモ" value={note} /> : null}
                 </s-stack>
               </s-box>
-              <s-text tone="subdued" fontSize="small">
+              <s-text type="small" color="subdued">
                 Shopify では返金しません。精算では、この返金を元の支払方法から選んだ手段へ移します（返金の合計は変わりません）。
               </s-text>
               {error ? <s-text tone="critical">{error}</s-text> : null}
               <s-stack gap="small">
-                <s-button kind="primary" onClick={handleSubmit} loading={loading}>
+                <s-button variant="primary" onClick={handleSubmit} loading={loading}>
                   付け替える
                 </s-button>
-                <s-button kind="secondary" onClick={() => setConfirming(false)} disabled={loading}>
+                <s-button variant="secondary" onClick={() => setConfirming(false)} disabled={loading}>
                   修正する
                 </s-button>
               </s-stack>
@@ -304,7 +304,7 @@ export function NativeRefundReassignForm({
               </s-box>
 
               {refundMethods.length === 0 ? (
-                <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} fontSize="small">
+                <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} type="small">
                   {methodsMessage}
                 </s-text>
               ) : !split ? (
@@ -338,7 +338,7 @@ export function NativeRefundReassignForm({
                           onChange={(v) => setRow(i, { method: v })}
                         />
                         {!isLast ? (
-                          <s-button kind="secondary" onClick={() => removeRow(i)} disabled={loading}>
+                          <s-button variant="secondary" onClick={() => removeRow(i)} disabled={loading}>
                             この行を消す
                           </s-button>
                         ) : null}
@@ -351,15 +351,15 @@ export function NativeRefundReassignForm({
               {refundMethods.length > 0 ? (
                 split ? (
                   <s-stack gap="small">
-                    <s-button kind="secondary" onClick={addRow} disabled={loading}>
+                    <s-button variant="secondary" onClick={addRow} disabled={loading}>
                       行を追加
                     </s-button>
-                    <s-button kind="secondary" onClick={stopSplit} disabled={loading}>
+                    <s-button variant="secondary" onClick={stopSplit} disabled={loading}>
                       分割をやめる
                     </s-button>
                   </s-stack>
                 ) : (
-                  <s-button kind="secondary" onClick={startSplit} disabled={loading}>
+                  <s-button variant="secondary" onClick={startSplit} disabled={loading}>
                     分割
                   </s-button>
                 )
@@ -375,11 +375,11 @@ export function NativeRefundReassignForm({
               {error ? <s-text tone="critical">{error}</s-text> : null}
 
               <s-stack gap="small">
-                <s-button kind="primary" onClick={handleConfirm} disabled={loading || refundMethods.length === 0}>
+                <s-button variant="primary" onClick={handleConfirm} disabled={loading || refundMethods.length === 0}>
                   確認する
                 </s-button>
                 <s-button
-                  kind="secondary"
+                  variant="secondary"
                   onClick={() => {
                     setError("");
                     setSelected(null);
@@ -404,7 +404,7 @@ export function NativeRefundReassignForm({
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
-            <s-text tone="subdued" fontSize="small">
+            <s-text type="small" color="subdued">
               {`${order?.orderName ?? "この取引"} は POS で返金されています。付け替える返金を選んでください。金額は返金した額のままです。`}
             </s-text>
             {lines.map((line) => {
@@ -413,13 +413,13 @@ export function NativeRefundReassignForm({
                 <s-box key={`${line.refundId}:${line.gateway}`} padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                   <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small">
                     <s-stack gap="none">
-                      <s-text fontWeight="bold">{nativeRefundLineLabel(line)}</s-text>
-                      {status ? <s-text tone="subdued" fontSize="small">{status}</s-text> : null}
+                      <s-text type="strong">{nativeRefundLineLabel(line)}</s-text>
+                      {status ? <s-text type="small" color="subdued">{status}</s-text> : null}
                     </s-stack>
                     <s-stack gap="small">
                       {canReassign(line) ? (
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           onClick={() => {
                             setError("");
                             setSelected(line);
@@ -432,7 +432,7 @@ export function NativeRefundReassignForm({
                       ) : null}
                       {activeReassignEvents(events, line).length > 0 ? (
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           onClick={() => {
                             setError("");
                             setRedoLine(line);
@@ -448,18 +448,18 @@ export function NativeRefundReassignForm({
               );
             })}
             {!anyOpen ? (
-              <s-text tone="subdued" fontSize="small">
+              <s-text type="small" color="subdued">
                 この取引の返金はすべて付け替え済みです。手段や分け方を直すときは「付け替え直す」、手段だけなら調整履歴の「変更」を使ってください。
               </s-text>
             ) : null}
             {error ? <s-text tone="critical">{error}</s-text> : null}
             <s-stack gap="small">
               {onOtherRegistration ? (
-                <s-button kind="secondary" onClick={onOtherRegistration} disabled={loading}>
+                <s-button variant="secondary" onClick={onOtherRegistration} disabled={loading}>
                   レシートの現金を直す
                 </s-button>
               ) : null}
-              <s-button kind="secondary" onClick={onBack} disabled={loading}>
+              <s-button variant="secondary" onClick={onBack} disabled={loading}>
                 戻る
               </s-button>
             </s-stack>

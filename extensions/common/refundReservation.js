@@ -47,7 +47,7 @@ const STATUS_LABEL = {
   pending: "予約中",
   applied: "返金に使いました",
   needs_review: "要確認",
-  cancelled: "取り消し済み",
+  cancelled: "やめた予約",
   expired: "期限切れ",
 };
 
