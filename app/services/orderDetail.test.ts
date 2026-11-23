@@ -58,3 +58,30 @@ describe("serializeOrderDetail", () => {
     assert.equal(li.staffMemberName, "");
   });
 });
+
+describe("applyPaymentDisplayLabels", () => {
+  const masters = [
+    { rawGatewayPattern: "wespo", matchType: "contains_match", displayLabel: "WeSPOポイント", enabled: true },
+  ];
+
+  it("支払方法マスタの名前 → 既定の日本語 → Shopify の名前 の順。gateway は変えない", async () => {
+    const { applyPaymentDisplayLabels } = await import("./orderDetail.server");
+    const out = applyPaymentDisplayLabels(
+      {
+        transactions: [
+          { gateway: "cash", formattedGateway: "Cash", displayName: "Cash", amount: 3325 },
+          { gateway: "wespo-point", formattedGateway: "wespo-point", displayName: "wespo-point", amount: 100 },
+          { gateway: "odd_pay", formattedGateway: "Odd Pay", displayName: "Odd Pay", amount: 1 },
+        ],
+        refunds: [{ id: "r1", transactions: [{ gateway: "cash", formattedGateway: "Cash", displayName: "Cash", amount: 1100 }] }],
+      },
+      masters,
+    );
+    const txs = out.transactions as { gateway: string; displayName: string }[];
+    assert.deepEqual(txs.map((t) => t.displayName), ["現金", "WeSPOポイント", "Odd Pay"]);
+    assert.deepEqual(txs.map((t) => t.gateway), ["cash", "wespo-point", "odd_pay"]);
+    const refunds = out.refunds as { id: string; transactions: { displayName: string }[] }[];
+    assert.equal(refunds[0].id, "r1");
+    assert.equal(refunds[0].transactions[0].displayName, "現金");
+  });
+});

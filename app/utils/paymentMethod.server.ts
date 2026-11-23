@@ -29,6 +29,11 @@ async function loadEnabledMasters(shopId: string): Promise<PaymentMethodMatchInp
   });
 }
 
+/** 有効な支払方法マスタ（sortOrder の順）。注文詳細の支払いの名前に使う */
+export async function loadEnabledPaymentMasters(shopId: string): Promise<PaymentMethodMatchInput[]> {
+  return loadEnabledMasters(shopId);
+}
+
 /**
  * ショップの支払方法マスタを取得し、gateway（または GAS 日本語バケットキー）に
  * 一致する displayLabel を返す。一致なしならフォールバック。

@@ -36,6 +36,8 @@ import {
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
+import { financialStatusTone } from "../../common/orderDetailLayout.js";
+import { financialStatusLabel } from "./orderDisplayUtils.js";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import {
   orderTenderLines,
@@ -725,11 +727,18 @@ function OrderDetailView({
             zIndex: 10,
           }}
         >
-          <s-stack gap="extraSmall">
-            <s-text fontWeight="bold" size="small">{order?.orderName ?? "-"}</s-text>
-            <s-text tone="subdued" size="small">
-              {order?.customer?.displayName || "顧客なし"} —
-              ¥{Number(order?.totalPrice?.amount ?? 0).toLocaleString()}
+          {/* 注文番号と状態の印。右に日時（日本時間） */}
+          <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
+            <s-stack direction="inline" alignItems="center" gap="small">
+              <s-text type="strong">{order?.orderName ?? "-"}</s-text>
+              {order?.financialStatus || order?.cancelledAt ? (
+                <s-badge tone={financialStatusTone(order?.financialStatus, order?.cancelledAt)}>
+                  {financialStatusLabel(order?.financialStatus, order?.cancelledAt)}
+                </s-badge>
+              ) : null}
+            </s-stack>
+            <s-text type="small" color="subdued">
+              {order?.transactionDateTime || order?.transactionTime || ""}
             </s-text>
           </s-stack>
         </s-box>
