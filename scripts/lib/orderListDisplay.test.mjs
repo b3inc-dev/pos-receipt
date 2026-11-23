@@ -119,3 +119,10 @@ describe("領収書の発行履歴も一覧と同じ作り", () => {
     assert.match(src, /locationId = \{ in:/);
   });
 });
+
+it("タイルごとの絞り込み: 自分のタイルの絞り込みと「すべて」だけ（T 2026-11-23）", async () => {
+  const { listSegmentsForTile } = await import("../../extensions/pos-smart-grid/src/orderDisplayUtils.js");
+  assert.deepEqual(listSegmentsForTile("refunded").map((s) => s.value), ["refunded", "all"]);
+  assert.deepEqual(listSegmentsForTile("voucher_change").map((s) => s.value), ["voucher_change", "all"]);
+  assert.equal(listSegmentsForTile("all").length, 3);
+});

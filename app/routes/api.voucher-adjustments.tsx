@@ -72,6 +72,28 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
+    // 同じ注文に有効な商品券調整がもうあれば、2 つ目は作らない（会計後に自動で作った行も含む。釣銭を 2 回数えないため）
+    const sourceDigits = String(sourceOrderId).replace(/\D/g, "");
+    const alreadyActive = await prisma.specialRefundEvent.findFirst({
+      where: {
+        shopId: shop.id,
+        eventType: "voucher_change_adjustment",
+        status: "active",
+        sourceOrderId: { in: [String(sourceOrderId), sourceDigits, `gid://shopify/Order/${sourceDigits}`] },
+      },
+      select: { id: true },
+    });
+    if (alreadyActive) {
+      return corsJson(
+        {
+          ok: false,
+          code: "VOUCHER_ALREADY_REGISTERED",
+          error: "この注文には、もう商品券釣銭の登録があります。直すときは、調整履歴の「変更」を使ってください。",
+        },
+        { status: 409 },
+      );
+    }
+
     // 使った額: 送られたらそれ（取引が読めないときの手入力・前の POS 拡張）、無ければ注文の取引から
     const manualApplied =
       voucherAppliedAmount != null && voucherAppliedAmount !== "" && Number.isFinite(Number(voucherAppliedAmount))

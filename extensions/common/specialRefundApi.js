@@ -88,6 +88,21 @@ export async function createVoucherAdjustment(data) {
 }
 
 /**
+ * POST /api/voucher-adjustments/from-cart
+ * 会計後の画面から: 会計の前に入れた額面があれば商品券調整を 1 件登録する（何回呼んでも 1 件）
+ * @param {{ sourceOrderId: string, locationId?: string, createdBy?: string }} data
+ * @returns {Promise<{ ok: boolean, status: "created" | "already" | "no_face" | "no_voucher_payment" | "cancelled" | "disabled" | "order_unreadable", event?: Object, face?: number }>}
+ */
+export async function registerVoucherFromCart(data) {
+  return apiPost("/api/voucher-adjustments/from-cart", data);
+}
+
+/** GET /api/voucher-adjustments/from-cart → { enabled }（管理画面の「会計の前に額面を入れる」） */
+export async function getVoucherCartEntryEnabled() {
+  return apiGet("/api/voucher-adjustments/from-cart");
+}
+
+/**
  * 返金の予約（docs/REFUND_RESERVATION.md）
  * GET  /api/refund-reservations?sourceOrderId=  … 開くと、できた純正の返金へ当て直す
  * POST /api/refund-reservations                  … { sourceOrderId, sourceOrderName, locationId, rows, note }

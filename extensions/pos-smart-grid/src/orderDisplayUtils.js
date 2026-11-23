@@ -51,6 +51,17 @@ export const LIST_SEGMENTS = [
   { value: "voucher_change", label: "商品券釣有り", noun: "商品券釣有り" },
 ];
 
+/**
+ * タイルごとの絞り込み（T 2026-11-23: タイルを分けたので、相手のタイルの絞り込みは出さない）。
+ * 「すべて」は残す（返金の予約は、まだ返金していない注文を選ぶため）
+ * @param {"refunded" | "voucher_change" | "all"} tile
+ */
+export function listSegmentsForTile(tile) {
+  const all = LIST_SEGMENTS.find((s) => s.value === "all");
+  const own = LIST_SEGMENTS.find((s) => s.value === tile);
+  return own && own !== all ? [own, all] : LIST_SEGMENTS;
+}
+
 /** @param {Record<string, unknown>} item @param {string} segment */
 export function matchesListSegment(item, segment) {
   if (!segment || segment === "all") return true;

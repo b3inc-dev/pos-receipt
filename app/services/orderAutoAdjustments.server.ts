@@ -6,6 +6,7 @@
  * - 失敗はログだけ（売上サマリーの処理は止めない）。会計後の画面・POS で開いたときにも同じ処理が動く
  */
 import { applyRefundReservationsForOrder, hasPendingReservation } from "./refundReservation.server";
+import { registerVoucherFromCartEntry, webhookPayloadHasVoucherCartFace } from "./voucherCartEntry.server";
 
 type AdminClient = {
   graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }>;
@@ -24,6 +25,18 @@ export async function runOrderAutoAdjustmentsFromWebhook(
 ): Promise<void> {
   const orderId = orderIdOf(payload);
   if (!orderId) return;
+
+  // 会計の前に入れた商品券の額面: 会計後の画面で登録できなかったときの拾い直し。知らせに項目がある注文だけ読む
+  if (webhookPayloadHasVoucherCartFace(payload)) {
+    try {
+      const r = await registerVoucherFromCartEntry(admin, shopId, orderId);
+      console.log(
+        `[order-auto-adjust] voucher from cart entry order=${orderId.replace(/\D/g, "")} status=${r.status} shop=${shopDomain}`,
+      );
+    } catch (e) {
+      console.warn(`[order-auto-adjust] voucher from cart entry failed shop=${shopDomain}`, e);
+    }
+  }
 
   // 返金の予約: その注文に使う前の予約があるときだけ、Shopify の返金を読んで返金方法変更を作る
   try {

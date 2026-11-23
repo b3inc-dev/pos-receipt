@@ -9,7 +9,7 @@
  *   form_voucher → 商品券釣銭登録フォーム（額面だけ入れる。使った額は注文の取引から）
  *   form_edit    → 登録の「変更」（前の登録を無効にし、直した内容の登録を足す。Shopify の返金はしない）
  *
- * タイルごとに一覧の最初の絞り込みを変える: 「返金・商品券」タイルは返金・キャンセル、「商品券」タイルは商品券釣有り
+ * タイルごとに一覧の最初の絞り込みを変える: 「返金方法変更」タイルは返金・キャンセル、「商品券釣銭登録」タイルは商品券釣有り
  * （VoucherModal.jsx が initialListSegment="voucher_change" で開く）
  *
  * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券釣銭登録」→ form_voucher へ直行
@@ -39,8 +39,11 @@ import {
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
+import { VoucherFaceCandidates } from "./VoucherFaceCandidates.jsx";
 import { adjustmentBadges, adjustmentKindLabel, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
-import { financialStatusLabel } from "./orderDisplayUtils.js";
+import { financialStatusLabel, listSegmentsForTile } from "./orderDisplayUtils.js";
+import { RedoCheckoutSection } from "./RedoCheckoutSection.jsx";
+import { isVoucherAdjustableOrder, voucherShortcutStep } from "../../common/voucherAdjustable.js";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import {
   orderTenderLines,
@@ -256,7 +259,7 @@ export default async () => {
 /**
  * @param {{ initialListSegment?: "all" | "refunded" | "voucher_change" }} props
  */
-export function SpecialRefundModal({ initialListSegment = "refunded" }) {
+export function SpecialRefundModal({ initialListSegment = "refunded", listNote = "", listAction = null }) {
   const [step, setStep] = useState("day_list");
   // 「変更」する登録
   const [editingEvent, setEditingEvent] = useState(null);
@@ -280,12 +283,31 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
 
   // 取引詳細: 「特殊返金」または「商品券釣銭登録」から起動
   useEffect(() => {
-    const vid = sessionStorage.getItem(STORAGE_KEY_VOUCHER);
-    const rid = sessionStorage.getItem(STORAGE_KEY_REFUND);
+    let vid = null;
+    let rid = null;
+    try {
+      vid = sessionStorage.getItem(STORAGE_KEY_VOUCHER);
+      rid = sessionStorage.getItem(STORAGE_KEY_REFUND);
+    } catch (_) {
+      /* 読めないときは下の Order API だけで決める */
+    }
+    // 会計が終わった画面の「商品券釣銭登録」の行から開いたとき: この画面が受け取る注文（Order API）を使う
+    if (!vid && !rid && initialListSegment === "voucher_change") {
+      try {
+        const oid = globalThis?.shopify?.order?.id;
+        if (oid != null && oid !== "") vid = String(oid);
+      } catch (_) {
+        /* ホームのタイルには注文が無い */
+      }
+    }
     const preId = vid || rid;
     if (!preId) return;
-    if (vid) sessionStorage.removeItem(STORAGE_KEY_VOUCHER);
-    else sessionStorage.removeItem(STORAGE_KEY_REFUND);
+    try {
+      if (vid) sessionStorage.removeItem(STORAGE_KEY_VOUCHER);
+      else sessionStorage.removeItem(STORAGE_KEY_REFUND);
+    } catch (_) {
+      /* ignore */
+    }
     const voucherShortcut = Boolean(vid);
 
     setOrderEntryLoading(true);
@@ -300,7 +322,22 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
         setOrderCorrectionContext(res.orderCorrectionContext ?? null);
         setNativeRefunds(Array.isArray(res.nativeRefunds) ? res.nativeRefunds : null);
         // 取引詳細メニューからは一覧を挟まず、各処理のフォームへ直行
-        setStep(voucherShortcut ? "form_voucher" : "form_refund");
+        if (!voucherShortcut) {
+          setStep("form_refund");
+          return;
+        }
+        // 商品券釣銭登録: 登録済みなら調整履歴、釣有りでない会計なら案内を出す（T のカード 2026-11-24）
+        const next = voucherShortcutStep(order, res.items ?? []);
+        if (next === "form_voucher") {
+          setStep("form_voucher");
+          return;
+        }
+        setSubmitNotice(
+          next === "order_detail_registered"
+            ? { tone: "info", text: "この会計の商品券釣銭は、もう登録してあります。直すときは、調整履歴の「変更」を押してください。" }
+            : { tone: "warning", text: "この会計は商品券釣有りではないので、商品券釣銭は登録できません。" },
+        );
+        setStep("order_detail");
       })
       .catch((e) => setBootstrapError(toUserMessage(e?.message) || "取得に失敗しました"))
       .finally(() => setOrderEntryLoading(false));
@@ -525,9 +562,11 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
     } else if (action.kind === "redo_draft") await runRedoDraft();
   }, [confirmAction, runVoid, runRecheck, runLegacyRecheck, runRedoDraft]);
 
+  // タイルを分けた（T 2026-11-23）: 見出しは開いたタイルの名前
+  const pageHeading = initialListSegment === "voucher_change" ? "商品券釣銭登録" : "返金方法変更";
   if (orderEntryLoading) {
     return (
-      <s-page heading="返金・商品券">
+      <s-page heading={pageHeading}>
         <s-box padding="base">
           <s-text tone="subdued">取引を開いています…</s-text>
         </s-box>
@@ -537,7 +576,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
 
   if (bootstrapError && fromOrderEntry) {
     return (
-      <s-page heading="返金・商品券">
+      <s-page heading={pageHeading}>
         <s-box padding="base">
           <s-stack gap="base">
             <s-text tone="critical">{bootstrapError}</s-text>
@@ -565,15 +604,20 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
     return (
       <OrderDayListScreen
         key={reserveMode ? "reserve" : "list"}
-        pageHeading={reserveMode ? "返金前登録（取引を選択）" : "返金・商品券（取引を選択）"}
+        pageHeading={reserveMode ? "返金前登録（取引を選択）" : `${pageHeading}（取引を選択）`}
         badgeMode="specialRefund"
         onSelectOrderId={handleOrderSelect}
         noticeError={bootstrapError}
         onDismissNotice={() => setBootstrapError("")}
         initialSegment={reserveMode ? "all" : initialListSegment}
+        segments={reserveMode ? undefined : listSegmentsForTile(initialListSegment)}
+        listNote={reserveMode ? "" : listNote}
         onBack={reserveMode ? () => setReserveMode(false) : undefined}
         listAction={
-          reservationEnabled && !reserveMode ? { label: "返金前登録", onClick: () => setReserveMode(true) } : null
+          listAction ??
+          (reservationEnabled && !reserveMode && initialListSegment !== "voucher_change"
+            ? { label: "返金前登録", onClick: () => setReserveMode(true) }
+            : null)
         }
       />
     );
@@ -582,6 +626,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
   if (step === "order_detail") {
     return (
       <OrderDetailView
+        entry={initialListSegment === "voucher_change" ? "voucher" : "refund"}
         order={selectedOrder}
         events={events}
         loading={loading}
@@ -763,6 +808,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
 // 取引詳細（スクロール）＋固定フッターで処理選択
 // ──────────────────────────────────────────────
 function OrderDetailView({
+  entry = "refund",
   order,
   events,
   loading,
@@ -784,13 +830,14 @@ function OrderDetailView({
 }) {
   const activeEvents = events.filter((e) => e.status === "active");
   const voidedEvents = events.filter((e) => e.status === "voided");
-  // 商品券釣銭調整は「商品券釣有り」の注文だけ（一覧の「商品券釣有り」の印と同じ判定: 支払方法マスタの
+  // 商品券釣銭登録は「商品券釣有り」の注文だけ（一覧の「商品券釣有り」の印と同じ判定: 支払方法マスタの
   // 釣り有りの商品券で払った、またはメモに「商品券」）。支払いが 1 件も読めない注文は判定できないので押せるまま。
-  const voucherAdjustable =
-    Boolean(order?.estimatedVoucherChange) || (order?.transactions ?? []).length === 0;
+  const voucherAdjustable = isVoucherAdjustableOrder(order);
+  // 入口ごとに、関係するボタンだけを右下に出す（T 2026-11-24）: 商品券釣銭登録タイル・会計後の行 → 商品券釣銭登録、返金方法変更タイル → 返金方法変更
+  const isVoucherEntry = entry === "voucher";
 
   return (
-    <s-page heading="特殊返金調整・商品券釣銭登録">
+    <s-page heading={isVoucherEntry ? "商品券釣銭登録" : "返金方法変更"}>
       <s-stack
         gap="none"
         blockSize="100%"
@@ -885,31 +932,15 @@ function OrderDetailView({
                 </s-text>
               ) : null}
 
-              {/* 会計をやり直す（下書き注文を作成）は一番下（T 2026-11-23） */}
-              {order?.canRedoAsDraft ? (
-                <s-box paddingBlockStart="base">
-                  <s-stack gap="small-300">
-                    <s-text type="small" color="subdued">会計をやり直す</s-text>
-                    <s-text type="small" color="subdued">
-                      キャンセル・返金済みの注文と同じ商品で下書き注文を作ります。お会計は POS か管理画面でします。
-                    </s-text>
-                    <s-box paddingBlockStart="small-300">
-                      <s-stack direction="inline" gap="small">
-                        <s-button
-                          variant="secondary"
-                          command="--show"
-                          commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
-                          onClick={() => onAskConfirm({ kind: "redo_draft" })}
-                          disabled={loading}
-                          loading={loading}
-                        >
-                          下書き注文を作成
-                        </s-button>
-                      </s-stack>
-                    </s-box>
-                  </s-stack>
-                </s-box>
-              ) : null}
+              {/* 会計をやり直す（カートに入れる／下書き注文）は一番下（T 2026-11-23）。方法は管理画面の特殊返金設定で選ぶ */}
+              <RedoCheckoutSection
+                order={order}
+                canRedoToCart={Boolean(order?.canRedoToCart)}
+                canRedoAsDraft={Boolean(order?.canRedoAsDraft)}
+                onRedoDraft={() => onAskConfirm({ kind: "redo_draft" })}
+                draftCommandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+                busy={loading}
+              />
 
               {error ? <s-text tone="critical">{error}</s-text> : null}
             </s-stack>
@@ -923,12 +954,9 @@ function OrderDetailView({
           leftLabel={fromOrderEntry ? "閉じる" : "戻る"}
           onLeft={onBack}
           leftDisabled={loading}
-          middleLabel="特殊返金調整"
-          onMiddle={onRefund}
-          middleDisabled={loading}
-          rightLabel="商品券釣銭登録"
-          onRight={onVoucher}
-          rightDisabled={loading || !voucherAdjustable}
+          rightLabel={isVoucherEntry ? "商品券釣銭登録" : "返金方法変更"}
+          onRight={isVoucherEntry ? onVoucher : onRefund}
+          rightDisabled={loading || (isVoucherEntry && !voucherAdjustable)}
         />
       </s-stack>
       <SpecialRefundConfirmModal
@@ -1352,7 +1380,7 @@ function SpecialRefundForm({
   }
 
   return (
-    <s-page heading="特殊返金調整を登録">
+    <s-page heading="返金方法変更を登録">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
@@ -1552,7 +1580,7 @@ function VoucherAdjustmentForm({
                   <Row label="取引" value={order?.orderName ?? "-"} />
                   <Row label="商品券額面" value={`¥${face.toLocaleString()}`} />
                   <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
-                  <Row label="お釣り" value={`¥${Number(changeAmount ?? 0).toLocaleString()}`} />
+                  <Row label="釣銭" value={`¥${Number(changeAmount ?? 0).toLocaleString()}`} />
                   {note ? <Row label="メモ" value={note} /> : null}
                 </s-stack>
               </s-box>
@@ -1609,16 +1637,14 @@ function VoucherAdjustmentForm({
                 value={appliedState === "loading" ? "読み込み中…" : `¥${applied.toLocaleString()}`}
               />
             )}
-            {/* 全額反映: 商品券で払った額をそのまま額面に入れる（お釣りなし。違えば直す） */}
+            {/* 額面の候補: 払った額より上の近い 100 円区切り 1 つ + 500 円区切り 2 つ（全額反映は釣銭が出ないのでやめた。T 2026-11-24） */}
             {appliedState !== "loading" && appliedAmount !== "" && applied > 0 ? (
-              <s-button kind="secondary" onClick={() => setFaceValue(String(roundMoney(applied)))} disabled={loading}>
-                {`払った額 ¥${roundMoney(applied).toLocaleString()} を額面に入れる（全額反映）`}
-              </s-button>
+              <VoucherFaceCandidates amount={applied} selected={faceValue} onPick={setFaceValue} disabled={loading} />
             ) : null}
 
-            {/* お釣り（自動） */}
+            {/* 釣銭（自動） */}
             <Row
-              label="お釣り（額面 − 払った額）"
+              label="釣銭（額面 − 払った額）"
               value={changeAmount == null ? "-" : `¥${changeAmount.toLocaleString()}`}
             />
 
@@ -1774,7 +1800,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
                   {isVoucher ? (
                     <>
                       <Row label="商品券額面" value={`¥${face.toLocaleString()}`} />
-                      <Row label="お釣り" value={`¥${Number(change ?? 0).toLocaleString()}`} />
+                      <Row label="釣銭" value={`¥${Number(change ?? 0).toLocaleString()}`} />
                     </>
                   ) : (
                     <Row label="金額" value={`¥${Number(amount).toLocaleString()}`} />
@@ -1839,7 +1865,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
                   onInput={(e) => setFaceValue(e?.currentTarget?.value ?? "")}
                 />
                 <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
-                <Row label="お釣り" value={change == null ? "-" : `¥${change.toLocaleString()}`} />
+                <Row label="釣銭" value={change == null ? "-" : `¥${change.toLocaleString()}`} />
               </>
             ) : isNative ? (
               <s-stack gap="none">

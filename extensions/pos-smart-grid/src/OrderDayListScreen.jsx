@@ -87,6 +87,9 @@ export function formatPosBadges(item, badgeMode) {
  * @param {string} [props.noticeError] - 一覧上部に出す一時メッセージ（取引詳細からの起動失敗など）
  * @param {() => void} [props.onDismissNotice]
  * @param {"all" | "refunded" | "voucher_change"} [props.initialSegment] - 開いたときの絞り込み（タイルごとに変える）
+ * @param {{ value: string, label: string, noun: string }[]} [props.segments] - 出す絞り込み（既定は全部）
+ * @param {string} [props.listNote] - 一覧の上に出す案内（1 行）
+ * @param {{ label: string, onClick: () => void } | null} [props.listAction] - 画面の下の固定の右に出すボタン（1 つ。「会計前登録」など。T 2026-11-24）
  * @param {(params: object) => Promise<{ items: object[], nextCursor?: string|null, todayLocalDate?: string, fetchedAtTime?: string }>} [props.fetchList]
  *   一覧の読み込み（既定は注文の検索）。領収書の発行履歴は発行の記録を読む
  * @param {(item: object, todayKey: string) => { key: string, title: string, amountLabel: string, dateTimeLabel: string, badges: object[], selectId?: string }} [props.toRow]
@@ -104,6 +107,9 @@ export function OrderDayListScreen({
   noticeError = "",
   onDismissNotice = () => {},
   initialSegment = "all",
+  segments = LIST_SEGMENTS,
+  listNote = "",
+  listAction = null,
   fetchList = searchOrders,
   toRow = null,
   itemNoun = "取引",
@@ -306,6 +312,15 @@ export function OrderDayListScreen({
     setDayMenuOpen(false);
   };
 
+  // 下の固定の右: 領収書の「履歴」など。無ければ「会計前登録」などの一覧のボタン（T 2026-11-24: 一覧の上ではなく右下）
+  const trailing =
+    footerTrailing ??
+    (listAction ? (
+      <s-button variant="secondary" onClick={listAction.onClick}>
+        {listAction.label}
+      </s-button>
+    ) : null);
+
   return (
     <s-page heading={pageHeading}>
       <s-stack
@@ -482,12 +497,12 @@ export function OrderDayListScreen({
               /* 幅いっぱいに均等（POS Stock の「未入庫／入庫済み」と同じ。T 2026-11-23）。
                  s-button に幅の指定は無いので、幅を割った s-box に入れる */
               <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
-                {LIST_SEGMENTS.map((seg, i) => (
+                {segments.map((seg, i) => (
                   <s-box
                     key={seg.value}
-                    inlineSize={`${(100 / LIST_SEGMENTS.length).toFixed(2)}%`}
+                    inlineSize={`${(100 / segments.length).toFixed(2)}%`}
                     paddingInlineStart={i === 0 ? "none" : "small-500"}
-                    paddingInlineEnd={i === LIST_SEGMENTS.length - 1 ? "none" : "small-500"}
+                    paddingInlineEnd={i === segments.length - 1 ? "none" : "small-500"}
                   >
                     <s-button
                       variant={
@@ -537,6 +552,7 @@ export function OrderDayListScreen({
           {/* 固定の線と一覧の間に余白（T 2026-11-23） */}
           <s-box padding="base">
             <s-stack gap="base">
+              {listNote ? <s-text color="subdued">{listNote}</s-text> : null}
               {noticeError ? (
                 <s-stack gap="small-300">
                   <s-banner tone="critical" heading={storeFacingNotice(noticeError)} />
@@ -589,7 +605,7 @@ export function OrderDayListScreen({
                     <s-stack gap="small-300">
                       <s-text>
                         {`${dayChipLabel}の取引は ${items.length} 件ありますが、${
-                          LIST_SEGMENTS.find(
+                          segments.find(
                             (x) => x.value === effectiveSegment,
                           )?.noun ?? ""
                         }の取引はありません。`}
@@ -645,8 +661,8 @@ export function OrderDayListScreen({
           </s-box>
         </s-scroll-box>
 
-        {footerTrailing || onBack ? <s-divider /> : null}
-        {footerTrailing || onBack ? (
+        {trailing || onBack ? <s-divider /> : null}
+        {trailing || onBack ? (
           /* 下の固定: 左に「戻る」、右に領収書の「履歴」など。FixedFooterNavBar と同じ作り */
           <s-box
             padding="base"
@@ -670,7 +686,7 @@ export function OrderDayListScreen({
               ) : (
                 <s-box />
               )}
-              {footerTrailing ?? <s-box />}
+              {trailing ?? <s-box />}
             </s-stack>
           </s-box>
         ) : null}
