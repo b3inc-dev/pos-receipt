@@ -38,7 +38,7 @@ export async function runOrderAutoAdjustmentsFromWebhook(
     }
   }
 
-  // 返金の予約: その注文に使う前の予約があるときだけ、Shopify の返金を読んで付け替えを作る
+  // 返金の予約: その注文に使う前の予約があるときだけ、Shopify の返金を読んで返金方法変更を作る
   try {
     if (await hasPendingReservation(shopId, orderId)) {
       const r = await applyRefundReservationsForOrder(admin, shopId, orderId);

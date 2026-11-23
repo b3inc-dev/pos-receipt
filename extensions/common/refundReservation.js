@@ -27,7 +27,7 @@ export function reservationRowsFromInput(rows) {
 
 /**
  * 返金する金額（純正で返金する見込みの額）。要る。分けた行（最後以外）の合計はこれより小さく。
- * 純正の返金額がこれと違うと、自動では付け替えずに「要確認」にする（T 2026-11-23）
+ * 純正の返金額がこれと違うと、自動では返金方法を変更せずに「要確認」にする（T 2026-11-23）
  */
 export function reservationExpectedAmountFromInput(input, rows) {
   const expected = money(input);
@@ -82,16 +82,16 @@ export function postReturnMessage(items, now = Date.now()) {
   if (!recent) return null;
   if (recent.status === "applied") {
     const rows = (recent.rows ?? []).map((row) => reservationRowText(row)).join("・");
-    return { tone: "success", text: `返金の予約どおり付け替えました（${rows}）` };
+    return { tone: "success", text: `返金の予約どおり返金方法を変更しました（${rows}）` };
   }
   if (recent.status === "needs_review") {
-    return { tone: "warning", text: recent.reviewReason || "返金の予約は自動では付け替えていません。「返金」タイルで確かめてください" };
+    return { tone: "warning", text: recent.reviewReason || "返金の予約は自動では返金方法を変更していません。「返金」タイルで確かめてください" };
   }
   if (recent.status === "pending") {
     return { tone: "neutral", text: "返金の予約はまだ使っていません。少したってから「返金」タイルで確かめてください" };
   }
   if (recent.status === "expired") {
-    return { tone: "warning", text: "返金の予約は期限が切れていたので使っていません。「返金」タイルから付け替えてください" };
+    return { tone: "warning", text: "返金の予約は期限が切れていたので使っていません。「返金」タイルから返金方法を変更してください" };
   }
   return null;
 }
