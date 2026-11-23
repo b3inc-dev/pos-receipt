@@ -10,7 +10,6 @@ import {
   Layout,
   Card,
   Text,
-  TextField,
   Checkbox,
   Button,
   BlockStack,
@@ -144,29 +143,29 @@ export default function SpecialRefundSettingsPage() {
           <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
           <Layout.Section>
             {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-            <AdminIntro><p>POS で利用できる特殊返金の種別と、各種別の入力要件・表示名を設定します。OFF にした種別は API でも拒否されます。</p></AdminIntro>
+            <AdminIntro><p>POS の「返金」タイルで使う登録の種類と、Shopify の注文に返金を作るか・精算に入れるかを決めます。オフにした種類は POS で登録できなくなります。</p></AdminIntro>
           </Layout.Section>
 
           <Layout.AnnotatedSection
             title="Shopify 返金の実行"
-            description="POS で特殊返金を登録したとき、Shopify 上でも実際に返金するかどうかを選びます。商品券調整は常に記録のみです。"
+            description="返金は POS の純正の返金で行い、タイルでは返した手段を付け替えます。純正で返金した注文の付け替えは、ここの選び方に関係なく Shopify では返金しません（金額は純正の返金のまま）。ここで選ぶのは、純正の返金が無い注文で手段を登録したときだけです。商品券釣銭調整とレシートの現金を直すは、いつも記録だけです。"
           >
             <Card>
               <BlockStack gap="400">
                 <ChoiceList
-                  title="返金処理モード"
+                  title="返金のしかた（純正の返金が無い注文）"
                   choices={[
                     {
-                      label: "記録のみ",
+                      label: "記録だけ",
                       value: "record_only",
                       helpText:
-                        "アプリのDBと精算・サマリーにだけ反映します。Shopify の注文には返金を作りません。",
+                        "アプリの記録と精算・売上サマリーにだけ入れます。Shopify の注文には返金を作りません。",
                     },
                     {
-                      label: "POS 登録時に Shopify で実返金",
+                      label: "Shopify で返金まで",
                       value: "shopify_execute",
                       helpText:
-                        "POS で登録すると、下で ON にした種別について Shopify Admin API（refundCreate）で返金を実行します。",
+                        "POS で登録すると、Shopify の注文にも元の支払いへの返金を作ります。",
                     },
                   ]}
                   selected={[form.refundProcessingMode]}
@@ -180,27 +179,27 @@ export default function SpecialRefundSettingsPage() {
                 {form.refundProcessingMode === "shopify_execute" ? (
                   <>
                     <Divider />
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      実返金の対象種別（商品券調整は対象外）
-                    </Text>
+                    {/* 現金で返した（cash_refund）・ほかの手段で返した（payment_method_override）は POS では 1 つの「返金の手段の付け替え」。設定の値は 2 つのまま、まとめて切り替える */}
                     <Checkbox
-                      label="現金返金"
-                      checked={form.shopifyExecuteCashRefund}
-                      onChange={(v) => set("shopifyExecuteCashRefund", v)}
+                      label="返金の手段の付け替えで、Shopify で返金まで行う"
+                      checked={form.shopifyExecuteCashRefund || form.shopifyExecutePaymentMethodOverride}
+                      onChange={(v) => {
+                        set("shopifyExecuteCashRefund", v);
+                        set("shopifyExecutePaymentMethodOverride", v);
+                      }}
+                      helpText={
+                        form.shopifyExecuteCashRefund !== form.shopifyExecutePaymentMethodOverride
+                          ? "今は「現金で返した」と「ほかの手段で返した」で設定が分かれています。押すと 2 つそろえます。"
+                          : undefined
+                      }
                     />
-                    <Checkbox
-                      label="返金手段変更"
-                      checked={form.shopifyExecutePaymentMethodOverride}
-                      onChange={(v) => set("shopifyExecutePaymentMethodOverride", v)}
-                    />
-                    <Text as="p" tone="subdued">レシート現金調整は精算の数字を直すだけで、Shopify では返金しません。</Text>
                   </>
                 ) : null}
                 <Checkbox
-                  label="訂正時は記録のみ（同一取引で無効化したあとの再登録で Shopify 実返金しない）"
+                  label="登録し直すときは記録だけにする"
                   checked={form.correctionUsesRecordOnly}
                   onChange={(v) => set("correctionUsesRecordOnly", v)}
-                  helpText="誤登録を無効化して正しい内容で登録し直すとき、二重返金を防ぎます。ON 推奨です。"
+                  helpText="間違えた登録を無効化して登録し直すとき、Shopify で 2 回返金しないようにします。オンをおすすめします。"
                 />
                 <Checkbox
                   label="会計やり直し（下書き注文を作成）"
@@ -209,26 +208,50 @@ export default function SpecialRefundSettingsPage() {
                   helpText="キャンセル・返金済みの取引から、同じ商品構成の下書き注文を POS で作成できます。決済は POS または管理画面で行います。"
                 />
                 <Banner tone="warning">
-                  実返金を ON にすると、POS で登録した金額が Shopify 上の注文に返金として記録されます。誤登録に注意してください。Shopify 返金済みの無効化では返金は自動取り消しされません。
+                  「Shopify で返金まで」にすると、純正の返金が無い注文で POS で登録した金額が、Shopify の注文に返金として入ります。登録を無効化しても、Shopify の返金は取り消されません。
                 </Banner>
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="利用可能イベント種別">
+          <Layout.AnnotatedSection
+            title="POS で使う種類"
+            description="POS の登録の画面に出る種類です。返した手段が現金かどうかで、記録の種類（現金返金・返金手段変更）は自動で決まります。"
+          >
             <Card>
               <BlockStack gap="300">
-                <Checkbox label="現金返金" checked={form.enableCashRefund} onChange={(v) => set("enableCashRefund", v)} />
-                <Checkbox label="返金手段変更" checked={form.enablePaymentMethodOverride} onChange={(v) => set("enablePaymentMethodOverride", v)} />
-                <Checkbox label="商品券調整" checked={form.enableVoucherChangeAdjustment} onChange={(v) => set("enableVoucherChangeAdjustment", v)} />
-                <Checkbox label="レシート現金調整" checked={form.enableReceiptCashAdjustment} onChange={(v) => set("enableReceiptCashAdjustment", v)} />
+                <Checkbox
+                  label="返金の手段の付け替え"
+                  checked={form.enableCashRefund || form.enablePaymentMethodOverride}
+                  onChange={(v) => {
+                    set("enableCashRefund", v);
+                    set("enablePaymentMethodOverride", v);
+                  }}
+                  helpText={
+                    form.enableCashRefund !== form.enablePaymentMethodOverride
+                      ? `今は${form.enableCashRefund ? "現金で返したときだけ" : "現金以外で返したときだけ"}使えます。押すと 2 つそろえます。`
+                      : "純正で返金した注文は、返金を選んで金額はそのまま、返した手段だけ選びます。"
+                  }
+                />
+                <Checkbox
+                  label="レシートの現金を直す"
+                  checked={form.enableReceiptCashAdjustment}
+                  onChange={(v) => set("enableReceiptCashAdjustment", v)}
+                  helpText="返金ではありません。レシートと実際の現金が違ったとき、精算の数字だけを直します。"
+                />
+                <Checkbox
+                  label="商品券釣銭調整"
+                  checked={form.enableVoucherChangeAdjustment}
+                  onChange={(v) => set("enableVoucherChangeAdjustment", v)}
+                  helpText="商品券で払ってお釣りを現金で渡したときの記録です。数え方は「商品券設定」で決めます。"
+                />
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
 
           <Layout.AnnotatedSection
             title="管理者の承認"
-            description="付け替え（返金手段変更・現金返金）を、管理者が承認してから精算に入れるかを選びます。"
+            description="返金の手段の付け替えを、管理者が承認してから精算に入れるかを選びます。"
           >
             <Card>
               <BlockStack gap="300">
@@ -249,7 +272,7 @@ export default function SpecialRefundSettingsPage() {
             <Card>
               <BlockStack gap="300">
                 <Checkbox
-                  label="特殊返金・商品券調整を注文にも記録する（注文メタフィールド pos.adjustments）"
+                  label="特殊返金・商品券調整を注文にも記録する"
                   checked={form.writeOrderAdjustmentsMetafield}
                   onChange={(v) => set("writeOrderAdjustmentsMetafield", v)}
                   helpText="オンにすると、登録・変更・無効化のたびに、その注文に記録を書きます。注文を読むほかのアプリ（ciara-system など）が同じ記録で数えられます。精算はアプリの記録で数え、注文の記録が違うときはアプリの記録で書き直します。オンにする前の登録は、下の「前からの登録を注文に書く」で書きます。オフのときは注文に何も書かず、今までどおりアプリの記録だけで数えます。"
@@ -298,30 +321,27 @@ export default function SpecialRefundSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="入力要件">
-            <Card>
-              <BlockStack gap="300">
-                <Checkbox label="返金手段変更: 元の支払手段を必須" checked={form.requireOriginalPaymentMethodForPaymentOverride} onChange={(v) => set("requireOriginalPaymentMethodForPaymentOverride", v)} />
-                <Checkbox label="返金手段変更: 実際の返金手段を必須" checked={form.requireActualRefundMethodForPaymentOverride} onChange={(v) => set("requireActualRefundMethodForPaymentOverride", v)} />
-                <Checkbox label="現金返金: メモを必須" checked={form.requireNoteForCashRefund} onChange={(v) => set("requireNoteForCashRefund", v)} />
-                <Checkbox label="商品券調整: 額面を必須" checked={form.requireVoucherFaceValueForVoucherChangeAdjustment} onChange={(v) => set("requireVoucherFaceValueForVoucherChangeAdjustment", v)} />
-                <Checkbox label="商品券調整: 使用額を必須" checked={form.requireVoucherAppliedAmountForVoucherChangeAdjustment} onChange={(v) => set("requireVoucherAppliedAmountForVoucherChangeAdjustment", v)} />
-                <Checkbox label="商品券調整: おつり額を必須" checked={form.requireVoucherChangeAmountForVoucherChangeAdjustment} onChange={(v) => set("requireVoucherChangeAmountForVoucherChangeAdjustment", v)} />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-          <Layout.AnnotatedSection title="精算反映・表示名">
+          <Layout.AnnotatedSection
+            title="精算に入れる"
+            description="オフにした種類は、登録しても精算・点検・売上サマリーに入れません。"
+          >
             <Card>
               <BlockStack gap="400">
-                <Checkbox label="現金返金を精算に反映" checked={form.reflectCashRefundToSettlement} onChange={(v) => set("reflectCashRefundToSettlement", v)} />
-                <Checkbox label="返金手段変更を精算に反映" checked={form.reflectPaymentOverrideToSettlement} onChange={(v) => set("reflectPaymentOverrideToSettlement", v)} />
-                <Checkbox label="商品券調整を精算に反映" checked={form.reflectVoucherAdjustmentToSettlement} onChange={(v) => set("reflectVoucherAdjustmentToSettlement", v)} />
-                <Checkbox label="レシート現金調整を精算に反映" checked={form.reflectReceiptCashAdjustmentToSettlement} onChange={(v) => set("reflectReceiptCashAdjustmentToSettlement", v)} />
-                <TextField label="特殊返金のUIラベル" value={form.specialRefundUiLabel} onChange={(v) => set("specialRefundUiLabel", v)} autoComplete="off" />
-                <TextField label="商品券調整のUIラベル" value={form.voucherAdjustmentUiLabel} onChange={(v) => set("voucherAdjustmentUiLabel", v)} autoComplete="off" />
-                <TextField label="現金返金のUIラベル" value={form.cashRefundUiLabel} onChange={(v) => set("cashRefundUiLabel", v)} autoComplete="off" />
-                <TextField label="返金手段変更のUIラベル" value={form.paymentOverrideUiLabel} onChange={(v) => set("paymentOverrideUiLabel", v)} autoComplete="off" />
+                <Checkbox
+                  label="返金の手段の付け替えを精算に入れる"
+                  checked={form.reflectCashRefundToSettlement || form.reflectPaymentOverrideToSettlement}
+                  onChange={(v) => {
+                    set("reflectCashRefundToSettlement", v);
+                    set("reflectPaymentOverrideToSettlement", v);
+                  }}
+                  helpText={
+                    form.reflectCashRefundToSettlement !== form.reflectPaymentOverrideToSettlement
+                      ? "今は「現金で返した」と「ほかの手段で返した」で設定が分かれています。押すと 2 つそろえます。"
+                      : undefined
+                  }
+                />
+                <Checkbox label="商品券釣銭調整を精算に入れる" checked={form.reflectVoucherAdjustmentToSettlement} onChange={(v) => set("reflectVoucherAdjustmentToSettlement", v)} />
+                <Checkbox label="レシートの現金を直すを精算に入れる" checked={form.reflectReceiptCashAdjustmentToSettlement} onChange={(v) => set("reflectReceiptCashAdjustmentToSettlement", v)} />
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
