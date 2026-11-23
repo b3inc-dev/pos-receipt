@@ -573,11 +573,11 @@ export function OrderDayListScreen({
                   {visibleItems.length === 0 ? (
                     <s-stack gap="small-300">
                       <s-text>
-                        {`${dayChipLabel}の取引は ${items.length} 件ありますが、「${
+                        {`${dayChipLabel}の取引は ${items.length} 件ありますが、${
                           LIST_SEGMENTS.find(
                             (x) => x.value === effectiveSegment,
-                          )?.label ?? ""
-                        }」に当てはまるものはありません。`}
+                          )?.noun ?? ""
+                        }の取引はありません。`}
                       </s-text>
                       <s-button
                         variant="secondary"
