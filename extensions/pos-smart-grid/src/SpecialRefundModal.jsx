@@ -569,7 +569,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
     return (
       <s-page heading={pageHeading}>
         <s-box padding="base">
-          <s-text tone="subdued">取引を開いています…</s-text>
+          <s-text color="subdued">取引を開いています…</s-text>
         </s-box>
       </s-page>
     );
@@ -581,11 +581,11 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         <s-box padding="base">
           <s-stack gap="base">
             <s-text tone="critical">{bootstrapError}</s-text>
-            <s-text tone="subdued" size="small">
+            <s-text type="small" color="subdued">
               取引詳細から開けませんでした。アプリの権限更新後に再度お試しください。
             </s-text>
             <s-button
-              kind="primary"
+              variant="primary"
               onClick={() => {
                 if (tryDismissModal()) return;
                 setBootstrapError("");
@@ -990,7 +990,7 @@ function SpecialRefundConfirmModal({ title, message, loading, onExecute, onCance
       </s-scroll-box>
       <s-button
         slot="secondary-actions"
-        kind="secondary"
+        variant="secondary"
         command="--hide"
         commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
         onClick={onCancel}
@@ -1011,24 +1011,24 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
   return (
     <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
       <s-stack gap="small">
-        <s-text fontWeight="bold" fontSize="small">
+        <s-text type="strong">
           {decision?.reason === "none_found"
             ? "Shopify の注文に、この調整の返金は見つかりませんでした"
             : "Shopify の注文に、この調整かもしれない返金があります"}
         </s-text>
-        <s-text tone="subdued" fontSize="small">
+        <s-text type="small" color="subdued">
           Shopify の管理画面でこの注文の返金を確かめて、下から選んでください。どれを選んでも Shopify の返金は実行しません。
         </s-text>
         {candidates.map((c) => (
           <s-stack key={c.refundId} gap="extraSmall">
-            <s-text fontSize="small">
+            <s-text type="small">
               ¥{Number(c.amount ?? 0).toLocaleString()} ・
               {` ${localDateTimeLabel(c.createdAt)}`}
               {c.looksLikeThisEvent ? "（この登録のメモ・金額が合う）" : ""}
             </s-text>
-            {c.note ? <s-text tone="subdued" fontSize="small">メモ: {c.note}</s-text> : null}
+            {c.note ? <s-text type="small" color="subdued">メモ: {c.note}</s-text> : null}
             <s-button
-              kind="secondary"
+              variant="secondary"
               command="--show"
               commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
               onClick={() =>
@@ -1047,7 +1047,7 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
         ))}
         {hasLikely ? null : (
           <s-button
-            kind="secondary"
+            variant="secondary"
             tone="critical"
             command="--show"
             commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
@@ -1118,11 +1118,11 @@ function EventCard({ event, readOnlyHint = "", onEdit, onAskConfirm, legacyDecis
 
         {!readOnlyHint && (canRecheckShopifyRefund(event) || canRecheckLegacyShopifyRefund(event)) ? (
           <s-stack gap="extraSmall">
-            <s-text tone="subdued" fontSize="small">
+            <s-text type="small" color="subdued">
               先に Shopify の管理画面でこの注文に返金があるかを確かめてから押してください。登録し直さないでください。
             </s-text>
             <s-button
-              kind="secondary"
+              variant="secondary"
               command="--show"
               commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
               onClick={() =>
@@ -1473,7 +1473,7 @@ function SpecialRefundForm({
                     onChange={setActualRefundMethod}
                   />
                 ) : (
-                  <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} fontSize="small">
+                  <s-text type="small" tone={refundMethodsState === "loading" ? undefined : "critical"}>
                     {refundMethodsMessage(refundMethodsState)}
                   </s-text>
                 )}
@@ -2045,7 +2045,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
 function Row({ label, value }) {
   return (
     <s-stack direction="horizontal" align="space-between">
-      <s-text tone="subdued">{label}</s-text>
+      <s-text color="subdued">{label}</s-text>
       <s-text>{value}</s-text>
     </s-stack>
   );
