@@ -43,6 +43,8 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | Fulfillment create（V2→フォールバック） | 精算注文クローズ |
 | Gift Cards API（任意） | レガシー発行額加算 |
 | Location | 同期・表示・printMode |
+
+注文検索（`orders(query:)`）の日付は、店舗タイムゾーンの 1 日（日本の店は日本時間 0:00〜23:59:59.999）を **UTC の Z 表記**で渡す（`getDayRangeInUtc` / `getDayRangeShopifySearchIso`。例: 2026-11-23 → `2026-11-22T15:00:00Z`〜`2026-11-23T14:59:59.999Z`）。`+09:00` 付きの値は開発ストア（2026-11-23）で同日の注文を取りこぼしたため使わない（Shopify 側の読み方は未確認）。
 | Shop.ianaTimezone / plan.partnerDevelopment | 日次境界・フルアクセス判定 |
 
 ## 5. Webhook
