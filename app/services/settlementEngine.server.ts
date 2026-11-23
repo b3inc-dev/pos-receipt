@@ -26,8 +26,16 @@ import {
   DEFAULT_SPECIAL_REFUND_SETTINGS,
   type SettlementSettings,
   type SpecialRefundSettings,
+  VOUCHER_SETTINGS_KEY,
+  DEFAULT_VOUCHER_SETTINGS,
+  type VoucherSettings,
 } from "../utils/appSettings.server";
 import { fetchLegacyGiftCardIssuanceForDay } from "./settlementLegacyGiftCards.server";
+import {
+  resolveVoucherChange,
+  resolveVoucherSettings,
+  voucherDetectionRulesFromSettings,
+} from "./voucherChangePure.server";
 import {
   getShopTimezoneForDaily,
   getDayRangeInUtc,
@@ -151,6 +159,16 @@ export interface SettlementPreviewDTO {
   refundCount: number;
   itemCount: number;
   voucherChangeAmount: number;
+  /** 商品券釣有り差額の内訳（判定優先順位で外した額。版の無い設定では legacy: true で外さない） */
+  voucherChangeBreakdown?: {
+    autoTotal: number;
+    manualTotal: number;
+    skippedAutoAmount: number;
+    skippedManualAmount: number;
+    legacy: boolean;
+    /** 納金金額（現金）から引く商品券の釣銭。POS の納金金額・精算レシートの納金額はこれを引いた額 */
+    cashDepositDeduction: number;
+  };
   paymentSections: PaymentSectionDTO[];
   /**
    * 売上に含めない手数料の明細（`_lsi_fee="1"` かつ `_lsi_fee_sales="0"`。例: Location Stock の送料の行）の当日分。
@@ -851,6 +869,10 @@ async function buildSettlementPreviewImpl(
   const loyaltySettings = await getAppSetting<Partial<LoyaltySettings>>(shopId, LOYALTY_SETTINGS_KEY);
   const pointRules = resolvePointRedemptionRules(loyaltySettings);
 
+  const voucherSettings = resolveVoucherSettings(
+    await getAppSetting<Partial<VoucherSettings> & { settingsVersion?: number }>(shopId, VOUCHER_SETTINGS_KEY),
+    DEFAULT_VOUCHER_SETTINGS,
+  );
   // 精算の数え方（売上を数える日・返金の付け替え・点数に数えない SKU など）。保存していない店は今の数え方
   const calcSettings = resolveSettlementCalcSettings(
     await getAppSetting<unknown>(shopId, SETTLEMENT_CALC_SETTINGS_KEY),
@@ -868,7 +890,7 @@ async function buildSettlementPreviewImpl(
     refundRemapRules: calcSettings.refundRemapRules,
     locIdRaw,
     paymentKey,
-  });
+  }, voucherDetectionRulesFromSettings(voucherSettings));
 
   const settlementSettings = await getAppSetting<Partial<SettlementSettings>>(shopId, SETTLEMENT_SETTINGS_KEY);
   const settlementMerged: SettlementSettings = { ...DEFAULT_SETTLEMENT_SETTINGS, ...settlementSettings };
@@ -1041,9 +1063,18 @@ async function buildSettlementPreviewImpl(
     (e) => e.eventType !== "voucher_change_adjustment",
   );
 
-  const voucherAdjustments = srSettings.reflectVoucherAdjustmentToSettlement
-    ? voucherAdjustmentsAll
-    : [];
+  // 商品券設定（機能・自動判定・手動調整・判定優先順位・精算に反映）と特殊返金設定「商品券調整を精算に反映」を合わせる。
+  // 同じ注文に自動判定と手入力の両方があるときは、判定優先順位の方だけを数える（二重計上の防止）。
+  const voucherResolution = resolveVoucherChange({
+    settings: voucherSettings,
+    reflectManualFromSpecialRefundSettings: srSettings.reflectVoucherAdjustmentToSettlement,
+    autoByOrder: gas.voucherChangeByOrder,
+    manualEvents: voucherAdjustmentsAll,
+    cashCapByOrder: gas.voucherCashCapByOrder,
+  });
+  const voucherAdjustments = voucherAdjustmentsAll.filter((e) =>
+    voucherResolution.appliedManual.includes(e),
+  );
   const otherEventsReflected = otherEventsAll.filter((e) => {
     if (e.eventType === "cash_refund") return srSettings.reflectCashRefundToSettlement;
     if (e.eventType === "payment_method_override") {
@@ -1077,10 +1108,8 @@ async function buildSettlementPreviewImpl(
     assertNoPendingSpecialRefunds(otherEventsReflected);
   }
 
-  /** DB の手入力調整 + ノート観測（GAS _voucher_change_total と同系） */
-  const voucherChangeAmount =
-    Math.round(gas.voucherChangeObserved) +
-    voucherAdjustments.reduce((sum, e) => sum + Number(e.voucherChangeAmount ?? 0), 0);
+  /** 自動判定（GAS _voucher_change_total と同系）＋ DB の手入力調整。同じ注文は片方だけ */
+  const voucherChangeAmount = voucherResolution.total;
   /** lineItems のポイント利用の割引（pointRules）の按分のみ（特殊返金の points は後続フェーズで合成可） */
   const vipPointsUsed = gas.vipPointsUsed;
 
@@ -1179,6 +1208,14 @@ async function buildSettlementPreviewImpl(
     refundCount: gas.refundOrderSet.size + giftCardRefundCount,
     itemCount,
     voucherChangeAmount: roundInt(voucherChangeAmount),
+    voucherChangeBreakdown: {
+      autoTotal: voucherResolution.autoTotal,
+      manualTotal: voucherResolution.manualTotal,
+      skippedAutoAmount: voucherResolution.skippedAutoAmount,
+      skippedManualAmount: voucherResolution.skippedManualAmount,
+      legacy: voucherResolution.legacy,
+      cashDepositDeduction: voucherResolution.cashDepositDeduction,
+    },
     paymentSections,
     ...(pendingSpecialRefundOrderLabels ? { pendingSpecialRefundOrderLabels } : {}),
     nonSalesFeeTotal,

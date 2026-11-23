@@ -221,6 +221,8 @@ export interface VoucherSettings {
   voucherDefaultLabel: string;
   voucherAdjustmentPriority: "manual_first" | "auto_first";
   reflectVoucherChangeInSettlement: boolean;
+  /** 商品券のお釣りを現金で渡した分を、精算の納金金額（現金）から引く */
+  deductVoucherChangeFromCashDeposit: boolean;
   reflectVoucherChangeInReceiptDisplay: boolean;
   voucherChangeDisplayLabel: string;
   /** 会計の前に商品券の額面を入れ、会計後に自動で登録する（docs/VOUCHER_CART_ENTRY.md）。初めはオフ（T の決定 2026-11-24） */
@@ -231,11 +233,12 @@ export const DEFAULT_VOUCHER_SETTINGS: VoucherSettings = {
   voucherFeatureEnabled: true,
   voucherAutoDetectionEnabled: true,
   voucherManualAdjustmentEnabled: true,
-  voucherNoteParseEnabled: false,
+  voucherNoteParseEnabled: true,
   voucherNoteParseRegex: "",
   voucherDefaultLabel: "商品券",
   voucherAdjustmentPriority: "manual_first",
   reflectVoucherChangeInSettlement: true,
+  deductVoucherChangeFromCashDeposit: true,
   reflectVoucherChangeInReceiptDisplay: true,
   voucherChangeDisplayLabel: "商品券おつり",
   voucherCartEntryEnabled: false,

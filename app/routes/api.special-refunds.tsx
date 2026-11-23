@@ -8,7 +8,14 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { getAppSetting } from "../utils/appSettings.server";
-import { SPECIAL_REFUND_SETTINGS_KEY, DEFAULT_SPECIAL_REFUND_SETTINGS } from "../utils/appSettings.server";
+import {
+  SPECIAL_REFUND_SETTINGS_KEY,
+  DEFAULT_SPECIAL_REFUND_SETTINGS,
+  VOUCHER_SETTINGS_KEY,
+  DEFAULT_VOUCHER_SETTINGS,
+  type VoucherSettings,
+} from "../utils/appSettings.server";
+import { resolveVoucherSettings, voucherManualAdjustmentAllowed } from "../services/voucherChangePure.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import { syncRefundAggregationMetafieldForOrder } from "../services/refundAggregation.server";
 import { setOrderRefundAggregationLocationGid } from "../services/posOrderMetafields.server";
@@ -66,7 +73,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const settings = await getAppSetting<typeof DEFAULT_SPECIAL_REFUND_SETTINGS>(shop.id, SPECIAL_REFUND_SETTINGS_KEY);
     const merged = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...settings };
+    const voucherSettings = resolveVoucherSettings(
+      await getAppSetting<Partial<VoucherSettings>>(shop.id, VOUCHER_SETTINGS_KEY),
+      DEFAULT_VOUCHER_SETTINGS,
+    );
     const allowedTypes = getAllowedEventTypes(merged);
+    // 一覧には登録済みの商品券調整も出す（消す操作のため）。新しく登録できるかは voucherAdjustmentAllowed で返す
+    // 版の無い設定は今までどおり押せる
+    const voucherAdjustmentAllowed =
+      voucherSettings.legacy ||
+      (voucherManualAdjustmentAllowed(voucherSettings) && allowedTypes.includes("voucher_change_adjustment"));
 
     const url = new URL(request.url);
     const sourceOrderId = url.searchParams.get("sourceOrderId");
@@ -141,6 +157,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             createdAtLabel: l.createdAt ? dateTimeFmt.format(new Date(l.createdAt)) : null,
           }))
         : null,
+      voucherAdjustmentAllowed,
       refundProcessingMode: merged.refundProcessingMode,
       orderCorrectionContext: {
         hasVoidedEvents: voidedCount > 0,
@@ -206,6 +223,23 @@ export async function action({ request }: ActionFunctionArgs) {
         { ok: false, error: `eventType must be one of: ${allowedTypes.join(", ")}` },
         { status: 400 }
       );
+    }
+
+    if (String(eventType) === "voucher_change_adjustment") {
+      const voucherSettings = resolveVoucherSettings(
+        await getAppSetting<Partial<VoucherSettings>>(shop.id, VOUCHER_SETTINGS_KEY),
+        DEFAULT_VOUCHER_SETTINGS,
+      );
+      if (!voucherManualAdjustmentAllowed(voucherSettings)) {
+        return corsJson(
+          {
+            ok: false,
+            code: "VOUCHER_ADJUSTMENT_DISABLED",
+            error: "商品券の手動調整は管理画面の商品券設定でオフになっています",
+          },
+          { status: 403 },
+        );
+      }
     }
 
     const eventTypeStr = String(eventType);

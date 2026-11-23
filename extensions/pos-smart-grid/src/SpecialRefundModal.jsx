@@ -280,6 +280,8 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
   const [refundFormOther, setRefundFormOther] = useState(false);
   // まだ純正で返金していない注文で「ここで登録する」を選んだとき（返金の予約の画面を飛ばす）
   const [reservationSkipped, setReservationSkipped] = useState(false);
+  /** 管理画面「商品券設定」で手動調整がオフなら false（古いサーバーは値なし＝true） */
+  const [voucherAllowed, setVoucherAllowed] = useState(true);
 
   // 取引詳細: 「特殊返金」または「商品券釣銭登録」から起動
   useEffect(() => {
@@ -321,9 +323,15 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         setAllowedEventTypes(Array.isArray(res.allowedEventTypes) ? res.allowedEventTypes : null);
         setOrderCorrectionContext(res.orderCorrectionContext ?? null);
         setNativeRefunds(Array.isArray(res.nativeRefunds) ? res.nativeRefunds : null);
+        setVoucherAllowed(res.voucherAdjustmentAllowed !== false);
         // 取引詳細メニューからは一覧を挟まず、各処理のフォームへ直行
         if (!voucherShortcut) {
           setStep("form_refund");
+          return;
+        }
+        // 管理画面「商品券設定」で手動調整がオフなら登録の画面は開かない（#92）
+        if (res.voucherAdjustmentAllowed === false) {
+          setStep("order_detail");
           return;
         }
         // 商品券釣銭登録: 登録済みなら調整履歴、釣有りでない会計なら案内を出す（T のカード 2026-11-24）
@@ -373,6 +381,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         setAllowedEventTypes(Array.isArray(res.allowedEventTypes) ? res.allowedEventTypes : null);
       setOrderCorrectionContext(res.orderCorrectionContext ?? null);
         setNativeRefunds(Array.isArray(res.nativeRefunds) ? res.nativeRefunds : null);
+        setVoucherAllowed(res.voucherAdjustmentAllowed !== false);
       setFromOrderEntry(false);
       // 「返金前登録」から選んだ注文は、注文の詳細を挟まずに予約の画面へ
       setStep(reserveModeRef.current ? "form_refund" : "order_detail");
@@ -391,6 +400,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         setAllowedEventTypes(Array.isArray(res.allowedEventTypes) ? res.allowedEventTypes : null);
       setOrderCorrectionContext(res.orderCorrectionContext ?? null);
         setNativeRefunds(Array.isArray(res.nativeRefunds) ? res.nativeRefunds : null);
+        setVoucherAllowed(res.voucherAdjustmentAllowed !== false);
     } catch {
       // silent
     }
@@ -659,6 +669,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         confirmTitle={confirmTitle}
         onConfirmExecute={handleConfirmExecute}
         onConfirmCancel={() => setConfirmAction(null)}
+        voucherAllowed={voucherAllowed}
         submitNotice={submitNotice}
         onDismissNotice={() => setSubmitNotice(null)}
         orderCorrectionContext={orderCorrectionContext}
@@ -824,6 +835,7 @@ function OrderDetailView({
   confirmTitle,
   onConfirmExecute,
   onConfirmCancel,
+  voucherAllowed = true,
   submitNotice,
   onDismissNotice,
   orderCorrectionContext,
@@ -947,6 +959,12 @@ function OrderDetailView({
           </s-box>
         </s-scroll-box>
 
+        {!voucherAllowed ? (
+          <s-box padding="small">
+            <s-text tone="subdued">商品券釣銭登録は、管理画面の商品券設定で「手動調整」がオフのため使えません。</s-text>
+          </s-box>
+        ) : null}
+
         <s-divider />
 
         <FixedFooterNavBar
@@ -956,7 +974,7 @@ function OrderDetailView({
           leftDisabled={loading}
           rightLabel={isVoucherEntry ? "商品券釣銭登録" : "返金方法変更"}
           onRight={isVoucherEntry ? onVoucher : onRefund}
-          rightDisabled={loading || (isVoucherEntry && !voucherAdjustable)}
+          rightDisabled={loading || (isVoucherEntry && (!voucherAdjustable || !voucherAllowed))}
         />
       </s-stack>
       <SpecialRefundConfirmModal

@@ -873,15 +873,18 @@ function PreviewView({
     { label: "点数", value: `${preview.itemCount}点` },
   ];
 
-  /** 納金金額ブロック用（現金セクションの net − refund） */
+  /** 納金金額ブロック用（現金セクションの net − refund − 商品券の釣銭） */
   const cashDepositRows = [];
+  const voucherCashDeduction = Math.max(0, Math.round(Number(preview.voucherChangeBreakdown?.cashDepositDeduction ?? 0)));
   /** 支払方法 | 件数 | 金額（返金行は ラベル[返金]） */
   const paymentTripleRows = [];
   if (preview.paymentSections?.length > 0) {
     for (const section of preview.paymentSections) {
       const methodLabel = section.label ?? section.gateway ?? "-";
       if (isCashPaymentSection(section)) {
-        const deposit = Math.round(Number(section.net ?? 0) - Number(section.refund ?? 0));
+        // 商品券の釣銭をレジの現金から渡した分は、最初の現金の行から引く（商品券設定「納金金額から引く」）
+        const voucherDeduct = cashDepositRows.length === 0 ? voucherCashDeduction : 0;
+        const deposit = Math.round(Number(section.net ?? 0) - Number(section.refund ?? 0) - voucherDeduct);
         cashDepositRows.push({
           key: `deposit-${section.gateway}-${cashDepositRows.length}`,
           label: methodLabel,
@@ -907,6 +910,18 @@ function PreviewView({
     }
   }
 
+  if (voucherCashDeduction > 0) {
+    if (cashDepositRows.length === 0) {
+      // 現金の売上が無い日でも、釣銭を現金で渡していれば納金はマイナスになる
+      cashDepositRows.push({ key: "deposit-cash-voucher-only", label: "現金", value: `¥${(-voucherCashDeduction).toLocaleString()}` });
+    }
+    cashDepositRows.push({
+      key: "deposit-voucher-change",
+      label: "うち商品券の釣銭",
+      value: `▲¥${voucherCashDeduction.toLocaleString()}`,
+    });
+  }
+
   const eventRows = [];
   for (const ev of preview.appliedSpecialRefundEvents ?? []) {
     eventRows.push({
@@ -920,6 +935,22 @@ function PreviewView({
       key: `va-${ev.id}`,
       label: `${ev.sourceOrderName ?? "-"}（商品券釣有り）`,
       value: `¥${Number(ev.voucherChangeAmount).toLocaleString()}`,
+    });
+  }
+  // 同じ注文に自動判定と手入力の両方があり、判定優先順位で片方を外した額（商品券設定）
+  const vb = preview.voucherChangeBreakdown;
+  if (vb && Number(vb.skippedAutoAmount) > 0) {
+    eventRows.push({
+      key: "va-skipped-auto",
+      label: "商品券釣有り：手入力を優先して外した自動の分",
+      value: `¥${Number(vb.skippedAutoAmount).toLocaleString()}`,
+    });
+  }
+  if (vb && Number(vb.skippedManualAmount) > 0) {
+    eventRows.push({
+      key: "va-skipped-manual",
+      label: "商品券釣有り：自動を優先して外した手入力の分",
+      value: `¥${Number(vb.skippedManualAmount).toLocaleString()}`,
     });
   }
 

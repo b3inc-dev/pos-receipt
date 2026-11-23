@@ -19,6 +19,16 @@ import {
 } from "../services/orderAdjustments.server";
 import { voucherChangeOf } from "../services/orderAdjustmentsPure.server";
 import { isSettlementConfirmedFor, refreshDailySummaryForAdjustment } from "../services/orderAdjustmentEdit.server";
+import {
+  getAppSetting,
+  VOUCHER_SETTINGS_KEY,
+  DEFAULT_VOUCHER_SETTINGS,
+  SPECIAL_REFUND_SETTINGS_KEY,
+  DEFAULT_SPECIAL_REFUND_SETTINGS,
+  type SpecialRefundSettings,
+  type VoucherSettings,
+} from "../utils/appSettings.server";
+import { resolveVoucherSettings, voucherManualAdjustmentAllowed } from "../services/voucherChangePure.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -50,6 +60,30 @@ export async function action({ request }: ActionFunctionArgs) {
     const { admin, shop, corsJson } = authResult;
     if (request.method !== "POST") {
       return corsJson({ error: "Method not allowed" }, { status: 405 });
+    }
+
+    // 管理画面「商品券設定」で機能・手動調整を切ったら、POS からの登録を受け付けない
+    const voucherSettings = resolveVoucherSettings(
+      await getAppSetting<Partial<VoucherSettings>>(shop.id, VOUCHER_SETTINGS_KEY),
+      DEFAULT_VOUCHER_SETTINGS,
+    );
+    const srSettings: SpecialRefundSettings = {
+      ...DEFAULT_SPECIAL_REFUND_SETTINGS,
+      ...(await getAppSetting<Partial<SpecialRefundSettings>>(shop.id, SPECIAL_REFUND_SETTINGS_KEY)),
+    };
+    // 版の無い設定（まだ新しい画面で保存していない店）は今までどおり受け付ける
+    if (
+      !voucherSettings.legacy &&
+      (!voucherManualAdjustmentAllowed(voucherSettings) || !srSettings.enableVoucherChangeAdjustment)
+    ) {
+      return corsJson(
+        {
+          ok: false,
+          code: "VOUCHER_ADJUSTMENT_DISABLED",
+          error: "商品券の手動調整は管理画面の設定でオフになっています（商品券設定・特殊返金設定）",
+        },
+        { status: 403 },
+      );
     }
 
     const body = await request.json() as Record<string, unknown>;

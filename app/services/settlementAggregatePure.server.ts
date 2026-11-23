@@ -3,6 +3,13 @@
  * Phase 1 ユニットテスト用に settlementEngine から切り出し。挙動は元実装と同一。
  */
 import {
+  DEFAULT_VOUCHER_DETECTION_RULES,
+  escapeRegExp,
+  parseVoucherFaceFromNoteWithRules,
+  voucherAppliedGatewayNames,
+  type VoucherDetectionRules,
+} from "./voucherChangePure.server";
+import {
   getPosLocationFromRefundTransactions,
   locationGidMatches,
   normalizeLocationGid,
@@ -330,34 +337,6 @@ export const builtinPaymentKeyResolver: PaymentKeyResolver = (gateway, formatted
   return { key, kind: builtinPaymentKeyKind(key) };
 };
 
-/** GAS z2hDigits: 全角数字・読点を除いて半角化（商品券額面パース用） */
-function z2hDigitsForVoucherNote(input: string): string {
-  const digitMap: Record<string, string> = {
-    "０": "0",
-    "１": "1",
-    "２": "2",
-    "３": "3",
-    "４": "4",
-    "５": "5",
-    "６": "6",
-    "７": "7",
-    "８": "8",
-    "９": "9",
-  };
-  let s = "";
-  for (const ch of String(input ?? "")) {
-    s += digitMap[ch] ?? ch;
-  }
-  return s.replace(/[，、,]/g, "");
-}
-
-/** GAS parseVoucherFaceFromNote: 注文ノートの「商品券 2000円」等から額面を抽出 */
-function parseVoucherFaceFromNote(note: string | null | undefined): number {
-  const s = z2hDigitsForVoucherNote(note ?? "");
-  const m = s.match(/商品券\s*([0-9]+)\s*(?:円|えん)?/);
-  return m ? Number(m[1]) : 0;
-}
-
 export type RefundAttributionDecision = {
   /** 精算対象ロケに返金を載せるか */
   counts: boolean;
@@ -472,6 +451,8 @@ export function aggregateGasStyleForOrders(
   pointRules: PointRedemptionRules = DEFAULT_POINT_REDEMPTION_RULES,
   /** 精算の数え方の設定（売上を数える日・返金の付け替え・点数に数えない SKU） */
   calcOpts: GasAggregateCalcOpts = DEFAULT_GAS_AGGREGATE_CALC_OPTS,
+  /** 商品券のお釣りの自動判定（保存した「商品券設定」。無ければ初めの値＝GAS と同じ） */
+  voucherRules: VoucherDetectionRules = DEFAULT_VOUCHER_DETECTION_RULES,
 ): {
   pay: Record<string, GasPayBucket>;
   refundsGross: number;
@@ -485,6 +466,13 @@ export function aggregateGasStyleForOrders(
   voucherChangeObserved: number;
   /** metafield と resolve の不一致件数（診断用。金額は metafield 優先） */
   refundAttributionMismatchCount: number;
+  /** voucherChangeObserved の注文ごとの内訳（キーは注文 ID）。手入力との二重計上を防ぐのに使う */
+  voucherChangeByOrder: Record<string, number>;
+  /**
+   * 現金の預かりが会計に必要な額より多かった分（注文ごと）。支払方法別の現金からはもう引いてある。
+   * 納金金額から商品券の釣銭を引くとき、この分を二重に引かないために使う。
+   */
+  voucherCashCapByOrder: Record<string, number>;
   /**
    * 売上に含めない手数料の明細（`_lsi_fee="1"` かつ `_lsi_fee_sales="0"`）の当日分（売った分 − 計上対象の返金分）。
    * 支払方法別の金額（pay）には入ったまま。総売上はここを引く（settlementEngine）。
@@ -502,7 +490,11 @@ export function aggregateGasStyleForOrders(
   let taxTotalShopify = 0;
   let voucherChangeObserved = 0;
   let refundAttributionMismatchCount = 0;
+  const voucherChangeByOrder: Record<string, number> = {};
+  const voucherCashCapByOrder: Record<string, number> = {};
   let nonSalesFeeTotal = 0;
+  const voucherKeywordRe = new RegExp(escapeRegExp(voucherRules.keyword));
+  const voucherGatewayNames = voucherAppliedGatewayNames(voucherRules.keyword);
 
   for (const o of orders) {
     const feeLineIds = nonSalesFeeLineIds(o.lineItems?.nodes);
@@ -626,9 +618,15 @@ export function aggregateGasStyleForOrders(
       const neededCashForOrder = Math.max(0, orderFinal - nonCashSaleTotal);
       effectiveCashSale = Math.min(rawCashSale, neededCashForOrder);
       orderVoucherCashChange = Math.max(0, rawCashSale - effectiveCashSale);
+      if (orderVoucherCashChange > 0) {
+        voucherCashCapByOrder[o.id] = (voucherCashCapByOrder[o.id] ?? 0) + orderVoucherCashChange;
+      }
     }
-    const hasVoucherInNote = /商品券/.test(o.note ?? "");
-    const hasVoucherInGateway = Object.keys(gwSaleMapToday).some((k) => voucherSaleKeys.has(k));
+    const hasVoucherInNote = voucherKeywordRe.test(o.note ?? "");
+    // 商品券の行: 支払方法の分け方で「商品券」になったキー（#82）か、商品券設定の言葉を含むキー（#92）
+    const hasVoucherInGateway = Object.keys(gwSaleMapToday).some(
+      (k) => voucherSaleKeys.has(k) || voucherKeywordRe.test(k),
+    );
     // 現金の上限で削る額。現金の行が 2 つ以上なら、並んだ順に削る（1 つなら今と同じ式）
     let cashCut = cashEntries.length > 1 ? rawCashSale - effectiveCashSale : 0;
     for (const [gw, amt] of Object.entries(gwSaleMapToday)) {
@@ -677,12 +675,12 @@ export function aggregateGasStyleForOrders(
     // GAS observeVoucherChangeFromFace（キャンセル済み注文はノート観測しない）
     let orderVoucherFaceChange = 0;
     if (!isCancelled) {
-      const face = parseVoucherFaceFromNote(o.note);
+      const face = parseVoucherFaceFromNoteWithRules(o.note, voucherRules);
       if (face > 0) {
-        // 足す順は決まった分け方の 3 つを先に（今の式と同じ順。小数の通貨でも同じ値にする）
+        // 足す順は商品券設定の名前（釣有り・釣無し・言葉そのもの）を先に、そのあと分け方で商品券になったキー
         const voucherKeysInOrder = [
-          ...GAS_VOUCHER_KEYS_ORDER.filter((k) => voucherSaleKeys.has(k)),
-          ...[...voucherSaleKeys].filter((k) => !GAS_VOUCHER_KEYS_ORDER.includes(k)),
+          ...voucherGatewayNames,
+          ...[...voucherSaleKeys].filter((k) => !voucherGatewayNames.includes(k)),
         ];
         const giftAppliedToday = voucherKeysInOrder.reduce(
           (acc, k) => acc + Number(gwSaleMapToday[k] || 0),
@@ -695,8 +693,14 @@ export function aggregateGasStyleForOrders(
       }
     }
     // cashChange と faceChange はどちらか大きい方を1回だけ計上（GAS と同式）
-    if ((hasVoucherInNote || hasVoucherInGateway) && (orderVoucherCashChange > 0 || orderVoucherFaceChange > 0)) {
-      voucherChangeObserved += Math.max(orderVoucherCashChange, orderVoucherFaceChange);
+    if (
+      voucherRules.autoDetectionEnabled &&
+      (hasVoucherInNote || hasVoucherInGateway) &&
+      (orderVoucherCashChange > 0 || orderVoucherFaceChange > 0)
+    ) {
+      const change = Math.max(orderVoucherCashChange, orderVoucherFaceChange);
+      voucherChangeObserved += change;
+      voucherChangeByOrder[o.id] = (voucherChangeByOrder[o.id] ?? 0) + change;
     }
 
     refundsGross += orderRefundToday;
@@ -791,6 +795,8 @@ export function aggregateGasStyleForOrders(
     taxTotalShopify: Math.round(taxTotalShopify),
     voucherChangeObserved: Math.round(voucherChangeObserved),
     refundAttributionMismatchCount,
+    voucherChangeByOrder,
+    voucherCashCapByOrder,
     nonSalesFeeTotal: Math.round(nonSalesFeeTotal),
   };
 }
