@@ -567,6 +567,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
   if (step === "order_detail") {
     return (
       <OrderDetailView
+        entry={initialListSegment === "voucher_change" ? "voucher" : "refund"}
         order={selectedOrder}
         events={events}
         loading={loading}
@@ -687,6 +688,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
 // 取引詳細（スクロール）＋固定フッターで処理選択
 // ──────────────────────────────────────────────
 function OrderDetailView({
+  entry = "refund",
   order,
   events,
   loading,
@@ -710,9 +712,11 @@ function OrderDetailView({
   // 商品券釣銭調整は「商品券釣有り」の注文だけ（一覧の「商品券釣有り」の印と同じ判定: 支払方法マスタの
   // 釣り有りの商品券で払った、またはメモに「商品券」）。支払いが 1 件も読めない注文は判定できないので押せるまま。
   const voucherAdjustable = isVoucherAdjustableOrder(order);
+  // 入口ごとに、関係するボタンだけを右下に出す（T 2026-11-24）: 商品券釣銭調整タイル・会計後の行 → 商品券釣銭調整、返金方法変更タイル → 返金方法変更
+  const isVoucherEntry = entry === "voucher";
 
   return (
-    <s-page heading="特殊返金調整・商品券釣銭調整">
+    <s-page heading={isVoucherEntry ? "商品券釣銭調整" : "返金方法変更"}>
       <s-stack
         gap="none"
         blockSize="100%"
@@ -843,12 +847,9 @@ function OrderDetailView({
           leftLabel={fromOrderEntry ? "閉じる" : "戻る"}
           onLeft={onBack}
           leftDisabled={loading}
-          middleLabel="特殊返金調整"
-          onMiddle={onRefund}
-          middleDisabled={loading}
-          rightLabel="商品券釣銭調整"
-          onRight={onVoucher}
-          rightDisabled={loading || !voucherAdjustable}
+          rightLabel={isVoucherEntry ? "商品券釣銭調整" : "返金方法変更"}
+          onRight={isVoucherEntry ? onVoucher : onRefund}
+          rightDisabled={loading || (isVoucherEntry && !voucherAdjustable)}
         />
       </s-stack>
       <SpecialRefundConfirmModal
@@ -1270,7 +1271,7 @@ function SpecialRefundForm({
   }
 
   return (
-    <s-page heading="特殊返金調整を登録">
+    <s-page heading="返金方法変更を登録">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
