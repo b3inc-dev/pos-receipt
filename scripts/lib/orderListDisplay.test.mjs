@@ -84,3 +84,16 @@ describe("一覧の画面は POS にある属性だけを使う", () => {
     });
   }
 });
+
+describe("店の人に英語のエラーを出さない・名前の許可が無くても一覧を出す", () => {
+  it("一覧の読み込み失敗は決まった日本語の文", () => {
+    const src = readFileSync(`${ROOT}/extensions/pos-smart-grid/src/OrderDayListScreen.jsx`, "utf8");
+    assert.doesNotMatch(src, /setListError\(toUserMessage/);
+    assert.match(src, /注文を読み込めませんでした/);
+  });
+  it("注文検索は保護された顧客データで断られたら名前なしで読み直す", () => {
+    const src = readFileSync(`${ROOT}/app/routes/api.orders.search.tsx`, "utf8");
+    assert.match(src, /ORDERS_SEARCH_QUERY_NO_CUSTOMER/);
+    assert.match(src, /isProtectedCustomerDataError/);
+  });
+});

@@ -14,7 +14,7 @@ import { buildSearchQuery, normalizeLocationIdForQuery } from "../utils/orderSea
 import { hasVoucherLikeGatewayHeuristic, matchPaymentMethodMaster } from "../utils/paymentMethodMatch.server";
 import { isShopifyRefundPending } from "../services/specialRefundOverlayPure.server";
 
-const ORDERS_SEARCH_QUERY = `#graphql
+const ORDERS_SEARCH_QUERY_TEMPLATE = `#graphql
   query OrdersSearch($first: Int!, $after: String, $query: String) {
     orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
       nodes {
@@ -25,9 +25,7 @@ const ORDERS_SEARCH_QUERY = `#graphql
         note
         totalPriceSet { shopMoney { amount } }
         displayFinancialStatus
-        customer {
-          displayName
-        }
+        __CUSTOMER__
         retailLocation {
           id
           name
@@ -45,6 +43,23 @@ const ORDERS_SEARCH_QUERY = `#graphql
     }
   }
 `;
+
+const ORDERS_SEARCH_QUERY = ORDERS_SEARCH_QUERY_TEMPLATE.replace("__CUSTOMER__", "customer { displayName }");
+/** 顧客の名前を読まない版（保護された顧客データの「名前」の許可が無いアプリ用） */
+const ORDERS_SEARCH_QUERY_NO_CUSTOMER = ORDERS_SEARCH_QUERY_TEMPLATE.replace("__CUSTOMER__", "");
+
+/**
+ * 保護された顧客データ（名前など）の許可が無いと、Shopify は問い合わせ全体をエラーにする
+ * （例: "This app is not approved to use the displayName field. See .../protected-customer-data"）。
+ * そのときは名前なしで読み直し、一覧は番号だけで出す（2026-11-23 開発ストアの実機で 11/20 の一覧が出なかった）。
+ */
+export function isProtectedCustomerDataError(errors: unknown): boolean {
+  if (!Array.isArray(errors)) return false;
+  return errors.some((e) => {
+    const msg = String((e as { message?: unknown })?.message ?? "");
+    return /protected-customer-data|not approved to use/i.test(msg);
+  });
+}
 
 function normalizeOrderIdKey(id: string): string {
   return String(id).replace(/^gid:\/\/shopify\/Order\//, "");
@@ -83,11 +98,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const query = buildSearchQuery({ q, locationId, dateFrom, dateTo, timezone });
 
-    const response = await admin.graphql(ORDERS_SEARCH_QUERY, {
-      variables: { first: limit, after: cursor || null, query: query || null },
-    });
-
-    const json = await response.json();
+    const variables = { first: limit, after: cursor || null, query: query || null };
+    // admin.graphql は GraphQL のエラーで例外を投げることも、errors を返すこともある。どちらでも名前なしで読み直す
+    let json: { data?: any; errors?: unknown[] };
+    try {
+      const response = await admin.graphql(ORDERS_SEARCH_QUERY, { variables });
+      json = await response.json();
+      if (json.errors?.length && isProtectedCustomerDataError(json.errors)) {
+        throw Object.assign(new Error("protected customer data"), { errors: json.errors });
+      }
+    } catch (e) {
+      const errs = (e as { body?: { errors?: unknown } })?.body?.errors ?? (e as { errors?: unknown })?.errors;
+      const msg = e instanceof Error ? e.message : String(e);
+      const blocked =
+        isProtectedCustomerDataError(Array.isArray(errs) ? errs : (errs as { graphQLErrors?: unknown[] })?.graphQLErrors) ||
+        isProtectedCustomerDataError([{ message: msg }]);
+      if (!blocked) throw e;
+      const response = await admin.graphql(ORDERS_SEARCH_QUERY_NO_CUSTOMER, { variables });
+      json = await response.json();
+    }
     if (json.errors?.length) {
       return corsJson(
         { ok: false, error: "GraphQL error", details: json.errors },
