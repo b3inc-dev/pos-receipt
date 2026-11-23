@@ -37,7 +37,7 @@ import {
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
-import { adjustmentBadges, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
+import { adjustmentBadges, adjustmentKindLabel, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
 import { financialStatusLabel } from "./orderDisplayUtils.js";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import {
@@ -119,14 +119,6 @@ const ADJUST_KINDS = [
   { value: "undo", label: "返金を取り消す（売上に戻す）" },
   { value: "extra", label: "現金を足す（売上に足す）" },
 ];
-
-// イベント種別の日本語ラベル
-const EVENT_TYPE_LABELS = {
-  cash_refund: "現金返金",
-  payment_method_override: "返金手段変更",
-  receipt_cash_adjustment: "レシート現金調整",
-  voucher_change_adjustment: "商品券調整",
-};
 
 function buildVoidConfirmMessage(event) {
   let msg =
@@ -775,7 +767,7 @@ function OrderDetailView({
         >
           <s-box padding="base">
             <s-stack gap="base">
-              <OrderDetailSummary order={order} />
+              <OrderDetailSummary order={order} events={activeEvents} />
 
 
 
@@ -988,7 +980,7 @@ function AdjustmentStatusNote({ event }) {
 }
 
 function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
-  const label = EVENT_TYPE_LABELS[event.eventType] ?? event.eventType;
+  const label = adjustmentKindLabel(event);
   // 案A（T 2026-11-23）: 一覧の行と同じ形。種類と金額は太字、手段・日時は灰色の小さい字、状態は色の印
   const badges = adjustmentBadges(event);
   return (
@@ -1687,7 +1679,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
     }
   };
 
-  const label = EVENT_TYPE_LABELS[event.eventType] ?? event.eventType;
+  const label = adjustmentKindLabel(event);
   const methodLabel = (v) => refundMethods.find((m) => m.value === v)?.label ?? v ?? "-";
 
   if (confirming) {
