@@ -476,9 +476,19 @@ export function OrderDayListScreen({
                   <s-button variant="secondary" onClick={reloadList}>再読み込み</s-button>
                 </s-stack>
               ) : items.length === 0 ? (
-                <s-text type="small" color="subdued">
-                  {isSearchMode ? "該当する取引は見つかりませんでした。" : "この日の取引はありません。"}
-                </s-text>
+                <s-stack gap="small-300">
+                  <s-text>
+                    {isSearchMode ? "該当する取引は見つかりませんでした。" : `${dayChipLabel}の取引はありません。`}
+                  </s-text>
+                  <s-text type="small" color="subdued">
+                    {isSearchMode
+                      ? "注文番号は数字だけでも探せます。顧客名は 2 文字以上入れてください。"
+                      : `ほかの日は「${dayChipLabel} ▾」から選べます。上の欄で注文番号や顧客名から探すこともできます。`}
+                  </s-text>
+                  {!isSearchMode ? (
+                    <s-button variant="secondary" onClick={reloadList}>読み込み直す</s-button>
+                  ) : null}
+                </s-stack>
               ) : (
                 <s-stack gap="small">
                   {visibleItems.length === 0 ? (

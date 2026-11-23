@@ -2,7 +2,7 @@
  * 注文を探す API（/api/orders/search）の Shopify の検索文。
  * 日の区切りは店のタイムゾーンの 0 時（日本の店は +09:00）。
  */
-import { getDayRangeShopifySearchIso } from "./shopTimezone.server";
+import { getDayRangeInUtc } from "./shopTimezone.server";
 
 export function normalizeLocationIdForQuery(locationId: string | null | undefined): string | null {
   const s = locationId?.trim();
@@ -37,14 +37,16 @@ export function buildSearchQuery(params: {
   // 検索語があるときは日付条件を付けない（店舗内の過去注文を横断検索）
   const hasQuery = Boolean(params.q?.trim());
   if (!hasQuery) {
-    // 日の区切りは店のタイムゾーンの 0 時（日本の店は +09:00）。前は UTC の 0 時で、0〜9 時の注文が前の日に出ていた
+    // 日の区切りは店のタイムゾーンの 0 時。前は UTC の 0 時で、0〜9 時の注文が前の日に出ていた。
+    // 書き方は UTC の Z 表記にする（精算の注文検索 settlementEngine と同じ）。
+    // 「2026-11-23T00:00:00+09:00」の形では、開発ストアの POS で 1 件も出なかった（2026-11-23 実機）。
     const tz = params.timezone?.trim();
     if (params.dateFrom) {
-      const start = tz ? getDayRangeShopifySearchIso(params.dateFrom, tz).start : `${params.dateFrom}T00:00:00Z`;
+      const start = tz ? getDayRangeInUtc(params.dateFrom, tz).startUtcIso : `${params.dateFrom}T00:00:00Z`;
       parts.push(`created_at:>=${start}`);
     }
     if (params.dateTo) {
-      const end = tz ? getDayRangeShopifySearchIso(params.dateTo, tz).end : `${params.dateTo}T23:59:59Z`;
+      const end = tz ? getDayRangeInUtc(params.dateTo, tz).endUtcIso : `${params.dateTo}T23:59:59Z`;
       parts.push(`created_at:<=${end}`);
     }
   }
