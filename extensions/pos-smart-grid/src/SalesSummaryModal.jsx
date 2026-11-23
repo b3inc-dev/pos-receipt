@@ -26,6 +26,8 @@ import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { formatYmdSlash, formatJstHm } from "../../common/dateDisplay.js";
 import { MetricCard } from "./SummaryTable.jsx";
+import { LoadingNotice } from "./LoadingNotice.jsx";
+import { INLINE_LOADING_TEXT } from "../../common/loadingNotice.js";
 import { formatYmdWithWeekday } from "../../common/summaryTableLayout.js";
 
 export default async () => {
@@ -655,6 +657,8 @@ function DailyListView({
   const [listDisplayOpts, setListDisplayOpts] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  /** 「再読み込み」で数を増やして読み直す */
+  const [reloadKey, setReloadKey] = useState(0);
 
   const listO = useMemo(() => ({ ...defaultDisplayOptions(), ...(listDisplayOpts ?? {}) }), [listDisplayOpts]);
 
@@ -722,7 +726,7 @@ function DailyListView({
     return () => {
       cancelled = true;
     };
-  }, [locationGid, listYear, listMonth]);
+  }, [locationGid, listYear, listMonth, reloadKey]);
 
   const displayName = locationName?.trim() || "ロケーション";
 
@@ -817,7 +821,7 @@ function DailyListView({
                 >
                   {monthsLoading ? (
                     <s-text tone="subdued" fontSize="small">
-                      月一覧を読み込み中…
+                      {INLINE_LOADING_TEXT}
                     </s-text>
                   ) : listAvailableMonthsForYear.length === 0 ? (
                     <s-text tone="subdued" fontSize="small">
@@ -849,15 +853,9 @@ function DailyListView({
         <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
           <s-box padding="base">
             <s-stack gap="base">
-              {loading ? (
-                <s-text tone="subdued" size="small">
-                  読み込み中…
-                </s-text>
-              ) : err ? (
-                <s-stack gap="small">
-                  <s-text tone="critical">{err}</s-text>
-                </s-stack>
-              ) : rows.length === 0 ? (
+              {/* 読み込み中・失敗の案内は全画面共通（見出しのすぐ下・青い帯ひとつ。T 2026-11-24） */}
+              <LoadingNotice loading={loading} error={err} onRetry={() => setReloadKey((n) => n + 1)} />
+              {loading || err ? null : rows.length === 0 ? (
                 <s-text tone="subdued" size="small">
                   表示できる日がありません
                 </s-text>
@@ -1085,7 +1083,7 @@ function HistoryDailyDetailView({
                 <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
                   <s-stack gap="extraSmall">
                     <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {sessionLocationName || "店舗名を取得中…"}
+                      {sessionLocationName || INLINE_LOADING_TEXT}
                     </s-text>
                     <s-text tone="subdued" size="small">
                       日次（履歴） {formatYmdSlash(viewDate)}
@@ -1129,23 +1127,17 @@ function HistoryDailyDetailView({
           >
             <s-box padding="base">
               <s-stack gap="base">
-                {historyShowLoading ? (
-                  <s-text tone="subdued" size="small">
-                    読み込み中…
-                  </s-text>
-                ) : null}
-                {error ? (
-                  <s-banner status="critical">{error}</s-banner>
-                ) : null}
+                {/* 読み込み中・失敗の案内は全画面共通（見出しのすぐ下・青い帯ひとつ。T 2026-11-24） */}
+                <LoadingNotice loading={historyShowLoading} error={error} onRetry={loadData} />
 
                 {kpiHidden ? (
-                  <s-banner status="info">
+                  <s-banner tone="info">
                     表示する数字の項目がすべてOFFです。管理画面の売上サマリー設定で、実績や件数などをONにしてください。
                   </s-banner>
                 ) : null}
 
                 {layoutEmpty ? (
-                  <s-banner status="info">
+                  <s-banner tone="info">
                     店舗ごとの一覧と店舗合計の両方が非表示です。管理画面で「ロケーション行を表示」または「店舗合計を表示」をONにしてください。
                   </s-banner>
                 ) : null}
@@ -1202,7 +1194,7 @@ function HistoryDailyDetailView({
             {/* POS Stock: FixedFooterNavBar centerAlignWithButtons と同型（space-between 3 子） */}
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
               <s-button kind="secondary" onClick={loadData} disabled={loading}>
-                {loading ? "更新中.." : "更新"}
+                更新
               </s-button>
               {scope === "single" && sessionRow?.footfallReportingEnabled ? (
                 <s-box style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
@@ -1617,8 +1609,8 @@ function SalesSummaryModal() {
   else rowsForUi = [];
 
   const summaryDataFresh = loadedSummaryParamsKey === summaryParamsKey;
-  const summaryShowLoading =
-    loading || (sessionReady && !summaryDataFresh && !error);
+  // 店の確認 → 数の読み込み のどの段階でも同じ帯ひとつにする（T 2026-11-24）
+  const summaryShowLoading = loading || (!summaryDataFresh && !error);
 
   const kpiHidden =
     !loading &&
@@ -1808,7 +1800,7 @@ function SalesSummaryModal() {
                 <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
                   <s-stack gap="extraSmall">
                     <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {sessionLocationName || "店舗名を取得中…"}
+                      {sessionLocationName || INLINE_LOADING_TEXT}
                     </s-text>
                     {scope === "all" ? (
                       <s-text tone="subdued" size="small">
@@ -1955,7 +1947,7 @@ function SalesSummaryModal() {
                       >
                         {monthsLoading ? (
                           <s-text tone="subdued" size="small">
-                            月一覧を読み込み中…
+                            {INLINE_LOADING_TEXT}
                           </s-text>
                         ) : (
                           availableMonthsForYear.map((m) => (
@@ -2059,7 +2051,7 @@ function SalesSummaryModal() {
                       <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
                         {monthsLoading ? (
                           <s-text tone="subdued" size="small">
-                            月一覧を読み込み中…
+                            {INLINE_LOADING_TEXT}
                           </s-text>
                         ) : (
                           Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
@@ -2180,7 +2172,7 @@ function SalesSummaryModal() {
                       <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
                         {monthsLoading ? (
                           <s-text tone="subdued" size="small">
-                            月一覧を読み込み中…
+                            {INLINE_LOADING_TEXT}
                           </s-text>
                         ) : (
                           Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
@@ -2260,36 +2252,33 @@ function SalesSummaryModal() {
           >
             <s-box padding="base">
               <s-stack gap="base">
-                {summaryShowLoading ? (
-                  <s-text tone="subdued" size="small">
-                    読み込み中…
-                  </s-text>
-                ) : null}
-                {!summaryShowLoading && cachedAsOf && refreshing ? (
-                  <s-banner status="info">
-                    {`${cachedAsOfLabel(cachedAsOf)}の数字です。最新の数字に更新しています…`}
-                  </s-banner>
-                ) : null}
+                {/*
+                  読み込み中・失敗の案内は全画面共通（見出しのすぐ下・青い帯ひとつ。T 2026-11-24）。
+                  前に取った数を出したまま最新を取りに行っているあいだ（refreshing）も同じ帯にする。
+                */}
+                <LoadingNotice
+                  loading={summaryShowLoading || (Boolean(cachedAsOf) && refreshing)}
+                  error={error}
+                  onRetry={loadData}
+                />
                 {!summaryShowLoading && cachedAsOf && refreshFailed ? (
-                  <s-banner status="warning">
-                    {`最新の数字を取れませんでした。${cachedAsOfLabel(cachedAsOf)}の数字を表示しています。「更新」でもう一度試せます。`}
-                  </s-banner>
-                ) : null}
-                {error ? (
-                  <s-banner status="critical">{error}</s-banner>
+                  <s-banner
+                    tone="warning"
+                    heading={`最新の数字を取れませんでした。${cachedAsOfLabel(cachedAsOf)}の数字を表示しています。「更新」でもう一度試せます。`}
+                  />
                 ) : null}
                 {grain === "period" && periodRangeInvalid ? (
-                  <s-banner status="critical">開始日が終了日より後になっています。日付を見直してください。</s-banner>
+                  <s-banner tone="critical" heading="開始日が終了日より後になっています。日付を見直してください。" />
                 ) : null}
 
                 {kpiHidden ? (
-                  <s-banner status="info">
+                  <s-banner tone="info">
                     表示する数字の項目がすべてOFFです。管理画面の売上サマリー設定で、実績や件数などをONにしてください。
                   </s-banner>
                 ) : null}
 
                 {layoutEmpty ? (
-                  <s-banner status="info">
+                  <s-banner tone="info">
                     店舗ごとの一覧と店舗合計の両方が非表示です。管理画面で「ロケーション行を表示」または「店舗合計を表示」をONにしてください。
                   </s-banner>
                 ) : null}
@@ -2356,8 +2345,8 @@ function SalesSummaryModal() {
           >
             {/* POS Stock: FixedFooterNavBar centerAlignWithButtons と同型（space-between 3 子） */}
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
-              <s-button kind="secondary" onClick={loadData} disabled={loading}>
-                {loading || refreshing ? "更新中.." : "更新"}
+              <s-button kind="secondary" onClick={loadData} disabled={loading || refreshing}>
+                更新
               </s-button>
               {showFooterFootfallButton ? (
                 <s-box style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>

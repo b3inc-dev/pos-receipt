@@ -31,6 +31,7 @@ import {
   PRINT_OUTCOME,
 } from "../../common/printApi.js";
 import { markSettlementPrinted } from "../../common/settlementApi.js";
+import { LoadingNotice } from "./LoadingNotice.jsx";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { SummaryHeading, SummaryLine, PaymentLine } from "./SummaryTable.jsx";
 import { formatYen, formatDeduction, formatYmdWithWeekday } from "../../common/summaryTableLayout.js";
@@ -414,7 +415,7 @@ function SettlementModal() {
           setTargetDate(`${selectedYear}-${String(month).padStart(2, "0")}-01`);
         }}
         onOpenDailyRow={handleOpenDailyRow}
-        onRetryLocations={loadLocations}
+        onRetryLocations={() => loadLocations(sessionLocationGid)}
         onRetryDaily={() => {
           loadAvailableMonths(selectedLocation?.locationId);
           loadMonthRows(selectedLocation?.locationId, selectedYear, selectedMonth);
@@ -440,6 +441,14 @@ function SettlementModal() {
         error={error}
         loadedAt={previewLoadedAt}
         onPickDate={(d) => fetchPreviewForDate({ date: d, inspection: false, openStep: "preview" })}
+        onRetry={() => {
+          // まだ店が決まっていなければ店から読み直す。決まっていればこの日の数を読み直す
+          if (!selectedLocation) {
+            if (sessionReady) loadLocations(sessionLocationGid);
+            return;
+          }
+          fetchPreviewForDate({ date: targetDate, inspection: false, openStep: "preview" });
+        }}
         onRecalculate={handleRecalculate}
         onReconfirm={handleReconfirm}
         onPrepareInspectionIssue={() => {
@@ -556,14 +565,7 @@ function MainView({
           }}
         >
           <s-stack gap="small">
-            {locationLoadError ? (
-              <s-stack gap="small">
-                <s-text tone="critical">{locationLoadError}</s-text>
-                <s-button kind="secondary" onClick={onRetryLocations} loading={loading}>
-                  再読み込み
-                </s-button>
-              </s-stack>
-            ) : (
+            {(
               <s-stack gap="small">
                 {/* 1行目のみ：ロケーション名（左）＋ 固定幅の年・月ボタン（右・同行） */}
                 <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
@@ -582,13 +584,11 @@ function MainView({
                       </s-button>
                     ) : selectedLocation ? (
                       <s-text emphasis="bold" size="small">{selectedLocation.locationName}</s-text>
-                    ) : loading ? (
-                      <s-text tone="subdued" size="small">ロケーションを読み込み中…</s-text>
+                    ) : loading || locationLoadError ? (
+                      /* 読み込み中・失敗は下の帯（LoadingNotice）に出す。ここは空けておく */
+                      <s-text> </s-text>
                     ) : (
-                      <s-stack gap="small">
-                        <s-text tone="subdued" size="small">ロケーションが見つかりません</s-text>
-                        <s-button kind="plain" onClick={onRetryLocations}>再読込</s-button>
-                      </s-stack>
+                      <s-text color="subdued">ロケーションが見つかりません</s-text>
                     )}
                   </s-box>
                   <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
@@ -713,14 +713,13 @@ function MainView({
         >
           <s-box padding="base">
             <s-stack gap="base">
-              {dailyLoading ? (
-                <s-text tone="subdued" size="small">読み込み中…</s-text>
-              ) : dailyError ? (
-                <s-stack gap="small">
-                  <s-text tone="critical">{dailyError}</s-text>
-                  <s-button kind="secondary" onClick={onRetryDaily}>再読み込み</s-button>
-                </s-stack>
-              ) : dailyRows.length === 0 ? (
+              {/* 読み込み中・失敗の案内は全画面共通（見出しのすぐ下・青い帯ひとつ。T 2026-11-24） */}
+              <LoadingNotice
+                loading={loading || dailyLoading}
+                error={locationLoadError || dailyError || error}
+                onRetry={locationLoadError ? onRetryLocations : onRetryDaily}
+              />
+              {loading || dailyLoading || locationLoadError || dailyError ? null : dailyRows.length === 0 ? (
                 <s-text tone="subdued" size="small">表示できる日がありません</s-text>
               ) : (
                 <s-stack gap="base">
@@ -756,12 +755,6 @@ function MainView({
           </s-box>
         </s-scroll-box>
 
-        {error ? (
-          <s-box padding="base" paddingBlockStart="none">
-            <s-text tone="critical">{error}</s-text>
-          </s-box>
-        ) : null}
-
         <s-divider />
 
         <FixedFooterNavBar
@@ -772,7 +765,7 @@ function MainView({
             onBackFromHistory();
           }}
           leftDisabled={!selectedLocation || loading || dailyLoading}
-          rightLabel={loading ? "読込中.." : dailyLoading ? "更新中.." : "更新"}
+          rightLabel="更新"
           onRight={onRetryDaily}
           rightDisabled={!selectedLocation || loading || dailyLoading}
         />
@@ -791,6 +784,7 @@ function PreviewView({
   error,
   loadedAt,
   onPickDate,
+  onRetry,
   onRecalculate,
   onReconfirm,
   onPrepareInspectionIssue,
@@ -831,15 +825,15 @@ function PreviewView({
           <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
             <s-box padding="base">
               <s-stack gap="base">
-                <SettlementTopNotices loading={loading} error={error} />
-                {!loading && !error ? (
-                  <s-text tone="subdued" size="small">精算の数を読み込み中…</s-text>
-                ) : null}
-                {!loading ? (
-                  <s-button kind="secondary" onClick={() => onPickDate(targetDate)}>
-                    再読み込み
-                  </s-button>
-                ) : null}
+                {/*
+                  数がまだ無いあいだは、店の確認・月の一覧・精算の数のどの段階でも同じ青い帯ひとつ（T 2026-11-24）。
+                  途中で「精算の数を読み込み中…」や大きな「再読み込み」に切り替えない。
+                */}
+                <LoadingNotice
+                  loading={loading || !error}
+                  error={error}
+                  onRetry={onRetry}
+                />
               </s-stack>
             </s-box>
           </s-scroll-box>
@@ -1002,7 +996,7 @@ function PreviewView({
               </s-box>
               <s-box style={{ flex: "0 0 auto" }}>
                 <s-button kind="secondary" onClick={onRecalculate} disabled={loading}>
-                  {loading ? "更新中.." : "更新"}
+                  更新
                 </s-button>
               </s-box>
             </s-stack>
@@ -1013,7 +1007,7 @@ function PreviewView({
               <s-stack gap="none" alignItems="center">
                 <s-text type="strong">{formatYmdWithWeekday(targetDate)}</s-text>
                 <s-text type="small" color="subdued">
-                  {loading ? "読み込み中…" : loadedAt ? `${formatJstHm(loadedAt)} 更新` : ""}
+                  {!loading && loadedAt ? `${formatJstHm(loadedAt)} 更新` : ""}
                 </s-text>
               </s-stack>
               <s-button kind="secondary" disabled={!canNextDay || loading} onClick={() => onPickDate(addDays(targetDate, 1))}>
@@ -1032,7 +1026,7 @@ function PreviewView({
                 大事な案内は一覧の「上」に出す（下に出すと iPhone ではスクロールしないと気づけない）。
                 確定済み・確定のあとに数が変わった・返金処理中などの案内を足すときも、ここに置く。
               */}
-              <SettlementTopNotices loading={loading} error={error} />
+              <LoadingNotice loading={loading} error={error} onRetry={onRecalculate} />
 
               {/* 確定済み・再確定・承認待ち・返金処理中・支払方法の行に入れられなかった返金（#93 系。#98 の決まりで表の上に置く） */}
               {/* 特殊返金の返金方法が支払方法マスタに無い等（精算は確定できる。合計は正しい） */}
@@ -1155,20 +1149,6 @@ function PreviewView({
 }
 
 /**
- * 精算画面の上に出す案内（読み込み中・エラー）。
- * s-banner は POS にある部品。文は見出し（heading）に入れる（端末によって本文が畳まれることがあるため）。
- */
-function SettlementTopNotices({ loading, error, busyLabel = "読み込み中です。少しお待ちください。" }) {
-  if (!loading && !error) return null;
-  return (
-    <s-stack gap="small">
-      {loading ? <s-banner tone="info" heading={busyLabel} /> : null}
-      {!loading && error ? <s-banner tone="critical" heading={error} /> : null}
-    </s-stack>
-  );
-}
-
-/**
  * 点検／精算の発行確認。画面ごと切り替える（重ね表示の s-modal は使わない）。
  * 案内・確認の中身・発行ボタンがスクロールなしで見えるよう、上から 何をするか → 結果の案内 → 中身 の順に置く。
  */
@@ -1197,7 +1177,7 @@ function SettlementIssueConfirmView({ preview, isInspection, loading, error, onE
         <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
           <s-box padding="base">
             <s-stack gap="base">
-              <SettlementTopNotices loading={loading} error={error} busyLabel="発行中です。画面を閉じずにお待ちください。" />
+              <LoadingNotice loading={loading} error={error} busyLabel="発行中です。画面を閉じずにお待ちください。" />
               <s-text type="strong">{title}</s-text>
               <s-text color="subdued">{note}</s-text>
               <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">

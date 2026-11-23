@@ -28,8 +28,9 @@ describe("精算画面の発行確認", () => {
     assert.ok(n >= 2, `setStep("confirm") が点検・精算の 2 か所に無い（${n} か所）`);
   });
 
-  it("エラーは一覧の上（SettlementTopNotices）に出し、下に赤字を置かない", () => {
-    assert.match(SRC, /<SettlementTopNotices /);
+  it("エラーは一覧の上（全画面共通の LoadingNotice）に出し、下に赤字を置かない", () => {
+    assert.match(SRC, /<LoadingNotice /);
+    assert.equal(/\{error \? \(\s*<s-box padding="base" paddingBlockStart="none">\s*<s-text tone="critical">\{error\}/.test(SRC), false);
     assert.equal(/\{error \? <s-text tone="critical">\{error\}<\/s-text> : null\}\s*<\/s-stack>\s*<\/s-box>\s*<\/s-scroll-box>/.test(SRC), false);
   });
 });

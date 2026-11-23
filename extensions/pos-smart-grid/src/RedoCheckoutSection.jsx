@@ -20,6 +20,7 @@ import {
   CART_NOT_READY_MESSAGES,
 } from "../../common/redoToCart.js";
 import { toUserMessage } from "../../common/errorMessage.js";
+import { INLINE_LOADING_TEXT } from "../../common/loadingNotice.js";
 
 function formatYen(amount) {
   const n = Number(amount ?? 0);
@@ -240,7 +241,7 @@ export function RedoCheckoutSection({ order, canRedoToCart, canRedoAsDraft, busy
                   ? "下書き注文を作成しています…"
                   : progress.total > 0
                     ? `カートに入れています（${progress.done} / ${progress.total}）`
-                    : "注文を読み込んでいます…"}
+                    : INLINE_LOADING_TEXT}
               </s-text>
             ) : null}
             <s-box paddingBlockStart="small-300">

@@ -38,6 +38,8 @@ import {
 } from "../../common/specialRefundRecheck.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
+import { LoadingPage } from "./LoadingNotice.jsx";
+import { INLINE_LOADING_TEXT } from "../../common/loadingNotice.js";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
 import { FormHeading, FormHero, FormLine, yen } from "./AdjustFormParts.jsx";
 import { VoucherFaceCandidates } from "./VoucherFaceCandidates.jsx";
@@ -576,13 +578,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
   // タイルを分けた（T 2026-11-23）: 見出しは開いたタイルの名前
   const pageHeading = initialListSegment === "voucher_change" ? "商品券釣銭登録" : "返金方法変更";
   if (orderEntryLoading) {
-    return (
-      <s-page heading={pageHeading}>
-        <s-box padding="base">
-          <s-text color="subdued">取引を開いています…</s-text>
-        </s-box>
-      </s-page>
-    );
+    return <LoadingPage heading={pageHeading} />;
   }
 
   if (bootstrapError && fromOrderEntry) {
@@ -618,6 +614,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         pageHeading={reserveMode ? "返金前登録（取引を選択）" : `${pageHeading}（取引を選択）`}
         badgeMode={initialListSegment === "voucher_change" ? "voucherTile" : initialListSegment === "refunded" ? "refundTile" : "specialRefund"}
         onSelectOrderId={handleOrderSelect}
+        busy={loading}
         noticeError={bootstrapError}
         onDismissNotice={() => setBootstrapError("")}
         initialSegment={reserveMode ? "all" : initialListSegment}
@@ -1331,7 +1328,11 @@ function SpecialRefundForm({
       return;
     }
     if (showPaymentFields && !refundMethods.some((m) => m.value === actualRefundMethod)) {
-      setError(refundMethodsMessage(refundMethodsState) || "返金方法を選んでください");
+      setError(
+        refundMethodsState === "loading"
+          ? "返金方法の候補を読み込んでいます。少し待ってからもう一度押してください"
+          : refundMethodsMessage(refundMethodsState) || "返金方法を選んでください",
+      );
       return;
     }
     if (!idempotencyKey) {
@@ -1587,7 +1588,7 @@ function VoucherAdjustmentForm({
       return;
     }
     if (appliedState === "loading") {
-      setError("注文の商品券の支払いを読み込み中です。少し待ってからもう一度押してください");
+      setError("注文の商品券の支払いをまだ読み込んでいます。少し待ってからもう一度押してください");
       return;
     }
     if (appliedAmount === "" || isNaN(applied) || applied < 0) {
@@ -1696,7 +1697,7 @@ function VoucherAdjustmentForm({
             ) : (
               <FormLine
                 label="商品券で払った額"
-                value={appliedState === "loading" ? "読み込み中…" : yen(applied)}
+                value={appliedState === "loading" ? INLINE_LOADING_TEXT : yen(applied)}
                 strong
               />
             )}
@@ -1822,7 +1823,11 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
       return;
     }
     if (needsMethod && !refundMethods.some((m) => m.value === actualRefundMethod)) {
-      setError(refundMethodsMessage(refundMethodsState) || "返金方法を選んでください");
+      setError(
+        refundMethodsState === "loading"
+          ? "返金方法の候補を読み込んでいます。少し待ってからもう一度押してください"
+          : refundMethodsMessage(refundMethodsState) || "返金方法を選んでください",
+      );
       return;
     }
     setConfirming(true);
@@ -2077,7 +2082,7 @@ function Row({ label, value }) {
 
 /** 実際の返金手段を選べないときの文（支払方法マスタからしか選べない） */
 function refundMethodsMessage(state) {
-  if (state === "loading") return "支払方法を読み込み中…";
+  if (state === "loading") return INLINE_LOADING_TEXT;
   if (state === "error") return "支払方法を読み込めませんでした。通信を確かめて、この画面を開き直してください。";
   if (state === "empty") return "返金方法に選べる支払方法がありません。管理画面の「支払方法」で「特殊返金で選べる」をオンにしてください。";
   return "";

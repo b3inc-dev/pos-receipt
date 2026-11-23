@@ -8,6 +8,7 @@ import { getOrder } from "../../common/orderPickerApi.js";
 import { printSalesReceipt, printResultMessage, PRINT_OUTCOME } from "../../common/printApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
+import { LoadingPage } from "./LoadingNotice.jsx";
 
 const STORAGE_KEY = "pos_sales_receipt_order_id";
 
@@ -76,11 +77,7 @@ function SalesReceiptModal() {
   }, [selectedOrder, loading, gift]);
 
   if (orderEntryLoading) {
-    return (
-      <s-page heading="販売レシート">
-        <s-box padding="base"><s-text>注文を読み込み中…</s-text></s-box>
-      </s-page>
-    );
+    return <LoadingPage heading="販売レシート" />;
   }
 
   if (step === "day_list") {
@@ -90,6 +87,7 @@ function SalesReceiptModal() {
         badgeMode="receipt"
         onSelectOrderId={handleOrderSelect}
         noticeError={bootstrapError || error}
+        busy={loading}
         onDismissNotice={() => {
           setBootstrapError("");
           setError("");

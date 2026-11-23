@@ -21,6 +21,7 @@ import {
   nativeRefundLineStatus,
   splitAmounts,
 } from "../../common/nativeRefundSplit.js";
+import { INLINE_LOADING_TEXT } from "../../common/loadingNotice.js";
 
 function newKey() {
   return (
@@ -108,7 +109,7 @@ export function NativeRefundReassignForm({
 
   const methodsMessage =
     refundMethodsState === "loading"
-      ? "支払方法を読み込み中…"
+      ? INLINE_LOADING_TEXT
       : refundMethodsState === "error"
         ? "支払方法を読み込めませんでした。通信を確かめて、この画面を開き直してください。"
         : refundMethodsState === "empty"

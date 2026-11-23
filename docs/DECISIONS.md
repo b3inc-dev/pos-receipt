@@ -124,3 +124,14 @@
 - 1 つを選ぶ欄は `extensions/pos-smart-grid/src/PosChoiceField.jsx` の `PosChoiceField`（`s-choice-list`）、オン・オフは `PosToggleField` を使う。精算のロケーションは年・月と同じくボタンで開く一覧にした。
 - `scripts/lib/posExtensionComponents.test.mjs` が POS の拡張（target がすべて `pos.` の拡張と `extensions/common`）のソースを見て、POS に無い部品があると落ちる。部品の一覧は `@shopify/ui-extensions` 2025.10.x のもの。版を上げたら一覧を見直す（版が変わると試験が落ちて知らせる）。
 - POS の実機ではまだ見ていない（選ぶ欄の見た目・押したときの動きは実機で確かめる）。
+
+## 11. POS の読み込み中の表示（2026-11-24）
+
+T さんの決定（決定カード「青い帯ひとつに揃える」と追加の指示）:
+
+- 画面の読み込み中は、青い帯「読み込み中です。少しお待ちください。」だけを、見出しのすぐ下（上の固定の帯の直下）に出す。店の確認・一覧・中身など段階がいくつあっても見た目は 1 つで、途中で別の表示に切り替えない。
+- 見出し・日付・下のボタンなどの枠は先に出し、押せないボタンは薄くする。ボタンの文字を「読込中..」「更新中..」に変えない。
+- 「再読み込み」は読み込み中には出さない。失敗したとき、または 10 秒ほど待たされたときだけ帯の下に出す。
+- 欄の中など一部だけの読み込みの文字は「読み込み中…」だけ（「精算の数を」「月一覧を」などの前置きを付けない）。
+- 共通部品: `extensions/pos-smart-grid/src/LoadingNotice.jsx`（`LoadingNotice` / `LoadingPage`）、決まりは `extensions/common/loadingNotice.js`。見張り: `scripts/lib/loadingNotice.test.mjs`。
+- 「印刷中…」「発行中…」など、押したボタンの処理中の表示はこの決まりの外（UI_RULES の「押してから終わるまで」）。

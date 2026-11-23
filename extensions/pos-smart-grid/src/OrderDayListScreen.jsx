@@ -26,6 +26,8 @@ import {
   formatOrderTitle,
 } from "../../common/orderListLabels.js";
 import { OrderListRow } from "./OrderListRow.jsx";
+import { LoadingNotice } from "./LoadingNotice.jsx";
+import { INLINE_LOADING_TEXT } from "../../common/loadingNotice.js";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -119,6 +121,8 @@ export function OrderDayListScreen({
   itemNoun = "取引",
   searchPlaceholder = "注文番号・顧客名で検索",
   searchHint = "注文番号は数字だけでも探せます。顧客名は 2 文字以上入れてください。",
+  /** 行を押したあと、呼び出し側が注文を読み込んでいるあいだ true（同じ青い帯を出す） */
+  busy = false,
 }) {
   const t0 = useMemo(() => todayYmd(), []);
   const {
@@ -296,7 +300,7 @@ export function OrderDayListScreen({
   const visibleItems = items.filter((order) =>
     matchesListSegment(order, effectiveSegment),
   );
-  const storeLabel = sessionReady ? locationName || "店舗を確認中…" : "確認中…";
+  const storeLabel = sessionReady ? locationName || INLINE_LOADING_TEXT : INLINE_LOADING_TEXT;
 
   const isTodaySelected = dateStr === ymdToStr(t0.y, t0.m, t0.day);
 
@@ -565,27 +569,18 @@ export function OrderDayListScreen({
                   </s-button>
                 </s-stack>
               ) : null}
-              {!sessionReady ? (
-                <s-text type="small" color="subdued">
-                  確認しています…
-                </s-text>
-              ) : !locationIdParam ? (
+              {/* 読み込み中・失敗の案内は全画面共通（見出しのすぐ下・青い帯ひとつ。T 2026-11-24）。店の確認と一覧の読み込みは同じ帯 */}
+              <LoadingNotice
+                loading={busy || !sessionReady || (Boolean(locationIdParam) && listLoading)}
+                error={sessionReady && locationIdParam ? listError : ""}
+                onRetry={reloadList}
+              />
+              {!sessionReady ? null : !locationIdParam ? (
                 <s-text type="small" tone="critical">
                   POS
                   の店舗が分かりません。店舗を選び直してから開き直してください。
                 </s-text>
-              ) : listLoading ? (
-                <s-text type="small" color="subdued">
-                  読み込み中…
-                </s-text>
-              ) : listError ? (
-                <s-stack gap="small">
-                  <s-text tone="critical">{listError}</s-text>
-                  <s-button variant="secondary" onClick={reloadList}>
-                    再読み込み
-                  </s-button>
-                </s-stack>
-              ) : items.length === 0 ? (
+              ) : listLoading || listError ? null : items.length === 0 ? (
                 <s-stack gap="small-300">
                   <s-text>
                     {isSearchMode
@@ -642,7 +637,10 @@ export function OrderDayListScreen({
                         badges={row.badges}
                         onClick={
                           onSelectOrderId && row.selectId
-                            ? () => onSelectOrderId(row.selectId)
+                            ? () => {
+                                if (busy) return;
+                                onSelectOrderId(row.selectId);
+                              }
                             : undefined
                         }
                       />

@@ -10,6 +10,7 @@ import { useEffect, useState } from "preact/hooks";
 import { getVoucherCartEntryEnabled } from "../../common/specialRefundApi.js";
 import { SpecialRefundModal } from "./SpecialRefundModal.jsx";
 import { VoucherCartScreen } from "./VoucherCartScreen.jsx";
+import { LoadingPage } from "./LoadingNotice.jsx";
 
 /** 取引詳細の「商品券釣銭登録」が入れる目印（VoucherOrderAction.jsx と同じ） */
 const STORAGE_KEY_VOUCHER_ORDER = "pos_voucher_adjustment_order_id";
@@ -92,13 +93,7 @@ function VoucherModal() {
     };
   }, [screen]);
   if (screen === "checking") {
-    return (
-      <s-page heading="商品券釣銭登録">
-        <s-box padding="base">
-          <s-text color="subdued">読み込み中…</s-text>
-        </s-box>
-      </s-page>
-    );
+    return <LoadingPage heading="商品券釣銭登録" />;
   }
   if (screen === "cart") {
     return <VoucherCartScreen onOpenList={() => setScreen("list")} />;

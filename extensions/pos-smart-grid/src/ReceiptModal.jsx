@@ -17,6 +17,7 @@ import { previewReceipt, issueReceipt, getReceiptHistory } from "../../common/re
 import { printGiftReceipt, printResultMessage, PRINT_OUTCOME } from "../../common/printApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
+import { LoadingPage } from "./LoadingNotice.jsx";
 import { fmtYen } from "./orderDisplayUtils.js";
 import { formatOrderDateTimeLabel } from "../../common/orderListLabels.js";
 import { PosToggleField } from "./PosChoiceField.jsx";
@@ -124,13 +125,7 @@ function ReceiptModal() {
   }, []);
 
   if (orderEntryLoading) {
-    return (
-      <s-page heading="領収書">
-        <s-box padding="base">
-          <s-text tone="subdued">取引を開いています…</s-text>
-        </s-box>
-      </s-page>
-    );
+    return <LoadingPage heading="領収書" />;
   }
 
   if (step === "day_list") {
@@ -140,6 +135,7 @@ function ReceiptModal() {
         badgeMode="receipt"
         onSelectOrderId={handleOrderSelect}
         noticeError={bootstrapError}
+        busy={loading}
         onDismissNotice={() => setBootstrapError("")}
         footerTrailing={(
           <s-button variant="secondary" onClick={() => setStep("history")}>

@@ -29,6 +29,8 @@ import {
   reservationStatusLabel,
   reservationStatusTone,
 } from "../../common/refundReservation.js";
+import { LoadingNotice } from "./LoadingNotice.jsx";
+import { INLINE_LOADING_TEXT } from "../../common/loadingNotice.js";
 
 const emptyRow = () => ({ amount: "", method: "" });
 
@@ -148,7 +150,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
 
   const methodsMessage =
     methodsState === "loading"
-      ? "支払方法を読み込み中…"
+      ? INLINE_LOADING_TEXT
       : methodsState === "error"
         ? "支払方法を読み込めませんでした。通信を確かめて、この画面を開き直してください。"
         : methodsState === "empty"
@@ -213,13 +215,22 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
+            {/* 読み込み中・失敗の案内は全画面共通（見出しのすぐ下・青い帯ひとつ。T 2026-11-24） */}
+            <LoadingNotice
+              loading={state === "loading"}
+              error={state === "error" ? error : ""}
+              onRetry={() => {
+                setError("");
+                setState("loading");
+                reload();
+              }}
+            />
             <s-text tone="neutral">
               {`${order?.orderName ?? "この取引"} をこれから POS で返金するときに、実際の返金方法を先に決めておけます。返金が終わると、返金した額のまま自動で返金方法を変えます。Shopify では返金しません。`}
             </s-text>
 
             <OrderPaymentSummary order={order} />
 
-            {state === "loading" ? <s-text tone="neutral">読み込み中…</s-text> : null}
 
             {open ? (
               <ReservationCard item={open} onCancel={cancel} loading={loading} />
@@ -327,9 +338,9 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
         </s-box>
       </s-scroll-box>
       {/* 結果は押したボタンの近く（下の固定のすぐ上）に出す */}
-      {error || notice ? (
+      {(error && state !== "error") || notice ? (
         <s-box paddingInline="base" paddingBlockStart="small">
-          {error ? <s-banner tone="critical">{error}</s-banner> : <s-banner tone="success">{notice}</s-banner>}
+          {error && state !== "error" ? <s-banner tone="critical">{error}</s-banner> : <s-banner tone="success">{notice}</s-banner>}
         </s-box>
       ) : null}
       {/* 下は固定: 左に「戻る」、右に「予約する」（予約があるときは「再読込」）。T 2026-11-24 */}
