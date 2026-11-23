@@ -6,7 +6,11 @@
  *   day_list     → ロケーション・年月日＋その日の取引一覧（バッジ）
  *   order_detail → 取引サマリー＋イベント一覧＋固定フッターで特殊返金／商品券調整を選択
  *   form_refund  → 特殊返金フォーム
- *   form_voucher → 商品券調整フォーム
+ *   form_voucher → 商品券調整フォーム（額面だけ入れる。使った額は注文の取引から）
+ *   form_edit    → 登録の「変更」（前の登録を無効にし、直した内容の登録を足す。Shopify の返金はしない）
+ *
+ * タイルごとに一覧の最初の絞り込みを変える: 「返金・商品券」タイルは返金・キャンセル、「商品券」タイルは商品券釣有り
+ * （VoucherModal.jsx が initialListSegment="voucher_change" で開く）
  *
  * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券調整」→ form_voucher へ直行
  */
@@ -19,6 +23,8 @@ import {
   createVoucherAdjustment,
   voidSpecialRefund,
   recheckLegacySpecialRefund,
+  editSpecialRefund,
+  getVoucherApplied,
 } from "../../common/specialRefundApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import {
@@ -250,11 +256,16 @@ function ShopifyRefundStatusLine({ status, error }) {
 }
 
 export default async () => {
-  render(<SpecialRefundModal />, document.body);
+  render(<SpecialRefundModal initialListSegment="refunded" />, document.body);
 };
 
-function SpecialRefundModal() {
+/**
+ * @param {{ initialListSegment?: "all" | "refunded" | "voucher_change" }} props
+ */
+export function SpecialRefundModal({ initialListSegment = "refunded" }) {
   const [step, setStep] = useState("day_list");
+  // 「変更」する登録
+  const [editingEvent, setEditingEvent] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -516,6 +527,7 @@ function SpecialRefundModal() {
         onSelectOrderId={handleOrderSelect}
         noticeError={bootstrapError}
         onDismissNotice={() => setBootstrapError("")}
+        initialSegment={initialListSegment}
       />
     );
   }
@@ -540,6 +552,11 @@ function SpecialRefundModal() {
         }}
         onRefund={() => setStep("form_refund")}
         onVoucher={() => setStep("form_voucher")}
+        onEdit={(ev) => {
+          setEditingEvent(ev);
+          setError("");
+          setStep("form_edit");
+        }}
         onAskConfirm={setConfirmAction}
         legacyDecision={legacyDecision}
         confirmMessage={confirmMessage}
@@ -569,6 +586,29 @@ function SpecialRefundModal() {
           if (notice) setSubmitNotice(notice);
           await refreshEvents();
           if (fromOrderEntry && tryDismissModal()) return;
+          setStep("order_detail");
+        }}
+      />
+    );
+  }
+
+  if (step === "form_edit" && editingEvent) {
+    return (
+      <AdjustmentEditForm
+        order={selectedOrder}
+        event={editingEvent}
+        loading={loading}
+        error={error}
+        setLoading={setLoading}
+        setError={setError}
+        onBack={() => {
+          setEditingEvent(null);
+          setStep("order_detail");
+        }}
+        onSuccess={async (notice) => {
+          setEditingEvent(null);
+          if (notice) setSubmitNotice(notice);
+          await refreshEvents();
           setStep("order_detail");
         }}
       />
@@ -616,6 +656,7 @@ function OrderDetailView({
   onBack,
   onRefund,
   onVoucher,
+  onEdit,
   onAskConfirm,
   legacyDecision,
   confirmMessage,
@@ -715,6 +756,7 @@ function OrderDetailView({
                     <EventCard
                       key={ev.id}
                       event={ev}
+                      onEdit={onEdit}
                       onAskConfirm={onAskConfirm}
                       legacyDecision={legacyDecision?.eventId === ev.id ? legacyDecision : null}
                       loading={loading}
@@ -848,7 +890,7 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
   );
 }
 
-function EventCard({ event, onAskConfirm, legacyDecision, loading }) {
+function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
   const label = EVENT_TYPE_LABELS[event.eventType] ?? event.eventType;
   return (
     <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
@@ -917,19 +959,32 @@ function EventCard({ event, onAskConfirm, legacyDecision, loading }) {
 
         <s-stack direction="horizontal" align="space-between">
           <s-text tone="subdued" fontSize="small">
-            {event.createdAt ? event.createdAt.slice(0, 16).replace("T", " ") : ""}
+            {event.countDate ? `${event.countDate} の分` : event.createdAt ? event.createdAt.slice(0, 16).replace("T", " ") : ""}
+            {event.replacesEventId ? "（変更あり）" : ""}
           </s-text>
-          <s-button
-            kind="plain"
-            tone="critical"
-            command="--show"
-            commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
-            onClick={() => onAskConfirm({ kind: "void", eventId: event.id })}
-            disabled={loading}
-          >
-            無効化
-          </s-button>
+          <s-stack direction="inline" gap="small">
+            {canEditEvent(event) ? (
+              <s-button kind="secondary" onClick={() => onEdit?.(event)} disabled={loading}>
+                変更
+              </s-button>
+            ) : null}
+            <s-button
+              kind="plain"
+              tone="critical"
+              command="--show"
+              commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+              onClick={() => onAskConfirm({ kind: "void", eventId: event.id })}
+              disabled={loading}
+            >
+              無効化
+            </s-button>
+          </s-stack>
         </s-stack>
+        {event.metafieldWritten === false ? (
+          <s-text tone="critical" fontSize="small">
+            注文への記録がまだ書けていません。この画面を開き直すか、もう一度「変更」してください。
+          </s-text>
+        ) : null}
       </s-stack>
     </s-box>
   );
@@ -1211,28 +1266,46 @@ function VoucherAdjustmentForm({
   onSuccess,
 }) {
   const [faceValue, setFaceValue] = useState("");
+  // 使った額は注文の取引から入れる。読めないときだけ手で入れる
   const [appliedAmount, setAppliedAmount] = useState("");
-  const [changeAmount, setChangeAmount] = useState("");
+  const [appliedState, setAppliedState] = useState("loading"); // loading | order | manual
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
 
-  // 釣銭自動計算
-  const calcChange = useCallback(() => {
-    const face = Number(faceValue);
-    const applied = Number(appliedAmount);
-    if (!isNaN(face) && !isNaN(applied) && face > 0 && applied > 0) {
-      setChangeAmount(String(Math.max(0, face - applied)));
-    }
-  }, [faceValue, appliedAmount]);
+  useEffect(() => {
+    if (!order?.orderId) return;
+    setAppliedState("loading");
+    getVoucherApplied(order.orderId)
+      .then((res) => {
+        if (res?.voucherAppliedAmount != null) {
+          setAppliedAmount(String(res.voucherAppliedAmount));
+          setAppliedState("order");
+        } else {
+          setAppliedState("manual");
+        }
+      })
+      .catch(() => setAppliedState("manual"));
+  }, [order?.orderId]);
+
+  const face = Number(faceValue);
+  const applied = Number(appliedAmount);
+  const changeAmount =
+    faceValue !== "" && appliedAmount !== "" && !isNaN(face) && !isNaN(applied)
+      ? Math.max(0, face - applied)
+      : null;
 
   const handleConfirm = () => {
     setError("");
-    if (!faceValue || !appliedAmount || !changeAmount) {
-      setError("商品券額面・充当額・釣銭額をすべて入力してください");
+    if (!faceValue || isNaN(face) || face <= 0) {
+      setError("受け取った商品券の額面を入れてください");
       return;
     }
-    if (isNaN(Number(faceValue)) || isNaN(Number(appliedAmount)) || isNaN(Number(changeAmount))) {
-      setError("金額に不正な値が含まれています");
+    if (appliedState === "loading") {
+      setError("注文の商品券の支払いを読み込み中です。少し待ってからもう一度押してください");
+      return;
+    }
+    if (appliedAmount === "" || isNaN(applied) || applied < 0) {
+      setError("商品券で払った額を入れてください");
       return;
     }
     setConfirming(true);
@@ -1246,9 +1319,9 @@ function VoucherAdjustmentForm({
         sourceOrderId: order.orderId,
         sourceOrderName: order.orderName,
         locationId: order.location?.id ?? "",
-        voucherFaceValue: Number(faceValue),
-        voucherAppliedAmount: Number(appliedAmount),
-        voucherChangeAmount: Number(changeAmount),
+        voucherFaceValue: face,
+        // 注文から読めた額はサーバーでも読み直す（送らない）。手で入れたときだけ送る
+        ...(appliedState === "manual" ? { voucherAppliedAmount: applied } : {}),
         currency: order.totalPrice?.currencyCode ?? "JPY",
         note: note.trim() || null,
       });
@@ -1272,9 +1345,9 @@ function VoucherAdjustmentForm({
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <Row label="取引" value={order?.orderName ?? "-"} />
-                  <Row label="商品券額面" value={`¥${Number(faceValue).toLocaleString()}`} />
-                  <Row label="売上充当額" value={`¥${Number(appliedAmount).toLocaleString()}`} />
-                  <Row label="釣銭額" value={`¥${Number(changeAmount).toLocaleString()}`} />
+                  <Row label="商品券額面" value={`¥${face.toLocaleString()}`} />
+                  <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
+                  <Row label="お釣り" value={`¥${Number(changeAmount ?? 0).toLocaleString()}`} />
                   {note ? <Row label="メモ" value={note} /> : null}
                 </s-stack>
               </s-box>
@@ -1311,33 +1384,35 @@ function VoucherAdjustmentForm({
 
             <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
 
-            {/* 商品券額面 */}
+            {/* 商品券額面（入れるのはこれだけ） */}
             <s-text-field
-              label="商品券額面（円）"
+              label="受け取った商品券の額面（円）"
               value={faceValue}
               type="number"
               onInput={(e) => setFaceValue(e?.currentTarget?.value ?? "")}
-              onBlur={calcChange}
-              placeholder="例: 1000"
+              placeholder="例: 5000"
             />
 
-            {/* 売上充当額 */}
-            <s-text-field
-              label="売上充当額（円）"
-              value={appliedAmount}
-              type="number"
-              onInput={(e) => setAppliedAmount(e?.currentTarget?.value ?? "")}
-              onBlur={calcChange}
-              placeholder="例: 800"
-            />
+            {/* 商品券で払った額（注文の取引から。読めないときだけ手で入れる） */}
+            {appliedState === "manual" ? (
+              <s-text-field
+                label="商品券で払った額（円）"
+                value={appliedAmount}
+                type="number"
+                onInput={(e) => setAppliedAmount(e?.currentTarget?.value ?? "")}
+                placeholder="注文の支払いを読めなかったので入れてください"
+              />
+            ) : (
+              <Row
+                label="商品券で払った額（注文から）"
+                value={appliedState === "loading" ? "読み込み中…" : `¥${applied.toLocaleString()}`}
+              />
+            )}
 
-            {/* 釣銭額（自動計算） */}
-            <s-text-field
-              label="釣銭額（円）"
-              value={changeAmount}
-              type="number"
-              onInput={(e) => setChangeAmount(e?.currentTarget?.value ?? "")}
-              placeholder="額面 − 充当額（自動計算）"
+            {/* お釣り（自動） */}
+            <Row
+              label="お釣り（額面 − 払った額）"
+              value={changeAmount == null ? "-" : `¥${changeAmount.toLocaleString()}`}
             />
 
             {/* メモ */}
@@ -1346,6 +1421,260 @@ function VoucherAdjustmentForm({
               value={note}
               onInput={(e) => setNote(e?.currentTarget?.value ?? "")}
               placeholder="補足説明など"
+            />
+
+            {error ? <s-text tone="critical">{error}</s-text> : null}
+
+            <s-stack gap="small">
+              <s-button kind="primary" onClick={handleConfirm} disabled={loading}>
+                確認する
+              </s-button>
+              <s-button kind="secondary" onClick={onBack} disabled={loading}>
+                戻る
+              </s-button>
+            </s-stack>
+          </s-stack>
+        </s-box>
+      </s-scroll-box>
+    </s-page>
+  );
+}
+
+// ──────────────────────────────────────────────
+// 「変更」フォーム（前の登録を無効にし、直した内容の登録を足す）
+// ──────────────────────────────────────────────
+
+/** 「変更」できる登録か（有効で、Shopify 返金の結果が分かっている） */
+function canEditEvent(event) {
+  return event?.status === "active" && event?.shopifyRefundStatus !== "pending";
+}
+
+const EDIT_DATE_MODES = [
+  { value: "original", label: "元の日のまま" },
+  { value: "today", label: "今日の分にする" },
+];
+
+function AdjustmentEditForm({ order, event, loading, error, setLoading, setError, onBack, onSuccess }) {
+  const isVoucher = event.eventType === "voucher_change_adjustment";
+  const needsMethod = event.eventType === "cash_refund" || event.eventType === "payment_method_override";
+  const refundDone = event.shopifyRefundStatus === "success";
+  const [amount, setAmount] = useState(String(Number(event.amount ?? 0)));
+  const [faceValue, setFaceValue] = useState(String(Number(event.voucherFaceValue ?? 0)));
+  const [actualRefundMethod, setActualRefundMethod] = useState(event.actualRefundMethod ?? "");
+  const [refundMethods, setRefundMethods] = useState([]);
+  const [refundMethodsState, setRefundMethodsState] = useState(needsMethod ? "loading" : "ready");
+  const [adjustKind, setAdjustKind] = useState(event.adjustKind ?? "undo");
+  const [dateMode, setDateMode] = useState("original");
+  const [reason, setReason] = useState("");
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    if (!needsMethod) return;
+    listSelectablePaymentMethods({ sync: false })
+      .then((res) => {
+        const items = res.items ?? [];
+        setRefundMethods(items);
+        setRefundMethodsState(items.length > 0 ? "ready" : "empty");
+        if (!items.some((m) => m.value === event.actualRefundMethod)) {
+          setActualRefundMethod(items[0]?.value ?? "");
+        }
+      })
+      .catch(() => {
+        setRefundMethods([]);
+        setRefundMethodsState("error");
+      });
+  }, [event.id]);
+
+  const applied = Number(event.voucherAppliedAmount ?? 0);
+  const face = Number(faceValue);
+  const change = isVoucher && !isNaN(face) ? Math.max(0, face - applied) : null;
+
+  const handleConfirm = () => {
+    setError("");
+    if (!reason.trim()) {
+      setError("直したわけを入れてください");
+      return;
+    }
+    if (isVoucher) {
+      if (!faceValue || isNaN(face) || face <= 0) {
+        setError("商品券の額面を入れてください");
+        return;
+      }
+    } else if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+      setError("金額を正しく入力してください");
+      return;
+    }
+    if (needsMethod && !refundMethods.some((m) => m.value === actualRefundMethod)) {
+      setError(refundMethodsMessage(refundMethodsState) || "実際の返金手段を選んでください");
+      return;
+    }
+    setConfirming(true);
+  };
+
+  const handleSubmit = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const body = {
+        reason: reason.trim(),
+        dateMode,
+        ...(isVoucher ? { voucherFaceValue: face } : { amount: Number(amount) }),
+        ...(needsMethod ? { actualRefundMethod } : {}),
+        ...(event.eventType === "receipt_cash_adjustment" ? { adjustKind } : {}),
+      };
+      const res = await editSpecialRefund(event.id, body);
+      setConfirming(false);
+      const parts = ["変更しました（前の登録は無効にして、直した内容で登録しました）。"];
+      if (res?.warning) parts.push(res.warning);
+      if (res?.settlementAlreadyConfirmed) {
+        parts.push("この日の精算はもう確定しています。精算の画面で「更新」を押し、「今の数で再確定する」を押してください。");
+      }
+      if (res?.metafieldWritten === false) {
+        parts.push("注文への記録はまだ書けていません。あとで開き直すと書き直します。");
+      }
+      await onSuccess({ tone: res?.warning || res?.settlementAlreadyConfirmed ? "warning" : "info", text: parts.join(" ") });
+    } catch (e) {
+      setError(toUserMessage(e?.message) || "変更に失敗しました");
+      setConfirming(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const label = EVENT_TYPE_LABELS[event.eventType] ?? event.eventType;
+  const methodLabel = (v) => refundMethods.find((m) => m.value === v)?.label ?? v ?? "-";
+
+  if (confirming) {
+    return (
+      <s-page heading="変更の確認">
+        <s-scroll-box>
+          <s-box padding="base">
+            <s-stack gap="base">
+              <s-text fontWeight="bold">前の登録を無効にして、次の内容で登録し直します</s-text>
+              <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                <s-stack gap="small">
+                  <Row label="取引" value={order?.orderName ?? "-"} />
+                  <Row label="種別" value={label} />
+                  {isVoucher ? (
+                    <>
+                      <Row label="商品券額面" value={`¥${face.toLocaleString()}`} />
+                      <Row label="お釣り" value={`¥${Number(change ?? 0).toLocaleString()}`} />
+                    </>
+                  ) : (
+                    <Row label="金額" value={`¥${Number(amount).toLocaleString()}`} />
+                  )}
+                  {needsMethod ? <Row label="返金手段" value={methodLabel(actualRefundMethod)} /> : null}
+                  <Row label="数える日" value={EDIT_DATE_MODES.find((d) => d.value === dateMode)?.label ?? dateMode} />
+                  <Row label="わけ" value={reason.trim()} />
+                </s-stack>
+              </s-box>
+              {refundDone ? (
+                <s-text tone="critical" fontSize="small">
+                  Shopify の返金は直しません（アプリの記録だけを直します）。
+                </s-text>
+              ) : null}
+              {error ? <s-text tone="critical">{error}</s-text> : null}
+              <s-stack gap="small">
+                <s-button kind="primary" onClick={handleSubmit} loading={loading}>
+                  変更する
+                </s-button>
+                <s-button kind="secondary" onClick={() => setConfirming(false)} disabled={loading}>
+                  修正する
+                </s-button>
+              </s-stack>
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+      </s-page>
+    );
+  }
+
+  return (
+    <s-page heading={`${label}を変更`}>
+      <s-scroll-box>
+        <s-box padding="base">
+          <s-stack gap="base">
+            <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+              <s-stack gap="extraSmall">
+                <s-text tone="subdued">対象取引: {order?.orderName ?? "-"}</s-text>
+                <s-text tone="subdued" fontSize="small">
+                  前の登録は無効にして残し、直した内容で登録し直します。
+                </s-text>
+                {refundDone ? (
+                  <s-text tone="critical" fontSize="small">
+                    この登録は Shopify でも返金済みです。Shopify の返金は直りません。金額を変えるときは Shopify の管理画面でも直してください。
+                  </s-text>
+                ) : null}
+              </s-stack>
+            </s-box>
+
+            {isVoucher ? (
+              <>
+                <s-text-field
+                  label="受け取った商品券の額面（円）"
+                  value={faceValue}
+                  type="number"
+                  onInput={(e) => setFaceValue(e?.currentTarget?.value ?? "")}
+                />
+                <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
+                <Row label="お釣り" value={change == null ? "-" : `¥${change.toLocaleString()}`} />
+              </>
+            ) : (
+              <s-text-field
+                label="金額（円）"
+                value={amount}
+                type="number"
+                onInput={(e) => setAmount(e?.currentTarget?.value ?? "")}
+              />
+            )}
+
+            {needsMethod ? (
+              refundMethods.length > 0 ? (
+                <s-select
+                  label="実際の返金手段"
+                  value={actualRefundMethod}
+                  onChange={(e) =>
+                    setActualRefundMethod(e?.currentTarget?.value ?? e?.currentValue?.value ?? actualRefundMethod)
+                  }
+                >
+                  {refundMethods.map((m) => (
+                    <s-option key={m.value} value={m.value}>{m.label}</s-option>
+                  ))}
+                </s-select>
+              ) : (
+                <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} fontSize="small">
+                  {refundMethodsMessage(refundMethodsState)}
+                </s-text>
+              )
+            ) : null}
+
+            {event.eventType === "receipt_cash_adjustment" ? (
+              <s-select
+                label="調整種別"
+                value={adjustKind}
+                onChange={(e) => setAdjustKind(e?.currentTarget?.value ?? e?.currentValue?.value ?? adjustKind)}
+              >
+                {ADJUST_KINDS.map((k) => (
+                  <s-option key={k.value} value={k.value}>{k.label}</s-option>
+                ))}
+              </s-select>
+            ) : null}
+
+            <s-select
+              label="数える日"
+              value={dateMode}
+              onChange={(e) => setDateMode(e?.currentTarget?.value ?? e?.currentValue?.value ?? dateMode)}
+            >
+              {EDIT_DATE_MODES.map((d) => (
+                <s-option key={d.value} value={d.value}>{d.label}</s-option>
+              ))}
+            </s-select>
+
+            <s-text-field
+              label="直したわけ（必須）"
+              value={reason}
+              onInput={(e) => setReason(e?.currentTarget?.value ?? "")}
+              placeholder="例: 返金手段の選び間違い"
             />
 
             {error ? <s-text tone="critical">{error}</s-text> : null}

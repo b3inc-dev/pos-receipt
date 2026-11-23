@@ -4,6 +4,7 @@
  * - どちらも、書いたあとに注文メタフィールド pos.adjustments を書き直し、数える日の売上サマリーを計算し直す。
  * 決まりの中身は orderAdjustmentsPure.server.ts の planAdjustmentEdit。
  */
+import type { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { computeAndCacheDailySummary } from "./salesSummaryEngine.server";
 import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
@@ -66,7 +67,7 @@ export async function isSettlementConfirmedFor(
     },
     select: { periodLabel: true, status: true },
   });
-  return rows.some((s) => !s.periodLabel?.startsWith("点検_") && s.status !== SUPERSEDED_SETTLEMENT_STATUS);
+  return rows.some((s: { periodLabel: string | null; status: string }) => !s.periodLabel?.startsWith("点検_") && s.status !== SUPERSEDED_SETTLEMENT_STATUS);
 }
 
 export type AdjustmentChangeResult =
@@ -133,7 +134,7 @@ export async function editAdjustmentEvent(
   const reason = String(input.reason ?? "").trim();
   let newEventId: string;
   try {
-    newEventId = await prisma.$transaction(async (tx) => {
+    newEventId = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const voided = await tx.specialRefundEvent.updateMany({
         where: { id: old.id, shopId, status: "active" },
         data: { status: "voided", voidedAt: now, voidedBy: input.by ?? null, voidReason: reason },

@@ -40,8 +40,9 @@ description = "商品券釣銭調整（取引詳細・任意タイル）"
 module = "./src/VoucherTile.jsx"
 target = "pos.home.tile.render"
 
+# 一覧の最初の絞り込みを「商品券釣有り」にして、特殊返金と同じ画面を開く
 [[extensions.targeting]]
-module = "./src/SpecialRefundModal.jsx"
+module = "./src/VoucherModal.jsx"
 target = "pos.home.modal.render"
 
 [[extensions.targeting]]

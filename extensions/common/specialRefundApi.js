@@ -80,7 +80,7 @@ export async function createSpecialRefund(data) {
 
 /**
  * POST /api/voucher-adjustments
- * @param {Object} data - sourceOrderId, voucherFaceValue, voucherAppliedAmount, voucherChangeAmount, 他
+ * @param {Object} data - sourceOrderId, voucherFaceValue（必須）, voucherAppliedAmount（任意。無ければ注文の取引から）, 他
  * @returns {Promise<{ ok: boolean, event: Object }>}
  */
 export async function createVoucherAdjustment(data) {
@@ -92,8 +92,29 @@ export async function createVoucherAdjustment(data) {
  * @param {string} id
  * @returns {Promise<{ ok: boolean, event: Object }>}
  */
-export async function voidSpecialRefund(id) {
-  return apiPost(`/api/special-refunds/${id}/void`, {});
+export async function voidSpecialRefund(id, body = {}) {
+  return apiPost(`/api/special-refunds/${id}/void`, body);
+}
+
+/**
+ * POST /api/special-refunds/:id/edit
+ * 「変更」: 前の登録を無効にし、直した内容の登録を足す（Shopify の返金はしない）。
+ * @param {string} id
+ * @param {{ reason: string, dateMode?: "original" | "today", amount?: number, actualRefundMethod?: string,
+ *   originalPaymentMethod?: string, adjustKind?: string, voucherFaceValue?: number, note?: string }} body
+ */
+export async function editSpecialRefund(id, body) {
+  return apiPost(`/api/special-refunds/${encodeURIComponent(id)}/edit`, body);
+}
+
+/**
+ * GET /api/voucher-adjustments?sourceOrderId=...
+ * その注文で商品券で払った額（注文の取引から）。読めなければ voucherAppliedAmount は null。
+ * @param {string} sourceOrderId
+ * @returns {Promise<{ ok: boolean, voucherAppliedAmount: number | null, appliedFromOrder: boolean }>}
+ */
+export async function getVoucherApplied(sourceOrderId) {
+  return apiGet("/api/voucher-adjustments", { sourceOrderId });
 }
 
 /**
