@@ -130,7 +130,7 @@ export function NativeRefundReassignForm({
       return;
     }
     if (!allRowsHaveMethod(rows, refundMethods)) {
-      setError(methodsMessage || "実際に返した手段を選んでください");
+      setError(methodsMessage || "返金方法を選んでください");
       return;
     }
     if (!keys) setKeys(rows.map(() => newKey()));
@@ -162,7 +162,7 @@ export function NativeRefundReassignForm({
         done += 1;
       }
       setConfirming(false);
-      const parts = [`付け替えました（${yen(total)}・${rows.length} 行）。Shopify では返金していません。`];
+      const parts = [`返金方法を変更しました（${yen(total)}・${rows.length} 行）。Shopify では返金していません。`];
       if (lastRes?.approvalRequired) parts.push("管理者の承認待ちです。承認されるまで精算では元の支払方法のままです。");
       if (lastRes?.metafieldWritten === false) parts.push("注文への記録はまだ書けていません。あとで開き直すと書き直します。");
       await onSuccess({ tone: "success", text: parts.join(" ") });
@@ -172,7 +172,7 @@ export function NativeRefundReassignForm({
       if (done > 0) {
         await onSuccess({
           tone: "warning",
-          text: `${rows.length} 行のうち ${done} 行を付け替えました。残りは登録できませんでした（${msg}）。注文を開き直して、残りを付け替えてください。`,
+          text: `${rows.length} 行のうち ${done} 行の返金方法を変更しました。残りは登録できませんでした（${msg}）。注文を開き直して、残りの返金方法を変更してください。`,
         });
       } else {
         setError(msg);
@@ -190,7 +190,7 @@ export function NativeRefundReassignForm({
     let voided = 0;
     try {
       for (const e of targets) {
-        await voidSpecialRefund(e.id, { reason: "付け替え直し" });
+        await voidSpecialRefund(e.id, { reason: "返金方法の変更し直し" });
         voided += 1;
       }
       setSelected({ ...redoLine, remaining: redoLine.amount, reassigned: 0 });
@@ -203,8 +203,8 @@ export function NativeRefundReassignForm({
         tone: "warning",
         text:
           voided > 0
-            ? `前の付け替え ${targets.length} 件のうち ${voided} 件を無効にしました。残りは無効にできませんでした（${msg}）。注文を開き直して、もう一度「付け替え直す」を押してください。`
-            : `前の付け替えを無効にできませんでした（${msg}）。`,
+            ? `前の返金方法変更 ${targets.length} 件のうち ${voided} 件を無効にしました。残りは無効にできませんでした（${msg}）。注文を開き直して、もう一度「変更し直す」を押してください。`
+            : `前の返金方法変更を無効にできませんでした（${msg}）。`,
       });
     } finally {
       setLoading(false);
@@ -215,11 +215,11 @@ export function NativeRefundReassignForm({
   if (redoLine) {
     const targets = activeReassignEvents(events, redoLine);
     return (
-      <s-page heading="付け替え直す">
+      <s-page heading="返金方法を変更し直す">
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
-              <s-text type="strong">前の付け替えを無効にして、選び直します</s-text>
+              <s-text type="strong">前の返金方法変更を無効にして、選び直します</s-text>
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <Row label="純正の返金" value={nativeRefundLineLabel(redoLine)} />
@@ -233,7 +233,7 @@ export function NativeRefundReassignForm({
                 </s-stack>
               </s-box>
               <s-text type="small" color="subdued">
-                無効にした分は、いったん元の支払方法の返金に戻ります。続けて返した手段を選んでください。Shopify では何もしません。
+                無効にした分は、いったん元の支払方法の返金に戻ります。続けて返金方法を選んでください。Shopify では何もしません。
               </s-text>
               {error ? <s-text tone="critical">{error}</s-text> : null}
               <s-stack gap="small">
@@ -254,11 +254,11 @@ export function NativeRefundReassignForm({
   // ── 確認 ──
   if (confirming && selected) {
     return (
-      <s-page heading="返金の手段を付け替える">
+      <s-page heading="返金方法変更">
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
-              <s-text type="strong">この内容で付け替えます</s-text>
+              <s-text type="strong">この内容で返金方法を変更します</s-text>
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <Row label="取引" value={order?.orderName ?? "-"} />
@@ -280,12 +280,12 @@ export function NativeRefundReassignForm({
                 </s-stack>
               </s-box>
               <s-text type="small" color="subdued">
-                Shopify では返金しません。精算では、この返金を元の支払方法から選んだ手段へ移します（返金の合計は変わりません）。
+                Shopify では返金しません。精算では、この返金を元の支払方法から選んだ返金方法へ移します（返金の合計は変わりません）。
               </s-text>
               {error ? <s-text tone="critical">{error}</s-text> : null}
               <s-stack gap="small">
                 <s-button variant="primary" onClick={handleSubmit} loading={loading}>
-                  付け替える
+                  変更する
                 </s-button>
                 <s-button variant="secondary" onClick={() => setConfirming(false)} disabled={loading}>
                   修正する
@@ -301,14 +301,14 @@ export function NativeRefundReassignForm({
   // ── 手段を選ぶ（分割） ──
   if (selected) {
     return (
-      <s-page heading="返金の手段を付け替える">
+      <s-page heading="返金方法変更">
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <Row label="純正の返金" value={nativeRefundLineLabel(selected)} />
-                  <Row label="付け替える額" value={yen(total)} />
+                  <Row label="変更する額" value={yen(total)} />
                 </s-stack>
               </s-box>
 
@@ -318,7 +318,7 @@ export function NativeRefundReassignForm({
                 </s-text>
               ) : !split ? (
                 <PosChoiceField
-                  label="実際に返した手段"
+                  label="返金方法"
                   value={rows[0].method}
                   options={refundMethods}
                   onChange={(v) => setRow(0, { method: v })}
@@ -341,7 +341,7 @@ export function NativeRefundReassignForm({
                           />
                         )}
                         <PosChoiceField
-                          label="返した手段"
+                          label="返金方法"
                           value={r.method}
                           options={refundMethods}
                           onChange={(v) => setRow(i, { method: v })}
@@ -409,12 +409,12 @@ export function NativeRefundReassignForm({
   // ── 純正の返金を選ぶ ──
   const anyOpen = lines.some(canReassign);
   return (
-    <s-page heading="返金の手段を付け替える">
+    <s-page heading="返金方法変更">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
             <s-text type="small" color="subdued">
-              {`${order?.orderName ?? "この取引"} は POS で返金されています。付け替える返金を選んでください。金額は返金した額のままです。`}
+              {`${order?.orderName ?? "この取引"} は POS で返金されています。返金方法を変更する返金を選んでください。金額は返金した額のままです。`}
             </s-text>
             {lines.map((line) => {
               const status = nativeRefundLineStatus(line);
@@ -436,7 +436,7 @@ export function NativeRefundReassignForm({
                           }}
                           disabled={loading}
                         >
-                          付け替える
+                          返金方法を変更
                         </s-button>
                       ) : null}
                       {activeReassignEvents(events, line).length > 0 ? (
@@ -448,7 +448,7 @@ export function NativeRefundReassignForm({
                           }}
                           disabled={loading}
                         >
-                          付け替え直す
+                          変更し直す
                         </s-button>
                       ) : null}
                     </s-stack>
@@ -458,7 +458,7 @@ export function NativeRefundReassignForm({
             })}
             {!anyOpen ? (
               <s-text type="small" color="subdued">
-                この取引の返金はすべて付け替え済みです。手段や分け方を直すときは「付け替え直す」、手段だけなら調整履歴の「変更」を使ってください。
+                この取引の返金はすべて返金方法変更済みです。返金方法や分け方を直すときは「変更し直す」、返金方法だけなら調整履歴の「変更」を使ってください。
               </s-text>
             ) : null}
             {error ? <s-text tone="critical">{error}</s-text> : null}
