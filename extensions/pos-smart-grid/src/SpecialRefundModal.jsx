@@ -121,7 +121,7 @@ const ADJUST_KINDS = [
 const EVENT_TYPE_LABELS = {
   cash_refund: "現金返金",
   payment_method_override: "返金手段変更",
-  receipt_cash_adjustment: "レシート現金調整",
+  receipt_cash_adjustment: "レシートの現金を直す",
   voucher_change_adjustment: "商品券調整",
 };
 

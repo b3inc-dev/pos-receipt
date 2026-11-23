@@ -37,7 +37,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   cash_refund: "現金返金",
   payment_method_override: "返金手段の付け替え",
   voucher_change_adjustment: "商品券",
-  receipt_cash_adjustment: "レシート現金調整",
+  receipt_cash_adjustment: "レシートの現金を直す",
 };
 
 function fmtYen(v: string | number | null | undefined) {
