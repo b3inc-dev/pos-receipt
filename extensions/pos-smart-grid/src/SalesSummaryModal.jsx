@@ -156,16 +156,30 @@ function fmtAmount(n) {
 
 /** 「15:42時点」形式（端末の時刻。店舗の端末は日本時間）。時刻が無ければ「保存済み」 */
 /**
- * 期間（当月）の数字に、まだ数え終わっていない店があるときの案内（裏で数えている）。
+ * 期間（当月）の数字に、まだ数え終わっていない分があるときの案内（裏で数えている）。
  * 例: 「まだ数え終わっていない日があります（北千住店 あと5日分 ほか2店）。少したってから「更新」を押すと、数字がそろいます。」
+ * 数えるのに失敗した日があるときは、続くなら管理者に知らせるよう分けて出す。
  */
 function pendingCountNotice(period) {
-  const list = Array.isArray(period?.pendingLocations) ? period.pendingLocations.filter((p) => p && p.days > 0) : [];
-  if (list.length === 0) return "";
-  const first = list[0];
-  const name = String(first.locationName || "店");
-  const more = list.length > 1 ? ` ほか${list.length - 1}店` : "";
-  return `まだ数え終わっていない日があります（${name} あと${first.days}日分${more}）。少したってから「更新」を押すと、数字がそろいます。`;
+  if (!period) return "";
+  const list = Array.isArray(period.pendingLocations) ? period.pendingLocations.filter((p) => p && p.days > 0) : [];
+  const failed = Number(period.pendingFailedCount) || 0;
+  const where = (() => {
+    if (list.length === 0) return "";
+    const first = list[0];
+    const more = list.length > 1 ? ` ほか${list.length - 1}店` : "";
+    return `（${String(first.locationName || "店")} あと${first.days}日分${more}）`;
+  })();
+  if (failed > 0) {
+    return `数えられなかった日があります${where}。少したってから「更新」を押してください。何度押しても消えないときは、管理者に知らせてください。`;
+  }
+  if (list.length > 0) {
+    return `まだ数え終わっていない日があります${where}。少したってから「更新」を押すと、数字がそろいます。`;
+  }
+  if (period.periodCachePartial === true) {
+    return "まだ数え終わっていない分があります。少したってから「更新」を押すと、数字がそろいます。";
+  }
+  return "";
 }
 
 function cachedAsOfLabel(cached) {

@@ -103,3 +103,25 @@ export function computeFailureReason(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   return msg.replace(/\s+/g, " ").slice(0, 200);
 }
+
+/**
+ * 裏で数えるキュー（salesSummaryFillQueue）が使えそうか。使えないときは、POS の期間も今まで通り
+ * 古い日から数える（時間で区切ると、過去の日がいつまでも埋まらないため）。
+ * 積むのに失敗したら 10 分は使えないものとして扱う。
+ */
+let fillQueueUnavailableUntil = 0;
+
+export function isSalesSummaryFillQueueUsable(now = Date.now()): boolean {
+  const v = process.env.SALES_SUMMARY_FILL_QUEUE;
+  if (v === "0" || v === "false" || !process.env.DATABASE_URL?.trim()) return false;
+  return now >= fillQueueUnavailableUntil;
+}
+
+export function markSalesSummaryFillQueueUnavailable(now = Date.now()): void {
+  fillQueueUnavailableUntil = now + 10 * 60 * 1000;
+}
+
+/** 試験用 */
+export function __resetSalesSummaryFillQueueStateForTest() {
+  fillQueueUnavailableUntil = 0;
+}

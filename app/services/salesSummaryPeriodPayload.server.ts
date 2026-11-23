@@ -16,7 +16,9 @@ import {
   computeFailureReason,
   getSalesSummaryPeriodMaxComputes,
   isSalesSummaryComputeRecentlyFailed,
+  isSalesSummaryFillQueueUsable,
   markSalesSummaryComputeFailed,
+  markSalesSummaryFillQueueUnavailable,
   needsLocationDayCompute,
 } from "../utils/salesSummaryPeriodCache.server";
 import {
@@ -33,7 +35,7 @@ import {
   tryLoadPeriodAggregatesFromRollup,
   syncRollupsMatchingPeriodRequest,
 } from "./salesSummaryPeriodRollup.server";
-import { shareSalesSummaryCompute } from "../utils/salesSummaryLoadShare.server";
+import { getInFlight, shareSalesSummaryCompute } from "../utils/salesSummaryLoadShare.server";
 import type { Shop } from "@prisma/client";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
@@ -78,6 +80,8 @@ export type PeriodSalesSummaryPayload = {
   pendingLocations?: PendingLocation[];
   /** そのうち数えるのに失敗した「店×日」の数 */
   pendingFailedCount?: number;
+  /** 数えきれなかった販売チャネル×日（保存が無いもの）の数 */
+  pendingChannelCount?: number;
   /** cachedOnly のときだけ付く。false = 保存済みが足りず rows は空（画面は数え直しを待つ） */
   cacheComplete?: boolean;
 };
@@ -208,6 +212,7 @@ export async function buildPeriodSalesSummaryPayload(
   let pendingComputeEstimate = 0;
   let pendingLocations: PendingLocation[] = [];
   let pendingFailedCount = 0;
+  let pendingChannelCount = 0;
 
   if (dateFrom && dateTo) {
     const start = new Date(dateFrom + "T00:00:00Z").getTime();
@@ -242,10 +247,13 @@ export async function buildPeriodSalesSummaryPayload(
         locationWork.push({ day, loc });
       }
     }
-    // 今日の分（日次と同じ読み込みで共有する）を先に、そのあと古い日から。時間を超えた残りは裏で数える
+    // 裏で数えられるとき（POS）は、今日の分（日次と同じ読み込みで共有する）を先に、そのあと古い日から。
+    // 時間を超えた残りは裏で数える。裏で数えられないときは今まで通り古い日から（過去の日を必ず進める）
+    const canDefer =
+      !cachedOnly && Boolean(options.backgroundShopDomain) && isSalesSummaryFillQueueUsable();
     locationWork.sort(
       (a, b) =>
-        Number(b.day >= today) - Number(a.day >= today) ||
+        (canDefer ? Number(b.day >= today) - Number(a.day >= today) : 0) ||
         a.day.localeCompare(b.day) ||
         a.loc.name.localeCompare(b.loc.name),
     );
@@ -317,27 +325,45 @@ export async function buildPeriodSalesSummaryPayload(
 
     const maxPeriod = getSalesSummaryPeriodMaxComputes();
     let budget = maxPeriod === 0 ? Number.MAX_SAFE_INTEGER : maxPeriod;
-    const timeBudgetMs = options.computeTimeBudgetMs ?? 0;
+    // 時間で区切るのは、残りを裏で数えられるときだけ
+    const timeBudgetMs = canDefer ? options.computeTimeBudgetMs ?? 0 : 0;
     const startedAt = Date.now();
-    /** POS の待ち時間・中断・上限を超えたら、残りはこのリクエストでは数えない */
+    /** POS の待ち時間・中断・上限を超えたら、残りはこのリクエストでは新しく数え始めない */
     const outOfTime = () =>
       budget <= 0 ||
       options.signal?.aborted === true ||
       (timeBudgetMs > 0 && Date.now() - startedAt >= timeBudgetMs);
 
+    /** 数えずに裏へ回した「店×日」（今日の分で保存があるものも、数え直しのために積む） */
     const deferred: Array<{ day: string; loc: SalesSummaryLocationRow }> = [];
-    let failedCount = 0;
+    /** そのうち保存がまったく無い（数字が欠けている）もの。POS の「数え終わっていない」はこれだけ */
+    const missing: Array<{ day: string; loc: SalesSummaryLocationRow; failed: boolean }> = [];
+    const hasLocCache = (loc: SalesSummaryLocationRow, day: string) =>
+      locationCacheSet.has(`${loc.shopifyLocationGid}|${day}`);
+    const deferLoc = (item: { day: string; loc: SalesSummaryLocationRow }, failed: boolean) => {
+      deferred.push(item);
+      if (!hasLocCache(item.loc, item.day)) missing.push({ ...item, failed });
+    };
     for (const item of locationWork) {
       const { day, loc } = item;
       const key = `loc|${shop.id}|${loc.shopifyLocationGid}|${day}`;
       // 少し前に失敗した「店×日」は、開くたびに数え直さない（裏で数え直す）
       if (isSalesSummaryComputeRecentlyFailed(key)) {
-        failedCount += 1;
-        deferred.push(item);
+        deferLoc(item, true);
         continue;
       }
       if (outOfTime()) {
-        deferred.push(item);
+        // 時間切れでも、ほかの読み込みが数えている途中の分は待って使う（もう走っているので増えない）
+        const running = getInFlight(key);
+        if (running && options.signal?.aborted !== true) {
+          try {
+            await running;
+            continue;
+          } catch {
+            /* 下で裏に回す */
+          }
+        }
+        deferLoc(item, false);
         continue;
       }
       try {
@@ -346,21 +372,26 @@ export async function buildPeriodSalesSummaryPayload(
         );
         clearSalesSummaryComputeFailed(key);
       } catch (e) {
-        failedCount += 1;
         markSalesSummaryComputeFailed(key);
-        deferred.push(item);
+        deferLoc(item, true);
         console.warn(
           `[sales-summary period] compute failed shop=${shop.id} location=${loc.shopifyLocationGid.replace("gid://shopify/Location/", "")} day=${day} reason=${computeFailureReason(e)}`,
         );
       }
       budget -= 1;
     }
-    const skippedLoc = deferred.length;
+    // 裏で数えるとき（POS）は、保存が無い分だけを「数え終わっていない」に数える（今日の分は保存の数字で出す）。
+    // そうでないとき（管理画面・公開リンク）は今まで通り、数えなかった分をすべて数える
+    const skippedLoc = canDefer ? missing.length : deferred.length;
 
-    let chAttempts = 0;
+    let skippedCh = 0;
     for (const { day, ch } of channelWork) {
-      if (outOfTime()) break;
-      chAttempts += 1;
+      const hasCache = channelCachePresence.has(`${ch.id}|${day}`);
+      if (outOfTime()) {
+        // 保存がある今日の分は保存の数字を使う。保存が無い分だけ「数え終わっていない」に数える
+        if (!hasCache || !canDefer) skippedCh += 1;
+        continue;
+      }
       const key = `ch|${shop.id}|${ch.id}|${day}`;
       try {
         await shareSalesSummaryCompute(loadId, key, () =>
@@ -374,29 +405,35 @@ export async function buildPeriodSalesSummaryPayload(
           ),
         );
       } catch (e) {
-        failedCount += 1;
+        if (!hasCache) skippedCh += 1;
         console.warn(
           `[sales-summary period] channel compute failed shop=${shop.id} channel=${ch.id} day=${day} reason=${computeFailureReason(e)}`,
         );
       }
       budget -= 1;
     }
-    const skippedCh = Math.max(0, channelWork.length - chAttempts);
 
-    // 数えきれなかった「店×日」は裏で数える（積めなければ、今までどおり次に開いたときに数える）
-    if (deferred.length > 0 && options.backgroundShopDomain) {
+    // 数えきれなかった「店×日」は裏で数える（積めなければ、しばらくは古い日から数える形に戻す）
+    if (deferred.length > 0 && canDefer && options.backgroundShopDomain) {
       const items = deferred.map(({ day, loc }) => ({
         locationGid: loc.shopifyLocationGid,
         locationName: loc.name,
         day,
       }));
+      const shopDomain = options.backgroundShopDomain;
       void import("./salesSummaryFillQueue.server")
-        .then(({ enqueueSalesSummaryFill }) => enqueueSalesSummaryFill(options.backgroundShopDomain!, shop.id, items))
-        .catch((e) => console.warn("[sales-summary period] background fill:", computeFailureReason(e)));
+        .then(({ enqueueSalesSummaryFill }) => enqueueSalesSummaryFill(shopDomain, shop.id, items))
+        .then((queued) => {
+          if (queued === 0) markSalesSummaryFillQueueUnavailable();
+        })
+        .catch((e) => {
+          markSalesSummaryFillQueueUnavailable();
+          console.warn("[sales-summary period] background fill:", computeFailureReason(e));
+        });
     }
 
-    const byLoc = new Map<string, { locationId: string; locationName: string; days: number }>();
-    for (const { loc } of deferred) {
+    const byLoc = new Map<string, PendingLocation>();
+    for (const { loc } of missing) {
       const cur = byLoc.get(loc.shopifyLocationGid) ?? {
         locationId: loc.shopifyLocationGid,
         locationName: loc.name,
@@ -406,7 +443,8 @@ export async function buildPeriodSalesSummaryPayload(
       byLoc.set(loc.shopifyLocationGid, cur);
     }
     pendingLocations = [...byLoc.values()];
-    pendingFailedCount = failedCount;
+    pendingFailedCount = missing.filter((m) => m.failed).length;
+    pendingChannelCount = skippedCh;
 
     pendingComputeEstimate = skippedLoc + skippedCh;
     periodCachePartial = pendingComputeEstimate > 0;
@@ -648,7 +686,9 @@ export async function buildPeriodSalesSummaryPayload(
     displayOptions: merged,
     periodCachePartial,
     pendingComputeEstimate,
-    ...(pendingLocations.length > 0 ? { pendingLocations, pendingFailedCount } : {}),
+    ...(pendingLocations.length > 0 || pendingChannelCount > 0
+      ? { pendingLocations, pendingFailedCount, pendingChannelCount }
+      : {}),
     ...(cachedOnly ? { cacheComplete: true } : {}),
   };
 }

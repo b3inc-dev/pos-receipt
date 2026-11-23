@@ -97,3 +97,8 @@ export function shareSalesSummaryCompute<T>(
 export function __resetSalesSummaryInFlightForTest() {
   inFlight.clear();
 }
+
+/** いま数えている途中なら、その Promise（無ければ null） */
+export function getInFlight<T>(key: string): Promise<T> | null {
+  return (inFlight.get(key) as Promise<T> | undefined) ?? null;
+}
