@@ -37,7 +37,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   cash_refund: "現金返金",
   payment_method_override: "返金方法変更",
   voucher_change_adjustment: "商品券",
-  receipt_cash_adjustment: "レシート現金調整",
+  receipt_cash_adjustment: "レシートの現金を直す",
 };
 
 function fmtYen(v: string | number | null | undefined) {
@@ -227,7 +227,7 @@ function EditPanel({ item, refundMethods, busy, onCancel }: {
             </s-select>
           ) : null}
           {item.eventType === "receipt_cash_adjustment" ? (
-            <s-choice-list label="調整の種類" name="adjustKind" values={[item.adjustKind ?? "undo"]}>
+            <s-choice-list label="どちらに直しますか" name="adjustKind" values={[item.adjustKind ?? "undo"]}>
               <s-choice value="undo">返金を取り消す（売上に戻す）</s-choice>
               <s-choice value="extra">現金を足す（売上に足す）</s-choice>
             </s-choice-list>
