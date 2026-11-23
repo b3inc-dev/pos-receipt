@@ -108,7 +108,7 @@ function VoucherModal() {
       initialListSegment="voucher_change"
       listNote={listNote}
       listAction={
-        canEnterBeforeItems ? { label: "会計の前に額面を入れる", onClick: () => setScreen("cart") } : null
+        canEnterBeforeItems ? { label: "会計前に登録", onClick: () => setScreen("cart") } : null
       }
     />
   );
