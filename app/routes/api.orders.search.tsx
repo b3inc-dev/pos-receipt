@@ -5,12 +5,17 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
-import { formatTimeHmInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
+import {
+  formatTimeHmInTimeZone,
+  getCalendarDateStringInTimeZone,
+  getShopTimezoneForDaily,
+} from "../utils/shopTimezone.server";
 import { buildSearchQuery, normalizeLocationIdForQuery } from "../utils/orderSearchQuery";
 import { hasVoucherLikeGatewayHeuristic, matchPaymentMethodMaster } from "../utils/paymentMethodMatch.server";
+import { graphqlWithCustomerFallback } from "../utils/protectedCustomerData";
 import { isShopifyRefundPending } from "../services/specialRefundOverlayPure.server";
 
-const ORDERS_SEARCH_QUERY = `#graphql
+const ORDERS_SEARCH_QUERY_TEMPLATE = `#graphql
   query OrdersSearch($first: Int!, $after: String, $query: String) {
     orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
       nodes {
@@ -21,9 +26,7 @@ const ORDERS_SEARCH_QUERY = `#graphql
         note
         totalPriceSet { shopMoney { amount } }
         displayFinancialStatus
-        customer {
-          displayName
-        }
+        __CUSTOMER__
         retailLocation {
           id
           name
@@ -41,6 +44,10 @@ const ORDERS_SEARCH_QUERY = `#graphql
     }
   }
 `;
+
+const ORDERS_SEARCH_QUERY = ORDERS_SEARCH_QUERY_TEMPLATE.replace("__CUSTOMER__", "customer { displayName }");
+/** 顧客の名前を読まない版（保護された顧客データの「名前」の許可が無いアプリ用） */
+const ORDERS_SEARCH_QUERY_NO_CUSTOMER = ORDERS_SEARCH_QUERY_TEMPLATE.replace("__CUSTOMER__", "");
 
 function normalizeOrderIdKey(id: string): string {
   return String(id).replace(/^gid:\/\/shopify\/Order\//, "");
@@ -79,11 +86,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const query = buildSearchQuery({ q, locationId, dateFrom, dateTo, timezone });
 
-    const response = await admin.graphql(ORDERS_SEARCH_QUERY, {
-      variables: { first: limit, after: cursor || null, query: query || null },
-    });
-
-    const json = await response.json();
+    const variables = { first: limit, after: cursor || null, query: query || null };
+    // 保護された顧客データ（名前）の許可が無いアプリでは、名前なしで読み直す
+    const json = await graphqlWithCustomerFallback(admin, ORDERS_SEARCH_QUERY, ORDERS_SEARCH_QUERY_NO_CUSTOMER, variables);
     if (json.errors?.length) {
       return corsJson(
         { ok: false, error: "GraphQL error", details: json.errors },
@@ -126,6 +131,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         currency: "JPY",
         createdAt: n.createdAt,
         transactionTime: n.createdAt ? formatTimeHmInTimeZone(n.createdAt, timezone) : "",
+        // 一覧の「今日 18:14」「11月20日 19:04」用。店のタイムゾーンの暦日（日本の店は日本時間）
+        localDate: n.createdAt ? getCalendarDateStringInTimeZone(new Date(n.createdAt), timezone) : "",
         financialStatus,
         segmentFlags: {
           isCancelled,
@@ -219,6 +226,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         items,
         nextCursor: pageInfo.hasNextPage ? pageInfo.endCursor : null,
         timezone,
+        // 一覧の「今日」の判定と「18:14 に更新」用（店のタイムゾーン）。端末の時計には頼らない
+        todayLocalDate: getCalendarDateStringInTimeZone(new Date(), timezone),
+        fetchedAtTime: formatTimeHmInTimeZone(new Date().toISOString(), timezone),
         searchMode: Boolean(q?.trim()),
       },
       { headers: { "Content-Type": "application/json" } },

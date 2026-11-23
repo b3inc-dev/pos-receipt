@@ -17,6 +17,8 @@ import { previewReceipt, issueReceipt, getReceiptHistory } from "../../common/re
 import { printGiftReceipt, getPrintSettings } from "../../common/printApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
+import { fmtYen } from "./orderDisplayUtils.js";
+import { formatOrderDateTimeLabel } from "../../common/orderListLabels.js";
 import { PosToggleField } from "./PosChoiceField.jsx";
 
 const STORAGE_KEY = "pos_receipt_order_id";
@@ -137,8 +139,8 @@ function ReceiptModal() {
         onSelectOrderId={handleOrderSelect}
         noticeError={bootstrapError}
         onDismissNotice={() => setBootstrapError("")}
-        headerTrailing={(
-          <s-button kind="secondary" onClick={() => setStep("history")}>
+        footerTrailing={(
+          <s-button variant="secondary" onClick={() => setStep("history")}>
             履歴
           </s-button>
         )}
@@ -509,54 +511,52 @@ function DoneView({ receipt, onClose, onReissue }) {
 }
 
 // ── 発行履歴 ──────────────────────────────────────────────────────────────────
+/**
+ * 発行履歴も、取引を選ぶ一覧と同じ見た目・作りにする（T 2026-11-23）。
+ * 上に検索欄・年月日・「店名・時刻 に更新」を固定、行は「#1017 • 宛名 様」と金額、灰色の発行日時、再発行のバッジ。
+ * 出すのは POS の今の店で発行したものだけ。行は押せない（前と同じ）。
+ */
+async function fetchReceiptHistoryPage(params) {
+  const res = await getReceiptHistory({
+    locationId: params.locationId,
+    q: params.q,
+    dateFrom: params.dateFrom,
+    dateTo: params.dateTo,
+    limit: 50,
+  });
+  return {
+    items: res.items ?? [],
+    nextCursor: null,
+    todayLocalDate: res.todayLocalDate ?? "",
+    fetchedAtTime: res.fetchedAtTime ?? "",
+  };
+}
+
+function receiptHistoryRow(item, todayKey) {
+  const name = String(item.orderName ?? "").trim();
+  const recipient = String(item.recipientName ?? "").trim();
+  const when = formatOrderDateTimeLabel(item, todayKey);
+  return {
+    key: item.id,
+    title: recipient ? `${name} • ${recipient} 様` : name,
+    amountLabel: fmtYen(item.amount),
+    dateTimeLabel: when ? `${when} 発行` : "",
+    badges: item.isReissue ? [{ key: "reissue", label: "再発行", tone: "caution" }] : [],
+  };
+}
+
 function HistoryView({ onBack }) {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    getReceiptHistory({ limit: 20 })
-      .then((res) => setItems(res.items ?? []))
-      .catch((e) => setError(toUserMessage(e?.message) || "履歴の取得に失敗しました"))
-      .finally(() => setLoading(false));
-  }, []);
-
   return (
-    <s-page heading="領収書発行履歴">
-      <s-scroll-box>
-        <s-box padding="base">
-          {loading ? (
-            <s-text tone="subdued">読み込み中…</s-text>
-          ) : error ? (
-            <s-text tone="critical">{error}</s-text>
-          ) : items.length === 0 ? (
-            <s-text tone="subdued">発行履歴がありません。</s-text>
-          ) : (
-            <s-stack gap="small">
-              {items.map((item) => (
-                <s-box key={item.id} padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="extraSmall">
-                    <s-stack direction="horizontal" align="space-between">
-                      <s-text fontWeight="bold">{item.orderName}</s-text>
-                      <s-text fontWeight="bold">¥{Number(item.amount).toLocaleString()}</s-text>
-                    </s-stack>
-                    <s-text tone="subdued" fontSize="small">
-                      宛名: {item.recipientName || "（未入力）"} {item.isReissue ? "【再発行】" : ""}
-                    </s-text>
-                    <s-text tone="subdued" fontSize="small">
-                      {item.createdAt?.slice(0, 16).replace("T", " ")}
-                    </s-text>
-                  </s-stack>
-                </s-box>
-              ))}
-            </s-stack>
-          )}
-        </s-box>
-        <s-box padding="base">
-          <s-button kind="plain" onClick={onBack}>← 戻る</s-button>
-        </s-box>
-      </s-scroll-box>
-    </s-page>
+    <OrderDayListScreen
+      pageHeading="領収書発行履歴"
+      badgeMode="receipt"
+      fetchList={fetchReceiptHistoryPage}
+      toRow={receiptHistoryRow}
+      itemNoun="発行"
+      searchPlaceholder="注文番号・宛名で検索"
+      searchHint="注文番号は数字だけでも探せます。宛名は 2 文字以上入れてください。"
+      onBack={onBack}
+    />
   );
 }
 

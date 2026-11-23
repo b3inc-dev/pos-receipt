@@ -57,7 +57,7 @@ async function apiPost(path, body = {}) {
 /**
  * GET /api/orders/search
  * @param {Object} opts - q, locationId, dateFrom, dateTo, cursor, limit
- * @returns {{ items: Array, nextCursor: string|null }}
+ * @returns {{ items: Array, nextCursor: string|null, todayLocalDate: string, fetchedAtTime: string }}
  */
 export async function searchOrders(opts = {}) {
   const { q, locationId, dateFrom, dateTo, cursor, limit } = opts;
@@ -69,7 +69,13 @@ export async function searchOrders(opts = {}) {
     cursor: cursor ?? undefined,
     limit: limit ?? 20,
   });
-  return { items: data.items ?? [], nextCursor: data.nextCursor ?? null };
+  return {
+    items: data.items ?? [],
+    nextCursor: data.nextCursor ?? null,
+    // 店のタイムゾーンの「今日」と取得した時刻（一覧の「今日 18:14」「18:14 に更新」用）
+    todayLocalDate: data.todayLocalDate ?? "",
+    fetchedAtTime: data.fetchedAtTime ?? "",
+  };
 }
 
 /**
