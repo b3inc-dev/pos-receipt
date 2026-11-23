@@ -43,5 +43,19 @@ export default defineConfig({
       allow: ["app", "node_modules"],
     },
   },
+  // 開発時、途中の画面で初めて出てくる依存（レシートのレイアウト編集の liquidjs・qrcode-generator など）を
+  // Vite が後から最適化し直すと、読み込み中の画面で React が 2 つになり「Application Error（useContext）」になる。
+  // 起動時にまとめて最適化しておく（本番の build には関係しない）。
+  optimizeDeps: {
+    include: [
+      "react",
+      "react-dom",
+      "react-router",
+      "@shopify/polaris",
+      "@shopify/app-bridge-react",
+      "liquidjs",
+      "qrcode-generator",
+    ],
+  },
   plugins: [corsPreflightDevPlugin(), reactRouter(), tsconfigPaths()],
 });
