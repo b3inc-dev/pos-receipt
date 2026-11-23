@@ -36,3 +36,10 @@ test("返品・交換が終わった画面の一行: 予約が無い・古いと
   assert.equal(m.postReturnMessage([{ status: "pending", createdAt: "2026-11-24T02:00:00Z" }], now).tone, "neutral");
   assert.equal(m.postReturnMessage([{ status: "needs_review", createdAt: "2026-11-24T02:00:00Z", reviewReason: "違う" }], now).text, "違う");
 });
+
+test("返金の予約: 分割しないときは金額が要らない", async () => {
+  const m = await import("../../extensions/common/refundReservation.js");
+  const one = [{ actualRefundMethod: "cash", amount: null }];
+  assert.deepEqual(m.reservationExpectedAmountFromInput("", one), { ok: true, error: "", amount: null });
+  assert.equal(m.reservationRowText({ actualRefundLabel: "現金", amount: null }, { only: true }), "現金 返金した額の全部");
+});

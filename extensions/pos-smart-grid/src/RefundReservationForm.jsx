@@ -1,7 +1,9 @@
 /**
  * 返金方法を先に決める（返金の予約）。まだ純正で返金していない注文で、返金の前に開く画面。
  *
- * - 「実際の返金方法」を選んで予約する（分割可・最後の行は残り＝純正で返金した額から自動）
+ * - 「実際の返金方法」を選んで予約する。分割しないときは金額を入れない（純正で返金した額の全部をその方法に変える）
+ * - 分割するときだけ金額を入れる（最後の行は残り＝純正で返金した額から自動）（T 2026-11-24）
+ * - 上に取引の合計と元の支払方法ごとの金額を出す（金額を入れやすくするため）
  * - そのあと、いつもどおり POS 純正で返品・返金する。返金ができたら、アプリが返金方法変更を自動で作る
  *   （金額は純正の返金額で固定・Shopify では返金しない）
  * - 予約はその日の営業が終わると使わない。ここでやめることもできる
@@ -18,6 +20,7 @@ import {
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { refundEventTypeFor } from "../../common/refundModes.js";
+import { orderTenderLines, roundMoney } from "../../common/orderTenderLines.js";
 import {
   reservationExpectedAmountFromInput,
   reservationRowsFromInput,
@@ -41,17 +44,46 @@ function ReservationCard({ item, onCancel, loading }) {
             </s-button>
           ) : null}
         </s-stack>
-        {item.expectedAmount ? <s-text>{`返金する金額 ¥${Number(item.expectedAmount).toLocaleString()}`}</s-text> : null}
+        {Number(item.expectedAmount) > 0 ? <s-text>{`返金する金額 ¥${Number(item.expectedAmount).toLocaleString()}`}</s-text> : null}
         {(item.rows ?? []).map((row, i) => (
-          <s-text key={i}>{reservationRowText(row)}</s-text>
+          <s-text key={i}>{reservationRowText(row, { only: (item.rows ?? []).length === 1 })}</s-text>
         ))}
         {item.status === "pending" ? (
-          <s-text tone="neutral">このあと POS で同じ金額を返金すると、自動でこの返金方法に変えます。金額が違うときは「要確認」になります。</s-text>
+          <s-text tone="neutral">
+            {(item.rows ?? []).length > 1
+              ? "このあと POS で同じ金額を返金すると、自動でこの返金方法に変えます。金額が違うときは「要確認」になります。"
+              : "このあと POS で返金すると、返金した額の全部を自動でこの返金方法に変えます。"}
+          </s-text>
         ) : null}
         {item.status === "applied" ? (
           <s-text tone="neutral">純正の返金の返金方法を変えました。調整履歴に出ています。</s-text>
         ) : null}
         {item.status === "needs_review" && item.reviewReason ? <s-text tone="caution">{item.reviewReason}</s-text> : null}
+      </s-stack>
+    </s-box>
+  );
+}
+
+/** 取引の合計と、元の支払方法ごとの支払った額・返金した額（入力の目安） */
+function OrderPaymentSummary({ order }) {
+  const lines = orderTenderLines(order);
+  const total = roundMoney(order?.totalPrice?.amount ?? 0);
+  return (
+    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+      <s-stack gap="small">
+        <s-text type="strong">{`${order?.orderName ?? "この取引"}（合計 ¥${total.toLocaleString()}）`}</s-text>
+        {lines.length === 0 ? (
+          <s-text type="small" color="subdued">注文の支払いを読めませんでした。</s-text>
+        ) : (
+          lines.map((line) => (
+            <s-stack key={line.gateway || line.label} direction="inline" justifyContent="space-between" alignItems="center" gap="small">
+              <s-text>{line.label}</s-text>
+              <s-text type="small" color="subdued">
+                {`支払い ¥${line.paid.toLocaleString()}${line.refunded > 0 ? ` ／ 返金 ¥${line.refunded.toLocaleString()}` : ""}`}
+              </s-text>
+            </s-stack>
+          ))
+        )}
       </s-stack>
     </s-box>
   );
@@ -181,6 +213,8 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
               {`${order?.orderName ?? "この取引"} をこれから POS で返金するときに、実際の返金方法を先に決めておけます。返金が終わると、返金した額のまま自動で返金方法を変えます。Shopify では返金しません。`}
             </s-text>
 
+            <OrderPaymentSummary order={order} />
+
             {state === "loading" ? <s-text tone="neutral">読み込み中…</s-text> : null}
 
             {open ? (
@@ -188,13 +222,16 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
             ) : state === "ready" ? (
               <s-section heading="実際の返金方法">
                 <s-stack gap="small">
-                  <s-text-field
-                    label="返金する金額（円）"
-                    value={expected}
-                    type="number"
-                    onInput={(e) => setExpected(e?.currentTarget?.value ?? "")}
-                    placeholder="例: 2500"
-                  />
+                  {/* 分割しないときは金額を入れない（純正で返金した額の全部を、選んだ返金方法に変える） */}
+                  {split ? (
+                    <s-text-field
+                      label="返金する金額（円）"
+                      value={expected}
+                      type="number"
+                      onInput={(e) => setExpected(e?.currentTarget?.value ?? "")}
+                      placeholder="例: 2500"
+                    />
+                  ) : null}
                   {methods.length === 0 ? (
                     <s-text tone={methodsState === "loading" ? "subdued" : "critical"}>{methodsMessage}</s-text>
                   ) : !split ? (
@@ -256,7 +293,11 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                   <s-button variant="primary" onClick={submit} disabled={loading || methods.length === 0}>
                     予約する
                   </s-button>
-                  <s-text tone="neutral">予約はその日のうちの返金にだけ使います。返金した額が「返金する金額」と違うときは、自動では返金方法を変えません。</s-text>
+                  <s-text tone="neutral">
+                    {split
+                      ? "予約はその日のうちの返金にだけ使います。返金した額が「返金する金額」と違うときは、自動では返金方法を変えません。"
+                      : "予約はその日のうちの返金にだけ使います。返金した額の全部を、選んだ返金方法に変えます。"}
+                  </s-text>
                 </s-stack>
               </s-section>
             ) : null}

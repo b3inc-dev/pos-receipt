@@ -26,10 +26,12 @@ export function reservationRowsFromInput(rows) {
 }
 
 /**
- * 返金する金額（純正で返金する見込みの額）。要る。分けた行（最後以外）の合計はこれより小さく。
+ * 返金する金額（純正で返金する見込みの額）。分割するときだけ要る。分けた行（最後以外）の合計はこれより小さく。
  * 純正の返金額がこれと違うと、自動では返金方法を変更せずに「要確認」にする（T 2026-11-23）
  */
 export function reservationExpectedAmountFromInput(input, rows) {
+  // 分割しない予約は金額を入れない: 純正で返金した額の全部を選んだ返金方法に変える（T 2026-11-24）
+  if (!Array.isArray(rows) || rows.length <= 1) return { ok: true, error: "", amount: null };
   const expected = money(input);
   if (!(expected > 0)) return { ok: false, error: "返金する金額を入れてください", amount: 0 };
   const fixed = (Array.isArray(rows) ? rows : []).slice(0, -1).reduce((s, r) => s + money(r?.amount), 0);
@@ -63,8 +65,10 @@ export function reservationStatusTone(status) {
 }
 
 /** 予約の行の文: 「現金 ¥1,000」「施設ポイント 残り」 */
-export function reservationRowText(row) {
+export function reservationRowText(row, { only = false } = {}) {
   const label = row?.actualRefundLabel || row?.actualRefundMethod || "-";
+  // 分割しない予約（行が 1 つ）は、返金した額の全部
+  if (only && row?.amount == null) return `${label} 返金した額の全部`;
   return row?.amount == null ? `${label} 残り` : `${label} ¥${money(row.amount).toLocaleString()}`;
 }
 

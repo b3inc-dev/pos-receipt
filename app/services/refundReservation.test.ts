@@ -222,8 +222,14 @@ test("知らせのたびに Shopify を読まない: 使う前の予約がある
   assert.equal(await svc.hasPendingReservation("shop1", "5001"), true);
 });
 
-test("返金額が予約の金額と違うときは作らずに要確認（T 2026-11-23）", async () => {
-  await reserve([{ actualRefundMethod: "cash", eventType: "cash_refund" }], 3000);
+test("分割の予約で返金額が予約の金額と違うときは作らずに要確認（T 2026-11-23）", async () => {
+  await reserve(
+    [
+      { actualRefundMethod: "cash", eventType: "cash_refund", amount: 1000 },
+      { actualRefundMethod: "gift", eventType: "payment_method_override" },
+    ],
+    3000,
+  );
   lines = [{ refundId: "gid://shopify/Refund/9", createdAt: "2026-11-23T03:00:00Z", gateway: "shopify_payments", formattedGateway: null, amount: 2500 }];
   const r = await svc.applyRefundReservationsForOrder(admin, "shop1", "5001");
   assert.equal(r.review, 1);
@@ -231,8 +237,25 @@ test("返金額が予約の金額と違うときは作らずに要確認（T 202
   assert.match(reservations[0].reviewReason, /予約の金額（¥3,000）と違った/);
 });
 
-test("予約: 返金する金額は要る・分けた額の合計はそれより小さく", async () => {
-  const none = await svc.createRefundReservation(admin, "shop1", { sourceOrderId: ORDER, rows: [{ actualRefundMethod: "cash", eventType: "cash_refund" }], expectedAmount: "" });
+test("分割しない予約は金額を入れず、返金した額の全部を変える（T 2026-11-24）", async () => {
+  const res = await svc.createRefundReservation(admin, "shop1", { sourceOrderId: ORDER, rows: [{ actualRefundMethod: "cash", eventType: "cash_refund" }], expectedAmount: "" });
+  assert.equal(res.ok, true);
+  assert.equal(Number(reservations[0].expectedAmount), 0);
+  lines = [{ refundId: "gid://shopify/Refund/9", createdAt: "2026-11-23T03:00:00Z", gateway: "shopify_payments", formattedGateway: null, amount: 1800 }];
+  const r = await svc.applyRefundReservationsForOrder(admin, "shop1", "5001");
+  assert.equal(r.applied, 1);
+  assert.equal(createCalls.length, 1);
+});
+
+test("予約: 分割するときは返金する金額が要る・分けた額の合計はそれより小さく", async () => {
+  const none = await svc.createRefundReservation(admin, "shop1", {
+    sourceOrderId: ORDER,
+    rows: [
+      { actualRefundMethod: "cash", eventType: "cash_refund", amount: 1000 },
+      { actualRefundMethod: "gift", eventType: "payment_method_override" },
+    ],
+    expectedAmount: "",
+  });
   assert.equal(none.ok, false);
   if (!none.ok) assert.equal(none.code, "INVALID_AMOUNT");
   const over = await svc.createRefundReservation(admin, "shop1", {
