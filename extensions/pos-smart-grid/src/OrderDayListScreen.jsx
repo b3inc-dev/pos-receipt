@@ -38,6 +38,19 @@ function daysInMonth(year, month) {
   return new Date(year, month, 0).getDate();
 }
 
+/**
+ * 店の人に英語や「(HTTP 500)」のままのエラーを出さない（T 2026-11-23）。
+ * 日本語の文はそのまま、英語まじりの文は決まった日本語にする。
+ */
+export function storeFacingNotice(message) {
+  const m = String(message ?? "").trim();
+  if (!m) return "";
+  if (/[A-Za-z]{4,}|HTTP\s*\d{3}/.test(m)) {
+    return "注文を読み込めませんでした。少し待ってから、もう一度注文を選んでください。";
+  }
+  return m;
+}
+
 function ymdToStr(y, m, day) {
   return `${y}-${pad2(m)}-${pad2(day)}`;
 }
@@ -506,11 +519,12 @@ export function OrderDayListScreen({
           minBlockSize="0"
           style={{ flex: "1 1 0", minHeight: 0 }}
         >
-          <s-box paddingInline="base" paddingBlockEnd="base">
+          {/* 固定の線と一覧の間に余白（T 2026-11-23） */}
+          <s-box padding="base">
             <s-stack gap="base">
               {noticeError ? (
                 <s-stack gap="small-300">
-                  <s-banner tone="critical" heading={noticeError} />
+                  <s-banner tone="critical" heading={storeFacingNotice(noticeError)} />
                   <s-button variant="secondary" onClick={onDismissNotice}>
                     閉じる
                   </s-button>

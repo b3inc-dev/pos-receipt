@@ -96,6 +96,8 @@ describe("店の人に英語のエラーを出さない・名前の許可が無�
   it("注文検索は保護された顧客データで断られたら名前なしで読み直す", () => {
     const src = readFileSync(`${ROOT}/app/routes/api.orders.search.tsx`, "utf8");
     assert.match(src, /ORDERS_SEARCH_QUERY_NO_CUSTOMER/);
-    assert.match(src, /isProtectedCustomerDataError/);
+    assert.match(src, /graphqlWithCustomerFallback/);
+    const detail = readFileSync(`${ROOT}/app/routes/api.orders.$orderId.tsx`, "utf8");
+    assert.match(detail, /graphqlWithCustomerFallback\(admin, ORDER_DETAIL_QUERY, ORDER_DETAIL_QUERY_NO_CUSTOMER_PII/);
   });
 });
