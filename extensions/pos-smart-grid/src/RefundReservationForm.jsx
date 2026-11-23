@@ -19,6 +19,7 @@ import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js"
 import { toUserMessage } from "../../common/errorMessage.js";
 import { refundEventTypeFor } from "../../common/refundModes.js";
 import {
+  reservationExpectedAmountFromInput,
   reservationRowsFromInput,
   reservationRowText,
   reservationStatusLabel,
@@ -40,14 +41,15 @@ function ReservationCard({ item, onCancel, loading }) {
             </s-button>
           ) : null}
         </s-stack>
+        {item.expectedAmount ? <s-text>{`返金する金額 ¥${Number(item.expectedAmount).toLocaleString()}`}</s-text> : null}
         {(item.rows ?? []).map((row, i) => (
           <s-text key={i}>{reservationRowText(row)}</s-text>
         ))}
         {item.status === "pending" ? (
-          <s-text tone="subdued">このあと POS で返金すると、自動でこの手段に付け替えます。</s-text>
+          <s-text tone="neutral">このあと POS で同じ金額を返金すると、自動でこの手段に付け替えます。金額が違うときは「要確認」になります。</s-text>
         ) : null}
         {item.status === "applied" ? (
-          <s-text tone="subdued">純正の返金に付け替えました。調整履歴に出ています。</s-text>
+          <s-text tone="neutral">純正の返金に付け替えました。調整履歴に出ています。</s-text>
         ) : null}
         {item.status === "needs_review" && item.reviewReason ? <s-text tone="caution">{item.reviewReason}</s-text> : null}
       </s-stack>
@@ -63,6 +65,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
   const [notice, setNotice] = useState("");
   const [rows, setRows] = useState([emptyRow()]);
   const [note, setNote] = useState("");
+  const [expected, setExpected] = useState("");
   const [methods, setMethods] = useState([]);
   const [methodsState, setMethodsState] = useState("loading");
 
@@ -70,6 +73,11 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
     if (!order?.orderId) return;
     try {
       const res = await listRefundReservations(order.orderId);
+      // 管理画面で「返金の予約」がオフ: この画面は出さずに、今までの登録の画面へ
+      if (res.enabled === false && onOtherRegistration) {
+        onOtherRegistration();
+        return;
+      }
       const list = res.items ?? [];
       setItems(list);
       setState("ready");
@@ -118,12 +126,18 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
       setError(parsed.error);
       return;
     }
+    const exp = reservationExpectedAmountFromInput(expected, parsed.rows);
+    if (!exp.ok) {
+      setError(exp.error);
+      return;
+    }
     setLoading(true);
     try {
       await createRefundReservation({
         sourceOrderId: order.orderId,
         sourceOrderName: order.orderName,
         locationId: order.location?.id ?? "",
+        expectedAmount: exp.amount,
         rows: parsed.rows.map((r) => ({
           ...r,
           eventType: refundEventTypeFor("method", r.actualRefundMethod, methods, allowedEventTypes),
@@ -132,6 +146,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
       });
       setRows([emptyRow()]);
       setNote("");
+      setExpected("");
       setNotice("予約しました。このあと、いつもどおり POS で返品・返金してください。");
       await reload();
     } catch (e) {
@@ -162,17 +177,24 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
         <s-box padding="base">
           <s-stack gap="base">
             {error ? <s-banner tone="critical">{error}</s-banner> : notice ? <s-banner tone="success">{notice}</s-banner> : null}
-            <s-text tone="subdued">
+            <s-text tone="neutral">
               {`${order?.orderName ?? "この取引"} をこれから POS で返金するときに、実際に返す手段を先に決めておけます。返金が終わると、返金した額のまま自動で付け替えます。Shopify では返金しません。`}
             </s-text>
 
-            {state === "loading" ? <s-text tone="subdued">読み込み中…</s-text> : null}
+            {state === "loading" ? <s-text tone="neutral">読み込み中…</s-text> : null}
 
             {open ? (
               <ReservationCard item={open} onCancel={cancel} loading={loading} />
             ) : state === "ready" ? (
               <s-section heading="実際に返す手段">
                 <s-stack gap="small">
+                  <s-text-field
+                    label="返金する金額（円）"
+                    value={expected}
+                    type="number"
+                    onInput={(e) => setExpected(e?.currentTarget?.value ?? "")}
+                    placeholder="例: 2500"
+                  />
                   {methods.length === 0 ? (
                     <s-text tone={methodsState === "loading" ? "subdued" : "critical"}>{methodsMessage}</s-text>
                   ) : !split ? (
@@ -189,7 +211,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                         <s-box key={i} padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                           <s-stack gap="small">
                             {isLast ? (
-                              <s-text tone="subdued">{`${i + 1} 行目（残り・返金した額から自動）`}</s-text>
+                              <s-text tone="neutral">{`${i + 1} 行目（残り・返金した額から自動）`}</s-text>
                             ) : (
                               <s-text-field
                                 label={`${i + 1} 行目の金額（円）`}
@@ -234,7 +256,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                   <s-button variant="primary" onClick={submit} disabled={loading || methods.length === 0}>
                     予約する
                   </s-button>
-                  <s-text tone="subdued">予約はその日の営業が終わると使いません。</s-text>
+                  <s-text tone="neutral">予約はその日のうちの返金にだけ使います。返金した額が「返金する金額」と違うときは、自動では付け替えません。</s-text>
                 </s-stack>
               </s-section>
             ) : null}
@@ -252,7 +274,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
             {onOtherRegistration ? (
               <s-section heading="ほかの登録">
                 <s-stack gap="small">
-                  <s-text tone="subdued">POS で返金せずに、ここで返金やレシートの現金の直しを登録するとき。</s-text>
+                  <s-text tone="neutral">POS で返金せずに、ここで返金やレシートの現金の直しを登録するとき。</s-text>
                   <s-button onClick={onOtherRegistration} disabled={loading}>
                     ここで登録する
                   </s-button>

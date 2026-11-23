@@ -8,7 +8,7 @@
  */
 import { useState, useEffect } from "preact/hooks";
 import { PosChoiceField } from "./PosChoiceField.jsx";
-import { createSpecialRefund } from "../../common/specialRefundApi.js";
+import { createSpecialRefund, voidSpecialRefund } from "../../common/specialRefundApi.js";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { refundEventTypeFor } from "../../common/refundModes.js";
@@ -42,9 +42,27 @@ function Row({ label, value }) {
 
 const emptyRow = () => ({ amount: "", method: "" });
 
+function sameGateway(a, b) {
+  const ka = String(a ?? "").trim().toLowerCase();
+  return ka !== "" && ka === String(b ?? "").trim().toLowerCase();
+}
+
+/** その純正の返金・支払方法の、有効な付け替えの登録（却下は数えない） */
+export function activeReassignEvents(events, line) {
+  return (events ?? []).filter(
+    (e) =>
+      e?.refundSource === "native" &&
+      e?.status === "active" &&
+      e?.approvalStatus !== "rejected" &&
+      e?.shopifyRefundId === line?.refundId &&
+      sameGateway(e?.originalPaymentMethod, line?.gateway),
+  );
+}
+
 export function NativeRefundReassignForm({
   order,
   nativeRefunds,
+  events = [],
   allowedEventTypes = null,
   loading,
   error,
@@ -63,6 +81,8 @@ export function NativeRefundReassignForm({
   const [keys, setKeys] = useState(null);
   const [refundMethods, setRefundMethods] = useState([]);
   const [refundMethodsState, setRefundMethodsState] = useState("loading");
+  // 「付け替え直す」: 前の付け替えを無効にしてから、返金額の全額で選び直す
+  const [redoLine, setRedoLine] = useState(null);
 
   useEffect(() => {
     listSelectablePaymentMethods({ sync: true })
@@ -161,6 +181,75 @@ export function NativeRefundReassignForm({
       setLoading(false);
     }
   };
+
+  const runRedo = async () => {
+    if (!redoLine) return;
+    setLoading(true);
+    setError("");
+    const targets = activeReassignEvents(events, redoLine);
+    let voided = 0;
+    try {
+      for (const e of targets) {
+        await voidSpecialRefund(e.id, { reason: "付け替え直し" });
+        voided += 1;
+      }
+      setSelected({ ...redoLine, remaining: redoLine.amount, reassigned: 0 });
+      setRows([emptyRow()]);
+      setRedoLine(null);
+    } catch (e) {
+      const msg = toUserMessage(e?.message) || "無効にできませんでした";
+      setRedoLine(null);
+      await onSuccess({
+        tone: "warning",
+        text:
+          voided > 0
+            ? `前の付け替え ${targets.length} 件のうち ${voided} 件を無効にしました。残りは無効にできませんでした（${msg}）。注文を開き直して、もう一度「付け替え直す」を押してください。`
+            : `前の付け替えを無効にできませんでした（${msg}）。`,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── 付け替え直すの確認 ──
+  if (redoLine) {
+    const targets = activeReassignEvents(events, redoLine);
+    return (
+      <s-page heading="付け替え直す">
+        <s-scroll-box>
+          <s-box padding="base">
+            <s-stack gap="base">
+              <s-text fontWeight="bold">前の付け替えを無効にして、選び直します</s-text>
+              <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                <s-stack gap="small">
+                  <Row label="純正の返金" value={nativeRefundLineLabel(redoLine)} />
+                  {targets.map((e) => (
+                    <Row
+                      key={e.id}
+                      label={`${e.originalPaymentLabel || e.originalPaymentMethod} → ${e.actualRefundLabel || e.actualRefundMethod}`}
+                      value={yen(e.amount)}
+                    />
+                  ))}
+                </s-stack>
+              </s-box>
+              <s-text tone="subdued" fontSize="small">
+                無効にした分は、いったん元の支払方法の返金に戻ります。続けて返した手段を選んでください。Shopify では何もしません。
+              </s-text>
+              {error ? <s-text tone="critical">{error}</s-text> : null}
+              <s-stack gap="small">
+                <s-button kind="primary" onClick={runRedo} loading={loading} disabled={targets.length === 0}>
+                  無効にして選び直す
+                </s-button>
+                <s-button kind="secondary" onClick={() => setRedoLine(null)} disabled={loading}>
+                  戻る
+                </s-button>
+              </s-stack>
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+      </s-page>
+    );
+  }
 
   // ── 確認 ──
   if (confirming && selected) {
@@ -327,24 +416,40 @@ export function NativeRefundReassignForm({
                       <s-text fontWeight="bold">{nativeRefundLineLabel(line)}</s-text>
                       {status ? <s-text tone="subdued" fontSize="small">{status}</s-text> : null}
                     </s-stack>
-                    <s-button
-                      kind="secondary"
-                      onClick={() => {
-                        setError("");
-                        setSelected(line);
-                        setRows([emptyRow()]);
-                      }}
-                      disabled={loading || !canReassign(line)}
-                    >
-                      付け替える
-                    </s-button>
+                    <s-stack gap="small">
+                      {canReassign(line) ? (
+                        <s-button
+                          kind="secondary"
+                          onClick={() => {
+                            setError("");
+                            setSelected(line);
+                            setRows([emptyRow()]);
+                          }}
+                          disabled={loading}
+                        >
+                          付け替える
+                        </s-button>
+                      ) : null}
+                      {activeReassignEvents(events, line).length > 0 ? (
+                        <s-button
+                          kind="secondary"
+                          onClick={() => {
+                            setError("");
+                            setRedoLine(line);
+                          }}
+                          disabled={loading}
+                        >
+                          付け替え直す
+                        </s-button>
+                      ) : null}
+                    </s-stack>
                   </s-stack>
                 </s-box>
               );
             })}
             {!anyOpen ? (
               <s-text tone="subdued" fontSize="small">
-                この取引の返金はすべて付け替え済みです。直すときは調整履歴の「変更」を使ってください。
+                この取引の返金はすべて付け替え済みです。手段や分け方を直すときは「付け替え直す」、手段だけなら調整履歴の「変更」を使ってください。
               </s-text>
             ) : null}
             {error ? <s-text tone="critical">{error}</s-text> : null}

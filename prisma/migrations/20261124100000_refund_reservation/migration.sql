@@ -6,6 +6,7 @@ CREATE TABLE "RefundReservation" (
     "sourceOrderName" TEXT,
     "locationId" TEXT NOT NULL,
     "rowsJson" TEXT NOT NULL,
+    "expectedAmount" DECIMAL(12,2) NOT NULL,
     "note" TEXT,
     "createdBy" TEXT,
     "status" TEXT NOT NULL DEFAULT 'pending',

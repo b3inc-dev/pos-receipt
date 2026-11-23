@@ -56,6 +56,28 @@ export function normalizeReservationRows(input: unknown): RowsCheck {
   return { ok: true, rows };
 }
 
+/** 注文の id を数字だけにする（POS・純正の返金の付け替えと同じ形。gid でも数字でも受ける） */
+export function numericOrderId(sourceOrderId: string): string {
+  return String(sourceOrderId ?? "").trim().replace(/^gid:\/\/shopify\/Order\//, "").replace(/\D/g, "");
+}
+
+/** 返す見込みの金額を確かめる。決めた行（最後以外）の合計は、この額より小さくする */
+export function checkExpectedAmount(
+  rows: ReservationRow[],
+  input: unknown,
+): { ok: true; expectedAmount: number } | { ok: false; error: string } {
+  const expectedAmount = money(input);
+  if (!(expectedAmount > 0)) return { ok: false, error: "返金する金額を入れてください" };
+  const fixed = rows.slice(0, -1).reduce((s, r) => s + money(r.amount), 0);
+  if (!(money(fixed) < expectedAmount)) {
+    return {
+      ok: false,
+      error: `分けた金額の合計（¥${money(fixed).toLocaleString()}）を、返金する金額（¥${expectedAmount.toLocaleString()}）より小さくしてください`,
+    };
+  }
+  return { ok: true, expectedAmount };
+}
+
 export function parseReservationRows(json: string | null | undefined): ReservationRow[] {
   try {
     const v = JSON.parse(String(json ?? "[]"));
@@ -108,13 +130,24 @@ export type ReservationPlan =
  * 予約の行を純正の返金に当てる。金額は返金額で固定。最後の行は残り。
  * 元と同じ手段の行は付け替えが要らないので作らない（額は使ったことにする）。
  */
-export function planReservation(refundLines: NativeRefundLine[], rows: ReservationRow[]): ReservationPlan {
+export function planReservation(
+  refundLines: NativeRefundLine[],
+  rows: ReservationRow[],
+  expectedAmount?: number | null,
+): ReservationPlan {
   if (refundLines.length !== 1) {
     return { ok: false, reason: "返金が複数の支払方法に分かれていたので、自動では付け替えていません。返金の一覧から付け替えてください。" };
   }
   const line = refundLines[0];
   const total = money(line.amount);
   if (rows.length === 0) return { ok: false, reason: "予約の内容が読めませんでした。返金の一覧から付け替えてください。" };
+  // 返金額が予約の金額と違う: 別の返金かもしれないので、自動では付け替えない（T 2026-11-23）
+  if (expectedAmount != null && money(expectedAmount) !== total) {
+    return {
+      ok: false,
+      reason: `返金額（¥${total.toLocaleString()}）が予約の金額（¥${money(expectedAmount).toLocaleString()}）と違ったので、自動では付け替えていません。返金の一覧から付け替えてください。`,
+    };
+  }
   const fixed = rows.slice(0, -1).reduce((s, r) => s + money(r.amount), 0);
   const last = money(total - fixed);
   if (last < 0) {
@@ -129,6 +162,11 @@ export function planReservation(refundLines: NativeRefundLine[], rows: Reservati
     line,
     rows: planned.filter((r) => r.amount > 0 && !sameGateway(r.actualRefundMethod, line.gateway)),
   };
+}
+
+/** 返金した日（店のタイムゾーン）が予約した日と同じか。違えば予約は使わない（期限切れ） */
+export function refundOnReservationDay(refundDate: string, businessDate: string): boolean {
+  return String(refundDate) === String(businessDate);
 }
 
 /** 付け替えの行の id（同じ予約・同じ行で 2 回作らない） */

@@ -5,6 +5,7 @@
  * - キューが使えないときだけ、知らせの中で呼ぶ
  * - 失敗はログだけ（売上サマリーの処理は止めない）。会計後の画面・POS で開いたときにも同じ処理が動く
  */
+import { applyRefundReservationsForOrder, hasPendingReservation } from "./refundReservation.server";
 import { registerVoucherFromCartEntry, webhookPayloadHasVoucherCartFace } from "./voucherCartEntry.server";
 
 type AdminClient = {
@@ -35,5 +36,17 @@ export async function runOrderAutoAdjustmentsFromWebhook(
     } catch (e) {
       console.warn(`[order-auto-adjust] voucher from cart entry failed shop=${shopDomain}`, e);
     }
+  }
+
+  // 返金の予約: その注文に使う前の予約があるときだけ、Shopify の返金を読んで付け替えを作る
+  try {
+    if (await hasPendingReservation(shopId, orderId)) {
+      const r = await applyRefundReservationsForOrder(admin, shopId, orderId);
+      if (r.applied || r.review) {
+        console.log(`[order-auto-adjust] refund reservation applied=${r.applied} review=${r.review} shop=${shopDomain}`);
+      }
+    }
+  } catch (e) {
+    console.warn(`[order-auto-adjust] refund reservation failed shop=${shopDomain}`, e);
   }
 }

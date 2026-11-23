@@ -244,12 +244,14 @@ model RefundReservation {
   id               String    @id @default(cuid())
   shopId           String
   shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  /// gid://shopify/Order/...
+  /// 注文の id（数字だけ。POS・純正の返金の付け替えと同じ形）
   sourceOrderId    String
   sourceOrderName  String?
   locationId       String
   /// [{ actualRefundMethod, eventType, amount|null }]。最後の行は残り（amount null）
   rowsJson         String
+  /// 返金する見込みの金額。純正の返金額がこれと同じときだけ自動で付け替える
+  expectedAmount   Decimal   @db.Decimal(12, 2)
   note             String?
   createdBy        String?
   /// pending | applied | cancelled | expired | needs_review

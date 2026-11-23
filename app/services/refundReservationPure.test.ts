@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  checkExpectedAmount,
   normalizeReservationRows,
+  numericOrderId,
+  refundOnReservationDay,
   pickRefundForReservation,
   planReservation,
   reservationEventId,
@@ -92,4 +95,30 @@ test("予約の額が返金額より大きい・支払方法が複数のとき�
 
 test("付け替えの行の id は予約と行の番号で決まる", () => {
   assert.equal(reservationEventId("abc", 2), "pos_rr_abc_2");
+});
+
+test("返す見込みの金額: 要る・分けた額の合計より大きく", () => {
+  const rows = [
+    { actualRefundMethod: "cash", eventType: "cash_refund" as const, amount: 1000 },
+    { actualRefundMethod: "gift", eventType: "payment_method_override" as const, amount: null },
+  ];
+  assert.equal(checkExpectedAmount(rows, 2500).ok, true);
+  assert.equal(checkExpectedAmount(rows, 1000).ok, false);
+  assert.equal(checkExpectedAmount(rows, 0).ok, false);
+  assert.equal(checkExpectedAmount(rows, "abc").ok, false);
+});
+
+test("返金額が予約の金額と違えば要確認・同じなら当てる", () => {
+  const l = { refundId: "r1", createdAt: "2026-11-23T03:00:00Z", gateway: "shopify_payments", formattedGateway: null, amount: 2500 };
+  const rows = [{ actualRefundMethod: "cash", eventType: "cash_refund" as const, amount: null }];
+  assert.equal(planReservation([l], rows, 2500).ok, true);
+  const ng = planReservation([l], rows, 2000);
+  assert.equal(ng.ok, false);
+});
+
+test("注文の id は数字だけにそろえる", () => {
+  assert.equal(numericOrderId("gid://shopify/Order/5001"), "5001");
+  assert.equal(numericOrderId("5001"), "5001");
+  assert.equal(refundOnReservationDay("2026-11-23", "2026-11-23"), true);
+  assert.equal(refundOnReservationDay("2026-11-24", "2026-11-23"), false);
 });
