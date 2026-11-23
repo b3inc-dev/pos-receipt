@@ -19,6 +19,17 @@ export default async () => {
 };
 
 function openedFromOrderDetails() {
+  // 会計が終わった画面の「管理」の行（pos.purchase.post.action.render）は、POS が行を描いて押すとそのままこの画面を開く。
+  // 行の onClick が呼ばれず目印が入らないので、この画面が受け取る注文（Order API）を目印にする（T の実機 2026-11-24）
+  try {
+    const orderId = globalThis?.shopify?.order?.id;
+    if (orderId != null && orderId !== "") {
+      sessionStorage.setItem(STORAGE_KEY_VOUCHER_ORDER, String(orderId));
+      return true;
+    }
+  } catch (_) {
+    /* ホームのタイルには注文が無い */
+  }
   try {
     return Boolean(sessionStorage.getItem(STORAGE_KEY_VOUCHER_ORDER));
   } catch (_) {
