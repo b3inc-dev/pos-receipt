@@ -23,6 +23,16 @@ describe("toUserMessage", () => {
     assert.match(out, /管理者に連絡/);
   });
 
+  it("サーバーの中の英語のエラー（データベースの文など）は出さず、いつもの案内にする", () => {
+    const raw =
+      "Invalid `prisma.specialRefundEvent.findMany()` invocation: The column `SpecialRefundEvent.foo` does not exist in the current database.";
+    const out = toUserMessage(raw);
+    assert.notEqual(out, raw);
+    assert.equal(/prisma|invocation|column/i.test(out), false, out);
+    assert.match(out, /管理者に連絡/);
+    assert.equal(toUserMessage("Internal Server Error"), toUserMessage(undefined));
+  });
+
   it("日本語のサーバーの文はそのまま返す", () => {
     assert.equal(toUserMessage("この日はもう精算済みです"), "この日はもう精算済みです");
   });

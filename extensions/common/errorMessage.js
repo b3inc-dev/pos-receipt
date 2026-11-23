@@ -50,8 +50,15 @@ export function toUserMessage(msg) {
   if (t.includes("network")) return MAP["network error"];
   if (t.includes("unauthorized") || t === "401") return MAP["401"];
   if (t.includes("throttled") || t.includes("混雑しています")) return MAP.throttled;
+  // 日本語を含まない文は、サーバーの中の英語のエラー（データベースの文など）なので店の人には見せない。
+  // 例: 「Invalid `prisma.specialRefundEvent.findMany()` invocation: The column ... does not exist」
+  // (2026-11-23 開発ストアの精算画面でそのまま赤字で出た)。調べるときはサーバーのログを見る。
+  if (!JAPANESE_CHAR.test(msg)) return FALLBACK;
   return msg;
 }
+
+/** ひらがな・カタカナ・漢字のどれかがあれば、店の人向けに書いた文とみなす */
+const JAPANESE_CHAR = /[\u3040-\u30ff\u3400-\u9fff]/;
 
 /**
  * エラーに HTTP の番号を付ける（画面の文には出さない。調べるときに err.status で見る）。
