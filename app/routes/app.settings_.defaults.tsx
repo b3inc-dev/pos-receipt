@@ -22,6 +22,7 @@ import {
 } from "../utils/locationDefaults.server";
 import { DEFAULTABLE_KEYS, DEFAULT_GROUPS, planDefaultsChange, readDefaultsForm, type LocationDefaults } from "../utils/locationDefaults";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { StoreBody } from "../components/StoreBody";
 import { AdminBlock, AdminIntro, SaveBar, StatusBanner, SuccessToast } from "../components/admin-ui";
 import { withSearch } from "../utils/withSearch";
 
@@ -75,10 +76,12 @@ export default function StoreDefaultsPage() {
   return (
     <PolarisPageWrapper>
       <Page title="全店の決まり" backAction={{ content: "店舗", onAction: () => navigate(withSearch("/app/settings", q)) }}>
+        <StoreBody>
         <SuccessToast trigger={result} message={result?.ok ? (result.changed > 0 ? `保存しました（${result.changed} 店を変更）` : "保存しました") : null} />
         {!busy && result && !result.ok ? <StatusBanner tone="critical" heading="保存できませんでした">{result.error}</StatusBanner> : null}
         {/* 保存のたびに開き直す（帯の基準を保存した値にする） */}
         <DefaultsForm key={`${data.savedAt}`} data={data} failed={!busy && Boolean(result && !result.ok)} />
+        </StoreBody>
       </Page>
     </PolarisPageWrapper>
   );

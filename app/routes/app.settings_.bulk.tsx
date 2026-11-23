@@ -24,6 +24,7 @@ import {
   type LocationDefaults,
 } from "../utils/locationDefaults";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { StoreBody } from "../components/StoreBody";
 import { AdminBlock, AdminIntro, StatusBanner, SuccessToast } from "../components/admin-ui";
 
 function readIds(raw: string | null): string[] {
@@ -108,6 +109,7 @@ export default function StoreBulkPage() {
   return (
     <PolarisPageWrapper>
       <Page title="選んだ店をまとめて変更" backAction={{ content: "店舗", onAction: () => navigate("/app/settings" + backSearch) }}>
+        <StoreBody>
         <SuccessToast trigger={result} message={result?.ok ? `${result.changed} 店を変更しました` : null} />
         {!busy && result && !result.ok ? <StatusBanner tone="critical" heading="反映できませんでした">{result.error}</StatusBanner> : null}
         {selected.length === 0 ? (
@@ -173,6 +175,7 @@ export default function StoreBulkPage() {
             </AdminBlock>
           </Form>
         )}
+        </StoreBody>
       </Page>
     </PolarisPageWrapper>
   );

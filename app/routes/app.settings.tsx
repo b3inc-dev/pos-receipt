@@ -27,6 +27,7 @@ import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
 import { AdminBlock, AdminIntro, SecondaryLink, StateBadge, SummaryRows } from "../components/admin-ui";
 import { withSearch } from "../utils/withSearch";
+import { StoreBody } from "../components/StoreBody";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
@@ -83,6 +84,7 @@ export default function StoresPage() {
     <PolarisPageWrapper>
       <Page title="店舗" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
         <TabGroupBar tabs={STORE_TABS} />
+        <StoreBody>
         <AdminIntro>
           <p>全店の決まりを 1 つ決めると、どの店もその設定になります。違う店だけ、店ごとに変えられます。</p>
         </AdminIntro>
@@ -185,18 +187,8 @@ export default function StoresPage() {
             <SecondaryLink to={withSearch("/app/diagnostics", q)}>診断を開く</SecondaryLink>
           </AdminBlock>
         ) : null}
-        <style>{storeCss}</style>
+        </StoreBody>
       </Page>
     </PolarisPageWrapper>
   );
 }
-
-// adminCss と同じく、引用符と「>」を書かない（サーバーで描くと &quot; &gt; になる。UI ルール 13章）
-const storeCss = `
-  .Store-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 0 12px; border-bottom: 1px solid #ebebeb; margin-bottom: 12px; }
-  .Store-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
-  .Store-bulk .Admin-secondary { margin-left: auto; }
-  .Store-bulk .Admin-secondary:disabled { opacity: .5; cursor: not-allowed; }
-  .Store-row-check { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; }
-  @media (max-width: 640px) { .Store-bulk .Admin-secondary { margin-left: 0; width: 100%; } }
-`;

@@ -22,6 +22,7 @@ import {
   type LocationDefaults,
 } from "../utils/locationDefaults";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { StoreBody } from "../components/StoreBody";
 import { AdminBlock, SaveBar, StateBadge, StatusBanner, SuccessToast, markFormDirty } from "../components/admin-ui";
 import { withSearch } from "../utils/withSearch";
 
@@ -118,6 +119,7 @@ export default function StoreEditPage() {
         subtitle={differing.length > 0 ? `全店と違う ${differing.length} 項目` : "全店と同じ"}
         backAction={{ content: "店舗", onAction: () => navigate(withSearch("/app/settings", q)) }}
       >
+        <StoreBody>
         <SuccessToast trigger={result} message={result?.ok ? "保存しました" : null} />
         {!busy && result && !result.ok ? <StatusBanner tone="critical" heading="保存できませんでした">{result.error}</StatusBanner> : null}
         <Form method="post" ref={formRef}>
@@ -210,6 +212,7 @@ export default function StoreEditPage() {
           </AdminBlock>
           <SaveBar failed={!busy && Boolean(result && !result.ok)} onDiscard={() => setValues(initial)} />
         </Form>
+        </StoreBody>
       </Page>
     </PolarisPageWrapper>
   );
