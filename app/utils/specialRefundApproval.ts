@@ -112,3 +112,38 @@ export function partitionSpecialRefundEventsByApproval<T extends { approvalStatu
   }
   return { counted, awaitingApproval, rejected };
 }
+
+/**
+ * 承認・却下した人を、管理画面の認証の結果から決める（DB の approvalDecidedBy に残す）。
+ * - オンラインのセッション（スタッフに紐づく）なら名前（無ければメール）
+ * - そうでなければ App Bridge のセッショントークンの sub（Shopify のユーザー ID）を「shopify_user:<ID>」で
+ * - どちらも無い（埋め込みでない・トークンが無い）ときは null
+ * 名前を後から読むには read_users が要るので、ここでは ID のまま残す。
+ */
+export function resolveApprovalDecidedBy(auth: {
+  session?: {
+    onlineAccessInfo?: {
+      associated_user?: { first_name?: string | null; last_name?: string | null; email?: string | null } | null;
+    } | null;
+  } | null;
+  sessionToken?: { sub?: unknown } | null;
+}): string | null {
+  const u = auth.session?.onlineAccessInfo?.associated_user;
+  if (u) {
+    const name = [u.last_name, u.first_name].map((v) => String(v ?? "").trim()).filter(Boolean).join(" ");
+    if (name) return name.slice(0, 100);
+    const email = String(u.email ?? "").trim();
+    if (email) return email.slice(0, 100);
+  }
+  const sub = String(auth.sessionToken?.sub ?? "").trim();
+  if (/^\d+$/.test(sub)) return `shopify_user:${sub}`;
+  return null;
+}
+
+/** 履歴の画面に出す「決めた人」 */
+export function approvalDecidedByLabel(v: string | null | undefined): string | null {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const m = /^shopify_user:(\d+)$/.exec(s);
+  return m ? `ユーザー ID ${m[1]}` : s;
+}

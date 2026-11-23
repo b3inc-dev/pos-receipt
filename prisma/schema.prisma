@@ -224,6 +224,8 @@ model SpecialRefundEvent {
   /// 注文メタフィールド pos.adjustments に書けた時刻と、書けなかったときのエラー
   metafieldSyncedAt       DateTime?
   metafieldSyncError      String?
+  /// 承認・却下した管理画面の人（オンラインのセッションなら名前、なければ Shopify のユーザー ID「shopify_user:<ID>」）。取れないときは null。DB にだけ残す
+  approvalDecidedBy       String?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
