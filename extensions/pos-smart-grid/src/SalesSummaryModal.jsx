@@ -23,7 +23,8 @@ import { getAvailableMonths } from "../../common/settlementApi.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
-import { formatYmdSlash } from "../../common/dateDisplay.js";
+import { formatYmdSlash, formatJstHm } from "../../common/dateDisplay.js";
+import { MetricCard } from "./SummaryTable.jsx";
 
 export default async () => {
   render(<SalesSummaryModal />, document.body);
@@ -124,16 +125,11 @@ function isTodayDate(ymd, shopCalendarToday) {
   return ymd === cap;
 }
 
+/** 「21:05 更新」（日本時間。端末の時刻帯によらない） */
 function formatUpdatedTimeLabel(dateObj) {
   if (!dateObj) return "";
-  const hh = pad2(dateObj.getHours());
-  const mm = pad2(dateObj.getMinutes());
-  return `${hh}:${mm}更新`;
-}
-
-function UpdatedAtBadge({ dateObj }) {
-  if (!dateObj) return null;
-  return <s-badge tone="info">{formatUpdatedTimeLabel(dateObj)}</s-badge>;
+  const hm = formatJstHm(dateObj);
+  return hm ? `${hm} 更新` : "";
 }
 
 function fmtNum(n, dec = 0) {
@@ -287,53 +283,6 @@ function FootfallReportModalHost({
   );
 }
 
-// ── Summary 1行（精算プレビューと同型）──────────────────────────────────────────
-
-function SummaryRow({ label, value, valueBold = false, labelBold = false, divider = true }) {
-  return (
-    <s-stack gap="none">
-      <s-box padding="small">
-        <s-stack
-          direction="inline"
-          justifyContent="space-between"
-          alignItems="center"
-          gap="small"
-          style={{ width: "100%" }}
-        >
-          <s-box style={{ flex: "1 1 0", minInlineSize: 0, paddingInlineEnd: "small" }}>
-            <s-text tone="subdued" size="small" fontWeight={labelBold ? "bold" : undefined}>
-              {label}
-            </s-text>
-          </s-box>
-          <s-box style={{ flex: "0 1 auto", minInlineSize: 0, textAlign: "end" }}>
-            <s-text fontWeight={valueBold ? "bold" : undefined} size="small">
-              {value}
-            </s-text>
-          </s-box>
-        </s-stack>
-      </s-box>
-      {divider ? <s-divider /> : null}
-    </s-stack>
-  );
-}
-
-function MetricBlock({ title, children }) {
-  return (
-    <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-      <s-box padding="small" paddingBlockEnd="none">
-        {typeof title === "string" ? (
-          <s-text emphasis="bold" size="small">
-            {title}
-          </s-text>
-        ) : (
-          title
-        )}
-      </s-box>
-      <s-stack gap="none">{children}</s-stack>
-    </s-box>
-  );
-}
-
 // ── 日次・月次の行データ ─────────────────────────────────────────────────────
 
 function dailyKpiRows(row, o) {
@@ -345,6 +294,7 @@ function dailyKpiRows(row, o) {
     rows.push({
       label: "予算比",
       value: fmtPct(row.budgetRatio),
+      ratio: row.budgetRatio,
       tone: row.budgetRatio >= 1 ? "success" : "critical",
     });
   }
@@ -360,19 +310,9 @@ function dailyKpiRows(row, o) {
   return rows;
 }
 
-/** tone は SummaryRow が未対応のため value に含めずそのまま表示 */
-function DailyMetricRows({ row, o, periodRow }) {
-  const base = dailyKpiRows(row, o);
-  const items = mergeDailyRowsWithMonthKpi(base, periodRow, o);
-  return items.map((r, i) => (
-    <SummaryRow
-      key={`${r.label}-${i}`}
-      label={r.label}
-      value={r.value}
-      valueBold={r.valueBold}
-      divider={i < items.length - 1}
-    />
-  ));
+/** 日次の店（またはチャネル）の行。月の数を出す設定なら一品単価の後ろに足す */
+function dailyMetricItems(row, o, periodRow) {
+  return mergeDailyRowsWithMonthKpi(dailyKpiRows(row, o), periodRow, o);
 }
 
 function periodKpiRows(row, o) {
@@ -384,6 +324,7 @@ function periodKpiRows(row, o) {
     rows.push({
       label: "達成率",
       value: fmtPct(row.achievementRate),
+      ratio: row.achievementRate,
     });
   }
   if (row.progressBudgetToday > 0 && o.showProgressToday) {
@@ -406,19 +347,6 @@ function periodKpiRows(row, o) {
   return rows;
 }
 
-function PeriodMetricRows({ row, o }) {
-  const items = periodKpiRows(row, o);
-  return items.map((r, i) => (
-    <SummaryRow
-      key={`${r.label}-${i}`}
-      label={r.label}
-      value={r.value}
-      valueBold={r.valueBold}
-      divider={i < items.length - 1}
-    />
-  ));
-}
-
 function totalsDailyRows(totals, o) {
   const rows = [];
   if (o.showActual) rows.push({ label: "実績", value: fmtAmount(totals.actual), valueBold: true });
@@ -426,7 +354,7 @@ function totalsDailyRows(totals, o) {
   const budgetRatio =
     totals.budget != null && totals.budget > 0 ? totals.actual / totals.budget : null;
   if (o.showBudgetRatio && budgetRatio !== null) {
-    rows.push({ label: "予算比", value: fmtPct(budgetRatio) });
+    rows.push({ label: "予算比", value: fmtPct(budgetRatio), ratio: budgetRatio });
   }
   if (o.showOrders) rows.push({ label: "件数", value: `${fmtNum(totals.orders)}件` });
   if (o.showVisitors && totals.visitors !== null)
@@ -479,6 +407,7 @@ function monthKpiRowsOrderedFromPeriodRow(row, o) {
     items.push({
       label: "達成率",
       value: fmtPct(row.achievementRate),
+      ratio: row.achievementRate,
     });
   }
   if (row.progressBudgetToday > 0 && o.showProgressToday) {
@@ -531,6 +460,7 @@ function totalsPeriodRows(totals, o, locationRows = []) {
     rows.push({
       label: "達成率",
       value: fmtPct(actualTotal / totals.budgetTotal),
+      ratio: actualTotal / totals.budgetTotal,
     });
   }
   const progressBudgetToday =
@@ -1222,52 +1152,24 @@ function HistoryDailyDetailView({
                     ) : (
                       <>
                         {showTotalsSection ? (
-                          <MetricBlock title="全店合計">
-                            {totalsDaily.map((r, i, arr) => (
-                              <SummaryRow
-                                key={r.label}
-                                label={r.label}
-                                value={r.value}
-                                valueBold={r.valueBold}
-                                divider={i < arr.length - 1}
-                              />
-                            ))}
-                          </MetricBlock>
+                          <MetricCard title="全店合計" items={totalsDaily} />
                         ) : null}
 
                         {rowsForUi.map((row) => (
                           <s-stack key={row.locationId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-stack
-                                  direction="inline"
-                                  justifyContent="space-between"
-                                  alignItems="center"
-                                  gap="small"
-                                  style={{ width: "100%" }}
-                                >
-                                  <s-text emphasis="bold" size="small">
-                                    {row.locationName ?? row.locationId}
-                                  </s-text>
-                                  {showUpdatedBadge ? <UpdatedAtBadge dateObj={lastLoadedAt} /> : null}
-                                </s-stack>
-                              }
-                            >
-                              <DailyMetricRows row={row} o={o} />
-                            </MetricBlock>
+                            <MetricCard
+                              title={row.locationName ?? row.locationId}
+                              items={dailyMetricItems(row, o)}
+                              updatedLabel={showUpdatedBadge ? formatUpdatedTimeLabel(lastLoadedAt) : ""}
+                            />
                           </s-stack>
                         ))}
                         {channelRowsForUi.map((row) => (
                           <s-stack key={row.channelId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-text emphasis="bold" size="small">
-                                  [{row.channelName ?? row.channelId}]
-                                </s-text>
-                              }
-                            >
-                              <DailyMetricRows row={row} o={o} />
-                            </MetricBlock>
+                            <MetricCard
+                              title={`[${row.channelName ?? row.channelId}]`}
+                              items={dailyMetricItems(row, o)}
+                            />
                           </s-stack>
                         ))}
                       </>
@@ -2317,81 +2219,35 @@ function SalesSummaryModal() {
                     ) : (
                       <>
                         {showTotalsSectionDaily ? (
-                          <MetricBlock title="全店合計">
-                            {totalsDaily.map((r, i, arr) => (
-                              <SummaryRow
-                                key={r.label}
-                                label={r.label}
-                                value={r.value}
-                                valueBold={r.valueBold}
-                                divider={i < arr.length - 1}
-                              />
-                            ))}
-                          </MetricBlock>
+                          <MetricCard title="全店合計" items={totalsDaily} />
                         ) : null}
                         {showTotalsSectionMonthly ? (
-                          <MetricBlock title="全店合計">
-                            {totalsPeriod.map((r, i, arr) => (
-                              <SummaryRow
-                                key={r.label}
-                                label={r.label}
-                                value={r.value}
-                                valueBold={r.valueBold}
-                                divider={i < arr.length - 1}
-                              />
-                            ))}
-                          </MetricBlock>
+                          <MetricCard title="全店合計" items={totalsPeriod} />
                         ) : null}
 
                         {rowsForUi.map((row) => (
                           <s-stack key={row.locationId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-stack
-                                  direction="inline"
-                                  justifyContent="space-between"
-                                  alignItems="center"
-                                  gap="small"
-                                  style={{ width: "100%" }}
-                                >
-                                  <s-text emphasis="bold" size="small">
-                                    {row.locationName ?? row.locationId}
-                                  </s-text>
-                                  {showUpdatedBadge ? <UpdatedAtBadge dateObj={lastLoadedAt} /> : null}
-                                </s-stack>
+                            <MetricCard
+                              title={row.locationName ?? row.locationId}
+                              items={
+                                grain === "daily"
+                                  ? dailyMetricItems(row, o, pickPeriodRowForDailyLine(dailyMonthPeriod, row))
+                                  : periodKpiRows(row, o)
                               }
-                            >
-                              {grain === "daily" ? (
-                                <DailyMetricRows
-                                  row={row}
-                                  o={o}
-                                  periodRow={pickPeriodRowForDailyLine(dailyMonthPeriod, row)}
-                                />
-                              ) : (
-                                <PeriodMetricRows row={row} o={o} />
-                              )}
-                            </MetricBlock>
+                              updatedLabel={showUpdatedBadge ? formatUpdatedTimeLabel(lastLoadedAt) : ""}
+                            />
                           </s-stack>
                         ))}
                         {channelRowsForUi.map((row) => (
                           <s-stack key={row.channelId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-text emphasis="bold" size="small">
-                                  [{row.channelName ?? row.channelId}]
-                                </s-text>
+                            <MetricCard
+                              title={`[${row.channelName ?? row.channelId}]`}
+                              items={
+                                grain === "daily"
+                                  ? dailyMetricItems(row, o, pickPeriodRowForDailyLine(dailyMonthPeriod, row))
+                                  : periodKpiRows(row, o)
                               }
-                            >
-                              {grain === "daily" ? (
-                                <DailyMetricRows
-                                  row={row}
-                                  o={o}
-                                  periodRow={pickPeriodRowForDailyLine(dailyMonthPeriod, row)}
-                                />
-                              ) : (
-                                <PeriodMetricRows row={row} o={o} />
-                              )}
-                            </MetricBlock>
+                            />
                           </s-stack>
                         ))}
                       </>

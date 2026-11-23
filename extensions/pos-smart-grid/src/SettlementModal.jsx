@@ -27,6 +27,8 @@ import { formatYmdSlash, formatJstHm } from "../../common/dateDisplay.js";
 import { specialRefundEventTypeLabel } from "../../common/specialRefundLabels.js";
 import { printSettlementReceipt, getPrintSettings } from "../../common/printApi.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
+import { SummaryHeading, SummaryLine, PaymentLine } from "./SummaryTable.jsx";
+import { formatYen, formatDeduction, formatYmdWithWeekday } from "../../common/summaryTableLayout.js";
 
 /**
  * 以前の発行確認モーダルの id。
@@ -775,9 +777,7 @@ function PreviewView({
               <s-button kind="secondary" disabled={!canPrevDay || loading} onClick={() => onPickDate(addDays(targetDate, -1))}>
                 前日
               </s-button>
-              <s-text emphasis="bold" size="small">
-                {formatYmdSlash(targetDate)}
-              </s-text>
+              <s-text type="strong">{formatYmdWithWeekday(targetDate)}</s-text>
               <s-button kind="secondary" disabled={!canNextDay || loading} onClick={() => onPickDate(addDays(targetDate, 1))}>
                 翌日
               </s-button>
@@ -818,42 +818,40 @@ function PreviewView({
     );
   }
 
-  const headerRows = [
-    { label: "ロケーション", value: preview.locationName ?? "-", valueBold: true },
-    { label: "対象日", value: formatYmdSlash(preview.targetDate ?? "-") },
-  ];
-
-  const summaryRows = [
-    { label: "総売上", value: `¥${Number(preview.total).toLocaleString()}`, valueBold: true },
-    { label: "純売上", value: `¥${Number(preview.netSales).toLocaleString()}` },
-    { label: "消費税", value: `¥${Number(preview.tax).toLocaleString()}` },
-    { label: "割引", value: `▲¥${Number(preview.discounts).toLocaleString()}` },
-    { label: "返金", value: `▲¥${Number(preview.refundTotal).toLocaleString()}` },
+  // 見出しで区切る形（案B, 2026-11-23）。数は preview のまま、並べ方と書き方だけ。
+  // 店名と日付は上の帯に出ているので、表の中には繰り返さない。
+  const discount = formatDeduction(preview.discounts);
+  const refund = formatDeduction(preview.refundTotal);
+  const salesLines = [
+    { key: "total", label: "総売上", value: formatYen(preview.total), strong: true },
+    { key: "net", label: "純売上", value: formatYen(preview.netSales), indent: true },
+    { key: "tax", label: "消費税", value: formatYen(preview.tax), indent: true },
+    { key: "discount", label: "割引", value: discount.text, tone: discount.tone },
+    { key: "refund", label: "返金", value: refund.text, tone: refund.tone },
   ];
   if (Number(preview.voucherChangeAmount) > 0) {
-    summaryRows.push({
+    salesLines.push({
+      key: "voucherChange",
       label: "商品券釣有り差額",
-      value: `¥${Number(preview.voucherChangeAmount).toLocaleString()}`,
+      value: formatYen(preview.voucherChangeAmount),
     });
   }
   // 売上に含めない送料等（支払方法別には入っている分。総売上には入れていない）
   if (Number(preview.nonSalesFeeTotal ?? 0) !== 0) {
-    summaryRows.push({
+    salesLines.push({
+      key: "nonSalesFee",
       label: "売上に含めない送料等",
-      value: `¥${Number(preview.nonSalesFeeTotal).toLocaleString()}`,
+      value: formatYen(preview.nonSalesFeeTotal),
     });
   }
 
-  const countRows = [
-    { label: "売上件数", value: `${preview.orderCount}件` },
-    { label: "返金件数", value: `${preview.refundCount}件` },
-    { label: "点数", value: `${preview.itemCount}点` },
-  ];
+  const countLabel = `売上 ${Number(preview.orderCount ?? 0)}件　・　返金 ${Number(preview.refundCount ?? 0)}件`;
+  const itemCountLabel = `${Number(preview.itemCount ?? 0)}点`;
 
-  /** 納金金額ブロック用（現金セクションの net − refund） */
+  /** 納金（現金セクションの net − refund） */
   const cashDepositRows = [];
-  /** 支払方法 | 件数 | 金額（返金行は ラベル[返金]） */
-  const paymentTripleRows = [];
+  /** 支払方法 | 件数 | 金額（返金は字下げした「返金」の行・赤） */
+  const paymentLines = [];
   if (preview.paymentSections?.length > 0) {
     for (const section of preview.paymentSections) {
       const methodLabel = section.label ?? section.gateway ?? "-";
@@ -862,23 +860,24 @@ function PreviewView({
         cashDepositRows.push({
           key: `deposit-${section.gateway}-${cashDepositRows.length}`,
           label: methodLabel,
-          value: `¥${deposit.toLocaleString()}`,
+          value: formatYen(deposit),
         });
       }
-      paymentTripleRows.push({
+      paymentLines.push({
         key: `${section.gateway}-sale`,
-        left: methodLabel,
-        middle: `${Number(section.txCount ?? 0)}件`,
-        right: `¥${Number(section.net ?? 0).toLocaleString()}`,
-        leftBold: true,
+        label: methodLabel,
+        count: `${Number(section.txCount ?? 0)}件`,
+        amount: formatYen(section.net ?? 0),
       });
       if (Number(section.refund) > 0) {
-        paymentTripleRows.push({
+        const r = formatDeduction(section.refund);
+        paymentLines.push({
           key: `${section.gateway}-refund`,
-          left: `${methodLabel}[返金]`,
-          middle: `${Number(section.refundCount ?? 0)}件`,
-          right: `¥${Number(section.refund).toLocaleString()}`,
-          leftBold: false,
+          label: "返金",
+          count: `${Number(section.refundCount ?? 0)}件`,
+          amount: r.text,
+          tone: r.tone,
+          indent: true,
         });
       }
     }
@@ -889,14 +888,14 @@ function PreviewView({
     eventRows.push({
       key: `sr-${ev.id}`,
       label: `${ev.sourceOrderName ?? "-"}（${specialRefundEventTypeLabel(ev.eventType)}）`,
-      value: `¥${Number(ev.amount).toLocaleString()}`,
+      value: formatYen(ev.amount),
     });
   }
   for (const ev of preview.appliedVoucherAdjustments ?? []) {
     eventRows.push({
       key: `va-${ev.id}`,
       label: `${ev.sourceOrderName ?? "-"}（商品券釣有り）`,
-      value: `¥${Number(ev.voucherChangeAmount).toLocaleString()}`,
+      value: formatYen(ev.voucherChangeAmount),
     });
   }
 
@@ -922,7 +921,7 @@ function PreviewView({
           <s-stack gap="small">
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
               <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <s-text type="strong">
                   {preview.locationName ?? "-"}
                 </s-text>
               </s-box>
@@ -937,10 +936,8 @@ function PreviewView({
                 前日
               </s-button>
               <s-stack gap="none" alignItems="center">
-                <s-text emphasis="bold" size="small">
-                  {formatYmdSlash(targetDate)}
-                </s-text>
-                <s-text tone="subdued" size="small">
+                <s-text type="strong">{formatYmdWithWeekday(targetDate)}</s-text>
+                <s-text type="small" color="subdued">
                   {loading ? "読み込み中…" : loadedAt ? `${formatJstHm(loadedAt)} 時点の数` : ""}
                 </s-text>
               </s-stack>
@@ -962,112 +959,56 @@ function PreviewView({
               */}
               <SettlementTopNotices loading={loading} error={error} />
 
-              {/* 精算内容 */}
-              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="none">
-                  {headerRows.map((row, i) => (
-                    <SummaryRow
-                      key={row.label}
-                      label={row.label}
-                      value={row.value}
-                      valueBold={row.valueBold}
-                      divider={i < headerRows.length - 1}
-                    />
-                  ))}
-                </s-stack>
-              </s-box>
+              <s-box>
+                <SummaryHeading first>売上</SummaryHeading>
+                {salesLines.map((l) => (
+                  <SummaryLine
+                    key={l.key}
+                    label={l.label}
+                    value={l.value}
+                    strong={l.strong}
+                    indent={l.indent}
+                    tone={l.tone}
+                  />
+                ))}
 
-              {/* 集計サマリー */}
-              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="none">
-                  {summaryRows.map((row, i) => (
-                    <SummaryRow
-                      key={row.label}
-                      label={row.label}
-                      value={row.value}
-                      valueBold={row.valueBold}
-                      divider={i < summaryRows.length - 1}
-                    />
-                  ))}
-                </s-stack>
-              </s-box>
+                <SummaryHeading>件数</SummaryHeading>
+                <SummaryLine label={countLabel} value={itemCountLabel} />
 
-              {/* 件数・点数 */}
-              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="none">
-                  {countRows.map((row, i) => (
-                    <SummaryRow
-                      key={row.label}
-                      label={row.label}
-                      value={row.value}
-                      divider={i < countRows.length - 1}
-                    />
-                  ))}
-                </s-stack>
-              </s-box>
-
-              {/* 納金金額（現金の差引額のみ・件数なし） */}
-              {cashDepositRows.length > 0 ? (
-                <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="none">
-                    <s-box padding="small">
-                      <s-text fontWeight="bold" fontSize="small">納金金額</s-text>
-                    </s-box>
-                    <s-divider />
-                    {cashDepositRows.map((row, i) => (
-                      <SummaryRow
-                        key={row.key}
-                        label={row.label}
-                        value={row.value}
-                        valueBold
-                        divider={i < cashDepositRows.length - 1}
+                {paymentLines.length > 0 ? (
+                  <>
+                    <SummaryHeading>支払方法別</SummaryHeading>
+                    {paymentLines.map((l) => (
+                      <PaymentLine
+                        key={l.key}
+                        label={l.label}
+                        count={l.count}
+                        amount={l.amount}
+                        indent={l.indent}
+                        tone={l.tone}
                       />
                     ))}
-                  </s-stack>
-                </s-box>
-              ) : null}
+                  </>
+                ) : null}
 
-              {/* 支払方法別内訳：支払方法 / 件数 / 金額（返金は 方法[返金]） */}
-              {paymentTripleRows.length > 0 ? (
-                <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="none">
-                    <s-box padding="small">
-                      <s-text fontWeight="bold" fontSize="small">支払方法別内訳</s-text>
-                    </s-box>
-                    <s-divider />
-                    {paymentTripleRows.map((row, i) => (
-                      <PaymentMethodTripleRow
-                        key={row.key}
-                        left={row.left}
-                        middle={row.middle}
-                        right={row.right}
-                        leftBold={row.leftBold}
-                        divider={i < paymentTripleRows.length - 1}
-                      />
+                {cashDepositRows.length > 0 ? (
+                  <>
+                    <SummaryHeading>納金</SummaryHeading>
+                    {cashDepositRows.map((l) => (
+                      <SummaryLine key={l.key} label={l.label} value={l.value} strong tone="success" />
                     ))}
-                  </s-stack>
-                </s-box>
-              ) : null}
+                  </>
+                ) : null}
 
-              {/* 適用済み特殊返金・商品券調整 */}
-              {eventRows.length > 0 ? (
-                <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="none">
-                    <s-box padding="small">
-                      <s-text fontWeight="bold" fontSize="small">反映した特殊返金・商品券調整</s-text>
-                    </s-box>
-                    <s-divider />
-                    {eventRows.map((row, i) => (
-                      <SummaryRow
-                        key={row.key}
-                        label={row.label}
-                        value={row.value}
-                        divider={i < eventRows.length - 1}
-                      />
+                {eventRows.length > 0 ? (
+                  <>
+                    <SummaryHeading>反映した特殊返金・商品券調整</SummaryHeading>
+                    {eventRows.map((l) => (
+                      <SummaryLine key={l.key} label={l.label} value={l.value} />
                     ))}
-                  </s-stack>
-                </s-box>
-              ) : null}
+                  </>
+                ) : null}
+              </s-box>
             </s-stack>
           </s-box>
         </s-scroll-box>
@@ -1464,46 +1405,6 @@ function isCashPaymentSection(section) {
   if (g === "現金" || l === "現金" || lNorm === "現金") return true;
   if (g === "cash" || l.toLowerCase() === "cash") return true;
   return /^現金/.test(lNorm);
-}
-
-/**
- * 支払内訳1行：支払方法・件数・金額を1行に並べる。
- *
- * POS UI 制約（@shopify/ui-extensions の point-of-sale `Box.d.ts`）:
- * - `s-box` の公開 props に **`style` はない**。`style={{ display: "grid" }}` は無視され、
- *   子 `s-box` が縦に積まれる（スクリーンショットの「方法→件数→金額」の3行になる）。
- * - レイアウトは **`s-stack` の `direction="inline"`** と、子 **`s-box` の `inlineSize`（`%` または `px`）**
- *   など、型定義にあるプロパティに寄せる。
- */
-function PaymentMethodTripleRow({ left, middle, right, leftBold = false, divider = true }) {
-  return (
-    <s-stack gap="none">
-      <s-box padding="small">
-        <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
-          <s-box padding="none" inlineSize="56%" minInlineSize="0" maxInlineSize="56%">
-            <s-text size="small" fontWeight={leftBold ? "bold" : undefined}>
-              {left}
-            </s-text>
-          </s-box>
-          <s-box padding="none" inlineSize="18%" minInlineSize="44px" maxInlineSize="18%">
-            <s-stack direction="block" alignItems="end">
-              <s-text size="small" tone="subdued">
-                {middle}
-              </s-text>
-            </s-stack>
-          </s-box>
-          <s-box padding="none" inlineSize="26%" minInlineSize="70px" maxInlineSize="26%">
-            <s-stack direction="block" alignItems="end">
-              <s-text size="small" fontWeight="bold">
-                {right}
-              </s-text>
-            </s-stack>
-          </s-box>
-        </s-stack>
-      </s-box>
-      {divider ? <s-divider /> : null}
-    </s-stack>
-  );
 }
 
 /** 明細1行：左に項目名、右寄せに値。下に区切り線（最下行は divider=false） */
