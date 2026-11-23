@@ -622,3 +622,21 @@ test("商品券 API: 注文に商品券の支払いが見つからないとき�
   assert.equal(json.code, "VOUCHER_APPLIED_UNKNOWN");
   assert.equal(store.specialRefundEvent.length, 0);
 });
+
+test("自動の確定（#88）で返金処理中から決まったら、注文の記録の返金の状態も同じにする", async () => {
+  putOverride({ shopifyRefundStatus: "pending" });
+  shopifyAdjustments.clear();
+  await writeDoc();
+  assert.equal(docOf("gid://shopify/Order/5001").entries[0].shopifyRefund.status, "pending");
+  // 自動の確定が DB を success にしたあと
+  store.specialRefundEvent[0].shopifyRefundStatus = "success";
+  store.specialRefundEvent[0].shopifyRefundId = "gid://shopify/Refund/9";
+  const { afterSpecialRefundsResolved } = await import("./specialRefundAutoResolve.server.ts");
+  await afterSpecialRefundsResolved(
+    admin as any,
+    SHOP_ID,
+    [{ id: "ev1", sourceOrderId: "gid://shopify/Order/5001", locationId: LOC_GID, status: "success" } as any],
+    { refreshDailySummary: false },
+  );
+  assert.equal(docOf("gid://shopify/Order/5001").entries[0].shopifyRefund.status, "success");
+});
