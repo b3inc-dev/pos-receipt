@@ -43,7 +43,7 @@ import { VoucherFaceCandidates } from "./VoucherFaceCandidates.jsx";
 import { adjustmentBadges, adjustmentKindLabel, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
 import { financialStatusLabel, listSegmentsForTile } from "./orderDisplayUtils.js";
 import { RedoCheckoutSection } from "./RedoCheckoutSection.jsx";
-import { isVoucherAdjustableOrder, voucherShortcutStep } from "../../common/voucherAdjustable.js";
+import { hasActiveVoucherAdjustment, isVoucherAdjustableOrder, voucherShortcutStep } from "../../common/voucherAdjustable.js";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import {
   orderTenderLines,
@@ -835,6 +835,9 @@ function OrderDetailView({
   const voucherAdjustable = isVoucherAdjustableOrder(order);
   // 入口ごとに、関係するボタンだけを右下に出す（T 2026-11-24）: 商品券釣銭登録タイル・会計後の行 → 商品券釣銭登録、返金方法変更タイル → 返金方法変更
   const isVoucherEntry = entry === "voucher";
+  // 有効な商品券釣銭登録がもうある注文は、もう一度登録できないようにする（直すのは調整履歴の「変更」。
+  // 無効化して有効な登録が無くなれば、また押せる。T 2026-11-24）。返金方法変更は分割などで複数回の登録があり得るのでそのまま。
+  const voucherRegistered = hasActiveVoucherAdjustment(events);
 
   return (
     <s-page heading={isVoucherEntry ? "商品券釣銭登録" : "返金方法変更"}>
@@ -956,7 +959,7 @@ function OrderDetailView({
           leftDisabled={loading}
           rightLabel={isVoucherEntry ? "商品券釣銭登録" : "返金方法変更"}
           onRight={isVoucherEntry ? onVoucher : onRefund}
-          rightDisabled={loading || (isVoucherEntry && !voucherAdjustable)}
+          rightDisabled={loading || (isVoucherEntry && (!voucherAdjustable || voucherRegistered))}
         />
       </s-stack>
       <SpecialRefundConfirmModal
