@@ -210,6 +210,17 @@ model SpecialRefundEvent {
   /// pending・rejected は精算・売上サマリーに数えない。status（active | voided）とは別に持つ
   approvalStatus          String   @default("none")
   approvalReviewedAt      DateTime?
+  /// 数える日（店のタイムゾーン、YYYY-MM-DD）。null は前からの行 = 登録した日（createdAt）で数える
+  countDate               String?
+  /// 「変更」で置き換えた前の行の id（前の行は voided にする）
+  replacesEventId         String?
+  voidedAt                DateTime?
+  voidedBy                String?
+  /// 無効にしたわけ・直したわけ
+  voidReason              String?
+  /// 注文メタフィールド pos.adjustments に書けた時刻と、書けなかったときのエラー
+  metafieldSyncedAt       DateTime?
+  metafieldSyncError      String?
   /// 承認・却下した管理画面の人（オンラインのセッションなら名前、なければ Shopify のユーザー ID「shopify_user:<ID>」）。取れないときは null。DB にだけ残す
   approvalDecidedBy       String?
   createdAt               DateTime @default(now())
@@ -219,6 +230,7 @@ model SpecialRefundEvent {
   @@index([locationId, createdAt])
   @@index([eventType, createdAt])
   @@index([shopId, approvalStatus])
+  @@index([shopId, locationId, countDate])
 }
 
 // ========== 20.6 領収書テンプレート（MVP は 1 件のみ active） ==========

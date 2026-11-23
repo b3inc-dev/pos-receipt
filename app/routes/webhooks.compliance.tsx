@@ -122,6 +122,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               where: { shopId: dbShop.id, sourceOrderId: { in: orderIds } },
               data: { note: "[redacted]" },
             }),
+            // 「変更」「無効化」のわけ（自由に書ける文）も消す。注文メタフィールド pos.adjustments には
+            // わけ・登録した人・メモを入れていない（DB だけ）ので、注文の値は書き直さなくてよい
+            prisma.specialRefundEvent.updateMany({
+              where: { shopId: dbShop.id, sourceOrderId: { in: orderIds }, voidReason: { not: null } },
+              data: { voidReason: "[redacted]" },
+            }),
           ]);
         }
       }

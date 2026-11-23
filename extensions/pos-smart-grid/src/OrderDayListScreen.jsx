@@ -27,20 +27,21 @@ function ymdToStr(y, m, day) {
 }
 
 /**
+ * 一覧の行に付けるバッジ（色付き）
  * @param {object} item - searchOrders の1件
  * @param {"receipt" | "specialRefund"} badgeMode
- * @returns {string[]}
+ * @returns {{ key: string, label: string, tone: string }[]}
  */
-export function formatPosBadgeLabels(item, badgeMode) {
+export function formatPosBadges(item, badgeMode) {
   if (badgeMode === "receipt") {
     const b = item?.posBadges ?? {};
     const out = [];
-    if (b.receiptIssued) out.push("領収書発行済");
-    if (b.refundedShopify) out.push("返金");
-    if (b.voucherLikeGateway) out.push("商品券決済");
+    if (b.receiptIssued) out.push({ key: "receipt", label: "領収書発行済", tone: "success" });
+    if (b.refundedShopify) out.push({ key: "refund", label: "返金", tone: "warning" });
+    if (b.voucherLikeGateway) out.push({ key: "voucher", label: "商品券決済", tone: "neutral" });
     return out;
   }
-  return formatListBadges(item).map((x) => x.label);
+  return formatListBadges(item);
 }
 
 /**
@@ -51,6 +52,7 @@ export function formatPosBadgeLabels(item, badgeMode) {
  * @param {import("preact").ComponentChildren} [props.headerTrailing] - ヘッダー右寄せの横に並べる操作（例: 履歴）
  * @param {string} [props.noticeError] - 一覧上部に出す一時メッセージ（取引詳細からの起動失敗など）
  * @param {() => void} [props.onDismissNotice]
+ * @param {"all" | "refunded" | "voucher_change"} [props.initialSegment] - 開いたときの絞り込み（タイルごとに変える）
  */
 export function OrderDayListScreen({
   pageHeading,
@@ -59,6 +61,7 @@ export function OrderDayListScreen({
   headerTrailing = null,
   noticeError = "",
   onDismissNotice = () => {},
+  initialSegment = "all",
 }) {
   const t0 = useMemo(() => todayYmd(), []);
   const { locationGid, locationIdParam, isReady: sessionReady } = useSessionLocation();
@@ -78,10 +81,12 @@ export function OrderDayListScreen({
   const [listError, setListError] = useState("");
   const [nextCursor, setNextCursor] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [listSegment, setListSegment] = useState("all");
+  const [listSegment, setListSegment] = useState(initialSegment);
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const isSearchMode = searchQuery.trim().length > 0;
+  // 注文番号で探すときは絞り込まない（返金前の注文も出す。特殊返金でアプリが Shopify の返金もする店のため）
+  const effectiveSegment = isSearchMode ? "all" : listSegment;
 
   const availableYears = useMemo(() => {
     return [t0.y, t0.y - 1, t0.y - 2];
@@ -355,9 +360,15 @@ export function OrderDayListScreen({
                 {LIST_SEGMENTS.map((seg) => (
                   <s-button
                     key={seg.value}
-                    kind={listSegment === seg.value ? "primary" : "secondary"}
+                    kind={effectiveSegment === seg.value ? "primary" : "secondary"}
                     style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
-                    onClick={() => setListSegment(seg.value)}
+                    onClick={() => {
+                      setListSegment(seg.value);
+                      if (isSearchMode) {
+                        setSearchDraft("");
+                        setSearchQuery("");
+                      }
+                    }}
                   >
                     {seg.label}
                   </s-button>
@@ -421,11 +432,11 @@ export function OrderDayListScreen({
                 </s-text>
               ) : (
                 <s-stack gap="base">
-                  {items.filter((order) => matchesListSegment(order, listSegment)).length === 0 ? (
+                  {items.filter((order) => matchesListSegment(order, effectiveSegment)).length === 0 ? (
                     <s-text tone="subdued" size="small">この条件の取引はありません。</s-text>
                   ) : null}
-                  {items.filter((order) => matchesListSegment(order, listSegment)).map((order) => {
-                    const badges = formatPosBadgeLabels(order, badgeMode);
+                  {items.filter((order) => matchesListSegment(order, effectiveSegment)).map((order) => {
+                    const badges = formatPosBadges(order, badgeMode);
                     return (
                       <s-clickable
                         key={order.orderId}
@@ -450,9 +461,11 @@ export function OrderDayListScreen({
                               ) : null}
                             </s-stack>
                             {badges.length > 0 ? (
-                              <s-text tone="subdued" fontSize="small">
-                                {badges.map((b) => `［${b}］`).join(" ")}
-                              </s-text>
+                              <s-stack direction="inline" gap="small-300">
+                                {badges.map((b) => (
+                                  <s-badge key={b.key} tone={b.tone}>{b.label}</s-badge>
+                                ))}
+                              </s-stack>
                             ) : null}
                           </s-stack>
                         </s-box>

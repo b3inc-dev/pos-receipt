@@ -154,6 +154,21 @@ export const SETTLEMENT_ORDER_METAFIELD_SPECS: SettlementMetafieldDefSpec[] = [
 /** namespace はすべて `pos`。値の書き込み・集計ロジックは別実装で pos.* と整合させる */
 export const POS_ORDER_BUSINESS_METAFIELD_SPECS: SettlementMetafieldDefSpec[] = [
   {
+    name: "POS 特殊返金・商品券調整",
+    namespace: "pos",
+    key: "adjustments",
+    description:
+      "特殊返金と商品券調整の記録（JSON・行を足すだけ）。アプリが書く。直すときはアプリの「変更」から。仕様は docs/ORDER_ADJUSTMENTS_METAFIELD.md",
+    type: "json",
+  },
+  {
+    name: "POS 特殊返金・商品券調整（一行）",
+    namespace: "pos",
+    key: "adjustments_summary",
+    description: "pos.adjustments を人が読むための一行。表示用（数えるときは pos.adjustments を読む）",
+    type: "single_line_text_field",
+  },
+  {
     name: "POS 特殊返金イベント",
     namespace: "pos",
     key: "special_refund_events",

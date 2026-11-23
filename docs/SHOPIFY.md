@@ -68,8 +68,10 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | key | 用途 |
 |-----|------|
 | `refund_aggregation_location_gid` | 返金の精算計上先 |
-| `special_refund_events` | 定義あり（JSON） |
-| `voucher_change_events` | 定義あり（JSON） |
+| `adjustments` | 特殊返金・商品券調整の記録（JSON・アプリが書く。精算と ciara-system が数える）。仕様は `docs/ORDER_ADJUSTMENTS_METAFIELD.md` |
+| `adjustments_summary` | 上を人が読むための 1 行（表示用） |
+| `special_refund_events` | 定義あり（JSON）。値は書かない（`adjustments` を使う） |
+| `voucher_change_events` | 定義あり（JSON）。値は書かない（`adjustments` を使う） |
 | `business_adjustments_version` | バージョン |
 
 定義 ensure: OAuth / `POST /api/admin/settlement-metafields/ensure`

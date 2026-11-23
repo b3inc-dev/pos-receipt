@@ -7,7 +7,9 @@ import {
   pickParentTransactions,
   refundEventMarker,
   refundNoteMatchesEvent,
+  shouldExecuteShopifyRefund,
 } from "./shopifyRefundExecute.server";
+import { DEFAULT_SPECIAL_REFUND_SETTINGS } from "../utils/appSettings.server";
 
 const sales = [
   {
@@ -200,6 +202,15 @@ describe("refundNoteMatchesEvent", () => {
     const note = `${refundEventMarker(longer)} / 特殊返金 / cash_refund`;
     assert.equal(refundNoteMatchesEvent(note, shorter), false);
     assert.equal(refundNoteMatchesEvent(note, longer), true);
+  });
+});
+
+describe("レシート現金調整", () => {
+  it("設定が残っていても Shopify で返金しない（T の決定 2026-11-23: 記録だけ）", () => {
+    const s = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, refundProcessingMode: "shopify_execute" as const, shopifyExecuteReceiptCashAdjustment: true };
+    assert.equal(shouldExecuteShopifyRefund(s, "receipt_cash_adjustment", "undo"), false);
+    assert.equal(shouldExecuteShopifyRefund(s, "receipt_cash_adjustment", "extra"), false);
+    assert.equal(shouldExecuteShopifyRefund(s, "cash_refund"), true);
   });
 });
 

@@ -157,12 +157,14 @@ Location Stock の POS Lite 配送では、送料が注文の配送料でなく 
 
 ## 10. 特殊返金の精算反映
 
+記録の置き場所（D25）: 特殊返金・商品券調整は、店の設定（特殊返金設定「注文への記録」、初めはオフ）がオンなら注文メタフィールド `pos.adjustments` にも残す（`docs/ORDER_ADJUSTMENTS_METAFIELD.md`）。精算はいつもアプリの記録でその日・その店の有効な行を数え、注文の値が違えば書き直す。数える日は行の `countDate`（店のタイムゾーン）で、前からの行（`countDate` なし）は登録した日。商品券のお釣りは注文の日。直すときは「変更」（前の行を無効にして置き換えの行を足す。Shopify の返金はしない）。
+
 `SpecialRefundEvent`（当日・同一ロケーション・status=active）を設定フラグに従い反映:
 
 | eventType | 反映内容（概略） |
 |-----------|------------------|
 | `cash_refund` | 返金額を支払セクション／refundTotal 等へ（設定 `reflectCashRefundToSettlement`） |
-| `receipt_cash_adjustment` | undo/extra に応じ増減（設定依存） |
+| `receipt_cash_adjustment` | 記録だけ（Shopify では返金しない。T 決定 2026-11-23）。`undo`＝返金を取り消して売上に戻す（返金の合計と支払方法の行の返金から引く）、`extra`＝現金を売上に足す |
 | `payment_method_override` | 実際の返金手段側へ寄せる（設定依存） |
 | `voucher_change_adjustment` | `voucherChangeAmount` に加算（設定依存） |
 

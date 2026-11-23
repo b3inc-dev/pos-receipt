@@ -11,6 +11,8 @@
  *
  * body: { resolution?: "link" | "no_refund", refundId?: string }
  */
+import { syncOrderAdjustmentsMetafield } from "../services/orderAdjustments.server";
+import { countDateOf } from "../services/orderAdjustmentsPure.server";
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
@@ -18,7 +20,7 @@ import { adminGraphqlWithRetry } from "../lib/shopifyGraphqlThrottle.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import { syncRefundAggregationMetafieldForOrder } from "../services/refundAggregation.server";
 import { setOrderRefundAggregationLocationGid } from "../services/posOrderMetafields.server";
-import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
+import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import {
   classifyRefundsForLegacyRecheck,
   decideLegacyRecheck,
@@ -88,7 +90,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         {
           ok: false,
           error:
-            "この登録は「Shopify 返金を確かめる」（同じ登録のまま送り直す）で確かめてください。",
+            "この登録は「返金を確かめる」（同じ登録のまま送り直す）で確かめてください。",
         },
         { status: 400 },
       );
@@ -193,11 +195,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
     } catch {
       // メタフィールド同期失敗でも確かめ直し自体は成功させる
     }
+    // 注文メタフィールド pos.adjustments の Shopify 返金の状態も書き直す（失敗しても確かめ直しは成功）
+    await syncOrderAdjustmentsMetafield(admin, shop.id, event.sourceOrderId);
     const locationGid = normalizeLocationGid(event.locationId);
     if (locationGid) {
       try {
         const timezone = await getShopTimezoneForDaily(admin, shop.id);
-        const targetDate = getCalendarDateStringInTimeZone(event.createdAt, timezone);
+        const targetDate = countDateOf(event, timezone);
         const loc = await prisma.location.findFirst({
           where: { shopId: shop.id, shopifyLocationGid: locationGid },
           select: { name: true },

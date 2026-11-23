@@ -95,6 +95,10 @@ function matchWhere(row: any, where: any): boolean {
       if (!(cond as any[]).some((w) => matchWhere(row, w))) return false;
       continue;
     }
+    if (cond === null) {
+      if (row[k] != null) return false;
+      continue;
+    }
     if (cond && typeof cond === "object" && !(cond instanceof Date)) {
       const c = cond as any;
       if ("in" in c && !c.in.includes(row[k])) return false;
@@ -279,7 +283,11 @@ test("承認／却下: 承認待ちだけを書き換え、Shopify には何も�
   assert.equal(store.specialRefundEvent[0].approvalStatus, "approved");
   assert.ok(store.specialRefundEvent[0].approvalReviewedAt instanceof Date);
   assert.equal(store.specialRefundEvent[0].approvalDecidedBy, "shopify_user:42");
-  assert.ok(calls.every((c) => !/^mutation|Create|Update|Set$/i.test(c)), `Shopify mutations: ${calls.join(",")}`);
+  // Shopify には何も書かない（返金はしない。注文への記録 pos.adjustments は設定が初めオフなので書かない）
+  assert.ok(
+    calls.every((c) => !/^mutation|Create|Update|Set$/i.test(c)),
+    `Shopify mutations: ${calls.join(",")}`,
+  );
   // 2 回目（ほかの人が先に決めた）は断る
   const r2 = await decideSpecialRefundApproval(spyAdmin as any, SHOP_ID, "ev1", "reject");
   assert.equal(r2.ok, false);
@@ -347,8 +355,9 @@ test("登録 API: 設定オンなら現金返金（現金への付け替え）�
   assert.equal(status, 201, JSON.stringify(json));
   assert.equal(json.approvalRequired, true);
   assert.equal(json.event.approvalStatus, "pending");
-  // 登録は「今」なので、合成データの日に移して数える
+  // 登録は「今」なので、合成データの日に移して数える（#93 では数える日 countDate も登録した日になるので一緒に移す）
   store.specialRefundEvent[0].createdAt = new Date(dayStartUtc + 5 * 3600_000);
+  store.specialRefundEvent[0].countDate = TARGET_DATE;
   const { preview, row, cache } = await runBoth();
   assert.equal(preview.total, 3000);
   assert.equal(preview.refundTotal, 0);

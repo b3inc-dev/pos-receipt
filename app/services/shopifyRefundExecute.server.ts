@@ -169,9 +169,11 @@ export function shouldExecuteShopifyRefund(
   if (eventType === "payment_method_override" && settings.shopifyExecutePaymentMethodOverride) {
     return true;
   }
-  if (eventType === "receipt_cash_adjustment" && settings.shopifyExecuteReceiptCashAdjustment) {
-    if (adjustKind === "extra") return false;
-    return true;
+  // レシート現金調整は記録だけ（T の決定 2026-11-23: 「取消」は返金を取り消して売上に戻す意味。Shopify では返金しない）。
+  // shopifyExecuteReceiptCashAdjustment は使わない（前の設定値が残っていても返金しない）
+  if (eventType === "receipt_cash_adjustment") {
+    void adjustKind;
+    return false;
   }
   return false;
 }

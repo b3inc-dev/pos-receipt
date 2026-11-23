@@ -6,6 +6,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import { formatTimeHmInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
+import { buildSearchQuery, normalizeLocationIdForQuery } from "../utils/orderSearchQuery";
 import { hasVoucherLikeGatewayHeuristic, matchPaymentMethodMaster } from "../utils/paymentMethodMatch.server";
 import { isShopifyRefundPending } from "../services/specialRefundOverlayPure.server";
 
@@ -50,47 +51,6 @@ function isRefundedFinancialStatus(status: string | null | undefined): boolean {
   return s === "REFUNDED" || s === "PARTIALLY_REFUNDED";
 }
 
-function normalizeLocationIdForQuery(locationId: string | null | undefined): string | null {
-  const s = locationId?.trim();
-  if (!s) return null;
-  if (/^\d+$/.test(s)) return s;
-  const m = s.match(/Location\/(\d+)$/) ?? s.match(/\/(\d+)$/);
-  return m?.[1] ?? null;
-}
-
-function buildSearchQuery(params: {
-  q?: string | null;
-  locationId?: string | null;
-  dateFrom?: string | null;
-  dateTo?: string | null;
-}): string | undefined {
-  const parts: string[] = [];
-  if (params.q?.trim()) {
-    const term = params.q.trim().replace(/^#/, "");
-    if (/^\d+$/.test(term)) {
-      parts.push(`name:${term}`);
-    } else {
-      parts.push(params.q.trim());
-    }
-  }
-  const locIdRaw = normalizeLocationIdForQuery(params.locationId);
-  if (locIdRaw) {
-    parts.push(`location_id:${locIdRaw}`);
-    parts.push("source_name:pos");
-  }
-  // 検索語があるときは日付条件を付けない（店舗内の過去注文を横断検索）
-  const hasQuery = Boolean(params.q?.trim());
-  if (!hasQuery) {
-    if (params.dateFrom) {
-      parts.push(`created_at:>=${params.dateFrom}T00:00:00Z`);
-    }
-    if (params.dateTo) {
-      parts.push(`created_at:<=${params.dateTo}T23:59:59Z`);
-    }
-  }
-  if (parts.length === 0) return undefined;
-  return parts.join(" AND ");
-}
 
 function gatewaysFromTransactions(
   txs: Array<{ gateway?: string | null; formattedGateway?: string | null }>,
@@ -117,7 +77,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       orderBy: { sortOrder: "asc" },
     });
 
-    const query = buildSearchQuery({ q, locationId, dateFrom, dateTo });
+    const query = buildSearchQuery({ q, locationId, dateFrom, dateTo, timezone });
 
     const response = await admin.graphql(ORDERS_SEARCH_QUERY, {
       variables: { first: limit, after: cursor || null, query: query || null },
@@ -205,16 +165,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
           select: { orderId: true },
         }),
         prisma.specialRefundEvent.findMany({
-          where: { shopId: shop.id, sourceOrderId: { in: idKeys }, status: "active" },
-          select: { sourceOrderId: true, eventType: true, shopifyRefundStatus: true },
+          // 登録の注文 ID は数字のときと GID のときがある（どちらでも拾う）
+          where: {
+            shopId: shop.id,
+            sourceOrderId: { in: [...idKeys, ...idKeys.map((k) => `gid://shopify/Order/${k}`)] },
+            // 無効化した登録も読む（有効な登録が無く無効化だけの注文に「登録を無効化」の印を付ける）
+            status: { in: ["active", "voided"] },
+          },
+          select: { sourceOrderId: true, eventType: true, shopifyRefundStatus: true, status: true, approvalStatus: true },
         }),
       ]);
       const receiptSet = new Set(receiptRows.map((r) => normalizeOrderIdKey(r.orderId)));
       const eventsByOrder = new Map<string, string[]>();
       // Shopify 返金の結果が分かっていない（pending）登録がある注文。精算を止めるので一覧で分かるようにする
       const pendingOrders = new Set<string>();
+      const voidedOrders = new Set<string>();
+      const approvalPendingOrders = new Set<string>();
       for (const e of eventRows) {
         const oid = normalizeOrderIdKey(e.sourceOrderId);
+        if (e.status === "voided") {
+          voidedOrders.add(oid);
+          continue;
+        }
+        if (e.approvalStatus === "pending") approvalPendingOrders.add(oid);
         if (!eventsByOrder.has(oid)) eventsByOrder.set(oid, []);
         eventsByOrder.get(oid)!.push(e.eventType);
         if (isShopifyRefundPending(e.shopifyRefundStatus)) pendingOrders.add(oid);
@@ -233,6 +206,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
             hasVoucherAdjustment,
             appSpecialApplied: hasSpecialRefund,
             hasPendingShopifyRefund: pendingOrders.has(oid),
+            hasApprovalPending: approvalPendingOrders.has(oid),
+            // 有効な登録が無く、無効化した登録だけがある
+            onlyVoidedAdjustments: types.length === 0 && voidedOrders.has(oid),
           },
         };
       });

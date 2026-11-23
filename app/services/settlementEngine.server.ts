@@ -79,8 +79,51 @@ import {
   sleep,
 } from "../lib/shopifyGraphqlThrottle.server";
 import { readOrdersPageOrThrow } from "./settlementUpstreamPage.server";
+import {
+  fetchOrderAdjustmentDocs,
+  isOrderAdjustmentsMetafieldEnabled,
+  syncOrderAdjustmentsMetafield,
+} from "./orderAdjustments.server";
+import {
+  ADJUSTMENT_REWRITE_COOLDOWN_MS,
+  adjustmentSourceWarningMessage,
+  groupAdjustmentRowsByOrder,
+  isOrderWrittenSinceSwitch,
+  orderDocMismatch,
+  resolveSettlementAdjustments,
+  toOrderGid,
+  type AdjustmentSourceWarning,
+} from "./orderAdjustmentsPure.server";
 import { autoResolveStalePendingSpecialRefunds } from "./specialRefundAutoResolve.server";
 import { splitTaxInclusiveToNetAndTax } from "./settlementTaxPure.server";
+
+/** 1 回の精算のプレビューで、注文の特殊返金・商品券調整を書き直す注文の数の上限 */
+const MAX_ADJUSTMENT_RESYNC_PER_PREVIEW = 20;
+
+/**
+ * 精算で注文の特殊返金・商品券調整を書き直した時刻（店と注文ごと）。
+ * 少し前に書き直した注文がまた違うときは、続けて書き換えずに知らせる（ほかのアプリと書き合いにならないように）。
+ * サーバーの中だけで持つ（再起動で消える。消えても 1 回書き直すだけ）。
+ */
+const recentAdjustmentRewrites = new Map<string, number>();
+
+/** テスト用: 精算で書き直した時刻を消す */
+export function resetRecentAdjustmentRewritesForTest(): void {
+  recentAdjustmentRewrites.clear();
+}
+
+function recentlyRewrittenOrders(shopId: string, now: number): Set<string> {
+  const out = new Set<string>();
+  for (const [key, at] of recentAdjustmentRewrites) {
+    if (now - at >= ADJUSTMENT_REWRITE_COOLDOWN_MS) {
+      recentAdjustmentRewrites.delete(key);
+      continue;
+    }
+    const [s, orderGid] = key.split("|");
+    if (s === shopId) out.add(orderGid);
+  }
+  return out;
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -131,6 +174,16 @@ export interface SettlementPreviewDTO {
    */
   awaitingApprovalSpecialRefunds?: AwaitingApprovalSpecialRefund[];
   awaitingApprovalWarning?: string;
+  /**
+   * 特殊返金・商品券調整の注文メタフィールドが無い・読めない・アプリの記録と違い、書き直せなかった注文（無いときは入れない）。
+   * 精算はいつもアプリの記録で数え、確定できる（注文を読むほかのアプリとずれることがある）。
+   */
+  adjustmentSourceWarnings?: {
+    reason: AdjustmentSourceWarning["reason"] | "metafield_unreadable";
+    sourceOrderId: string;
+    sourceOrderName: string | null;
+    message: string;
+  }[];
   appliedSpecialRefundEvents: {
     id: string;
     eventType: string;
@@ -178,6 +231,11 @@ export interface SettlementPreviewOptions {
    * 確定しない読み方（プレビュー・点検）だけで使う。精算の確定・再確定・再集計では使わない（D18）。
    */
   allowPendingSpecialRefunds?: boolean;
+  /**
+   * false のとき、注文の特殊返金・商品券調整が違っても書き直さず、警告だけ出す（調べるだけの呼び出し用。見直し P3）。
+   * 初めは true。
+   */
+  resyncOrderAdjustments?: boolean;
 }
 
 export interface SettlementPreviewDebugDTO {
@@ -883,17 +941,89 @@ async function buildSettlementPreviewImpl(
   const itemCount = gas.itemCount;
 
   const locationGid = locationId.startsWith("gid://") ? locationId : `gid://shopify/Location/${locationId}`;
-  const specialRefundEvents = await prisma.specialRefundEvent.findMany({
+  // DB は「日・店 → 注文」の目次。数える日（countDate）がこの日の行と、前からの行（countDate なし）は登録した日で探す。
+  // 数そのものは注文メタフィールド pos.adjustments から読む（docs/ORDER_ADJUSTMENTS_METAFIELD.md）。
+  const specialRefundIndexRows = await prisma.specialRefundEvent.findMany({
     where: {
       shopId,
       locationId: { in: [locationId, locationGid, locIdRaw] },
       status: "active",
-      createdAt: {
-        gte: dayRange.startUtc,
-        lte: dayRange.endUtc,
-      },
+      OR: [
+        { countDate: targetDate },
+        {
+          countDate: null,
+          createdAt: {
+            gte: dayRange.startUtc,
+            lte: dayRange.endUtc,
+          },
+        },
+      ],
     },
   });
+  // 数えるのはアプリの記録（DB）。注文に書く設定の店は、注文の値と比べ、違う・無い・読めない注文を書き直す
+  // （T の決定 2026-11-23。docs/ORDER_ADJUSTMENTS_METAFIELD.md 4 章）
+  const metafieldEnabled =
+    specialRefundIndexRows.length > 0 && (await isOrderAdjustmentsMetafieldEnabled(shopId));
+  // 読むのは、注文に書く設定にしてから書いた注文だけ（前からの登録は管理画面から書く。精算ではまとめて書かない）
+  const writtenOrderIds = [...groupAdjustmentRowsByOrder(specialRefundIndexRows).values()]
+    .filter((rows) => isOrderWrittenSinceSwitch(rows))
+    .map((rows) => rows[0].sourceOrderId);
+  const adjustmentDocs = metafieldEnabled
+    ? await fetchOrderAdjustmentDocs(admin, writtenOrderIds)
+    : { fetched: false, docs: new Map<string, string | null>() };
+  const {
+    events: specialRefundEvents,
+    needsResync,
+    warnings: adjustmentDiffersAgain,
+    notWrittenOrderCount,
+  } = resolveSettlementAdjustments({
+    date: targetDate,
+    locationGid,
+    dbRows: specialRefundIndexRows,
+    docs: adjustmentDocs.docs,
+    docsFetched: adjustmentDocs.fetched,
+    recentlyRewritten: recentlyRewrittenOrders(shopId, Date.now()),
+  });
+  const adjustmentSourceWarnings: AdjustmentSourceWarning[] = [...adjustmentDiffersAgain];
+  const rowsByOrder = groupAdjustmentRowsByOrder(specialRefundIndexRows);
+  for (const [i, need] of needsResync.entries()) {
+    // 1 回の精算で書き直すのは決まった数まで（残りは警告にして、次に開いたときに書き直す）
+    // 調べるだけの呼び出し（resyncOrderAdjustments: false）は書かない
+    if (opts?.resyncOrderAdjustments === false || i >= MAX_ADJUSTMENT_RESYNC_PER_PREVIEW) {
+      adjustmentSourceWarnings.push(need);
+      continue;
+    }
+    const orderGid = toOrderGid(need.sourceOrderId);
+    const r = await syncOrderAdjustmentsMetafield(admin, shopId, need.sourceOrderId);
+    if (!r.ok) {
+      adjustmentSourceWarnings.push(need);
+      continue;
+    }
+    recentAdjustmentRewrites.set(`${shopId}|${orderGid}`, Date.now());
+    // 書いたあとに注文を読み直して、まだ違えば知らせる（ほかのアプリが書き換えている）
+    const reread = await fetchOrderAdjustmentDocs(admin, [orderGid]);
+    const still = reread.fetched
+      ? orderDocMismatch({
+          date: targetDate,
+          locationGid,
+          rows: rowsByOrder.get(orderGid) ?? [],
+          raw: reread.docs.get(orderGid) ?? null,
+        })
+      : null;
+    if (still) {
+      adjustmentSourceWarnings.push({ ...need, reason: "metafield_differs_again" });
+    }
+  }
+  if (metafieldEnabled && !adjustmentDocs.fetched) {
+    console.warn(
+      `[settlement] order adjustments metafield read failed; counted from DB shop=${shopId} location=${locationId} date=${targetDate}`,
+    );
+  }
+  if (needsResync.length > 0 || adjustmentDiffersAgain.length > 0 || notWrittenOrderCount > 0) {
+    console.warn(
+      `[settlement] order adjustments metafield resync count=${needsResync.length} warned=${adjustmentSourceWarnings.length} notWrittenYet=${notWrittenOrderCount} reasons=${[...needsResync, ...adjustmentDiffersAgain].map((w) => w.reason).join(",")} shop=${shopId} location=${locationId} date=${targetDate}`,
+    );
+  }
 
   const srSettingsRaw = await getAppSetting<Partial<SpecialRefundSettings>>(
     shopId,
@@ -1094,6 +1224,27 @@ async function buildSettlementPreviewImpl(
             awaitingApprovalWarning: awaitingApprovalWarningMessage(items),
           };
         })()
+      : {}),
+    ...(adjustmentSourceWarnings.length > 0 || (metafieldEnabled && !adjustmentDocs.fetched)
+      ? {
+          adjustmentSourceWarnings: [
+            ...adjustmentSourceWarnings.map((w) => ({
+              ...w,
+              message: adjustmentSourceWarningMessage(w),
+            })),
+            ...(metafieldEnabled && !adjustmentDocs.fetched
+              ? [
+                  {
+                    reason: "metafield_unreadable" as const,
+                    sourceOrderId: "",
+                    sourceOrderName: null,
+                    message:
+                      "注文の「特殊返金・商品券調整」を読めず、注文の記録と比べられませんでした。精算はアプリの記録で数えています。しばらくしてから更新してください。",
+                  },
+                ]
+              : []),
+          ],
+        }
       : {}),
     ...(unmatchedRefundMethods.length > 0
       ? {

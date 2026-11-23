@@ -8,6 +8,7 @@
  *
  * Shopify は読むだけで、返金は作らない。決め方は specialRefundAutoResolvePure.server.ts。
  */
+import { syncOrderAdjustmentsMetafield } from "./orderAdjustments.server";
 import prisma from "../db.server";
 import { adminGraphqlWithRetry, type AdminGraphqlClient } from "../lib/shopifyGraphqlThrottle.server";
 import { syncRefundAggregationMetafieldForOrder } from "./refundAggregation.server";
@@ -62,6 +63,9 @@ export async function afterSpecialRefundsResolved(
     } catch {
       // メタフィールド同期失敗でも決めた結果はそのまま
     }
+    // 注文の記録（pos.adjustments）の返金の状態も同じにする（注文に書く設定の店だけ。失敗しても結果はそのまま。
+    // 精算のときに書き直す）。docs/ORDER_ADJUSTMENTS_METAFIELD.md
+    await syncOrderAdjustmentsMetafield(admin, shopId, sourceOrderId);
   }
   if (!opts.refreshDailySummary) return;
 
