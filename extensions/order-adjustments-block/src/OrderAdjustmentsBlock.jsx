@@ -12,9 +12,9 @@ export default async () => {
 
 const KIND_LABELS = {
   cash_refund: "現金返金",
-  payment_method_override: "返金手段の付け替え",
+  payment_method_override: "返金方法変更",
   receipt_cash_adjustment: "レシート現金調整",
-  voucher_change_adjustment: "商品券",
+  voucher_change_adjustment: "商品券釣銭登録",
 };
 
 const STATUS_LABELS = {
@@ -89,14 +89,14 @@ function OrderAdjustmentsBlock() {
 
   if (state.loading) {
     return (
-      <s-admin-block heading="特殊返金・商品券調整">
+      <s-admin-block heading="返金方法変更・商品券釣銭登録">
         <s-text color="subdued">読み込み中…</s-text>
       </s-admin-block>
     );
   }
   if (state.error) {
     return (
-      <s-admin-block heading="特殊返金・商品券調整">
+      <s-admin-block heading="返金方法変更・商品券釣銭登録">
         <s-banner tone="critical">{state.error}</s-banner>
       </s-admin-block>
     );
@@ -108,7 +108,7 @@ function OrderAdjustmentsBlock() {
   const notice = STATE_NOTICES[state.data?.metafieldState];
 
   return (
-    <s-admin-block heading="特殊返金・商品券調整">
+    <s-admin-block heading="返金方法変更・商品券釣銭登録">
       <s-stack gap="base">
         {notice ? <s-banner tone="warning">{notice}</s-banner> : null}
         {shown.length === 0 ? (

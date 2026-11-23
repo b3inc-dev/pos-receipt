@@ -32,7 +32,7 @@ export interface OrderAdjustmentEntry {
   locationGid: string;
   /** 元の支払方法（支払方法マスタの gateway の名前） */
   fromMethod: string | null;
-  /** 実際に返した手段（支払方法マスタの gateway の名前） */
+  /** 実際に返金方法（支払方法マスタの gateway の名前） */
   toMethod: string | null;
   /** 支払方法マスタの表示名（読みやすさのため。数えるときは使わない） */
   fromLabel: string | null;
@@ -216,16 +216,16 @@ export function buildOrderAdjustmentsDoc(
 
 const KIND_LABEL: Record<string, string> = {
   cash_refund: "現金返金",
-  payment_method_override: "返金手段の付け替え",
+  payment_method_override: "返金方法変更",
   receipt_cash_adjustment: "レシート現金調整",
-  voucher_change_adjustment: "商品券",
+  voucher_change_adjustment: "商品券釣銭登録",
 };
 
 function yen(n: number): string {
   return `¥${Math.round(n).toLocaleString("ja-JP")}`;
 }
 
-/** 人が読むための 1 行（有効・承認待ちの行だけ）。例: 「11/23 返金手段の付け替え クレジット→現金 ¥1,200 ／ 11/23 商品券 額面¥5,000 お釣り¥800」 */
+/** 人が読むための 1 行（有効・承認待ちの行だけ）。例: 「11/23 返金方法変更 クレジット→現金 ¥1,200 ／ 11/23 商品券 額面¥5,000 お釣り¥800」 */
 export function buildOrderAdjustmentsSummary(doc: OrderAdjustmentsDoc): string {
   const parts: string[] = [];
   for (const e of doc.entries) {
@@ -420,11 +420,11 @@ export function adjustmentSourceWarningMessage(w: AdjustmentSourceWarning): stri
     case "metafield_missing":
       return `注文 ${order}: 特殊返金・商品券の記録を注文に書けていません。${tail}`;
     case "metafield_invalid":
-      return `注文 ${order}: 注文の「特殊返金・商品券調整」の形が読めず、書き直しもできませんでした。${tail}`;
+      return `注文 ${order}: 注文の「返金方法変更・商品券釣銭登録」の形が読めず、書き直しもできませんでした。${tail}`;
     case "metafield_differs":
-      return `注文 ${order}: 注文の「特殊返金・商品券調整」がアプリの記録と違い、書き直しもできませんでした。${tail}`;
+      return `注文 ${order}: 注文の「返金方法変更・商品券釣銭登録」がアプリの記録と違い、書き直しもできませんでした。${tail}`;
     case "metafield_differs_again":
-      return `注文 ${order}: 注文の「特殊返金・商品券調整」を少し前に書き直しましたが、まだアプリの記録と違います。ほかのアプリや Shopify の画面で書き換えられている可能性があります。精算はアプリの記録で数えています。続けて書き直すことはしないので、書き換えている所を確かめてから、管理画面の注文ごとの記録で「書き直す」を押してください。`;
+      return `注文 ${order}: 注文の「返金方法変更・商品券釣銭登録」を少し前に書き直しましたが、まだアプリの記録と違います。ほかのアプリや Shopify の画面で書き換えられている可能性があります。精算はアプリの記録で数えています。続けて書き直すことはしないので、書き換えている所を確かめてから、管理画面の注文ごとの記録で「書き直す」を押してください。`;
   }
 }
 
@@ -722,7 +722,7 @@ export function planAdjustmentEdit(
     warning =
       "Shopify の返金の金額は変わりません。金額を直した分は、Shopify の管理画面で返金を直してください（アプリの記録は直しました）。";
   } else if (shopifyRefundKept) {
-    warning = "Shopify の返金はそのままです。アプリの記録（返した手段など）だけを直しました。";
+    warning = "Shopify の返金はそのままです。アプリの記録（返金方法など）だけを直しました。";
   }
   return { ok: true, create, shopifyRefundKept, warning };
 }
