@@ -264,7 +264,16 @@ export function NativeRefundReassignForm({
                   <Row label="取引" value={order?.orderName ?? "-"} />
                   <Row label="純正の返金" value={nativeRefundLineLabel(selected)} />
                   {rows.map((r, i) => (
-                    <Row key={i} label={`${selected.label || selected.gateway} → ${methodLabel(r.method)}`} value={yen(amounts.amounts[i])} />
+                    <Row
+                      key={i}
+                      label={
+                        String(r.method ?? "").trim().toLowerCase() === String(selected.gateway ?? "").trim().toLowerCase() ||
+                        methodLabel(r.method) === (selected.label || selected.gateway)
+                          ? `${methodLabel(r.method)}のまま（変更なし）`
+                          : `${selected.label || selected.gateway} → ${methodLabel(r.method)}`
+                      }
+                      value={yen(amounts.amounts[i])}
+                    />
                   ))}
                   <Row label="合計" value={yen(total)} />
                   {note ? <Row label="メモ" value={note} /> : null}

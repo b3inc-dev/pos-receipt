@@ -118,6 +118,16 @@ function shortDate(isoDate) {
   return m ? `${Number(m[2])}/${Number(m[3])}` : String(isoDate ?? "");
 }
 
+/** 元の手段と実際の手段が同じか（分割の残額の行など、手段が変わらない調整） */
+export function sameRefundMethod(event) {
+  const k = (v) => String(v ?? "").trim().toLowerCase();
+  const from = k(event?.originalPaymentMethod);
+  const to = k(event?.actualRefundMethod);
+  if (from && to && from === to) return true;
+  const fl = k(event?.originalPaymentLabel);
+  return fl !== "" && fl === k(event?.actualRefundLabel);
+}
+
 /**
  * 調整履歴の 1 件の灰色の小さい字の行（手段・内訳・いつの精算・登録日時）。
  * @param {Record<string, any>} event
@@ -132,7 +142,8 @@ export function adjustmentSubLines(event) {
   }
   const from = event?.originalPaymentMethod ? event.originalPaymentLabel || event.originalPaymentMethod : "";
   const to = event?.actualRefundMethod ? event.actualRefundLabel || event.actualRefundMethod : "";
-  if (from && to) lines.push(`${from} → ${to} で返金`);
+  if (from && to && sameRefundMethod(event)) lines.push(`${to}のまま（手段の変更なし）`);
+  else if (from && to) lines.push(`${from} → ${to} で返金`);
   else if (from) lines.push(`元の支払い ${from}`);
   else if (to) lines.push(`${to} で返金`);
   const when = [
@@ -149,7 +160,8 @@ export function adjustmentKindLabel(event) {
   switch (event?.eventType) {
     case "cash_refund":
     case "payment_method_override":
-      return event?.refundSource === "native" ? "返金の付け替え" : "返金の手段の変更";
+      // 純正の返金の付け替えも同じ名前。違いはバッジ「純正返金の付け替え」で分かる
+      return "返金の手段の変更";
     case "receipt_cash_adjustment":
       return "レシート現金調整";
     case "voucher_change_adjustment":

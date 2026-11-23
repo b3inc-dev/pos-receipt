@@ -787,27 +787,29 @@ function OrderDetailView({
 
 
 
-              {submitNotice ? (
-                <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="small">
-                    <s-text tone={submitNotice.tone === "warning" ? "critical" : submitNotice.tone}>
-                      {submitNotice.text}
-                    </s-text>
-                    {onDismissNotice ? (
-                      <s-button kind="secondary" onClick={onDismissNotice}>
-                        閉じる
-                      </s-button>
-                    ) : null}
-                  </s-stack>
-                </s-box>
-              ) : null}
-
               {/* 調整履歴（案A: 灰色の小さい見出し、1 件は一覧の行と同じ形） */}
               <s-stack gap="small-300">
                 <s-text type="small" color="subdued">
                   {activeEvents.length > 0 ? `調整履歴（${activeEvents.length}件）` : "調整履歴"}
                 </s-text>
                 <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
+                {/* 登録・変更・無効化の結果は、変わった所（調整履歴）の頭に出す（#104 の「会計をやり直す」と同じ考え） */}
+                {submitNotice ? (
+                  <s-box paddingBlock="small-300">
+                    <s-stack gap="small-300">
+                      <s-text type="strong" tone={submitNotice.tone === "warning" ? "critical" : submitNotice.tone}>
+                        {submitNotice.text}
+                      </s-text>
+                      {onDismissNotice ? (
+                        <s-stack direction="inline" gap="small">
+                          <s-button variant="secondary" onClick={onDismissNotice}>
+                            閉じる
+                          </s-button>
+                        </s-stack>
+                      ) : null}
+                    </s-stack>
+                  </s-box>
+                ) : null}
               </s-stack>
               {activeEvents.length > 0 ? (
                 <s-stack gap="small">
