@@ -37,15 +37,45 @@ function cartHasItems() {
 
 function VoucherModal() {
   // カートに商品があるときだけ、管理画面の「会計の前に額面を入れる」（初めはオフ）を確かめてから決める
-  const [screen, setScreen] = useState(() =>
-    !openedFromOrderDetails() && cartHasItems() ? "checking" : "list",
-  );
+  // 取引詳細から開いたか（一覧の画面が目印を消すので、最初に一度だけ読む）
+  const [fromOrder] = useState(() => openedFromOrderDetails());
+  const [screen, setScreen] = useState(() => (!fromOrder && cartHasItems() ? "checking" : "list"));
+  const [listNote, setListNote] = useState("");
+  // カートに商品がある: 「会計の前に額面を入れる」がオンなら入力の画面へ。使えないときは一覧の上に一行でわけを出す
   useEffect(() => {
     if (screen !== "checking") return;
     let alive = true;
     getVoucherCartEntryEnabled()
-      .then((res) => alive && setScreen(res?.enabled === true ? "cart" : "list"))
-      .catch(() => alive && setScreen("list"));
+      .then((res) => {
+        if (!alive) return;
+        if (res?.enabled === true) {
+          setScreen("cart");
+          return;
+        }
+        setListNote(
+          "会計の前に額面を入れる機能がオフです。使うときは、管理画面の「商品券設定」で「商品券機能」「手動調整」「会計の前に額面を入れる」をオンにします。",
+        );
+        setScreen("list");
+      })
+      .catch(() => {
+        if (!alive) return;
+        setListNote("会計の前に額面を入れる設定を読めませんでした。通信を確かめて、タイルを開き直してください。");
+        setScreen("list");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [screen]);
+  // カートが空で一覧を出すとき: 先に額面を入れる入口を一覧の上に出す（スイッチがオンの店だけ。T 2026-11-24）
+  const [canEnterBeforeItems, setCanEnterBeforeItems] = useState(false);
+  useEffect(() => {
+    if (screen !== "list" || listNote || fromOrder || cartHasItems()) return;
+    let alive = true;
+    getVoucherCartEntryEnabled()
+      .then((res) => {
+        if (alive && res?.enabled === true) setCanEnterBeforeItems(true);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -54,7 +84,7 @@ function VoucherModal() {
     return (
       <s-page heading="商品券">
         <s-box padding="base">
-          <s-text tone="subdued">読み込み中…</s-text>
+          <s-text color="subdued">読み込み中…</s-text>
         </s-box>
       </s-page>
     );
@@ -62,5 +92,13 @@ function VoucherModal() {
   if (screen === "cart") {
     return <VoucherCartScreen onOpenList={() => setScreen("list")} />;
   }
-  return <SpecialRefundModal initialListSegment="voucher_change" />;
+  return (
+    <SpecialRefundModal
+      initialListSegment="voucher_change"
+      listNote={listNote}
+      listAction={
+        canEnterBeforeItems ? { label: "会計の前に額面を入れる", onClick: () => setScreen("cart") } : null
+      }
+    />
+  );
 }

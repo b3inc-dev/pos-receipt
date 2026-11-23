@@ -8,9 +8,9 @@ api_version = "2026-07"
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "特殊返金・商品券調整"
+name = "返金・商品券釣銭調整"
 handle = "order-adjustments-block"
-description = "注文の特殊返金・商品券調整の記録を表示し、アプリで変更する"
+description = "注文の返金の手段の付け替え・商品券釣銭調整の記録を見て、アプリで変更する"
 
 [[extensions.targeting]]
 module = "./src/OrderAdjustmentsBlock.jsx"

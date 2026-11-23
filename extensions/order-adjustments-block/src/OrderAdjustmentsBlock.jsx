@@ -89,14 +89,14 @@ function OrderAdjustmentsBlock() {
 
   if (state.loading) {
     return (
-      <s-admin-block heading="特殊返金・商品券調整">
+      <s-admin-block heading="返金・商品券釣銭調整">
         <s-text color="subdued">読み込み中…</s-text>
       </s-admin-block>
     );
   }
   if (state.error) {
     return (
-      <s-admin-block heading="特殊返金・商品券調整">
+      <s-admin-block heading="返金・商品券釣銭調整">
         <s-banner tone="critical">{state.error}</s-banner>
       </s-admin-block>
     );
@@ -108,7 +108,7 @@ function OrderAdjustmentsBlock() {
   const notice = STATE_NOTICES[state.data?.metafieldState];
 
   return (
-    <s-admin-block heading="特殊返金・商品券調整">
+    <s-admin-block heading="返金・商品券釣銭調整">
       <s-stack gap="base">
         {notice ? <s-banner tone="warning">{notice}</s-banner> : null}
         {shown.length === 0 ? (

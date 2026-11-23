@@ -22,6 +22,7 @@ T の決定（2026-11-23、カード）: 商品券釣有りの会計では、会
 | 注文 | Shopify | カートの項目は会計後も注文に残る。「_」始まりは POS の画面・レシートに出ないが、注文（管理画面・Admin API・webhook）には書かれる（shopify.dev Cart API, 2026-07） |
 | 自動登録 | `VoucherPostPurchaseBlock.jsx`（`pos.purchase.post.block.render`） | 目印があるときだけ `POST /api/voucher-adjustments/from-cart`（注文 ID）。結果を一行で出す。目印が無い会計では何も出さず、サーバーも呼ばない |
 | 拾い直し | `webhooks.orders.updated.tsx` | 知らせの `note_attributes` に額面があれば同じ関数を呼ぶ（会計後の画面を閉じた・端末の目印が消えたとき） |
+| 会計が終わった画面の「管理」 | `VoucherOrderAction.jsx`（`pos.purchase.post.action.menu-item.render`）→ `VoucherModal.jsx`（`pos.purchase.post.action.render`） | 「商品券釣銭調整」の行から、その注文の商品券の画面を開く（自動で登録できなかったとき・額面を直すとき） |
 | 登録 | `voucherCartEntry.server.ts` `registerVoucherFromCartEntry` | 注文を読み直し、`customAttributes` の額面・商品券で払った額（`fetchOrderVoucherApplied`）から、後から登録したときと同じ行を作り、`pos.adjustments` と売上サマリーを直す |
 
 ### 決まり
@@ -40,6 +41,7 @@ T の決定（2026-11-23、カード）: 商品券釣有りの会計では、会
 - 同じ注文で 2 回作らない: 行の id を `pos_vc_cart_<注文の数字>` にして主キーで止める。手で登録した商品券調整（有効）が先にあれば作らない。
 - 作らないとき（会計後の画面にわけを出す）: 商品券の支払いが無い（`no_voucher_payment`）、キャンセル済み、管理画面の商品券設定で「商品券機能」か「手動調整」がオフ（`disabled`）、注文を読めない。
 - 額面を入れたまま会計しなかったカートは、項目が消えるだけで何も登録しない。
+- カートが空のときも、一覧の上の「会計の前に額面を入れる」から先に入れられる（T 2026-11-24）。空のカートに項目を付けて、あとから商品を入れても残るかは実機で確かめる（Cart API の説明に空のカートを断るとは書いていない）。
 
 ## 未確認（開発ストアで確かめる）
 

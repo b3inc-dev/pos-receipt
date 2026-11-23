@@ -39,7 +39,7 @@ import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
 import { adjustmentBadges, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
-import { financialStatusLabel } from "./orderDisplayUtils.js";
+import { financialStatusLabel, listSegmentsForTile } from "./orderDisplayUtils.js";
 import { RedoCheckoutSection } from "./RedoCheckoutSection.jsx";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import {
@@ -254,7 +254,7 @@ export default async () => {
 /**
  * @param {{ initialListSegment?: "all" | "refunded" | "voucher_change" }} props
  */
-export function SpecialRefundModal({ initialListSegment = "refunded" }) {
+export function SpecialRefundModal({ initialListSegment = "refunded", listNote = "", listAction = null }) {
   const [step, setStep] = useState("day_list");
   // 「変更」する登録
   const [editingEvent, setEditingEvent] = useState(null);
@@ -548,6 +548,9 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
         noticeError={bootstrapError}
         onDismissNotice={() => setBootstrapError("")}
         initialSegment={initialListSegment}
+        segments={listSegmentsForTile(initialListSegment)}
+        listNote={listNote}
+        listAction={listAction}
       />
     );
   }
@@ -1494,7 +1497,7 @@ function VoucherAdjustmentForm({
                   <Row label="取引" value={order?.orderName ?? "-"} />
                   <Row label="商品券額面" value={`¥${face.toLocaleString()}`} />
                   <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
-                  <Row label="お釣り" value={`¥${Number(changeAmount ?? 0).toLocaleString()}`} />
+                  <Row label="釣銭" value={`¥${Number(changeAmount ?? 0).toLocaleString()}`} />
                   {note ? <Row label="メモ" value={note} /> : null}
                 </s-stack>
               </s-box>
@@ -1551,16 +1554,16 @@ function VoucherAdjustmentForm({
                 value={appliedState === "loading" ? "読み込み中…" : `¥${applied.toLocaleString()}`}
               />
             )}
-            {/* 全額反映: 商品券で払った額をそのまま額面に入れる（お釣りなし。違えば直す） */}
+            {/* 全額反映: 商品券で払った額をそのまま額面に入れる（釣銭なし。違えば直す） */}
             {appliedState !== "loading" && appliedAmount !== "" && applied > 0 ? (
               <s-button kind="secondary" onClick={() => setFaceValue(String(roundMoney(applied)))} disabled={loading}>
                 {`払った額 ¥${roundMoney(applied).toLocaleString()} を額面に入れる（全額反映）`}
               </s-button>
             ) : null}
 
-            {/* お釣り（自動） */}
+            {/* 釣銭（自動） */}
             <Row
-              label="お釣り（額面 − 払った額）"
+              label="釣銭（額面 − 払った額）"
               value={changeAmount == null ? "-" : `¥${changeAmount.toLocaleString()}`}
             />
 
@@ -1716,7 +1719,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
                   {isVoucher ? (
                     <>
                       <Row label="商品券額面" value={`¥${face.toLocaleString()}`} />
-                      <Row label="お釣り" value={`¥${Number(change ?? 0).toLocaleString()}`} />
+                      <Row label="釣銭" value={`¥${Number(change ?? 0).toLocaleString()}`} />
                     </>
                   ) : (
                     <Row label="金額" value={`¥${Number(amount).toLocaleString()}`} />
@@ -1781,7 +1784,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
                   onInput={(e) => setFaceValue(e?.currentTarget?.value ?? "")}
                 />
                 <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
-                <Row label="お釣り" value={change == null ? "-" : `¥${change.toLocaleString()}`} />
+                <Row label="釣銭" value={change == null ? "-" : `¥${change.toLocaleString()}`} />
               </>
             ) : isNative ? (
               <s-stack gap="none">
