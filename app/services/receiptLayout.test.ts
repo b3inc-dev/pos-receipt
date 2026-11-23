@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readableSummaryText } from "./receiptLayoutVariables";
 import { BLOCK_DEFS, blockDefsForKind, defaultSettings } from "./receiptLayoutBlocks";
 import { sampleTemplateData } from "./receiptLayoutData";
 import {
@@ -299,5 +300,17 @@ describe("receiptLayout: 独立レビューの指摘（2026-11-22）", () => {
     const r = validateLayoutInput(l, "receipt");
     assert.equal(r.ok, false);
     assert.match(r.ok ? "" : r.errors.join(), /「画像の URL」が長すぎます/);
+  });
+});
+
+
+describe("ブロックの一覧の見出し", () => {
+  it("{{ }} の変数を読める名前にする", () => {
+    assert.equal(readableSummaryText("{{ shop.name }}"), "［ストア名］");
+    assert.equal(readableSummaryText("{{ settlement.as_of }} 発行"), "［集計した時刻］ 発行");
+    assert.equal(readableSummaryText("{{ settlement.kind_label }}"), "［精算／点検］");
+    assert.equal(readableSummaryText("{{ settlement.title }}"), "［表題］");
+    assert.equal(readableSummaryText("{{ nothing.here | upcase }}"), "［値］");
+    assert.equal(readableSummaryText("ありがとうございました"), "ありがとうございました");
   });
 });
