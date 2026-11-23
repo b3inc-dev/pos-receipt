@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   executeShopifyRefundForEvent,
+  graphqlErrorsFromThrown,
   isRetryableRefundError,
   pickParentTransactions,
   refundEventMarker,
@@ -210,5 +211,97 @@ describe("レシート現金調整", () => {
     assert.equal(shouldExecuteShopifyRefund(s, "receipt_cash_adjustment", "undo"), false);
     assert.equal(shouldExecuteShopifyRefund(s, "receipt_cash_adjustment", "extra"), false);
     assert.equal(shouldExecuteShopifyRefund(s, "cash_refund"), true);
+  });
+});
+
+/** @shopify/shopify-api の GraphqlQueryError に似せたもの（body.errors.graphQLErrors に GraphQL の errors） */
+class FakeGraphqlQueryError extends Error {
+  body: unknown;
+  constructor(graphQLErrors: { message: string; extensions?: { code?: string } }[]) {
+    super(graphQLErrors[0]?.message ?? "GraphQL operation failed");
+    this.name = "GraphqlQueryError";
+    this.body = { errors: { message: "GraphQL Client: An error occurred", graphQLErrors } };
+  }
+}
+
+function adminThatThrowsOnRefundCreate(err: Error) {
+  return {
+    graphql: async (query: string) => {
+      if (!query.includes("OrderForRefund")) throw err;
+      return {
+        json: async () => ({
+          data: {
+            order: {
+              id: "gid://shopify/Order/1",
+              refundable: true,
+              refunds: [],
+              transactions: [sales[1]],
+            },
+          },
+        }),
+      };
+    },
+  };
+}
+
+const refundParams = {
+  sourceOrderId: "1",
+  amount: 500,
+  eventType: "cash_refund",
+  originalPaymentMethod: "credit_card",
+  actualRefundMethod: "cash",
+  idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",
+};
+
+describe("refundCreate が例外（GraphqlQueryError）で返ってきたとき", () => {
+  it("同じキーの実行中は、本物のクライアントのように投げられても retryable（pending のまま同じキーで再開）", async () => {
+    const admin = adminThatThrowsOnRefundCreate(
+      new FakeGraphqlQueryError([
+        {
+          message: "A request with this idempotency key is still running",
+          extensions: { code: "IDEMPOTENCY_CONCURRENT_REQUEST" },
+        },
+      ]),
+    );
+    const result = await executeShopifyRefundForEvent(admin, refundParams);
+    assert.deepEqual(result, {
+      status: "retryable",
+      error: "A request with this idempotency key is still running",
+    });
+  });
+
+  it("検証のエラー（mutation が走っていない）は failed とエラー文を返す", async () => {
+    const admin = adminThatThrowsOnRefundCreate(
+      new FakeGraphqlQueryError([
+        { message: "Field 'code' doesn't exist on type 'UserError'", extensions: { code: "undefinedField" } },
+      ]),
+    );
+    const result = await executeShopifyRefundForEvent(admin, refundParams);
+    assert.deepEqual(result, {
+      status: "failed",
+      error: "Field 'code' doesn't exist on type 'UserError'",
+    });
+  });
+
+  it("errors を持たない例外（通信の失敗など）はそのまま上げる（成否が分からないので pending のまま）", async () => {
+    const admin = adminThatThrowsOnRefundCreate(new Error("socket hang up"));
+    await assert.rejects(() => executeShopifyRefundForEvent(admin, refundParams), /socket hang up/);
+  });
+});
+
+describe("graphqlErrorsFromThrown", () => {
+  it("GraphqlQueryError の body.errors.graphQLErrors と、body.errors が配列の形の両方を読む", () => {
+    assert.deepEqual(
+      graphqlErrorsFromThrown(new FakeGraphqlQueryError([{ message: "x", extensions: { code: "THROTTLED" } }])),
+      [{ message: "x", extensions: { code: "THROTTLED" } }],
+    );
+    assert.deepEqual(graphqlErrorsFromThrown({ body: { errors: [{ message: "y" }] } }), [
+      { message: "y", extensions: { code: undefined } },
+    ]);
+  });
+  it("errors が無いものは null", () => {
+    assert.equal(graphqlErrorsFromThrown(new Error("z")), null);
+    assert.equal(graphqlErrorsFromThrown({ body: { errors: { message: "HTTP 500" } } }), null);
+    assert.equal(graphqlErrorsFromThrown(null), null);
   });
 });
