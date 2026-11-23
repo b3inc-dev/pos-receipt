@@ -39,6 +39,9 @@ function mkOrder(i: number, gw: string, amount: number) {
 }
 const orders = [mkOrder(0, "cash", 1000), mkOrder(1, "shopify_payments", 2000)];
 
+/** 注文の純正の返金（OrderRefundsForReassign の答え）。"error" なら読めない */
+let nativeRefundsMock: unknown[] | "error" = [];
+
 function opName(q: string) {
   return /(query|mutation)\s+(\w+)/.exec(q)?.[2] ?? "anon";
 }
@@ -59,6 +62,12 @@ const admin = {
         break;
       case "ShopTimezone":
         data = { shop: { ianaTimezone: "Asia/Tokyo" } };
+        break;
+      case "OrderRefundsForReassign":
+        if (nativeRefundsMock === "error") {
+          return { json: async () => ({ errors: [{ message: "Throttled" }] }) };
+        }
+        data = { order: { id: v.id, refunds: nativeRefundsMock } };
         break;
       case "LegacyGiftCards":
       case "LegacyGiftCardsFb":
@@ -336,7 +345,54 @@ test("登録 API: 設定オン（記録のみ）の返金手段変更は承認�
   assert.equal(json.event.approvalStatus, "pending");
   assert.equal(json.event.shopifyRefundStatus, "skipped");
   assert.equal(store.specialRefundEvent[0].approvalStatus, "pending");
-  assert.ok(!shopifyCalls.includes("refundCreate") && !shopifyCalls.some((c) => /Refund/.test(c)), shopifyCalls.join(","));
+  // 純正の返金を読む（OrderRefundsForReassign）だけ。返金はしない
+  assert.ok(
+    !shopifyCalls.includes("refundCreate") &&
+      !shopifyCalls.some((c) => /Refund/.test(c) && c !== "OrderRefundsForReassign"),
+    shopifyCalls.join(","),
+  );
+});
+
+test("登録 API: 純正の返金がある注文に、返金を選ばない返金方法変更は 409。読めなければ 503。レシートの現金を直すは通す（#106 P2-2）", async () => {
+  store.specialRefundEvent = [];
+  setSpecialRefundSettings({ refundProcessingMode: "record_only" });
+  try {
+    nativeRefundsMock = [
+      {
+        id: "gid://shopify/Refund/77",
+        createdAt: "2026-11-23T03:00:00Z",
+        note: null,
+        transactions: {
+          nodes: [
+            { kind: "REFUND", status: "SUCCESS", gateway: "shopify_payments", formattedGateway: "Shopify Payments", amountSet: { shopMoney: { amount: "500" } } },
+          ],
+        },
+      },
+    ];
+    const exists = await postSpecialRefund(overrideBody);
+    assert.equal(exists.status, 409, JSON.stringify(exists.json));
+    assert.equal(exists.json.code, "NATIVE_REFUND_EXISTS");
+    const existsCash = await postSpecialRefund({ ...overrideBody, eventType: "cash_refund" });
+    assert.equal(existsCash.status, 409);
+
+    nativeRefundsMock = "error";
+    const unreadable = await postSpecialRefund(overrideBody);
+    assert.equal(unreadable.status, 503, JSON.stringify(unreadable.json));
+    assert.equal(unreadable.json.code, "NATIVE_REFUNDS_UNREADABLE");
+    assert.equal(store.specialRefundEvent.length, 0);
+
+    const receipt = await postSpecialRefund({
+      ...overrideBody,
+      eventType: "receipt_cash_adjustment",
+      adjustKind: "undo",
+      actualRefundMethod: undefined,
+    });
+    assert.notEqual(receipt.status, 409);
+    assert.notEqual(receipt.status, 503);
+  } finally {
+    nativeRefundsMock = [];
+    store.specialRefundEvent = [];
+  }
 });
 
 test("登録 API: 設定オフ（初めの値）は今までどおり（承認の対象外）", async () => {

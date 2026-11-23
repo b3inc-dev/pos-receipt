@@ -375,6 +375,39 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
+    // 純正の返金がある注文に、返金を選ばずに返金方法変更を登録すると、Shopify で 2 回目の返金になったり
+    // 精算で 2 回数えたりする。純正の返金があれば止め、読めなければ登録しない（見直し #106 P2-2）。
+    // 「レシートの現金を直す」は返金をしないので、そのまま通す。
+    if (
+      !existingIdempotentEvent &&
+      (eventTypeStr === "cash_refund" || eventTypeStr === "payment_method_override")
+    ) {
+      let nativeLines: Awaited<ReturnType<typeof fetchNativeRefundLines>>;
+      try {
+        nativeLines = await fetchNativeRefundLines(admin, sourceOrderIdStr);
+      } catch (e) {
+        console.error("[special-refunds] native refunds read failed", e);
+        return corsJson(
+          {
+            ok: false,
+            code: "NATIVE_REFUNDS_UNREADABLE",
+            error: "注文の返金を読めませんでした。少し待ってから、もう一度お試しください。",
+          },
+          { status: 503 },
+        );
+      }
+      if (nativeLines.length > 0) {
+        return corsJson(
+          {
+            ok: false,
+            code: "NATIVE_REFUND_EXISTS",
+            error: "この注文は POS で返金済みです。画面を読み直し、返金を選んで返金方法変更を登録してください。",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     const voidedOnOrder = await countVoidedEventsOnOrder(shop.id, sourceOrderIdStr);
     const isCorrectionRegistration =
       merged.correctionUsesRecordOnly && voidedOnOrder > 0;
