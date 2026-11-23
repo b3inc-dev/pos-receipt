@@ -28,7 +28,7 @@ const GROUP_PATHS: Record<string, string[]> = {
   ],
   "/app/settings": [
     "/app/settings",
-    "/app/location-profiles",
+    "/app/location-profiles", // 前の「設定軸・一括反映」（店舗の一覧へ移す）
     "/app/payment-methods",
   ],
   "/app/sales-summary": [

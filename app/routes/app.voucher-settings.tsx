@@ -154,7 +154,7 @@ export default function VoucherSettingsPage() {
             <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
             <Layout.Section>
               {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-              <AdminIntro><p>商品券のお釣り（精算の「商品券釣有り差額」）の数え方を決めます。同じ注文に自動判定と POS の商品券調整の両方があるときは、判定優先順位の方だけを数えます。</p></AdminIntro>
+              <AdminIntro><p>商品券のお釣り（精算の「商品券釣有り差額」）の数え方を決めます。同じ注文に自動判定と POS の商品券釣銭登録の両方があるときは、判定優先順位の方だけを数えます。</p></AdminIntro>
             </Layout.Section>
             {actionData?.error ? (
               <Layout.Section>

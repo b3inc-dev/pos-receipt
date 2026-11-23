@@ -1,627 +1,67 @@
 /**
- * /app/sales-summary-settings — 売上サマリー設定
- * 要件 §10: 表示内容・KPI表示制御・入店数報告のON/OFF
+ * /app/sales-summary-settings — 売上サマリー設定（要約の一覧）
+ *
+ * 区分ごとに今の設定を 1 行で見せ、「編集」で区分だけの画面（/app/sales-summary-settings/:section）を開く。
+ * Shop Point の設定と同じ「要約の行＋編集」（T 11/23・11/24 全画面点検）。読む側（POS・公開ページ）は変えない。
  */
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate, useFetcher, useRevalidator } from "react-router";
-import {
-  Page,
-  Layout,
-  Card,
-  Text,
-  TextField,
-  Checkbox,
-  Button,
-  BlockStack,
-  Banner,
-  Box,
-  InlineStack,
-  ChoiceList,
-} from "@shopify/polaris";
-import { useState, useEffect } from "react";
+import type { LoaderFunctionArgs } from "react-router";
+import { useLoaderData, useLocation, useNavigate } from "react-router";
+import { Page } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
-import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
-import {
-  generateSalesSummaryPublicToken,
-  hashSalesSummaryPublicToken,
-} from "../utils/salesSummaryPublicToken.server";
-import { hashPublicSummaryPassword } from "../utils/salesSummaryPublicAuth.server";
-import {
-  getAppSetting,
-  setAppSetting,
-  SALES_SUMMARY_SETTINGS_KEY,
-  DEFAULT_SALES_SUMMARY_SETTINGS,
-  type SalesSummarySettings,
-} from "../utils/appSettings.server";
+import { loadSalesSummarySettingsPage } from "../utils/salesSummarySettings.server";
+import { SECTION_ORDER, SECTION_TITLES, sectionSummary, type SalesSummarySectionKey } from "../utils/salesSummarySettingsSections";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
+import { AdminBlock, AdminIntro, StateBadge, SummaryRows } from "../components/admin-ui";
+import { StoreBody } from "../components/StoreBody";
+import { withSearch } from "../utils/withSearch";
 
-const LOCATIONS_QUERY = `#graphql
-  query Locations {
-    locations(first: 50, includeLegacy: false) {
-      nodes { id name isActive }
-    }
-  }
-`;
+const ICONS: Record<SalesSummarySectionKey, string> = {
+  basic: "settings",
+  display: "store",
+  numbers: "chart-vertical",
+  footfall: "person",
+  link: "link",
+};
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
-  const shop = await resolveShop(session.shop, admin);
-
-  const locRes = await admin.graphql(LOCATIONS_QUERY);
-  const locJson = (await locRes.json()) as {
-    data?: { locations?: { nodes?: { id: string; name: string; isActive: boolean }[] } };
-  };
-  const locations = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
-
-  const saved = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
-  const settings: SalesSummarySettings = {
-    ...DEFAULT_SALES_SUMMARY_SETTINGS,
-    ...saved,
-    visibleLocationIds: Array.isArray(saved?.visibleLocationIds) ? saved.visibleLocationIds : DEFAULT_SALES_SUMMARY_SETTINGS.visibleLocationIds,
-    footfallTargetLocationIds: Array.isArray(saved?.footfallTargetLocationIds) ? saved.footfallTargetLocationIds : DEFAULT_SALES_SUMMARY_SETTINGS.footfallTargetLocationIds,
-  };
-
-  const shopPublic = await prisma.shop.findUnique({
-    where: { id: shop.id },
-    select: { salesSummaryPublicTokenHash: true, salesSummaryPublicPasswordScrypt: true },
-  });
-  const publicLinkActive = Boolean(shopPublic?.salesSummaryPublicTokenHash);
-  const publicPasswordSet = Boolean(shopPublic?.salesSummaryPublicPasswordScrypt);
-
-  return { settings, locations, publicLinkActive, publicPasswordSet };
-}
-
-function formDataToSettings(formData: FormData, locations: { id: string }[]): SalesSummarySettings {
-  const get = (k: string) => formData.get(k);
-  const bool = (k: string, def: boolean) => get(k) === "true" || (def && get(k) !== "false");
-  const visibleIds = formData.get("visibleLocationIds");
-  const footfallIds = formData.get("footfallTargetLocationIds");
+  const { settings, locations, link } = await loadSalesSummarySettingsPage(admin, session.shop);
   return {
-    ...DEFAULT_SALES_SUMMARY_SETTINGS,
-    salesSummaryEnabled: bool("salesSummaryEnabled", true),
-    allowSingleDateSummary: bool("allowSingleDateSummary", true),
-    allowDateRangeSummary: bool("allowDateRangeSummary", true),
-    showLocationRows: bool("showLocationRows", true),
-    showChannelRows: bool("showChannelRows", true),
-    showChannelOnTile: bool("showChannelOnTile", true),
-    showStoreTotals: bool("showStoreTotals", true),
-    showOverallTotals: bool("showOverallTotals", true),
-    visibleLocationIds: visibleIds ? (JSON.parse(visibleIds as string) as string[]) : [],
-    showBudget: bool("showBudget", true),
-    showActual: bool("showActual", true),
-    showBudgetRatio: bool("showBudgetRatio", true),
-    showOrders: bool("showOrders", true),
-    showVisitors: bool("showVisitors", true),
-    showConv: bool("showConv", true),
-    showAtv: bool("showAtv", true),
-    showSetRate: bool("showSetRate", true),
-    showItems: bool("showItems", true),
-    showUnitPrice: bool("showUnitPrice", true),
-    showMonthBudget: bool("showMonthBudget", true),
-    showMonthActual: bool("showMonthActual", true),
-    showMonthAchvRatio: bool("showMonthAchvRatio", true),
-    showProgressToday: bool("showProgressToday", true),
-    showProgressPrev: bool("showProgressPrev", true),
-    showLoyaltyUsage: bool("showLoyaltyUsage", true),
-    loyaltyUsageSummaryLabel: String(get("loyaltyUsageSummaryLabel") ?? "ポイント利用額").trim(),
-    footfallReportingEnabled: bool("footfallReportingEnabled", true),
-    footfallTargetLocationIds: footfallIds ? (JSON.parse(footfallIds as string) as string[]) : [],
-    footfallReportEditableAfterSubmit: bool("footfallReportEditableAfterSubmit", false),
-    footfallReportRequiresConfirmation: bool("footfallReportRequiresConfirmation", true),
-    weekStartsOn: get("weekStartsOn") === "sunday" ? "sunday" : "monday",
+    enabled: settings.salesSummaryEnabled,
+    rows: SECTION_ORDER.map((key) => ({ key, text: sectionSummary(key, settings, locations, link) })),
   };
 }
-
-export async function action({ request }: ActionFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
-  const shop = await resolveShop(session.shop, admin);
-
-  const formData = await request.formData();
-  const intent = String(formData.get("intent") ?? "");
-
-  if (intent === "issueSalesSummaryPublicLink") {
-    const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
-    const access = checkPlanAccess(shop.planCode, "sales_summary", fullAccess);
-    if (!access.allowed) {
-      return Response.json({ ok: false, error: access.message });
-    }
-    const plain = generateSalesSummaryPublicToken();
-    const hash = hashSalesSummaryPublicToken(plain);
-    await prisma.shop.update({
-      where: { id: shop.id },
-      data: { salesSummaryPublicTokenHash: hash },
-    });
-    const baseUrl = (process.env.SHOPIFY_APP_URL ?? "").replace(/\/$/, "");
-    const fullUrl = `${baseUrl}/p/sales-summary/${encodeURIComponent(plain)}`;
-    return Response.json({
-      ok: true,
-      issued: { plainToken: plain, fullUrl },
-    });
-  }
-
-  if (intent === "revokeSalesSummaryPublicLink") {
-    await prisma.shop.update({
-      where: { id: shop.id },
-      data: { salesSummaryPublicTokenHash: null },
-    });
-    return Response.json({ ok: true, revoked: true });
-  }
-
-  if (intent === "setSalesSummaryPublicPassword") {
-    const newPwd = String(formData.get("publicSummaryNewPassword") ?? "").trim();
-    const confirm = String(formData.get("publicSummaryConfirmPassword") ?? "").trim();
-    if (newPwd.length < 4) {
-      return Response.json({ ok: false, error: "パスワードは 4 文字以上にしてください。" });
-    }
-    if (newPwd.length > 128) {
-      return Response.json({ ok: false, error: "パスワードは 128 文字以内にしてください。" });
-    }
-    if (newPwd !== confirm) {
-      return Response.json({ ok: false, error: "確認用パスワードが一致しません。" });
-    }
-    const hash = hashPublicSummaryPassword(newPwd);
-    await prisma.shop.update({
-      where: { id: shop.id },
-      data: { salesSummaryPublicPasswordScrypt: hash },
-    });
-    return Response.json({ ok: true, passwordSet: true });
-  }
-
-  if (intent === "clearSalesSummaryPublicPassword") {
-    await prisma.shop.update({
-      where: { id: shop.id },
-      data: { salesSummaryPublicPasswordScrypt: null },
-    });
-    return Response.json({ ok: true, passwordCleared: true });
-  }
-
-  const locRes = await admin.graphql(LOCATIONS_QUERY);
-  const locJson = (await locRes.json()) as {
-    data?: { locations?: { nodes?: { id: string }[] } };
-  };
-  const locations = locJson.data?.locations?.nodes ?? [];
-
-  const settings = formDataToSettings(formData, locations);
-  await setAppSetting(shop.id, SALES_SUMMARY_SETTINGS_KEY, settings);
-  return Response.json({ ok: true });
-}
-
-type PublicLinkActionJson =
-  | { ok: true; issued: { plainToken: string; fullUrl: string } }
-  | { ok: true; revoked: true }
-  | { ok: true; passwordSet: true }
-  | { ok: true; passwordCleared: true }
-  | { ok: false; error: string };
 
 export default function SalesSummarySettingsPage() {
-  const { settings: initial, locations, publicLinkActive, publicPasswordSet } = useLoaderData<typeof loader>();
-  const submit = useSubmit();
-  const location = useLocation();
+  const { enabled, rows } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
-  const linkFetcher = useFetcher<PublicLinkActionJson>();
-  const revalidator = useRevalidator();
-  const q = location.search || "";
-  const [saved, setSaved] = useState(false);
-  const [form, setForm] = useState<SalesSummarySettings>({ ...initial });
-  const [publicPwd, setPublicPwd] = useState("");
-  const [publicPwdConfirm, setPublicPwdConfirm] = useState("");
-
-  const issuePublicLink = () => {
-    const fd = new FormData();
-    fd.set("intent", "issueSalesSummaryPublicLink");
-    linkFetcher.submit(fd, { method: "post" });
-  };
-
-  const revokePublicLink = () => {
-    if (!window.confirm("公開用リンクを無効にします。ブラウザに保存したURLは開けなくなります。よろしいですか？")) {
-      return;
-    }
-    const fd = new FormData();
-    fd.set("intent", "revokeSalesSummaryPublicLink");
-    linkFetcher.submit(fd, { method: "post" });
-  };
-
-  const savePublicPassword = () => {
-    const fd = new FormData();
-    fd.set("intent", "setSalesSummaryPublicPassword");
-    fd.set("publicSummaryNewPassword", publicPwd);
-    fd.set("publicSummaryConfirmPassword", publicPwdConfirm);
-    linkFetcher.submit(fd, { method: "post" });
-  };
-
-  const clearPublicPassword = () => {
-    if (!window.confirm("公開ページのパスワードを削除します。URLを知っている人はそのまま表示できます。よろしいですか？")) {
-      return;
-    }
-    const fd = new FormData();
-    fd.set("intent", "clearSalesSummaryPublicPassword");
-    linkFetcher.submit(fd, { method: "post" });
-  };
-
-  const copyText = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      window.prompt("コピーしてください:", text);
-    }
-  };
-
-  useEffect(() => {
-    if (linkFetcher.state !== "idle" || !linkFetcher.data?.ok) return;
-    if ("revoked" in linkFetcher.data && linkFetcher.data.revoked) {
-      revalidator.revalidate();
-    }
-    if ("issued" in linkFetcher.data) {
-      revalidator.revalidate();
-    }
-    if ("passwordSet" in linkFetcher.data || "passwordCleared" in linkFetcher.data) {
-      revalidator.revalidate();
-      setPublicPwd("");
-      setPublicPwdConfirm("");
-    }
-  }, [linkFetcher.state, linkFetcher.data, revalidator]);
-
-  const handleSave = () => {
-    const fd = new FormData();
-    Object.entries(form).forEach(([k, v]) => {
-      if (typeof v === "boolean") fd.set(k, v ? "true" : "false");
-      else if (typeof v === "string") fd.set(k, v);
-      else if (Array.isArray(v)) fd.set(k, JSON.stringify(v));
-    });
-    submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
-  };
-
-  const set = <K extends keyof SalesSummarySettings>(key: K, value: SalesSummarySettings[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const isVisible = (locationId: string) =>
-    form.visibleLocationIds.length === 0 || form.visibleLocationIds.includes(locationId);
-  const isFootfallTarget = (locationId: string) =>
-    form.footfallTargetLocationIds.length === 0 || form.footfallTargetLocationIds.includes(locationId);
-
-  const toggleVisibleLocation = (locationId: string) => {
-    setForm((prev) => {
-      const showAll = prev.visibleLocationIds.length === 0;
-      const currentlyChecked = showAll || prev.visibleLocationIds.includes(locationId);
-      if (currentlyChecked) {
-        if (showAll)
-          return { ...prev, visibleLocationIds: locations.map((l) => l.id).filter((id) => id !== locationId) };
-        return { ...prev, visibleLocationIds: prev.visibleLocationIds.filter((id) => id !== locationId) };
-      }
-      const next = [...prev.visibleLocationIds, locationId];
-      return { ...prev, visibleLocationIds: next.length === locations.length ? [] : next };
-    });
-  };
-
-  const toggleFootfallLocation = (locationId: string) => {
-    setForm((prev) => {
-      const showAll = prev.footfallTargetLocationIds.length === 0;
-      const currentlyChecked = showAll || prev.footfallTargetLocationIds.includes(locationId);
-      if (currentlyChecked) {
-        if (showAll)
-          return { ...prev, footfallTargetLocationIds: locations.map((l) => l.id).filter((id) => id !== locationId) };
-        return { ...prev, footfallTargetLocationIds: prev.footfallTargetLocationIds.filter((id) => id !== locationId) };
-      }
-      const next = [...prev.footfallTargetLocationIds, locationId];
-      return { ...prev, footfallTargetLocationIds: next.length === locations.length ? [] : next };
-    });
-  };
-
+  const q = useLocation().search || "";
   return (
     <PolarisPageWrapper>
-      <Page
-        title="売上サマリー設定"
-        backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
-      >
-        <Card padding="0">
-          <TabGroupBar tabs={REPORTS_TABS} />
-        </Card>
-        <Layout>
-          {saved && (
-            <Layout.Section>
-              <Banner tone="success">保存しました。</Banner>
-            </Layout.Section>
-          )}
-
-          <Layout.Section>
-            <Banner tone="info">
-              POS の売上サマリー画面で表示する項目や入店数報告の有無を設定します。ここで OFF にした項目はサマリーに表示されません。
-            </Banner>
-          </Layout.Section>
-
-          {/* §10.2.1 売上サマリー全体 */}
-          <Layout.AnnotatedSection
-            title="売上サマリー全体"
-            description="サマリー機能の有効化と日次/期間の許可"
-          >
-            <Card>
-              <BlockStack gap="300">
-                <Checkbox
-                  label="売上サマリーを有効にする"
-                  checked={form.salesSummaryEnabled}
-                  onChange={(v) => set("salesSummaryEnabled", v)}
-                />
-                <Checkbox
-                  label="単日サマリーを許可"
-                  checked={form.allowSingleDateSummary}
-                  onChange={(v) => set("allowSingleDateSummary", v)}
-                />
-                <Checkbox
-                  label="期間サマリーを許可"
-                  checked={form.allowDateRangeSummary}
-                  onChange={(v) => set("allowDateRangeSummary", v)}
-                />
-                <ChoiceList
-                  title="週の始まり（期間指定の初期値・今週/先週に使用）"
-                  selected={[form.weekStartsOn]}
-                  choices={[
-                    { label: "月曜始まり（日曜終わり）", value: "monday" },
-                    { label: "日曜始まり（土曜終わり）", value: "sunday" },
-                  ]}
-                  onChange={(selected) =>
-                    set("weekStartsOn", (selected?.[0] === "sunday" ? "sunday" : "monday"))
-                  }
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-          <Layout.AnnotatedSection
-            title="ブラウザ用公開リンク"
-            description="Shopify にログインしなくても、URL を開くだけで日次の全店売上サマリーを表示できます。トークンは 1 ショップにつき 1 つです。漏れた場合は再発行してください。"
-          >
-            <Card>
-              <BlockStack gap="400">
-                {linkFetcher.data && linkFetcher.data.ok === false && "error" in linkFetcher.data ? (
-                  <Banner tone="critical">{linkFetcher.data.error}</Banner>
-                ) : null}
-                {linkFetcher.data && linkFetcher.data.ok && "issued" in linkFetcher.data ? (
-                  <Banner tone="success" title="公開URLを発行しました">
-                    <BlockStack gap="300">
-                      <Text as="p" variant="bodySm">
-                        以下の URL はこの画面でのみ表示されます。必ずコピーして保管してください。再発行すると古い URL は使えなくなります。
-                      </Text>
-                      <TextField
-                        label="公開URL"
-                        value={linkFetcher.data.issued.fullUrl}
-                        readOnly
-                        autoComplete="off"
-                        multiline={2}
-                      />
-                      <Button
-                        onClick={() => {
-                          const d = linkFetcher.data;
-                          if (d && d.ok && "issued" in d) void copyText(d.issued.fullUrl);
-                        }}
-                      >
-                        URLをコピー
-                      </Button>
-                    </BlockStack>
-                  </Banner>
-                ) : null}
-
-                <Text as="p" variant="bodySm" fontWeight="semibold">
-                  公開ページのパスワード（任意）
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  公開URLの直下で表示される売上サマリーに、パスワードを必須にできます。正しいパスワードを入れたブラウザでは、しばらく再入力不要です（Cookie）。サーバーには平文では保存しません。
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  現在: {publicPasswordSet ? "設定済み" : "未設定（パスワードなしで表示）"}
-                </Text>
-                {linkFetcher.data && linkFetcher.data.ok && "passwordSet" in linkFetcher.data ? (
-                  <Banner tone="success">パスワードを保存しました。</Banner>
-                ) : null}
-                {linkFetcher.data && linkFetcher.data.ok && "passwordCleared" in linkFetcher.data ? (
-                  <Banner tone="success">パスワードを削除しました。</Banner>
-                ) : null}
-                <TextField
-                  label="新しいパスワード"
-                  type="password"
-                  value={publicPwd}
-                  onChange={setPublicPwd}
-                  autoComplete="new-password"
-                  helpText="4文字以上128文字以内。保存すると既に開いている端末では再入力が必要になることがあります。"
-                />
-                <TextField
-                  label="新しいパスワード（確認）"
-                  type="password"
-                  value={publicPwdConfirm}
-                  onChange={setPublicPwdConfirm}
-                  autoComplete="new-password"
-                />
-                <InlineStack gap="200" wrap>
-                  <Button
-                    onClick={savePublicPassword}
-                    loading={linkFetcher.state === "submitting"}
-                    disabled={linkFetcher.state === "submitting"}
-                  >
-                    パスワードを保存
-                  </Button>
-                  {publicPasswordSet ? (
-                    <Button
-                      tone="critical"
-                      onClick={clearPublicPassword}
-                      loading={linkFetcher.state === "submitting"}
-                      disabled={linkFetcher.state === "submitting"}
-                    >
-                      パスワードを削除
-                    </Button>
-                  ) : null}
-                </InlineStack>
-
-                <Text as="p" variant="bodySm" tone="subdued">
-                  状態: {publicLinkActive ? "有効（トークンが設定されています）" : "未設定"}
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  発行されるURLのドメインは、環境変数 SHOPIFY_APP_URL（アプリの公開URL）に合わせます。Render 以外のホストや独自ドメインでも、この変数を正しく設定すればそのURLで発行されます。
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  公開ページでは「日次」「月次」「期間」を切り替えられます。ブックマーク例: 月次は URL の末尾に{" "}
-                  <code style={{ fontSize: "12px" }}>{`?mode=month&y=2026&m=3`}</code>
-                  、期間は{" "}
-                  <code style={{ fontSize: "12px" }}>{`?mode=period&from=2026-03-01&to=2026-03-31`}</code>
-                  を付けます（トークン部分はそのまま）。
-                </Text>
-                <InlineStack gap="200" wrap>
-                  <Button
-                    onClick={issuePublicLink}
-                    loading={linkFetcher.state === "submitting"}
-                    disabled={linkFetcher.state === "submitting"}
-                  >
-                    {publicLinkActive ? "トークンを再発行" : "公開用リンクを発行"}
-                  </Button>
-                  {publicLinkActive ? (
-                    <Button
-                      tone="critical"
-                      onClick={revokePublicLink}
-                      loading={linkFetcher.state === "submitting"}
-                      disabled={linkFetcher.state === "submitting"}
-                    >
-                      公開リンクを無効化
-                    </Button>
-                  ) : null}
-                </InlineStack>
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-          {/* §10.2.2 表示対象 */}
-          <Layout.AnnotatedSection
-            title="表示対象"
-            description="ロケーション行と合計の表示、表示するロケーション"
-          >
-            <Card>
-              <BlockStack gap="400">
-                <Checkbox
-                  label="ロケーション行を表示"
-                  checked={form.showLocationRows}
-                  onChange={(v) => set("showLocationRows", v)}
-                />
-                <Checkbox
-                  label="チャネル行を表示（EC・マーケットプレイス等）"
-                  helpText="POS の売上サマリーで「全店舗表示」のときのみ一覧に出ます。単一店舗表示では店舗の売上だけです。"
-                  checked={form.showChannelRows}
-                  onChange={(v) => set("showChannelRows", v)}
-                />
-                <Checkbox
-                  label="POSタイルにチャネル別実績を表示"
-                  checked={form.showChannelOnTile}
-                  onChange={(v) => set("showChannelOnTile", v)}
-                />
-                <Checkbox
-                  label="店舗合計を表示"
-                  checked={form.showStoreTotals}
-                  onChange={(v) => set("showStoreTotals", v)}
-                />
-                <Checkbox
-                  label="全体合計を表示"
-                  checked={form.showOverallTotals}
-                  onChange={(v) => set("showOverallTotals", v)}
-                />
-                <Text as="p" variant="bodySm" fontWeight="semibold">サマリーに表示するロケーション（空で全件）</Text>
-                <Box paddingBlockStart="200">
-                  <BlockStack gap="200">
-                    {locations.map((loc) => (
-                      <Checkbox
-                        key={loc.id}
-                        label={loc.name}
-                        checked={isVisible(loc.id)}
-                        onChange={() => toggleVisibleLocation(loc.id)}
-                        helpText={form.visibleLocationIds.length === 0 ? "全ロケーション表示" : undefined}
-                      />
-                    ))}
-                  </BlockStack>
-                </Box>
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-          {/* §10.2.3 KPI 表示制御 */}
-          <Layout.AnnotatedSection
-            title="KPI 表示制御"
-            description="サマリー画面で表示する KPI の ON/OFF"
-          >
-            <Card>
-              <BlockStack gap="200">
-                <InlineStack gap="400" wrap>
-                  <Checkbox label="予算" checked={form.showBudget} onChange={(v) => set("showBudget", v)} />
-                  <Checkbox label="実績" checked={form.showActual} onChange={(v) => set("showActual", v)} />
-                  <Checkbox label="予算比" checked={form.showBudgetRatio} onChange={(v) => set("showBudgetRatio", v)} />
-                  <Checkbox label="注文数" checked={form.showOrders} onChange={(v) => set("showOrders", v)} />
-                  <Checkbox label="入店数" checked={form.showVisitors} onChange={(v) => set("showVisitors", v)} />
-                  <Checkbox label="購買率" checked={form.showConv} onChange={(v) => set("showConv", v)} />
-                  <Checkbox label="客単価" checked={form.showAtv} onChange={(v) => set("showAtv", v)} />
-                  <Checkbox label="セット率" checked={form.showSetRate} onChange={(v) => set("showSetRate", v)} />
-                  <Checkbox label="商品数" checked={form.showItems} onChange={(v) => set("showItems", v)} />
-                  <Checkbox label="一品単価" checked={form.showUnitPrice} onChange={(v) => set("showUnitPrice", v)} />
-                  <Checkbox label="月予算" checked={form.showMonthBudget} onChange={(v) => set("showMonthBudget", v)} />
-                  <Checkbox label="月実績" checked={form.showMonthActual} onChange={(v) => set("showMonthActual", v)} />
-                  <Checkbox label="月達成率" checked={form.showMonthAchvRatio} onChange={(v) => set("showMonthAchvRatio", v)} />
-                  <Checkbox label="本日の進捗" checked={form.showProgressToday} onChange={(v) => set("showProgressToday", v)} />
-                  <Checkbox label="前日比" checked={form.showProgressPrev} onChange={(v) => set("showProgressPrev", v)} />
-                  <Checkbox label="ポイント利用額" checked={form.showLoyaltyUsage} onChange={(v) => set("showLoyaltyUsage", v)} />
-                </InlineStack>
-                <TextField
-                  label="ポイント利用額のラベル"
-                  value={form.loyaltyUsageSummaryLabel}
-                  onChange={(v) => set("loyaltyUsageSummaryLabel", v)}
-                  autoComplete="off"
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-          {/* §10.2.4 入店数報告 */}
-          <Layout.AnnotatedSection
-            title="入店数報告"
-            description="POS の売上サマリーで入店数を報告できるかどうかの正本です。全体のON/OFFと、対象に含める店舗（空ならすべて）をここで決めます。"
-          >
-            <Card>
-              <BlockStack gap="400">
-                <Checkbox
-                  label="入店数報告を有効にする"
-                  checked={form.footfallReportingEnabled}
-                  onChange={(v) => set("footfallReportingEnabled", v)}
-                />
-                <Text as="p" variant="bodySm" fontWeight="semibold">入店数入力対象ロケーション（空で全件）</Text>
-                <BlockStack gap="200">
-                  {locations.map((loc) => (
-                    <Checkbox
-                      key={loc.id}
-                      label={loc.name}
-                      checked={isFootfallTarget(loc.id)}
-                      onChange={() => toggleFootfallLocation(loc.id)}
-                    />
-                  ))}
-                </BlockStack>
-                <Checkbox
-                  label="送信後の編集を許可"
-                  checked={form.footfallReportEditableAfterSubmit}
-                  onChange={(v) => set("footfallReportEditableAfterSubmit", v)}
-                />
-                <Checkbox
-                  label="送信前に確認を求める"
-                  checked={form.footfallReportRequiresConfirmation}
-                  onChange={(v) => set("footfallReportRequiresConfirmation", v)}
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end">
-              <Button variant="primary" onClick={handleSave}>保存</Button>
-            </InlineStack>
-          </Layout.Section>
-        </Layout>
+      <Page title="売上サマリー設定" backAction={{ content: "ホーム", onAction: () => navigate(withSearch("/app", q)) }}>
+        <TabGroupBar tabs={REPORTS_TABS} />
+        <StoreBody>
+          <AdminIntro>
+            <p>POS の売上サマリーに出すものを決めます。変えたい行の「編集」を押してください。</p>
+          </AdminIntro>
+          <AdminBlock title="設定" description={enabled ? "外した項目は、POS の売上サマリーに出ません。" : "今は売上サマリーを使っていません。「使い方」で使うようにできます。"}>
+            <SummaryRows
+              rows={rows.map((row) => ({
+                key: row.key,
+                icon: ICONS[row.key],
+                title: (
+                  <>
+                    {SECTION_TITLES[row.key]}
+                    {row.key === "basic" && !enabled ? <StateBadge label="使っていません" tone="warning" /> : null}
+                  </>
+                ),
+                text: row.text,
+                to: withSearch(`/app/sales-summary-settings/${row.key}`, q),
+              }))}
+            />
+          </AdminBlock>
+        </StoreBody>
       </Page>
     </PolarisPageWrapper>
   );
