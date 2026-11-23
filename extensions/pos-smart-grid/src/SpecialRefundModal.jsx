@@ -755,26 +755,6 @@ function OrderDetailView({
             <s-stack gap="base">
               <OrderDetailSummary order={order} />
 
-              {order?.canRedoAsDraft ? (
-                <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="small">
-                    <s-text fontWeight="bold" size="small">会計をやり直す</s-text>
-                    <s-text tone="subdued" fontSize="small">
-                      キャンセル・返金済みの取引向けです。同じ商品構成の下書き注文を作成します。決済は POS または管理画面で行ってください。
-                    </s-text>
-                    <s-button
-                      kind="secondary"
-                      command="--show"
-                      commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
-                      onClick={() => onAskConfirm({ kind: "redo_draft" })}
-                      disabled={loading}
-                      loading={loading}
-                    >
-                      下書き注文を作成
-                    </s-button>
-                  </s-stack>
-                </s-box>
-              ) : null}
 
               <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
 
@@ -795,7 +775,7 @@ function OrderDetailView({
 
               <s-divider />
 
-              <s-text fontWeight="bold" size="small">この注文の登録</s-text>
+              <s-text fontWeight="bold" size="small">調整履歴</s-text>
               {activeEvents.length > 0 ? (
                 <s-stack gap="small">
                   {activeEvents.map((ev) => (
@@ -817,6 +797,28 @@ function OrderDetailView({
                 <s-text tone="subdued" fontSize="small">
                   無効化済み: {voidedEvents.length}件
                 </s-text>
+              ) : null}
+
+              {/* 会計をやり直す（下書き注文を作成）は一番下（T 2026-11-23） */}
+              {order?.canRedoAsDraft ? (
+                <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                  <s-stack gap="small">
+                    <s-text fontWeight="bold" size="small">会計をやり直す</s-text>
+                    <s-text tone="subdued" fontSize="small">
+                      キャンセル・返金済みの取引向けです。同じ商品構成の下書き注文を作成します。決済は POS または管理画面で行ってください。
+                    </s-text>
+                    <s-button
+                      kind="secondary"
+                      command="--show"
+                      commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+                      onClick={() => onAskConfirm({ kind: "redo_draft" })}
+                      disabled={loading}
+                      loading={loading}
+                    >
+                      下書き注文を作成
+                    </s-button>
+                  </s-stack>
+                </s-box>
               ) : null}
 
               {error ? <s-text tone="critical">{error}</s-text> : null}
