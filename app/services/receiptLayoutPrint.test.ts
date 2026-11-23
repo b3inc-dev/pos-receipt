@@ -240,8 +240,8 @@ describe("精算: 納金額", () => {
     assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "x", locationName: "ciara梅田エスト店", voucherChange: 0 }), 7700);
     assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "gid://shopify/Location/84233453814", locationName: "", voucherChange: 0 }), 7700);
   });
-  it("事後調整を足す", () => {
-    assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "", locationName: "", voucherChange: 0, manualDelta: 50 }), 8050);
+  it("事後調整は足さない（現金の取引額にもう入っている）", () => {
+    assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "", locationName: "", voucherChange: 0 }), 8000);
   });
 });
 
@@ -277,6 +277,15 @@ describe("精算レシートのデータとレイアウトの印字", () => {
     assert.ok(html!.includes("納金額"));
     assert.ok(html!.includes("¥8,000"));
     assert.ok(html!.indexOf("現金") < html!.indexOf("クレジットカード"));
+  });
+  it("売上に含めない送料等: ある日だけ行が出る（標準・Ciara 風）", () => {
+    for (const layout of [defaultLayout("settlement"), ciaraSettlementLayout()]) {
+      const withFee = renderLayoutForPrint(layout, settlementTemplateData({ ...base, isInspection: false, nonSalesFee: 500 }), 80)!;
+      assert.ok(withFee.includes("売上に含めない送料等"), layout.blocks[0].type);
+      assert.ok(withFee.includes("¥500"));
+      const without = renderLayoutForPrint(layout, settlementTemplateData({ ...base, isInspection: false }), 80)!;
+      assert.ok(!without.includes("売上に含めない送料等"));
+    }
   });
   it("管理画面の見本にも店の設定が入る", () => {
     const d = sampleSettlementData(CIARA_SETTLEMENT_CALC);

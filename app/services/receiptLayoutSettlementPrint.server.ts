@@ -8,6 +8,7 @@ import { getSettlementCalc, renderLayoutForPrint } from "./receiptLayoutPrint.se
 import type { ReceiptLayout } from "./receiptLayoutSchema";
 import { parsePaymentSectionsJson, settlementReceiptTitle } from "./settlementPrintSnapshot.server";
 import type { SettlementRowLike } from "./printUnification.server";
+import { nonSalesFeeTotalFromSaved } from "./nonSalesFeeLines";
 
 type AdminLike = { graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }> };
 
@@ -80,6 +81,8 @@ export async function layoutSettlementHtml(
     printedAt: new Date().toISOString(),
     timezone,
     calc,
+    // 今までの印字と同じ部品で出す（総売上 = 支払方法別の合計 − 売上に含めない送料等）
+    nonSalesFee: nonSalesFeeTotalFromSaved(n(printRow.total), sectionsParsed),
   });
   return renderLayoutForPrint(layout, data, opts.paperWidthMm);
 }

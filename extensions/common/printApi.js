@@ -80,7 +80,7 @@ export async function printHtml(relativeOrAbsoluteSrc, options = {}) {
       outcome: PRINT_OUTCOME.UNAVAILABLE,
       paperConfirmed: false,
       error:
-        "この POS では Printing API を利用できません。api_version 2026-07+ と POS 11.11+ が必要です。",
+        "この POS では印刷できません。Shopify POS を新しい版に更新してください。",
     };
   }
 
@@ -89,7 +89,7 @@ export async function printHtml(relativeOrAbsoluteSrc, options = {}) {
       ok: false,
       outcome: PRINT_OUTCOME.IN_FLIGHT,
       paperConfirmed: false,
-      error: "印字処理中です。完了するまで再タップしないでください。",
+      error: "印刷中です。終わるまでお待ちください。",
     };
   }
   inFlightSrc.add(src);
@@ -111,7 +111,7 @@ export async function printHtml(relativeOrAbsoluteSrc, options = {}) {
           ok: false,
           outcome: PRINT_OUTCOME.FAILED,
           paperConfirmed: false,
-          error: "プリンタ一覧を取得できませんでした。印刷は送信されていません。接続を確認してもう一度お試しください。",
+          error: "プリンタを見つけられませんでした。まだ印刷していません。プリンタのつながりを確かめて、もう一度お試しください。",
         };
       }
     }
@@ -128,8 +128,8 @@ export async function printHtml(relativeOrAbsoluteSrc, options = {}) {
           disconnectedCount: classified.disconnectedCount,
           error:
             classified.disconnectedCount > 0
-              ? "接続中のプリンタがありません。用紙切れ・切断・オフラインを確認してください。未接続のまま成功扱いしません。"
-              : "接続中のレシートプリンタがありません。POS にプリンタをペアリングしてください。",
+              ? "つながっているプリンタがありません。用紙・電源・つながりを確かめてください。"
+              : "つながっているレシートプリンタがありません。POS の設定でプリンタをつないでください。",
         };
       }
       await withTimeout(printing.print(src), PRINT_TIMEOUT_MS);

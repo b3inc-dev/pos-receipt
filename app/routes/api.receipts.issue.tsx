@@ -14,6 +14,8 @@ import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
 import { getPrintLayout, renderLayoutForPrint } from "../services/receiptLayoutPrint.server";
 import { LAYOUT_RECEIPT_ORDER_QUERY, receiptTemplateData } from "../services/receiptLayoutAdapters";
 import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
+import { getAppSetting } from "../utils/appSettings.server";
+import { issuerNameAtIssue, normalizeStaffId, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
 
 const ORDER_QUERY = `#graphql
   query ReceiptIssueOrder($id: ID!) {
@@ -38,7 +40,15 @@ export async function action({ request }: ActionFunctionArgs) {
     const { admin, shop, corsJson } = authResult;
 
     const body = await request.json() as Record<string, unknown>;
-    const { orderId, recipientName, proviso, isReissue, createdBy, idempotencyKey } = body;
+    const { orderId, recipientName, proviso, isReissue, staffMemberId, idempotencyKey } = body;
+    // 発行者＝領収書を発行した人（POS のピン留め中スタッフ）。名前は「スタッフ名」の登録から。自由入力の createdBy は受けない
+    const createdByStaffId = normalizeStaffId(staffMemberId);
+    const createdByName = createdByStaffId
+      ? issuerNameAtIssue(
+          createdByStaffId,
+          parseStaffNameMap(await getAppSetting(shop.id, STAFF_DISPLAY_NAMES_SETTING_KEY).catch(() => null)),
+        )
+      : null;
 
     if (!orderId) {
       return corsJson({ ok: false, error: "orderId is required" }, { status: 400 });
@@ -147,7 +157,8 @@ export async function action({ request }: ActionFunctionArgs) {
           templateId: tmpl?.id ?? null,
           templateVersion: tmpl?.version ?? 1,
           isReissue: Boolean(isReissue),
-          createdBy: createdBy ? String(createdBy) : null,
+          createdBy: createdByName,
+          createdByStaffId,
           idempotencyKey: idempotencyKey && typeof idempotencyKey === "string"
             ? idempotencyKey
             : null,

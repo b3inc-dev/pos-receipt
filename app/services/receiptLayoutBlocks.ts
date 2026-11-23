@@ -67,7 +67,7 @@ export const SETTLEMENT_FIELDS: { value: string; label: string; format: "money" 
   { value: "vip_points_used", label: "ポイント利用額", format: "money" },
   { value: "refund_total", label: "返金", format: "money" },
   { value: "voucher_change", label: "商品券釣有り差額", format: "money" },
-  { value: "receipt_cash_manual_delta", label: "領収書現金調整", format: "money" },
+  { value: "non_sales_fee", label: "売上に含めない送料等", format: "money" },
   { value: "total_including_returns", label: "合計額（返品含む）", format: "money" },
   { value: "cash_deposit", label: "納金額", format: "money" },
   { value: "order_count", label: "件数", format: "count" },

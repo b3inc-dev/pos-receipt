@@ -44,7 +44,7 @@ type LocRow = {
 };
 
 const FIELD_LABELS: Record<keyof LocationProfileFields, string> = {
-  printMode: "印字方式（printMode）",
+  printMode: "印字方式",
   salesSummaryEnabled: "売上サマリー",
   settlementEnabled: "精算",
   receiptEnabled: "領収書",
@@ -55,7 +55,7 @@ const FIELD_LABELS: Record<keyof LocationProfileFields, string> = {
   includeInOverallTotals: "全体合計に含める",
   visibleInSummaryDefault: "サマリー既定表示",
   printerProfileId: "プリンタプロファイル",
-  cloudprntEnabled: "CloudPRNT",
+  cloudprntEnabled: "前のプリンタ設定（使っていません）",
   summaryTargetGroup: "サマリー対象グループ",
   budgetTargetEnabled: "予算対象",
   footfallTargetEnabled: "入店数対象",
@@ -63,9 +63,10 @@ const FIELD_LABELS: Record<keyof LocationProfileFields, string> = {
 
 function formatFieldValue(key: keyof LocationProfileFields, value: unknown): string {
   if (key === "printMode") {
-    if (value === "shopify_printing") return "Shopify Printing API";
-    if (value === "order_based") return "Shopify Printing API（保存値 order_based は未使用）";
-    if (value === "cloudprnt_direct") return "Shopify Printing API（保存値 cloudprnt_direct は未使用）";
+    // 印字はいつも POS につないだプリンタへ送る。前の設定（order_based・cloudprnt_direct）が残っていても同じ表示にする
+    if (value === "shopify_printing" || value === "order_based" || value === "cloudprnt_direct") {
+      return "POS につないだプリンタ";
+    }
   }
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "ON" : "OFF";
@@ -298,7 +299,7 @@ export default function LocationProfilesPage() {
         ? changingFieldSummary.map((k) => FIELD_LABELS[k] || k).join("、")
         : "（差分なし）";
     const printModeNote = changingFieldSummary.includes("printMode")
-      ? "\n※ 印字方式（printMode）も上書きされます。"
+      ? "\n※ 印字方式も上書きされます。"
       : "";
     if (
       !window.confirm(
@@ -332,7 +333,7 @@ export default function LocationProfilesPage() {
         <Layout>
           <Layout.Section>
             <Banner tone="info">
-              設定軸（プロファイル）または「このロケをコピー」で複数ロケーションへ反映できます。適用前に差分プレビューを確認してください。印字方式（printMode）を含む全フィールドが一括上書き対象です。個別ロケ編集は「ロケーション」タブに残しています。
+              設定軸（プロファイル）または「このロケをコピー」で複数ロケーションへ反映できます。適用前に差分プレビューを確認してください。印字方式を含む全項目が一括で上書きされます。個別ロケ編集は「ロケーション」タブに残しています。
             </Banner>
           </Layout.Section>
           {message ? (
@@ -447,7 +448,7 @@ export default function LocationProfilesPage() {
                         ? changingFieldSummary.map((k) => FIELD_LABELS[k] || k).join("、")
                         : "なし"}
                       {changingFieldSummary.includes("printMode")
-                        ? "（※ 印字方式 printMode を含みます）"
+                        ? "（※ 印字方式を含みます）"
                         : ""}
                     </Text>
                     <Box overflowX="scroll">

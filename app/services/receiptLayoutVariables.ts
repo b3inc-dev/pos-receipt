@@ -55,7 +55,7 @@ export const TEMPLATE_VARIABLES: Record<ReceiptKind, TemplateVariable[]> = {
     { name: "settlement.vip_points_used", label: "ポイント利用額" },
     { name: "settlement.refund_total", label: "返金" },
     { name: "settlement.voucher_change", label: "商品券釣有り差額" },
-    { name: "settlement.receipt_cash_manual_delta", label: "領収書現金調整" },
+    { name: "settlement.non_sales_fee", label: "売上に含めない送料等（総売上 = 支払方法別の合計 − これ）" },
     { name: "settlement.order_count", label: "件数" },
     { name: "settlement.refund_count", label: "返金件数" },
     { name: "settlement.item_count", label: "点数" },

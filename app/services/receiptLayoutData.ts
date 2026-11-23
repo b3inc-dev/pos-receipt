@@ -97,7 +97,8 @@ export type SettlementData = {
   vip_points_used: number;
   refund_total: number;
   voucher_change: number;
-  receipt_cash_manual_delta: number;
+  /** 売上に含めない送料等。総売上 = 支払方法別の合計 − これ。無い日は 0 */
+  non_sales_fee: number;
   order_count: number;
   refund_count: number;
   item_count: number;
@@ -226,7 +227,7 @@ export function sampleTemplateData(kind: ReceiptKind): ReceiptTemplateData {
           vip_points_used: 500,
           refund_total: 4950,
           voucher_change: 0,
-          receipt_cash_manual_delta: 0,
+          non_sales_fee: 0,
           order_count: 42,
           refund_count: 1,
           item_count: 57,

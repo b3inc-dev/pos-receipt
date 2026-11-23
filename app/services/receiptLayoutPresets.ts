@@ -69,6 +69,7 @@ export function defaultLayout(kind: ReceiptKind): ReceiptLayout {
         row("orders", "order_count", "件数", { unit: "件" }),
         row("items", "item_count", "点数", { unit: "点" }),
         row("voucher", "voucher_change", "商品券釣有り差額", { hide_zero: true }),
+        row("fee", "non_sales_fee", "売上に含めない送料等", { hide_zero: true }),
         block("hr2", "divider", { style: "dashed" }),
         block("payments", "settlement_payments"),
       ]);
@@ -225,6 +226,7 @@ export function ciaraSettlementLayout(): ReceiptLayout {
       row("refunds", "refund_count", "返金件数", unit),
       row("items", "item_count", "販売点数", unit),
       row("with_returns", "total_including_returns", "合計額（返品含む）"),
+      row("fee", "non_sales_fee", "売上に含めない送料等", { hide_zero: true }),
       block("hr2", "divider", { style: "thick" }),
       block("deposit", "settlement_deposit", { label: "納金額", voucher_label: "商品券釣り" }),
       block("payments", "settlement_payments", {

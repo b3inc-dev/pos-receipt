@@ -3,7 +3,7 @@
  *
  * 精算エンジンの金額（総売上・支払方法ごとの取引額など）は変えない。ここで決めるのは印字の並べ方と、
  * Ciara の gift-receipt.liquid が印字のときに計算していた 2 つだけ。
- * - 納金額 = 現金の取引額 − 指定した店の、指定した支払方法の返金 − 商品券釣り ＋ 事後調整
+ * - 納金額 = 現金の取引額 − 指定した店の、指定した支払方法の返金 − 商品券釣り（事後調整は内訳に入っているので足さない）
  * - 支払方法の並び順と、まとめの行（例: 電子マネー(合計) を クレジットカード の後に、2 種類以上あるときだけ）
  *
  * 初期値は「何もしない」（並べ替えなし・まとめの行なし・特例の店なし）。Ciara の値は「Ciara の値を入れる」で入る。
@@ -216,7 +216,7 @@ function locationMatches(calc: SettlementCalcSettings, locationId: string, locat
 
 /**
  * 納金額。Ciara の gift-receipt.liquid と同じ式:
- * 現金の取引額 − （特例の店なら）指定した支払方法の返金 − 商品券釣り ＋ 事後調整
+ * 現金の取引額 − （特例の店なら）指定した支払方法の返金 − 商品券釣り
  */
 export function settlementCashDeposit(
   sections: SettlementSectionInput[],
@@ -225,7 +225,6 @@ export function settlementCashDeposit(
     locationId: string;
     locationName: string;
     voucherChange: number;
-    manualDelta?: number;
   },
 ): number {
   const cashKeys = opts.calc.cashLabels.map(lc).filter(Boolean);
@@ -238,7 +237,9 @@ export function settlementCashDeposit(
     if (cashKeys.some((k) => label.includes(k))) cash += num(s.net);
     if (special && deductKeys.some((k) => label.includes(k))) refundAdjust += num(s.refund);
   }
-  return cash - refundAdjust - num(opts.voucherChange) + num(opts.manualDelta);
+  // Ciara の liquid にあった「事後調整」（receipt_cash_manual_delta）は足さない。
+  // このアプリでは「レシートの現金を直す」は精算エンジンが支払方法別の内訳（現金の取引額）にもう入れているので、足すと二重になる
+  return cash - refundAdjust - num(opts.voucherChange);
 }
 
 // ── 販売レシートの値の設定 ──────────────────────────────

@@ -456,7 +456,8 @@ export function settlementTemplateData(input: {
   printedAt: string;
   timezone: string;
   calc: SettlementCalcSettings;
-  manualDelta?: number;
+  /** 売上に含めない送料等（総売上 = 支払方法別の合計 − これ。今までの印字と同じ nonSalesFeeTotalFromSaved で出す） */
+  nonSalesFee?: number;
 }): ReceiptTemplateData {
   const f = input.figures;
   const kindLabel = input.isInspection ? "点検" : "精算";
@@ -474,7 +475,7 @@ export function settlementTemplateData(input: {
     vip_points_used: f.vipPointsUsed,
     refund_total: f.refundTotal,
     voucher_change: f.voucherChangeAmount,
-    receipt_cash_manual_delta: input.manualDelta ?? 0,
+    non_sales_fee: input.nonSalesFee ?? 0,
     order_count: f.orderCount,
     refund_count: f.refundCount,
     item_count: f.itemCount,
@@ -484,7 +485,6 @@ export function settlementTemplateData(input: {
       locationId: input.locationId,
       locationName: input.locationName,
       voucherChange: f.voucherChangeAmount,
-      manualDelta: input.manualDelta,
     }),
     payments: orderSettlementPayments(input.sections, input.calc),
   };
