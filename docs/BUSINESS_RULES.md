@@ -136,6 +136,8 @@
 
 ## 10. 特殊返金の精算反映
 
+記録の置き場所（D24）: 特殊返金・商品券調整は注文メタフィールド `pos.adjustments` に残し、精算はその日・その店の有効な行を数える（`docs/ORDER_ADJUSTMENTS_METAFIELD.md`）。数える日は行の `countDate`（店のタイムゾーン）で、前からの行（`countDate` なし）は登録した日。直すときは「変更」（前の行を無効にして置き換えの行を足す。Shopify の返金はしない）。
+
 `SpecialRefundEvent`（当日・同一ロケーション・status=active）を設定フラグに従い反映:
 
 | eventType | 反映内容（概略） |

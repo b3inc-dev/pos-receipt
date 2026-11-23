@@ -5,10 +5,12 @@
  */
 import prisma from "../db.server";
 import { computeAndCacheDailySummary } from "./salesSummaryEngine.server";
-import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
+import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import { normalizeLocationGid } from "../utils/locationGid";
 import { checkApprovalDecision } from "../utils/specialRefundApproval";
 import { SUPERSEDED_SETTLEMENT_STATUS } from "./settlementConfirmedPure.server";
+import { syncOrderAdjustmentsMetafield } from "./orderAdjustments.server";
+import { countDateOf } from "./orderAdjustmentsPure.server";
 
 type AdminClient = Parameters<typeof computeAndCacheDailySummary>[0];
 
@@ -47,12 +49,15 @@ export async function decideSpecialRefundApproval(
     };
   }
 
+  // 注文メタフィールド pos.adjustments の status（承認待ち → 有効／却下）を書き直す（失敗しても決定は取り消さない）
+  await syncOrderAdjustmentsMetafield(admin, shopId, event.sourceOrderId);
+
   let settlementAlreadyConfirmed = false;
   const locationGid = normalizeLocationGid(event.locationId);
   if (locationGid) {
     try {
       const timezone = await getShopTimezoneForDaily(admin, shopId);
-      const targetDate = getCalendarDateStringInTimeZone(event.createdAt, timezone);
+      const targetDate = countDateOf(event, timezone);
       const locIdRaw = locationGid.replace("gid://shopify/Location/", "");
       const settlements = await prisma.settlement.findMany({
         where: {

@@ -74,6 +74,12 @@ import {
   sleep,
 } from "../lib/shopifyGraphqlThrottle.server";
 import { readOrdersPageOrThrow } from "./settlementUpstreamPage.server";
+import { fetchOrderAdjustmentDocs } from "./orderAdjustments.server";
+import {
+  adjustmentSourceWarningMessage,
+  resolveSettlementAdjustments,
+  type AdjustmentSourceWarning,
+} from "./orderAdjustmentsPure.server";
 import { splitTaxInclusiveToNetAndTax } from "./settlementTaxPure.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -119,6 +125,16 @@ export interface SettlementPreviewDTO {
    */
   awaitingApprovalSpecialRefunds?: AwaitingApprovalSpecialRefund[];
   awaitingApprovalWarning?: string;
+  /**
+   * 特殊返金・商品券調整の注文メタフィールドが無い・読めない・アプリの記録と違う注文（無いときは入れない）。
+   * 精算は確定できる。読めた注文はメタフィールドの値、読めない注文はアプリの記録で数えている。
+   */
+  adjustmentSourceWarnings?: {
+    reason: AdjustmentSourceWarning["reason"] | "metafield_unreadable";
+    sourceOrderId: string;
+    sourceOrderName: string | null;
+    message: string;
+  }[];
   appliedSpecialRefundEvents: {
     id: string;
     eventType: string;
@@ -839,17 +855,50 @@ async function buildSettlementPreviewImpl(
   const itemCount = gas.itemCount;
 
   const locationGid = locationId.startsWith("gid://") ? locationId : `gid://shopify/Location/${locationId}`;
-  const specialRefundEvents = await prisma.specialRefundEvent.findMany({
+  // DB は「日・店 → 注文」の目次。数える日（countDate）がこの日の行と、前からの行（countDate なし）は登録した日で探す。
+  // 数そのものは注文メタフィールド pos.adjustments から読む（docs/ORDER_ADJUSTMENTS_METAFIELD.md）。
+  const specialRefundIndexRows = await prisma.specialRefundEvent.findMany({
     where: {
       shopId,
       locationId: { in: [locationId, locationGid, locIdRaw] },
       status: "active",
-      createdAt: {
-        gte: dayRange.startUtc,
-        lte: dayRange.endUtc,
-      },
+      OR: [
+        { countDate: targetDate },
+        {
+          countDate: null,
+          createdAt: {
+            gte: dayRange.startUtc,
+            lte: dayRange.endUtc,
+          },
+        },
+      ],
     },
   });
+  const adjustmentDocs =
+    specialRefundIndexRows.length > 0
+      ? await fetchOrderAdjustmentDocs(
+          admin,
+          specialRefundIndexRows.map((r) => r.sourceOrderId),
+        )
+      : { fetched: true, docs: new Map<string, string | null>() };
+  const { events: specialRefundEvents, warnings: adjustmentSourceWarnings } =
+    resolveSettlementAdjustments({
+      date: targetDate,
+      locationGid,
+      dbRows: specialRefundIndexRows,
+      docs: adjustmentDocs.docs,
+      docsFetched: adjustmentDocs.fetched,
+    });
+  if (!adjustmentDocs.fetched) {
+    console.warn(
+      `[settlement] order adjustments metafield read failed; counted from DB shop=${shopId} location=${locationId} date=${targetDate}`,
+    );
+  }
+  if (adjustmentSourceWarnings.length > 0) {
+    console.warn(
+      `[settlement] order adjustments metafield warnings count=${adjustmentSourceWarnings.length} reasons=${adjustmentSourceWarnings.map((w) => w.reason).join(",")} shop=${shopId} location=${locationId} date=${targetDate}`,
+    );
+  }
 
   const srSettingsRaw = await getAppSetting<Partial<SpecialRefundSettings>>(
     shopId,
@@ -1045,6 +1094,27 @@ async function buildSettlementPreviewImpl(
             awaitingApprovalWarning: awaitingApprovalWarningMessage(items),
           };
         })()
+      : {}),
+    ...(adjustmentSourceWarnings.length > 0 || !adjustmentDocs.fetched
+      ? {
+          adjustmentSourceWarnings: [
+            ...adjustmentSourceWarnings.map((w) => ({
+              ...w,
+              message: adjustmentSourceWarningMessage(w),
+            })),
+            ...(!adjustmentDocs.fetched
+              ? [
+                  {
+                    reason: "metafield_unreadable" as const,
+                    sourceOrderId: "",
+                    sourceOrderName: null,
+                    message:
+                      "注文の「特殊返金・商品券調整」を読めなかったため、アプリの記録で数えました。しばらくしてから更新してください。",
+                  },
+                ]
+              : []),
+          ],
+        }
       : {}),
     ...(unmatchedRefundMethods.length > 0
       ? {

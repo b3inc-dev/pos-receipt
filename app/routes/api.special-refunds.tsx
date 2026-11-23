@@ -29,6 +29,8 @@ import {
 } from "../utils/specialRefundMethodValidation";
 import { normalizeLocationGid } from "../utils/locationGid";
 import { initialApprovalStatus } from "../utils/specialRefundApproval";
+import { syncOrderAdjustmentsMetafield } from "../services/orderAdjustments.server";
+import { countDateOf } from "../services/orderAdjustmentsPure.server";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
 
@@ -252,6 +254,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const isCorrectionRegistration =
       merged.correctionUsesRecordOnly && voidedOnOrder > 0;
 
+    // 数える日（店のタイムゾーン）。登録した日。「変更」で元の日のまま直せるように行に持つ
+    const shopTimezone = await getShopTimezoneForDaily(admin, shop.id);
+    const countDate = getCalendarDateStringInTimeZone(new Date(), shopTimezone);
+
     let idempotentReplay = Boolean(existingIdempotentEvent);
     const event = existingIdempotentEvent ?? await (async () => {
       try {
@@ -278,6 +284,7 @@ export async function action({ request }: ActionFunctionArgs) {
             // 承認制（設定でオンのときの付け替えだけ）: 承認待ちで登録し、管理画面で承認するまで精算に数えない。
             // Shopify 返金の実行は今までどおり（承認では Shopify に何も書かない）
             approvalStatus: initialApprovalStatus(merged, eventTypeStr),
+            countDate,
           },
         });
       } catch (error: unknown) {
@@ -314,6 +321,9 @@ export async function action({ request }: ActionFunctionArgs) {
       isCorrectionRegistration:
         event.shopifyRefundStatus === "pending" ? false : isCorrectionRegistration,
     });
+
+    // 注文メタフィールド pos.adjustments を書き直す（失敗しても登録は取り消さない。行に残して精算で警告）
+    const metafieldSync = await syncOrderAdjustmentsMetafield(admin, shop.id, processedEvent.sourceOrderId);
 
     if (processedEvent.shopifyRefundStatus === "pending") {
       return corsJson(
@@ -352,8 +362,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const locationGid = normalizeLocationGid(processedEvent.locationId);
     if (locationGid) {
       try {
-        const timezone = await getShopTimezoneForDaily(admin, shop.id);
-        const targetDate = getCalendarDateStringInTimeZone(processedEvent.createdAt, timezone);
+        const targetDate = countDateOf(processedEvent, shopTimezone);
         const loc = await prisma.location.findFirst({
           where: { shopId: shop.id, shopifyLocationGid: locationGid },
           select: { name: true },
@@ -376,6 +385,7 @@ export async function action({ request }: ActionFunctionArgs) {
         event: serializeEvent(processedEvent),
         correctionRegistration: isCorrectionRegistration,
         approvalRequired: processedEvent.approvalStatus === "pending",
+        metafieldWritten: metafieldSync.ok,
         shopifyRefund: {
           status: processedEvent.shopifyRefundStatus,
           refundId: processedEvent.shopifyRefundId,
@@ -508,6 +518,11 @@ function serializeEvent(e: {
   shopifyRefundProcessedAt: Date | null;
   approvalStatus?: string | null;
   approvalReviewedAt?: Date | null;
+  countDate?: string | null;
+  replacesEventId?: string | null;
+  voidedAt?: Date | null;
+  voidReason?: string | null;
+  metafieldSyncError?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -534,6 +549,11 @@ function serializeEvent(e: {
     shopifyRefundProcessedAt: e.shopifyRefundProcessedAt?.toISOString() ?? null,
     approvalStatus: e.approvalStatus ?? "none",
     approvalReviewedAt: e.approvalReviewedAt?.toISOString() ?? null,
+    countDate: e.countDate ?? null,
+    replacesEventId: e.replacesEventId ?? null,
+    voidedAt: e.voidedAt?.toISOString() ?? null,
+    voidReason: e.voidReason ?? null,
+    metafieldWritten: !e.metafieldSyncError,
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
   };

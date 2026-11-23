@@ -95,6 +95,10 @@ function matchWhere(row: any, where: any): boolean {
       if (!(cond as any[]).some((w) => matchWhere(row, w))) return false;
       continue;
     }
+    if (cond === null) {
+      if (row[k] != null) return false;
+      continue;
+    }
     if (cond && typeof cond === "object" && !(cond instanceof Date)) {
       const c = cond as any;
       if ("in" in c && !c.in.includes(row[k])) return false;
@@ -264,7 +268,7 @@ test("承認待ちでも Shopify 返金の成否が分からない（pending）�
   );
 });
 
-test("承認／却下: 承認待ちだけを書き換え、Shopify には何も書かない", async () => {
+test("承認／却下: 承認待ちだけを書き換え、Shopify には注文メタフィールドのほか何も書かない", async () => {
   putOverride("pending");
   const calls: string[] = [];
   const spyAdmin = {
@@ -278,7 +282,12 @@ test("承認／却下: 承認待ちだけを書き換え、Shopify には何も�
   assert.equal(r1.ok, true);
   assert.equal(store.specialRefundEvent[0].approvalStatus, "approved");
   assert.ok(store.specialRefundEvent[0].approvalReviewedAt instanceof Date);
-  assert.ok(calls.every((c) => !/^mutation|Create|Update|Set$/i.test(c)), `Shopify mutations: ${calls.join(",")}`);
+  // Shopify に書くのは注文メタフィールド pos.adjustments（承認待ち → 有効）だけ。返金などは書かない
+  assert.ok(
+    calls.every((c) => c === "OrderAdjustmentsSet" || !/^mutation|Create|Update|Set$/i.test(c)),
+    `Shopify mutations: ${calls.join(",")}`,
+  );
+  assert.ok(calls.includes("OrderAdjustmentsSet"), calls.join(","));
   // 2 回目（ほかの人が先に決めた）は断る
   const r2 = await decideSpecialRefundApproval(spyAdmin as any, SHOP_ID, "ev1", "reject");
   assert.equal(r2.ok, false);
