@@ -15,8 +15,8 @@ import { fileURLToPath } from "node:url";
 
 const SRC = fileURLToPath(new URL("../../extensions/pos-smart-grid/src", import.meta.url));
 
-/** 別の持ち主の PR で直している画面（精算）。そちらが入ったら外す */
-const PENDING_FILES = new Set(["SettlementModal.jsx"]);
+/** 別の持ち主の PR で直している画面。そちらが入ったら外す（精算は 2026-11-23 に直した） */
+const PENDING_FILES = new Set([]);
 
 const RULES = [
   { name: "s-button の kind（POS は variant）", re: /<s-button\b[^>]*\skind=/ },
