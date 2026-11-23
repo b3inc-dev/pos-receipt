@@ -117,7 +117,7 @@ export function OrderDetailSummary({ order }) {
           {order.estimatedVoucherChange ? (
             <s-text type="small" color="subdued">商品券釣有りの可能性があります</s-text>
           ) : (order.transactions ?? []).length > 0 ? (
-            <s-text type="small" color="subdued">商品券（釣り有り）の支払いが無いため、商品券釣銭調整はできません</s-text>
+            <s-text type="small" color="subdued">商品券釣有りの支払いが無いため、商品券釣銭調整はできません</s-text>
           ) : null}
         </s-stack>
       </s-section>
