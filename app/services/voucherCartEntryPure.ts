@@ -6,10 +6,10 @@
 /** カート → 注文 customAttributes のキー。「_」始まりは POS の画面・レシートに出ない */
 export const VOUCHER_CART_FACE_KEY = "_pos_receipt_voucher_face";
 
-/** "5000" → 5000。数でない・0 以下・小数 2 桁より細かい値は null */
+/** "5000" → 5000。数でない・0 以下・小数（円なので受けない）は null */
 export function parseVoucherCartFace(value: unknown): number | null {
   const s = String(value ?? "").replace(/[,，\s円]/g, "").trim();
-  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
+  if (!/^\d+$/.test(s)) return null;
   const n = Number(s);
   if (!Number.isFinite(n) || n <= 0) return null;
   return n;

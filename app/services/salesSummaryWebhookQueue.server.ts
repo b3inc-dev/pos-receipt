@@ -61,6 +61,14 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
             console.warn(`[pg-boss] sales-summary: unknown shop ${shopDomain}`);
             continue;
           }
+          // 会計前の商品券・返金の予約の自動の調整（失敗はログだけ。docs/VOUCHER_CART_ENTRY.md）
+          try {
+            const { runOrderAutoAdjustmentsFromWebhook } = await import("./orderAutoAdjustments.server");
+            await runOrderAutoAdjustmentsFromWebhook(admin, dbShop.id, shopDomain, payload);
+          } catch (e) {
+            console.warn(`[pg-boss] order auto adjustments failed shop=${shopDomain}`, e);
+          }
+
           const disabled = process.env.SALES_SUMMARY_WEBHOOK_REFRESH_DISABLED;
           if (disabled === "1" || disabled === "true") continue;
 

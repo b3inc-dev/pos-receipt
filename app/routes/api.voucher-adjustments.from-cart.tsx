@@ -1,12 +1,25 @@
 /**
+ * GET  /api/voucher-adjustments/from-cart → { enabled }（POS の「商品券」タイルが、会計前の額面入力を出すか決める）
  * POST /api/voucher-adjustments/from-cart
  * 会計後の画面（POS「商品券」の会計後の枠）から呼ぶ。本文: { sourceOrderId, locationId?, createdBy? }
  * 会計の前に入れた額面（注文の見えない項目）があれば、商品券調整を 1 件だけ登録する（docs/VOUCHER_CART_ENTRY.md）。
  * 同じ注文で何回呼んでも 1 件（2 回目からは status: "already"）。
  */
-import type { ActionFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
-import { registerVoucherFromCartEntry } from "../services/voucherCartEntry.server";
+import { registerVoucherFromCartEntry, voucherCartEntryEnabled } from "../services/voucherCartEntry.server";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  try {
+    const authResult = await authenticatePosRequestOrCorsError(request);
+    if (authResult instanceof Response) return authResult;
+    const { shop, corsJson } = authResult;
+    return corsJson({ ok: true, enabled: await voucherCartEntryEnabled(shop.id) });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return corsErrorJson(request, { ok: false, error: message }, 500);
+  }
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method === "OPTIONS") return corsPreflightResponse(request);

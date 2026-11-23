@@ -9,10 +9,10 @@ export const VOUCHER_CART_FACE_KEY = "_pos_receipt_voucher_face";
 export const VOUCHER_CART_HINT_KEY = "voucher_cart_entry_hint";
 export const VOUCHER_CART_HINT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
-/** 入力 "5,000" → 5000。数でない・0 以下は null */
+/** 入力 "5,000" → 5000。数でない・0 以下・小数（円なので受けない）は null */
 export function parseVoucherFaceInput(value) {
   const s = String(value ?? "").replace(/[,，\s円]/g, "").trim();
-  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
+  if (!/^\d+$/.test(s)) return null;
   const n = Number(s);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -51,6 +51,15 @@ export function postPurchaseMessage(res) {
         tone: "warning",
         text: `商品券釣有りの支払いが無いので、商品券 ${yen(res.face)} は登録していません`,
       };
+    case "face_too_small":
+      return {
+        tone: "warning",
+        text: `額面 ${yen(res.face)} が商品券で払った額 ${yen(res.applied)} より小さいので、登録していません。「商品券」タイルから額面を確かめて登録してください`,
+      };
+    case "settlement_confirmed":
+      return { tone: "warning", text: "この日の精算はもう確定しているので、商品券は登録していません。「商品券」タイルから登録してください" };
+    case "too_late":
+      return null;
     case "disabled":
       return { tone: "warning", text: "商品券の登録が管理画面で止められているので、登録していません" };
     case "cancelled":

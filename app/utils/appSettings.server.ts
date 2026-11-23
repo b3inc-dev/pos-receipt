@@ -223,6 +223,8 @@ export interface VoucherSettings {
   reflectVoucherChangeInSettlement: boolean;
   reflectVoucherChangeInReceiptDisplay: boolean;
   voucherChangeDisplayLabel: string;
+  /** 会計の前に商品券の額面を入れ、会計後に自動で登録する（docs/VOUCHER_CART_ENTRY.md）。初めはオフ（T の決定 2026-11-24） */
+  voucherCartEntryEnabled: boolean;
 }
 
 export const DEFAULT_VOUCHER_SETTINGS: VoucherSettings = {
@@ -236,6 +238,7 @@ export const DEFAULT_VOUCHER_SETTINGS: VoucherSettings = {
   reflectVoucherChangeInSettlement: true,
   reflectVoucherChangeInReceiptDisplay: true,
   voucherChangeDisplayLabel: "商品券おつり",
+  voucherCartEntryEnabled: false,
 };
 
 // ── 特殊返金設定（要件 §8） ───────────────────────────────────────────────────

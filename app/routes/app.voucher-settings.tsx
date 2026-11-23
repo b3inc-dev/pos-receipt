@@ -62,6 +62,7 @@ export async function action({ request }: ActionFunctionArgs) {
     reflectVoucherChangeInSettlement: bool("reflectVoucherChangeInSettlement", true),
     reflectVoucherChangeInReceiptDisplay: bool("reflectVoucherChangeInReceiptDisplay", true),
     voucherChangeDisplayLabel: String(get("voucherChangeDisplayLabel") ?? "商品券おつり").trim(),
+    voucherCartEntryEnabled: bool("voucherCartEntryEnabled", false),
   };
   await setAppSetting(shop.id, VOUCHER_SETTINGS_KEY, settings);
   return Response.json({ ok: true });
@@ -88,6 +89,7 @@ export default function VoucherSettingsPage() {
     fd.set("reflectVoucherChangeInSettlement", form.reflectVoucherChangeInSettlement ? "true" : "false");
     fd.set("reflectVoucherChangeInReceiptDisplay", form.reflectVoucherChangeInReceiptDisplay ? "true" : "false");
     fd.set("voucherChangeDisplayLabel", form.voucherChangeDisplayLabel);
+    fd.set("voucherCartEntryEnabled", form.voucherCartEntryEnabled ? "true" : "false");
     submit(fd, { method: "post" });
   };
 
@@ -119,6 +121,12 @@ export default function VoucherSettingsPage() {
                 <Checkbox label="商品券機能を有効にする" checked={form.voucherFeatureEnabled} onChange={(v) => set("voucherFeatureEnabled", v)} />
                 <Checkbox label="自動判定を有効にする" checked={form.voucherAutoDetectionEnabled} onChange={(v) => set("voucherAutoDetectionEnabled", v)} />
                 <Checkbox label="手動調整を有効にする" checked={form.voucherManualAdjustmentEnabled} onChange={(v) => set("voucherManualAdjustmentEnabled", v)} />
+                <Checkbox
+                  label="会計の前に額面を入れる"
+                  helpText="POS の「商品券」タイルで会計の前に額面を入れると、会計のあとに商品券釣銭調整を自動で登録します。初めはオフです。"
+                  checked={form.voucherCartEntryEnabled}
+                  onChange={(v) => set("voucherCartEntryEnabled", v)}
+                />
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>

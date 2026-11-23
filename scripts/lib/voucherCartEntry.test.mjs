@@ -30,6 +30,7 @@ test("額面の入力を読む", () => {
   assert.equal(parseVoucherFaceInput(""), null);
   assert.equal(parseVoucherFaceInput("-1"), null);
   assert.equal(parseVoucherFaceInput("1e3"), null);
+  assert.equal(parseVoucherFaceInput("1000.5"), null, "円なので小数は受けない");
   assert.equal(voucherFaceInCart({ properties: { [VOUCHER_CART_FACE_KEY]: "1000" } }), 1000);
   assert.equal(voucherFaceInCart({ properties: {} }), null);
   assert.equal(voucherFaceInCart(null), null);
@@ -48,7 +49,7 @@ test("会計後の一行は店のことばで、生のキーを出さない", ()
   assert.match(created.text, /商品券 5,000円（釣銭 700円）を登録しました/);
   assert.match(postPurchaseMessage({ status: "no_voucher_payment", face: 3000 }).text, /商品券釣有りの支払いが無い/);
   assert.equal(postPurchaseMessage({ status: "no_face" }), null);
-  for (const s of ["created", "already", "no_voucher_payment", "disabled", "cancelled", "order_unreadable"]) {
+  for (const s of ["created", "already", "no_voucher_payment", "face_too_small", "settlement_confirmed", "disabled", "cancelled", "order_unreadable"]) {
     const m = postPurchaseMessage({ status: s, event: {}, face: 1 });
     assert.ok(m && !/_pos_|voucher|釣り/.test(m.text), `${s}: ${m?.text}`);
   }
