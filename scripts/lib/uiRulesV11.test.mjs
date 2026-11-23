@@ -13,7 +13,7 @@ const routes = readdirSync("app/routes")
 const OPEN_PR_SCREENS = new Set([
   "app._index.tsx", "app.budget-management.tsx", "app.budget-template-csv.tsx", "app.channel-budget-management.tsx",
   "app.channel-budget-template-csv.tsx", "app.diagnostics.tsx", "app.plan.callback.tsx", "app.plan.tsx",
-  "app.sales-summary-settings.tsx", "app.sales-summary.tsx", "app.print-settings.tsx",
+  "app.sales-summary.tsx", "app.print-settings.tsx",
   "app.receipt-print-layout.tsx", "app.settlement-print-layout.tsx", "app.settlement-settings.tsx",
 ]);
 const checked = routes.filter(({ name }) => !OPEN_PR_SCREENS.has(name));
