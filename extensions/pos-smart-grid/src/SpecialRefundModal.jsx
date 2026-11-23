@@ -11,9 +11,9 @@
  * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券調整」→ form_voucher へ直行
  */
 import { render } from "preact";
-import { PosChoiceField } from "./PosChoiceField.jsx";
 import { useState, useCallback, useEffect } from "preact/hooks";
 import { getOrder, createRedoDraft } from "../../common/orderPickerApi.js";
+import { PosChoiceField } from "./PosChoiceField.jsx";
 import {
   listSpecialRefunds,
   createSpecialRefund,
