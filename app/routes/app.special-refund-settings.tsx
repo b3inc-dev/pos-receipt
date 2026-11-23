@@ -380,7 +380,7 @@ export default function SpecialRefundSettingsPage() {
               <Card>
                 <BlockStack gap="400">
                   <Checkbox
-                    label="返金方法変更を精算に入れる"
+                    label="「返金方法変更」を精算に入れる"
                     checked={form.reflectCashRefundToSettlement || form.reflectPaymentOverrideToSettlement}
                     onChange={(v) => {
                       set("reflectCashRefundToSettlement", v);
@@ -392,8 +392,8 @@ export default function SpecialRefundSettingsPage() {
                         : undefined
                     }
                   />
-                  <Checkbox label="商品券釣銭登録を精算に入れる" checked={form.reflectVoucherAdjustmentToSettlement} onChange={(v) => set("reflectVoucherAdjustmentToSettlement", v)} />
-                  <Checkbox label="レシートの現金を直すを精算に入れる" checked={form.reflectReceiptCashAdjustmentToSettlement} onChange={(v) => set("reflectReceiptCashAdjustmentToSettlement", v)} />
+                  <Checkbox label="「商品券釣銭登録」を精算に入れる" checked={form.reflectVoucherAdjustmentToSettlement} onChange={(v) => set("reflectVoucherAdjustmentToSettlement", v)} />
+                  <Checkbox label="「レシートの現金を直す」を精算に入れる" checked={form.reflectReceiptCashAdjustmentToSettlement} onChange={(v) => set("reflectReceiptCashAdjustmentToSettlement", v)} />
                 </BlockStack>
               </Card>
             </Layout.AnnotatedSection>
