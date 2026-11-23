@@ -33,6 +33,8 @@ export function formatListBadges(item) {
   if (b.hasPendingShopifyRefund) out.push({ key: "pending", label: "返金処理中", tone: "critical" });
   if (b.cancelled) out.push({ key: "cancelled", label: "キャンセル", tone: "critical" });
   if (b.refundedShopify) out.push(refundBadge(item));
+  // ほかの店舗で売って、この店舗で返品した注文（返品した店舗の一覧にも出す。T 2026-11-24）
+  if (b.otherStoreSale) out.push({ key: "otherstore", label: "他店舗で販売", tone: "neutral" });
   if (b.hasApprovalPending) out.push({ key: "approval", label: "承認待ち", tone: "caution" });
   if (b.hasSpecialRefund || b.appSpecialApplied) out.push({ key: "special", label: "返金方法変更済", tone: "info" });
   if (b.hasVoucherAdjustment) out.push({ key: "vadj", label: "商品券登録済", tone: "success" });
@@ -45,7 +47,7 @@ export function formatListBadges(item) {
 
 // タイルごとに出すバッジ（T 2026-11-24: 返金と商品券のバッジが混ざらないように。「すべて」の絞り込みでも同じ）
 const TILE_BADGE_KEYS = {
-  refunded: new Set(["pending", "cancelled", "refund", "approval", "special", "voided", "receipt"]),
+  refunded: new Set(["pending", "cancelled", "refund", "otherstore", "approval", "special", "voided", "receipt"]),
   voucher_change: new Set(["cancelled", "vadj", "voided", "vchg", "voucher", "receipt"]),
 };
 
