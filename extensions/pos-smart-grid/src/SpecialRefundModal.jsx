@@ -1251,6 +1251,228 @@ function SpecialRefundForm({
     }
   };
 
+  if (confirming) {
+    return (
+      <s-page heading="登録確認">
+        <s-scroll-box>
+          <s-box padding="base">
+            <s-stack gap="base">
+              <s-text fontWeight="bold">以下の内容で登録します</s-text>
+              <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+                <s-stack gap="small">
+                  <Row label="取引" value={order?.orderName ?? "-"} />
+                  <Row label="内容" value={REFUND_MODES.find((m) => m.value === currentMode)?.label ?? ""} />
+                  <Row label="金額" value={`¥${Number(amount).toLocaleString()}`} />
+                  {showPaymentFields ? (
+                    <>
+                      <Row label="元の手段" value={paymentLabel(originalPaymentMethod, paymentMethods)} />
+                      <Row label="返金手段" value={paymentLabel(actualRefundMethod, refundMethods)} />
+                    </>
+                  ) : null}
+                  {showAdjustKind ? (
+                    <Row label="調整種別" value={ADJUST_KINDS.find((k) => k.value === adjustKind)?.label ?? adjustKind} />
+                  ) : null}
+                  {note ? <Row label="メモ" value={note} /> : null}
+                </s-stack>
+              </s-box>
+              {error ? <s-text tone="critical">{error}</s-text> : null}
+              <s-stack gap="small">
+                <s-button kind="primary" onClick={handleSubmit} loading={loading}>
+                  登録する
+                </s-button>
+                <s-button kind="secondary" onClick={() => setConfirming(false)} disabled={loading}>
+                  修正する
+                </s-button>
+              </s-stack>
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+      </s-page>
+    );
+  }
+
+  return (
+    <s-page heading="返金方法変更を登録">
+      <s-scroll-box>
+        <s-box padding="base">
+          <s-stack gap="base">
+            {/* 取引情報と元の支払い（支払方法ごと）。「全額反映」で金額と元の支払手段を入れる */}
+            <OrderTenderPanel order={order} lines={tenderLines} onFill={fillFromTender} disabled={loading} />
+
+            <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
+
+            {/* 何をするか（2 つ）。種別は返金手段から決める */}
+            {modes.length > 1 ? (
+              <PosChoiceField
+                label="何をしますか"
+                value={currentMode}
+                options={modes.map((m) => ({ value: m.value, label: m.label }))}
+                onChange={setMode}
+              />
+            ) : (
+              <s-text fontWeight="bold">{modes[0]?.label ?? ""}</s-text>
+            )}
+            <s-text tone="subdued" fontSize="small">{modes.find((m) => m.value === currentMode)?.help ?? ""}</s-text>
+
+            {/* 金額 */}
+            <s-text-field
+              label="金額（円）"
+              value={amount}
+              type="number"
+              onInput={(e) => setAmount(e?.currentTarget?.value ?? "")}
+              placeholder="例: 1000"
+            />
+
+            {/* 支払手段（cash_refund / payment_method_override） */}
+            {showPaymentFields ? (
+              <>
+                {originalFromOrder && paymentMethods.length === 1 ? (
+                  <s-stack gap="none">
+                    <s-text tone="subdued" fontSize="small">元の支払手段（この注文の支払い）</s-text>
+                    <s-text fontWeight="bold">{paymentMethods[0].label}</s-text>
+                  </s-stack>
+                ) : (
+                  <PosChoiceField
+                    label={originalFromOrder ? "元の支払手段（この注文で払われたものから選ぶ）" : "元の支払手段"}
+                    value={originalPaymentMethod}
+                    options={paymentMethods}
+                    onChange={setOriginalPaymentMethod}
+                  />
+                )}
+                {refundMethods.length > 0 ? (
+                  <PosChoiceField
+                    label="実際の返金手段"
+                    value={actualRefundMethod}
+                    options={refundMethods}
+                    onChange={setActualRefundMethod}
+                  />
+                ) : (
+                  <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} fontSize="small">
+                    {refundMethodsMessage(refundMethodsState)}
+                  </s-text>
+                )}
+              </>
+            ) : null}
+
+            {/* 調整種別（receipt_cash_adjustment） */}
+            {showAdjustKind ? (
+              <PosChoiceField
+                label="調整種別"
+                value={adjustKind}
+                options={ADJUST_KINDS}
+                onChange={setAdjustKind}
+              />
+            ) : null}
+
+            {/* メモ */}
+            <s-text-field
+              label="メモ（任意）"
+              value={note}
+              onInput={(e) => setNote(e?.currentTarget?.value ?? "")}
+              placeholder="補足説明など"
+            />
+
+            {error ? <s-text tone="critical">{error}</s-text> : null}
+
+            <s-stack gap="small">
+              <s-button kind="primary" onClick={handleConfirm} disabled={loading}>
+                確認する
+              </s-button>
+              <s-button kind="secondary" onClick={onBack} disabled={loading}>
+                戻る
+              </s-button>
+            </s-stack>
+          </s-stack>
+        </s-box>
+      </s-scroll-box>
+    </s-page>
+  );
+}
+
+// ──────────────────────────────────────────────
+// 商品券調整フォーム
+// ──────────────────────────────────────────────
+function VoucherAdjustmentForm({
+  order,
+  orderCorrectionContext,
+  loading,
+  error,
+  setLoading,
+  setError,
+  onBack,
+  onSuccess,
+}) {
+  const [faceValue, setFaceValue] = useState("");
+  // 使った額は注文の取引から入れる。読めないときだけ手で入れる
+  const [appliedAmount, setAppliedAmount] = useState("");
+  const [appliedState, setAppliedState] = useState("loading"); // loading | order | manual
+  const [note, setNote] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const tenderLines = orderTenderLines(order);
+
+  useEffect(() => {
+    if (!order?.orderId) return;
+    setAppliedState("loading");
+    getVoucherApplied(order.orderId)
+      .then((res) => {
+        if (res?.voucherAppliedAmount != null) {
+          setAppliedAmount(String(res.voucherAppliedAmount));
+          setAppliedState("order");
+        } else {
+          setAppliedState("manual");
+        }
+      })
+      .catch(() => setAppliedState("manual"));
+  }, [order?.orderId]);
+
+  const face = Number(faceValue);
+  const applied = Number(appliedAmount);
+  const changeAmount =
+    faceValue !== "" && appliedAmount !== "" && !isNaN(face) && !isNaN(applied)
+      ? Math.max(0, face - applied)
+      : null;
+
+  const handleConfirm = () => {
+    setError("");
+    if (!faceValue || isNaN(face) || face <= 0) {
+      setError("受け取った商品券の額面を入れてください");
+      return;
+    }
+    if (appliedState === "loading") {
+      setError("注文の商品券の支払いを読み込み中です。少し待ってからもう一度押してください");
+      return;
+    }
+    if (appliedAmount === "" || isNaN(applied) || applied < 0) {
+      setError("商品券で払った額を入れてください");
+      return;
+    }
+    setConfirming(true);
+  };
+
+  const handleSubmit = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await createVoucherAdjustment({
+        sourceOrderId: order.orderId,
+        sourceOrderName: order.orderName,
+        locationId: order.location?.id ?? "",
+        voucherFaceValue: face,
+        // 注文から読めた額はサーバーでも読み直す（送らない）。手で入れたときだけ送る
+        ...(appliedState === "manual" ? { voucherAppliedAmount: applied } : {}),
+        currency: order.totalPrice?.currencyCode ?? "JPY",
+        note: note.trim() || null,
+      });
+      setConfirming(false);
+      await onSuccess(res);
+    } catch (e) {
+      setError(toUserMessage(e?.message) || "登録に失敗しました");
+      setConfirming(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // 入力・確認とも、確かめる所（釣銭）を大きく、取引と金額は「左に項目名・右に値」の行で（T 2026-11-24）。
   // 下は固定: 左に「戻る」、右に「確認する」「登録する」
   if (confirming) {
