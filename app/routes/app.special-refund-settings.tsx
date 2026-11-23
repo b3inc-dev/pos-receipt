@@ -44,7 +44,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const settings: SpecialRefundSettings = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...saved };
   // 前からの登録で、まだ注文に書いていない注文の数（注文に書く設定がオンのときだけ数える）
   const notWrittenCount = settings.writeOrderAdjustmentsMetafield ? await countOrdersNotWrittenYet(shop.id) : 0;
-  return { settings, notWrittenCount };
+  return { settings, notWrittenCount, backfillMax: ORDER_ADJUSTMENTS_BACKFILL_MAX };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -97,7 +97,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function SpecialRefundSettingsPage() {
-  const { settings: initial, notWrittenCount } = useLoaderData<typeof loader>();
+  const { settings: initial, notWrittenCount, backfillMax } = useLoaderData<typeof loader>();
   const backfill = useFetcher<
     | { intent: "backfill"; ok: true; written: { orderName: string }[]; failed: { orderName: string; error: string }[]; remaining: number }
     | { intent: "backfill"; ok: false; reason: "off" }
@@ -264,7 +264,7 @@ export default function SpecialRefundSettingsPage() {
                     <BlockStack gap="200">
                       <Text as="h3" variant="headingSm">前からの登録を注文に書く</Text>
                       <Text as="p" tone="subdued">
-                        {`オンにする前の登録で、まだ注文に書いていない注文が ${backfillResult?.ok ? backfillResult.remaining : notWrittenCount} 件あります。精算ではまとめて書かないので、ここから書きます。注文を書くと売上サマリーの計算し直しが走るので、まず 1 件だけ書いて注文ページで確かめてから、${ORDER_ADJUSTMENTS_BACKFILL_MAX} 件ずつ書いてください。`}
+                        {`オンにする前の登録で、まだ注文に書いていない注文が ${backfillResult?.ok ? backfillResult.remaining : notWrittenCount} 件あります。精算ではまとめて書かないので、ここから書きます。注文を書くと売上サマリーの計算し直しが走るので、まず 1 件だけ書いて注文ページで確かめてから、${backfillMax} 件ずつ書いてください。`}
                       </Text>
                       <InlineStack gap="200">
                         <Button
@@ -275,11 +275,11 @@ export default function SpecialRefundSettingsPage() {
                           1 件だけ書く
                         </Button>
                         <Button
-                          onClick={() => runBackfill(ORDER_ADJUSTMENTS_BACKFILL_MAX)}
+                          onClick={() => runBackfill(backfillMax)}
                           loading={backfillBusy}
                           disabled={(backfillResult?.ok ? backfillResult.remaining : notWrittenCount) === 0}
                         >
-                          {`${ORDER_ADJUSTMENTS_BACKFILL_MAX} 件書く`}
+                          {`${backfillMax} 件書く`}
                         </Button>
                       </InlineStack>
                       {backfillResult && !backfillResult.ok ? (
