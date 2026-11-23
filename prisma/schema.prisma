@@ -52,6 +52,7 @@ model Shop {
   refundReservations RefundReservation[]
   receiptTemplates ReceiptTemplate[]
   receiptIssues    ReceiptIssue[]
+  printRecords     PrintRecord[]
   budgets          Budget[]
   footfallReports  FootfallReport[]
   salesSummaryCacheDaily   SalesSummaryCacheDaily[]
@@ -485,4 +486,20 @@ model SalesChannelCacheDaily {
 
   @@unique([shopId, channelId, targetDate])
   @@index([shopId, targetDate])
+}
+
+// ========== レシートを印刷した記録（再印字の印のため） ==========
+// 領収書・販売レシート・ギフトレシートを POS が一度でも印刷を受け付けたか。
+// 精算・点検は Settlement.printedAt で見るのでここには入れない。金額・件数には使わない。
+model PrintRecord {
+  id             String   @id @default(cuid())
+  shopId         String
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  kind           String   // "receipt" | "sales" | "gift"
+  targetId       String   // 領収書は ReceiptIssue.id、販売・ギフトは注文の数字の id
+  printCount     Int      @default(1)
+  firstPrintedAt DateTime @default(now())
+  lastPrintedAt  DateTime @default(now())
+
+  @@unique([shopId, kind, targetId])
 }

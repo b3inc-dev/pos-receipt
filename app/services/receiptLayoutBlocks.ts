@@ -109,6 +109,20 @@ export const BLOCK_DEFS: BlockDef[] = [
     summaryKey: "text",
   },
   {
+    type: "print_marks",
+    label: "再印字・再精算の印",
+    description: "印刷し直したときの「再印字」、確定し直した精算の「再精算」をここに出します。出すかどうかと文言は印字設定で決めます。",
+    kinds: ["settlement", "sales", "gift"],
+    settings: [
+      size("l"),
+      { key: "bold", label: "太字", type: "checkbox", default: true },
+      { key: "boxed", label: "四角で囲む", type: "checkbox", default: true },
+      align(),
+    ],
+    template:
+      `{% if print_mark_text != blank %}<div class="blk a-{{ s_align }}"><span class="fs-{{ s_size }}{% if s_bold %} b{% endif %}"{% if s_boxed %} style="display:inline-block;border:2px solid #000;padding:2px 10px"{% endif %}>{{ print_mark_text }}</span></div>{% endif %}`,
+  },
+  {
     type: "text",
     label: "文章",
     description: "自由な文章です。{{ order.name }} のような差し込みも使えます。",

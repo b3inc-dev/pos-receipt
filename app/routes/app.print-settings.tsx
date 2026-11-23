@@ -13,6 +13,7 @@ import {
   BlockStack,
   Banner,
   Select,
+  TextField,
 } from "@shopify/polaris";
 import { useState } from "react";
 import { authenticate } from "../shopify.server";
@@ -35,6 +36,14 @@ import { SuccessToast } from "../components/admin-ui";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
 import { PaperWidthCorrespondence } from "../components/PaperWidthCorrespondence";
 import { parseSalesPaperWidth, parseSharedPaperWidth } from "../utils/paperWidthCorrespondence";
+import {
+  DEFAULT_REPRINT_MARK_TEXT,
+  DEFAULT_RESETTLEMENT_MARK_TEXT,
+  normalizePrintMarkSettings,
+  PRINT_MARK_SETTINGS_KEY,
+  PRINT_MARK_TEXT_MAX,
+  type PrintMarkSettings,
+} from "../services/printMarks";
 
 const UNIFIED_PRINT_MODE = "shopify_printing" as const;
 
@@ -49,8 +58,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const saved = await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY);
   const settings: PrintSettings = { ...DEFAULT_PRINT_SETTINGS, ...saved };
   const sales = await getAppSetting<Partial<SalesReceiptSettings>>(shop.id, SALES_RECEIPT_SETTINGS_KEY);
+  const marks = normalizePrintMarkSettings(await getAppSetting<unknown>(shop.id, PRINT_MARK_SETTINGS_KEY));
   return {
     settings,
+    marks,
     storedDefaultPrintMode: saved?.defaultPrintMode ?? null,
     salesPaperWidthMm: parseSalesPaperWidth(sales?.paperWidthMm),
   };
@@ -93,11 +104,24 @@ export async function action({ request }: ActionFunctionArgs) {
     widthRaw === "58" || widthRaw === "58mm" ? 58 : 80;
   Object.assign(settings, syncPrintPaperWidthFields(widthMm));
   await setAppSetting(shop.id, PRINT_SETTINGS_KEY, settings);
+  // 再印字・再精算の印（別のキーに保存。読み込みで文言を整える）
+  await setAppSetting(
+    shop.id,
+    PRINT_MARK_SETTINGS_KEY,
+    normalizePrintMarkSettings({
+      settlementReprint: formData.get("markSettlementReprint") === "true",
+      receiptReprint: formData.get("markReceiptReprint") === "true",
+      salesReprint: formData.get("markSalesReprint") === "true",
+      resettlement: formData.get("markResettlement") === "true",
+      reprintText: formData.get("markReprintText"),
+      resettlementText: formData.get("markResettlementText"),
+    }),
+  );
   return Response.json({ ok: true, at: Date.now() });
 }
 
 export default function PrintSettingsPage() {
-  const { settings: initial, storedDefaultPrintMode, salesPaperWidthMm } = useLoaderData<typeof loader>();
+  const { settings: initial, marks: initialMarks, storedDefaultPrintMode, salesPaperWidthMm } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
@@ -105,6 +129,11 @@ export default function PrintSettingsPage() {
   const actionData = useActionData<{ ok: boolean; at?: number }>();
   const q = location.search || "";
   const [form, setForm] = useState<PrintSettings>({ ...initial });
+  const [marks, setMarks] = useState<PrintMarkSettings>({ ...initialMarks });
+  const setMark = <K extends keyof PrintMarkSettings>(key: K, value: PrintMarkSettings[K]) => {
+    setMarks((prev) => ({ ...prev, [key]: value }));
+  };
+  const anyReprint = marks.settlementReprint || marks.receiptReprint || marks.salesReprint;
   // 押してから終わるまで保存ボタンを処理中にし、二重に押せないようにする（UI ルール v1.1）
   const saving = navigation.state !== "idle" && navigation.formMethod?.toLowerCase() === "post";
 
@@ -115,6 +144,12 @@ export default function PrintSettingsPage() {
       "receiptPreviewBeforePrintRequired",
       form.receiptPreviewBeforePrintRequired ? "true" : "false",
     );
+    fd.set("markSettlementReprint", marks.settlementReprint ? "true" : "false");
+    fd.set("markReceiptReprint", marks.receiptReprint ? "true" : "false");
+    fd.set("markSalesReprint", marks.salesReprint ? "true" : "false");
+    fd.set("markResettlement", marks.resettlement ? "true" : "false");
+    fd.set("markReprintText", marks.reprintText);
+    fd.set("markResettlementText", marks.resettlementText);
     submit(fd, { method: "post" });
   };
 
@@ -187,6 +222,71 @@ export default function PrintSettingsPage() {
                   salesWidthMm={salesPaperWidthMm}
                   search={q}
                 />
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection
+            title="再印字・再精算の印"
+            description="ブランドや商業施設の決まりで、印刷し直した控えや確定し直した精算を見分けたいときに使います。印はレシートのいちばん上に四角で囲んで出します。"
+          >
+            <Card>
+              <BlockStack gap="400">
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingSm">印刷し直したとき「再印字」と出すレシート</Text>
+                  <Text as="p" tone="subdued">
+                    一度印刷したあとにもう一度印刷すると出ます。発行した画面で押し直したときも、履歴から印刷したときも同じです。
+                  </Text>
+                  <Checkbox
+                    label="精算レシート"
+                    checked={marks.settlementReprint}
+                    onChange={(v) => setMark("settlementReprint", v)}
+                    helpText="点検レシートは確認のために何度も出すので、印は出しません。"
+                  />
+                  <Checkbox
+                    label="領収書"
+                    checked={marks.receiptReprint}
+                    onChange={(v) => setMark("receiptReprint", v)}
+                  />
+                  <Checkbox
+                    label="販売レシート・ギフトレシート"
+                    checked={marks.salesReprint}
+                    onChange={(v) => setMark("salesReprint", v)}
+                    helpText="この画面の印字で出すレシートだけです。Shopify の標準のレシートには出ません。"
+                  />
+                  <TextField
+                    label="再印字の印の文言"
+                    value={marks.reprintText}
+                    onChange={(v) => setMark("reprintText", v)}
+                    autoComplete="off"
+                    maxLength={PRINT_MARK_TEXT_MAX}
+                    placeholder={DEFAULT_REPRINT_MARK_TEXT}
+                    disabled={!anyReprint}
+                    helpText="空のまま保存すると「再印字」になります。"
+                  />
+                </BlockStack>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingSm">確定し直した精算</Text>
+                  <Checkbox
+                    label="「再精算」と出す"
+                    checked={marks.resettlement}
+                    onChange={(v) => setMark("resettlement", v)}
+                    helpText="精算したあとに会計などがあり、POS の「今の数で再確定する」で確定し直した精算のレシートに出ます。前の精算は履歴に残ります。"
+                  />
+                  <TextField
+                    label="再精算の印の文言"
+                    value={marks.resettlementText}
+                    onChange={(v) => setMark("resettlementText", v)}
+                    autoComplete="off"
+                    maxLength={PRINT_MARK_TEXT_MAX}
+                    placeholder={DEFAULT_RESETTLEMENT_MARK_TEXT}
+                    disabled={!marks.resettlement}
+                    helpText="空のまま保存すると「再精算」になります。"
+                  />
+                </BlockStack>
+                <Text as="p" tone="subdued">
+                  レシートのレイアウトで「再印字・再精算の印」のブロックを置くと、その場所に出します。金額や件数は変わりません。
+                </Text>
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>

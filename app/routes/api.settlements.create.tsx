@@ -208,6 +208,8 @@ export async function action({ request }: ActionFunctionArgs) {
       const printSnapshot = buildSettlementPrintSnapshot({
         locationName: issuedLocationName,
         isInspection: inspection,
+        // 確定済みの日を確定し直した精算（再精算）。印字の「再精算」の印にだけ使う
+        isResettlement: !inspection && !!raced,
       });
 
       const data = {

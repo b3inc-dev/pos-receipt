@@ -30,6 +30,8 @@ export type SettlementPrintSnapshot = {
   locationName: string;
   title: string;
   isInspection: boolean;
+  /** 確定済みの日を確定し直してできた精算（再精算）。古い記録には無い（= false） */
+  resettlement?: boolean;
 };
 
 export type ParsedSettlementPrintPayload = {
@@ -51,12 +53,15 @@ export function settlementReceiptTitle(isInspection: boolean): string {
 export function buildSettlementPrintSnapshot(opts: {
   locationName: string;
   isInspection: boolean;
+  /** 再確定（reconfirm）でできた精算なら true。点検には付けない */
+  isResettlement?: boolean;
 }): SettlementPrintSnapshot {
   return {
     formVersion: SETTLEMENT_RECEIPT_FORM_VERSION,
     locationName: String(opts.locationName ?? "").trim(),
     title: settlementReceiptTitle(opts.isInspection),
     isInspection: !!opts.isInspection,
+    ...(opts.isResettlement && !opts.isInspection ? { resettlement: true } : {}),
   };
 }
 
@@ -118,6 +123,7 @@ export function parsePaymentSectionsJson(
             locationName: snap.locationName,
             title: String(snap.title ?? ""),
             isInspection: !!snap.isInspection,
+            ...(snap.resettlement === true && !snap.isInspection ? { resettlement: true } : {}),
           }
         : null;
     return {
@@ -127,6 +133,11 @@ export function parsePaymentSectionsJson(
     };
   }
   return { sections: [], snapshot: null, legacyUnversioned: true };
+}
+
+/** 保存した記録が再精算（再確定でできた精算）か */
+export function isResettlementRow(row: { paymentSectionsJson?: string | null }): boolean {
+  return parsePaymentSectionsJson(row.paymentSectionsJson).snapshot?.resettlement === true;
 }
 
 export function paymentSectionsForApi(json: string | null | undefined): SettlementPaymentSection[] {

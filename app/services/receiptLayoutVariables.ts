@@ -14,6 +14,9 @@ const COMMON: TemplateVariable[] = [
   { name: "location.phone", label: "電話番号" },
   { name: "staff.name", label: "スタッフ" },
   { name: "printed_at", label: "印字した日時" },
+  { name: "print_mark_text", label: "再印字・再精算の印（印字設定でオンにした分。無ければ空）" },
+  { name: "print_marks", label: "再印字・再精算の印の一覧（for で回す）" },
+  { name: "is_reprint", label: "一度印刷したあとの印刷なら true" },
 ];
 
 const ORDER: TemplateVariable[] = [
@@ -62,6 +65,7 @@ export const TEMPLATE_VARIABLES: Record<ReceiptKind, TemplateVariable[]> = {
     { name: "settlement.total_including_returns", label: "合計額（返品含む）" },
     { name: "settlement.cash_deposit", label: "納金額" },
     { name: "settlement.payments", label: "支払方法別の一覧（label・net・count・refund・refund_count）" },
+    { name: "settlement.is_resettlement", label: "確定し直した精算（再精算）なら true" },
   ],
   receipt: [
     ...COMMON,

@@ -108,6 +108,8 @@ export type SettlementData = {
   cash_deposit: number;
   /** 表示する順に並べた支払方法（電子マネーの合計などの行も精算側で入れる） */
   payments: SettlementPayment[];
+  /** 確定済みの日を確定し直した精算（再精算）なら true */
+  is_resettlement?: boolean;
 };
 
 export type ReceiptData = {
@@ -128,6 +130,12 @@ type Common = {
   staff: { name: string };
   printed_at: string;
   document: { title: string };
+  /** 一度印刷したあとの印刷（再印字）なら true。印を出す設定かどうかには関係しない */
+  is_reprint?: boolean;
+  /** 紙に出す印（印字設定でオンにした分だけ。例: ["再精算", "再印字"]） */
+  print_marks?: string[];
+  /** 印を 1 行にした文（「再精算・再印字」）。出さないときは空 */
+  print_mark_text?: string;
 };
 
 export type ReceiptTemplateData =
@@ -147,6 +155,10 @@ const SAMPLE_COMMON: Common = {
   staff: { name: "山田" },
   printed_at: "2026年11月22日 20:58",
   document: { title: "" },
+  // 見本では印の位置が分かるよう「再印字」を出す（印のブロックを置いたときだけ見える）
+  is_reprint: true,
+  print_marks: ["再印字"],
+  print_mark_text: "再印字",
 };
 
 const SAMPLE_ORDER: OrderData = {

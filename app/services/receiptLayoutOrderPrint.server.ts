@@ -8,6 +8,7 @@ import { LAYOUT_ORDER_QUERY, LAYOUT_SHIPPING_ADDRESS_QUERY, salesTemplateData } 
 import { renderLayoutForPrint } from "./receiptLayoutPrint.server";
 import { normalizeSalesData, SALES_DATA_SETTING_KEY } from "./receiptLayoutSettlementCalc";
 import type { ReceiptLayout } from "./receiptLayoutSchema";
+import { applyPrintMarksToLayoutHtml, printMarkTemplateValues } from "./printMarks";
 
 type AdminLike = { graphql: (query: string, opts?: { variables?: Record<string, unknown> }) => Promise<Response> };
 
@@ -53,7 +54,7 @@ export async function layoutOrderHtml(
   shopId: string,
   orderGid: string,
   layout: ReceiptLayout,
-  opts: { kind: "sales" | "gift"; paperWidthMm: 58 | 80; shopName?: string },
+  opts: { kind: "sales" | "gift"; paperWidthMm: 58 | 80; shopName?: string; printMarks?: string[]; isReprint?: boolean },
 ): Promise<LayoutOrderResult> {
   try {
     return await build(admin, shopId, orderGid, layout, opts);
@@ -71,7 +72,7 @@ async function build(
   shopId: string,
   orderGid: string,
   layout: ReceiptLayout,
-  opts: { kind: "sales" | "gift"; paperWidthMm: 58 | 80; shopName?: string },
+  opts: { kind: "sales" | "gift"; paperWidthMm: 58 | 80; shopName?: string; printMarks?: string[]; isReprint?: boolean },
 ): Promise<LayoutOrderResult> {
   const res = await admin.graphql(LAYOUT_ORDER_QUERY, { variables: { id: orderGid } });
   const json = (await res.json()) as {
@@ -102,6 +103,10 @@ async function build(
     printedAt: new Date().toISOString(),
     logoUrl,
   });
-  const html = renderLayoutForPrint(layout, data, opts.paperWidthMm);
-  return html ? { status: "ok", html } : { status: "fallback" };
+  // 再印字の印（印字設定でオンにした店だけ）。レイアウトに印のブロックが無ければ上に出す
+  const withMarks = { ...data, ...printMarkTemplateValues(opts.printMarks ?? [], !!opts.isReprint) };
+  const html = renderLayoutForPrint(layout, withMarks, opts.paperWidthMm);
+  return html
+    ? { status: "ok", html: applyPrintMarksToLayoutHtml(html, layout, opts.printMarks ?? []) }
+    : { status: "fallback" };
 }

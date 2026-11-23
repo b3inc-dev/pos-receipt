@@ -26,6 +26,8 @@ import { GIFT_LAYOUT_KEY, type GiftLayout } from "../utils/salesReceiptSettings"
 import { GIFT_ORDER_QUERY, giftOrderHtml } from "../services/giftOrderReceipt";
 import { getPrintLayout, PRINT_CSP } from "../services/receiptLayoutPrint.server";
 import { layoutOrderHtml } from "../services/receiptLayoutOrderPrint.server";
+import { insertPrintMarkAtTop, printMarksFor } from "../services/printMarks";
+import { getPrintMarkSettings, wasPrinted } from "../services/printMarks.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -75,12 +77,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // 管理画面のレイアウト（#69）を「印字に使う」にしているときだけ。作れなければ今までの印字
     const layoutKind = copy === "gift" ? "gift" : "sales";
+    // 再印字の印（印字設定でオンにした店だけ）。販売とギフトは別々に数える
+    const markSettings = await getPrintMarkSettings(shop.id);
+    const isReprint = markSettings.salesReprint ? await wasPrinted(shop.id, layoutKind, gid) : false;
+    const printMarks = printMarksFor(layoutKind, { isReprint }, markSettings);
     const layout = await getPrintLayout(shop.id, layoutKind);
     if (layout) {
       const result = await layoutOrderHtml(admin, shop.id, gid, layout, {
         kind: layoutKind,
         paperWidthMm,
         shopName: settings.headerTitle || undefined,
+        printMarks,
+        isReprint,
       });
       if (result.status === "not_found") {
         return corsErrorJson(request, { ok: false, error: "注文が見つかりません。" }, 404);
@@ -99,7 +107,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         return result.data?.order ?? null;
       }, settings.paperWidthMm === 58 ? 58 : 80, giftLayout ?? undefined);
       if (html === null) return corsErrorJson(request, { ok: false, error: "注文が見つかりません。" }, 404);
-      return corsHtml(request, html);
+      return corsHtml(request, insertPrintMarkAtTop(html, printMarks));
     }
     const response = await admin.graphql(SALES_RECEIPT_ORDER_QUERY, { variables: { id: gid } });
     const json = (await response.json()) as {
@@ -119,7 +127,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       timezone,
       shopName: settings.headerTitle || undefined,
     });
-    return corsHtml(request, html);
+    return corsHtml(request, insertPrintMarkAtTop(html, printMarks));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);
