@@ -20,6 +20,8 @@ import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { fmtYen } from "./orderDisplayUtils.js";
 import { formatOrderDateTimeLabel } from "../../common/orderListLabels.js";
 import { PosToggleField } from "./PosChoiceField.jsx";
+import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
+import { customerLabel } from "../../common/orderDetailLayout.js";
 
 const STORAGE_KEY = "pos_receipt_order_id";
 
@@ -223,6 +225,14 @@ function FormView({
   setRecipientName, setProviso, setIsReissue, setError,
   onPreview, onBack,
 }) {
+  const orderSubLine = [
+    order?.transactionDateTime || "",
+    order?.location?.name || "",
+    customerLabel(order),
+  ]
+    .filter(Boolean)
+    .join(" ・ ");
+
   const handleNext = () => {
     setError("");
     onPreview();
@@ -230,48 +240,74 @@ function FormView({
 
   return (
     <s-page heading="領収書情報を入力">
-      <s-scroll-box>
-        <s-box padding="base">
-          <s-stack gap="base">
-            {/* 対象取引 */}
-            <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="extraSmall">
-                <s-text fontWeight="bold">{order?.orderName ?? "-"}</s-text>
-                <s-text tone="subdued">
-                  ¥{Number(order?.totalPrice?.amount ?? 0).toLocaleString()}
-                  {order?.location?.name ? ` | ${order.location.name}` : ""}
+      <s-stack
+        gap="none"
+        blockSize="100%"
+        inlineSize="100%"
+        minBlockSize="0"
+        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+      >
+        <s-scroll-box
+          blockSize="auto"
+          maxBlockSize="100%"
+          minBlockSize="0"
+          style={{ flex: "1 1 0", minHeight: 0 }}
+        >
+          <s-box padding="base">
+            <s-stack gap="base">
+              {/* 対象取引（一覧の行と同じ形: 番号・金額は太字、日時・店舗・顧客は灰色の小さい字） */}
+              <s-stack gap="small-300">
+                <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
+                  <s-text type="strong">{order?.orderName ?? "-"}</s-text>
+                  <s-text type="strong">¥{Number(order?.totalPrice?.amount ?? 0).toLocaleString("ja-JP")}</s-text>
+                </s-stack>
+                {orderSubLine ? <s-text type="small" color="subdued">{orderSubLine}</s-text> : null}
+              </s-stack>
+
+              <s-stack gap="small">
+                <s-text type="small" color="subdued">領収書に書く内容</s-text>
+                <s-text-field
+                  label="宛名"
+                  value={recipientName}
+                  onInput={(e) => setRecipientName(e?.currentTarget?.value ?? "")}
+                  placeholder="例: 株式会社○○ 御中"
+                />
+                <s-text-field
+                  label="但し書き"
+                  value={proviso}
+                  onInput={(e) => setProviso(e?.currentTarget?.value ?? "")}
+                  placeholder="例: お買上品代として"
+                />
+              </s-stack>
+
+              <s-stack gap="small-300">
+                <s-text type="small" color="subdued">再発行</s-text>
+                <PosToggleField label="再発行として記録する" checked={isReissue} onChange={setIsReissue} />
+                <s-text type="small" color="subdued">
+                  前に出した領収書を出し直すときだけチェック。領収書に【再発行】と入ります。
                 </s-text>
               </s-stack>
-            </s-box>
 
-            {/* 宛名 */}
-            <s-text-field
-              label="宛名"
-              value={recipientName}
-              onInput={(e) => setRecipientName(e?.currentTarget?.value ?? "")}
-              placeholder="例: 株式会社○○ 御中"
-            />
-
-            {/* 但し書き */}
-            <s-text-field
-              label="但し書き"
-              value={proviso}
-              onInput={(e) => setProviso(e?.currentTarget?.value ?? "")}
-              placeholder="例: お買上品代として"
-            />
-
-            {/* 再発行フラグ */}
-            <PosToggleField label="再発行として記録する" checked={isReissue} onChange={setIsReissue} />
-
-            {error ? <s-text tone="critical">{error}</s-text> : null}
-
-            <s-stack gap="small">
-              <s-button kind="primary" onClick={handleNext} loading={loading}>プレビューを確認</s-button>
-              <s-button kind="plain" onClick={onBack} disabled={loading}>← 日付一覧に戻る</s-button>
+              {error ? <s-text tone="critical">{error}</s-text> : null}
             </s-stack>
-          </s-stack>
-        </s-box>
-      </s-scroll-box>
+          </s-box>
+        </s-scroll-box>
+
+        <s-divider />
+
+        {/* 次に押すボタンを下に固定。「プレビューを確認」だけ色付き（精算の「精算」と同じ） */}
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={onBack}
+          leftDisabled={loading}
+          rightLabel="プレビューを確認"
+          onRight={handleNext}
+          rightTone="success"
+          rightLoading={loading}
+          rightDisabled={loading}
+        />
+      </s-stack>
     </s-page>
   );
 }

@@ -36,6 +36,8 @@ import {
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
+import { adjustmentBadges, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
+import { financialStatusLabel } from "./orderDisplayUtils.js";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import {
   orderTenderLines,
@@ -171,11 +173,9 @@ function buildRedoDraftConfirmMessage(order) {
 function CorrectionModeBanner({ orderCorrectionContext }) {
   if (!orderCorrectionContext?.nextRegistrationRecordOnly) return null;
   return (
-    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-      <s-text tone="info" fontSize="small">
-        この取引には無効化済みの登録があります。次の登録は訂正のため記録のみ（返金はしません）になります。
-      </s-text>
-    </s-box>
+    <s-text type="small" tone="info">
+      無効化した調整があるため、次の登録は記録のみ（返金はしません）です。
+    </s-text>
   );
 }
 
@@ -212,19 +212,6 @@ function formatRecheckNotice(res) {
   return { tone: "info", text: "返金を確かめました。" };
 }
 
-function ApprovalStatusLine({ approvalStatus }) {
-  if (approvalStatus === "pending") {
-    return <s-text tone="caution" fontSize="small">管理者の承認待ち（承認されるまで精算に入りません）</s-text>;
-  }
-  if (approvalStatus === "approved") {
-    return <s-text tone="success" fontSize="small">管理者の承認済み</s-text>;
-  }
-  if (approvalStatus === "rejected") {
-    return <s-text tone="critical" fontSize="small">管理者が却下（精算に入りません）</s-text>;
-  }
-  return null;
-}
-
 function formatShopifyRefundNoticeBase(res) {
   if (res?.correctionRegistration) {
     return {
@@ -253,31 +240,6 @@ function formatShopifyRefundNoticeBase(res) {
     };
   }
   return { tone: "success", text: "登録しました。" };
-}
-
-function ShopifyRefundStatusLine({ status, error }) {
-  if (!status || status === "none") return null;
-  if (status === "pending") {
-    return (
-      <s-text tone="critical" fontSize="small">
-        返金処理中（結果待ち。この日の精算が止まります）{error ? `: ${error}` : ""}
-      </s-text>
-    );
-  }
-  if (status === "success") {
-    return <s-text tone="success" fontSize="small">返金済</s-text>;
-  }
-  if (status === "failed") {
-    return (
-      <s-text tone="critical" fontSize="small">
-        返金失敗{error ? `: ${error}` : ""}
-      </s-text>
-    );
-  }
-  if (status === "skipped") {
-    return <s-text tone="subdued" fontSize="small">記録のみ（返金なし）</s-text>;
-  }
-  return null;
 }
 
 export default async () => {
@@ -705,6 +667,10 @@ function OrderDetailView({
 }) {
   const activeEvents = events.filter((e) => e.status === "active");
   const voidedEvents = events.filter((e) => e.status === "voided");
+  // 商品券釣銭調整は「商品券釣有り」の注文だけ（一覧の「商品券釣有り」の印と同じ判定: 支払方法マスタの
+  // 釣り有りの商品券で払った、またはメモに「商品券」）。支払いが 1 件も読めない注文は判定できないので押せるまま。
+  const voucherAdjustable =
+    Boolean(order?.estimatedVoucherChange) || (order?.transactions ?? []).length === 0;
 
   return (
     <s-page heading="特殊返金調整・商品券釣銭調整">
@@ -725,11 +691,18 @@ function OrderDetailView({
             zIndex: 10,
           }}
         >
-          <s-stack gap="extraSmall">
-            <s-text fontWeight="bold" size="small">{order?.orderName ?? "-"}</s-text>
-            <s-text tone="subdued" size="small">
-              {order?.customer?.displayName || "顧客なし"} —
-              ¥{Number(order?.totalPrice?.amount ?? 0).toLocaleString()}
+          {/* 注文番号と状態の印。右に日時（日本時間） */}
+          <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
+            <s-stack direction="inline" alignItems="center" gap="small">
+              <s-text type="strong">{order?.orderName ?? "-"}</s-text>
+              {order?.financialStatus || order?.cancelledAt ? (
+                <s-badge tone={financialStatusTone(order?.financialStatus, order?.cancelledAt)}>
+                  {financialStatusLabel(order?.financialStatus, order?.cancelledAt)}
+                </s-badge>
+              ) : null}
+            </s-stack>
+            <s-text type="small" color="subdued">
+              {order?.transactionDateTime || order?.transactionTime || ""}
             </s-text>
           </s-stack>
         </s-box>
@@ -746,28 +719,7 @@ function OrderDetailView({
             <s-stack gap="base">
               <OrderDetailSummary order={order} />
 
-              {order?.canRedoAsDraft ? (
-                <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="small">
-                    <s-text fontWeight="bold" size="small">会計をやり直す</s-text>
-                    <s-text tone="subdued" fontSize="small">
-                      キャンセル・返金済みの取引向けです。同じ商品構成の下書き注文を作成します。決済は POS または管理画面で行ってください。
-                    </s-text>
-                    <s-button
-                      kind="secondary"
-                      command="--show"
-                      commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
-                      onClick={() => onAskConfirm({ kind: "redo_draft" })}
-                      disabled={loading}
-                      loading={loading}
-                    >
-                      下書き注文を作成
-                    </s-button>
-                  </s-stack>
-                </s-box>
-              ) : null}
 
-              <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
 
               {submitNotice ? (
                 <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
@@ -784,9 +736,13 @@ function OrderDetailView({
                 </s-box>
               ) : null}
 
-              <s-divider />
-
-              <s-text fontWeight="bold" size="small">この注文の登録</s-text>
+              {/* 調整履歴（案A: 灰色の小さい見出し、1 件は一覧の行と同じ形） */}
+              <s-stack gap="small-300">
+                <s-text type="small" color="subdued">
+                  {activeEvents.length > 0 ? `調整履歴（${activeEvents.length}件）` : "調整履歴"}
+                </s-text>
+                <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
+              </s-stack>
               {activeEvents.length > 0 ? (
                 <s-stack gap="small">
                   {activeEvents.map((ev) => (
@@ -801,13 +757,39 @@ function OrderDetailView({
                   ))}
                 </s-stack>
               ) : (
-                <s-text tone="subdued" size="small">まだ登録はありません。</s-text>
+                <s-text type="small" color="subdued">まだ調整はありません。</s-text>
               )}
 
               {voidedEvents.length > 0 ? (
-                <s-text tone="subdued" fontSize="small">
-                  無効化済み: {voidedEvents.length}件
+                <s-text type="small" color="subdued">
+                  無効化した調整 {voidedEvents.length}件
                 </s-text>
+              ) : null}
+
+              {/* 会計をやり直す（下書き注文を作成）は一番下（T 2026-11-23） */}
+              {order?.canRedoAsDraft ? (
+                <s-box paddingBlockStart="base">
+                  <s-stack gap="small-300">
+                    <s-text type="small" color="subdued">会計をやり直す</s-text>
+                    <s-text type="small" color="subdued">
+                      キャンセル・返金済みの注文と同じ商品で下書き注文を作ります。お会計は POS か管理画面でします。
+                    </s-text>
+                    <s-box paddingBlockStart="small-300">
+                      <s-stack direction="inline" gap="small">
+                        <s-button
+                          variant="secondary"
+                          command="--show"
+                          commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+                          onClick={() => onAskConfirm({ kind: "redo_draft" })}
+                          disabled={loading}
+                          loading={loading}
+                        >
+                          下書き注文を作成
+                        </s-button>
+                      </s-stack>
+                    </s-box>
+                  </s-stack>
+                </s-box>
               ) : null}
 
               {error ? <s-text tone="critical">{error}</s-text> : null}
@@ -827,7 +809,7 @@ function OrderDetailView({
           middleDisabled={loading}
           rightLabel="商品券釣銭調整"
           onRight={onVoucher}
-          rightDisabled={loading}
+          rightDisabled={loading || !voucherAdjustable}
         />
       </s-stack>
       <SpecialRefundConfirmModal
@@ -927,41 +909,48 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
   );
 }
 
+/** 印だけでは足りない状態の説明（返金処理中・失敗の理由、承認待ち・却下の意味） */
+function AdjustmentStatusNote({ event }) {
+  const notes = [];
+  if (event.shopifyRefundStatus === "pending") {
+    notes.push(`結果待ちのため、この日の精算が止まっています${event.shopifyRefundError ? `（${event.shopifyRefundError}）` : ""}`);
+  } else if (event.shopifyRefundStatus === "failed" && event.shopifyRefundError) {
+    notes.push(`返金できなかった理由: ${event.shopifyRefundError}`);
+  }
+  if (event.approvalStatus === "pending") notes.push("管理者が承認するまで精算に入りません");
+  if (event.approvalStatus === "rejected") notes.push("管理者が却下したため精算に入りません");
+  if (notes.length === 0) return null;
+  return (
+    <s-stack gap="none">
+      {notes.map((n, i) => (
+        <s-text key={i} type="small" tone="critical">{n}</s-text>
+      ))}
+    </s-stack>
+  );
+}
+
 function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
   const label = EVENT_TYPE_LABELS[event.eventType] ?? event.eventType;
+  // 案A（T 2026-11-23）: 一覧の行と同じ形。種類と金額は太字、手段・日時は灰色の小さい字、状態は色の印
+  const badges = adjustmentBadges(event);
   return (
-    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-      <s-stack gap="extraSmall">
-        <s-stack direction="horizontal" align="space-between">
-          <s-text fontWeight="bold">{label}</s-text>
-          <s-text>¥{Number(event.amount).toLocaleString()}</s-text>
+    <s-box paddingBlock="small-300">
+      <s-stack gap="small-300">
+        <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
+          <s-stack direction="inline" alignItems="center" gap="small">
+            <s-text type="strong">{label}</s-text>
+            {badges.map((bd) => (
+              <s-badge key={bd.key} tone={bd.tone}>{bd.label}</s-badge>
+            ))}
+          </s-stack>
+          <s-text type="strong">¥{Number(event.amount).toLocaleString("ja-JP")}</s-text>
         </s-stack>
 
-        {event.eventType === "voucher_change_adjustment" ? (
-          <s-text tone="subdued" fontSize="small">
-            額面 ¥{Number(event.voucherFaceValue ?? 0).toLocaleString()} ／
-            商品券で払った額 ¥{Number(event.voucherAppliedAmount ?? 0).toLocaleString()} ／
-            お釣り ¥{Number(event.voucherChangeAmount ?? 0).toLocaleString()}
-          </s-text>
-        ) : null}
+        {adjustmentSubLines(event).map((line, i) => (
+          <s-text key={i} type="small" color="subdued">{line}</s-text>
+        ))}
 
-        {event.originalPaymentMethod || event.actualRefundMethod ? (
-          <s-text tone="subdued" fontSize="small">
-            {event.originalPaymentMethod ? `元の支払い: ${event.originalPaymentLabel || event.originalPaymentMethod}` : ""}
-            {event.actualRefundMethod ? ` → 返した手段: ${event.actualRefundLabel || event.actualRefundMethod}` : ""}
-          </s-text>
-        ) : null}
-
-        {event.note ? (
-          <s-text tone="subdued" fontSize="small">メモ: {event.note}</s-text>
-        ) : null}
-
-        <ShopifyRefundStatusLine
-          status={event.shopifyRefundStatus}
-          error={event.shopifyRefundError}
-        />
-
-        <ApprovalStatusLine approvalStatus={event.approvalStatus} />
+        <AdjustmentStatusNote event={event} />
 
         {canRecheckShopifyRefund(event) || canRecheckLegacyShopifyRefund(event) ? (
           <s-stack gap="extraSmall">
@@ -994,36 +983,25 @@ function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
           />
         ) : null}
 
-        <s-stack direction="horizontal" align="space-between">
-          <s-text tone="subdued" fontSize="small">
-            {[
-              event.countDate ? `${shortDateLabel(event.countDate)} の精算` : "",
-              event.createdAtLabel ? `登録 ${event.createdAtLabel}` : "",
-            ]
-              .filter(Boolean)
-              .join("・")}
-            {event.replacesEventId ? "（変更あり）" : ""}
-          </s-text>
-          <s-stack direction="inline" gap="small">
-            {canEditEvent(event) ? (
-              <s-button kind="secondary" onClick={() => onEdit?.(event)} disabled={loading}>
-                変更
-              </s-button>
-            ) : null}
-            <s-button
-              kind="plain"
-              tone="critical"
-              command="--show"
-              commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
-              onClick={() => onAskConfirm({ kind: "void", eventId: event.id })}
-              disabled={loading}
-            >
-              無効化
+        {/* ボタンは右に小さく。赤は「無効化」だけ */}
+        <s-stack direction="inline" justifyContent="end" alignItems="center" gap="small">
+          {canEditEvent(event) ? (
+            <s-button variant="secondary" onClick={() => onEdit?.(event)} disabled={loading}>
+              変更
             </s-button>
-          </s-stack>
+          ) : null}
+          <s-button
+            tone="critical"
+            command="--show"
+            commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+            onClick={() => onAskConfirm({ kind: "void", eventId: event.id })}
+            disabled={loading}
+          >
+            無効化
+          </s-button>
         </s-stack>
         {event.metafieldWritten === false ? (
-          <s-text tone="critical" fontSize="small">
+          <s-text type="small" tone="critical">
             注文への記録がまだ書けていません。この画面を開き直すか、もう一度「変更」してください。
           </s-text>
         ) : null}

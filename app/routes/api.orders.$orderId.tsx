@@ -6,13 +6,14 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import {
+  applyPaymentDisplayLabels,
   ORDER_DETAIL_QUERY,
   ORDER_DETAIL_QUERY_NO_CUSTOMER_PII,
   serializeOrderDetail,
 } from "../services/orderDetail.server";
 import { graphqlWithCustomerFallback } from "../utils/protectedCustomerData";
 import { isOrderEligibleForRedoDraft } from "../services/orderRedoDraft.server";
-import { getPaymentMethodVoucherInfo } from "../utils/paymentMethod.server";
+import { getPaymentMethodVoucherInfo, loadEnabledPaymentMasters } from "../utils/paymentMethod.server";
 import {
   getAppSetting,
   SPECIAL_REFUND_SETTINGS_KEY,
@@ -49,7 +50,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     const timezone = await getShopTimezoneForDaily(admin, shop.id);
-    const result = serializeOrderDetail(order as Record<string, unknown>, { timezone });
+    // 支払いの名前は支払方法マスタの表示名にする（Cash → 現金 など）。gateway はそのまま
+    const result = applyPaymentDisplayLabels(
+      serializeOrderDetail(order as Record<string, unknown>, { timezone }),
+      await loadEnabledPaymentMasters(shop.id),
+    );
 
     const gateways = ((result.transactions as { gateway?: string }[]) ?? []).map((t) => t.gateway ?? "");
     let hasVoucherChange = false;
