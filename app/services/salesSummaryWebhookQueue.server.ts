@@ -47,7 +47,7 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
 
   await boss.work(
     SALES_SUMMARY_WEBHOOK_QUEUE_NAME,
-    { teamSize: 2, pollingIntervalSeconds: 2 },
+    { teamSize: 2, pollingIntervalSeconds: 2, includeMetadata: true },
     async (jobs) => {
       const { unauthenticated } = await import("../shopify.server");
       for (const job of jobs) {
@@ -62,11 +62,19 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
           const disabled = process.env.SALES_SUMMARY_WEBHOOK_REFRESH_DISABLED;
           if (disabled === "1" || disabled === "true") continue;
 
-          const { targetDates, errors } = await executeSalesSummaryOrderWebhookJob(
+          // 積まれた時刻を渡し、そのあとに始まった再計算で済んでいる日は数え直さない
+          const { targetDates, errors, skipped } = await executeSalesSummaryOrderWebhookJob(
             admin,
             dbShop.id,
             payload,
+            { jobCreatedAt: job.createdOn ?? null },
           );
+          if (skipped) {
+            console.log(
+              `[pg-boss] sales-summary skip (already refreshed) shop=${shopDomain} dates=${targetDates.join(",")}`,
+            );
+            continue;
+          }
           if (backgroundRefreshNeedsRetry(errors)) {
             console.warn(
               `[pg-boss] sales-summary partial shop=${shopDomain} dates=${targetDates.join(",")}`,
