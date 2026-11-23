@@ -77,8 +77,10 @@ describe("一覧の画面は POS にある属性だけを使う", () => {
       assert.doesNotMatch(src, /<s-button[^>]*\bkind=/);
       // s-text の太字・大きさは type（fontWeight・size・fontSize は POS に無い）
       assert.doesNotMatch(src, /<s-text[^>]*\b(fontWeight|fontSize|size)=/);
-      // 行の間に線を引かない（純正は余白で区切る）
-      assert.doesNotMatch(src, /<s-divider/);
+      // 行の間に線を引かない（純正は余白で区切る）。線は固定の上下の境目だけ
+      if (rel.endsWith("OrderListRow.jsx")) assert.doesNotMatch(src, /<s-divider/);
+      // s-box に border は無い（POS では効かない）
+      assert.doesNotMatch(src, /<s-box[^>]*\bborder=/);
       // 角かっこの文字のバッジに戻さない
       assert.doesNotMatch(src, /［\$\{/);
     });
@@ -94,6 +96,8 @@ describe("店の人に英語のエラーを出さない・名前の許可が無�
   it("注文検索は保護された顧客データで断られたら名前なしで読み直す", () => {
     const src = readFileSync(`${ROOT}/app/routes/api.orders.search.tsx`, "utf8");
     assert.match(src, /ORDERS_SEARCH_QUERY_NO_CUSTOMER/);
-    assert.match(src, /isProtectedCustomerDataError/);
+    assert.match(src, /graphqlWithCustomerFallback/);
+    const detail = readFileSync(`${ROOT}/app/routes/api.orders.$orderId.tsx`, "utf8");
+    assert.match(detail, /graphqlWithCustomerFallback\(admin, ORDER_DETAIL_QUERY, ORDER_DETAIL_QUERY_NO_CUSTOMER_PII/);
   });
 });

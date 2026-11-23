@@ -8,7 +8,7 @@ import {
   type PaymentMethodMatchInput,
 } from "../utils/paymentMethodMatch.server";
 
-export const ORDER_DETAIL_QUERY = `#graphql
+const ORDER_DETAIL_QUERY_TEMPLATE = `#graphql
   query OrderDetail($id: ID!) {
     order(id: $id) {
       id
@@ -26,8 +26,7 @@ export const ORDER_DETAIL_QUERY = `#graphql
       currentTotalPriceSet { shopMoney { amount currencyCode } }
       customer {
         id
-        displayName
-        email
+        __CUSTOMER_PII__
       }
       retailLocation {
         id
@@ -91,6 +90,10 @@ export const ORDER_DETAIL_QUERY = `#graphql
     }
   }
 `;
+
+export const ORDER_DETAIL_QUERY = ORDER_DETAIL_QUERY_TEMPLATE.replace("__CUSTOMER_PII__", "displayName\n        email");
+/** 顧客の名前・メールを読まない版（保護された顧客データの許可が無いアプリ用。POS の注文詳細だけで使う） */
+export const ORDER_DETAIL_QUERY_NO_CUSTOMER_PII = ORDER_DETAIL_QUERY_TEMPLATE.replace("__CUSTOMER_PII__", "");
 
 type MoneyBag = { shopMoney?: { amount?: string; currencyCode?: string } };
 

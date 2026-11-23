@@ -8,8 +8,10 @@ import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import {
   applyPaymentDisplayLabels,
   ORDER_DETAIL_QUERY,
+  ORDER_DETAIL_QUERY_NO_CUSTOMER_PII,
   serializeOrderDetail,
 } from "../services/orderDetail.server";
+import { graphqlWithCustomerFallback } from "../utils/protectedCustomerData";
 import { isOrderEligibleForRedoDraft } from "../services/orderRedoDraft.server";
 import { getPaymentMethodVoucherInfo, loadEnabledPaymentMasters } from "../utils/paymentMethod.server";
 import {
@@ -31,11 +33,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const gid = orderId.startsWith("gid://") ? orderId : `gid://shopify/Order/${orderId}`;
 
-    const response = await admin.graphql(ORDER_DETAIL_QUERY, {
-      variables: { id: gid },
+    // 保護された顧客データ（名前・メール）の許可が無いアプリでは、名前なしで読み直す
+    const json = await graphqlWithCustomerFallback(admin, ORDER_DETAIL_QUERY, ORDER_DETAIL_QUERY_NO_CUSTOMER_PII, {
+      id: gid,
     });
-
-    const json = await response.json();
     if (json.errors?.length) {
       return corsJson(
         { ok: false, error: "GraphQL error", details: json.errors },
