@@ -867,6 +867,22 @@ function PreviewView({
       value: `¥${Number(ev.voucherChangeAmount).toLocaleString()}`,
     });
   }
+  // 同じ注文に自動判定と手入力の両方があり、判定優先順位で片方を外した額（商品券設定）
+  const vb = preview.voucherChangeBreakdown;
+  if (vb && Number(vb.skippedAutoAmount) > 0) {
+    eventRows.push({
+      key: "va-skipped-auto",
+      label: "商品券釣有り：手入力を優先して外した自動の分",
+      value: `¥${Number(vb.skippedAutoAmount).toLocaleString()}`,
+    });
+  }
+  if (vb && Number(vb.skippedManualAmount) > 0) {
+    eventRows.push({
+      key: "va-skipped-manual",
+      label: "商品券釣有り：自動を優先して外した手入力の分",
+      value: `¥${Number(vb.skippedManualAmount).toLocaleString()}`,
+    });
+  }
 
   return (
     <s-page heading={isInspection ? "点検レシート" : "精算"}>

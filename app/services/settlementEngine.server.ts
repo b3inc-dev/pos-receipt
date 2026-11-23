@@ -89,6 +89,14 @@ export interface SettlementPreviewDTO {
   refundCount: number;
   itemCount: number;
   voucherChangeAmount: number;
+  /** 商品券釣有り差額の内訳（判定優先順位で外した額。版の無い設定では legacy: true で外さない） */
+  voucherChangeBreakdown?: {
+    autoTotal: number;
+    manualTotal: number;
+    skippedAutoAmount: number;
+    skippedManualAmount: number;
+    legacy: boolean;
+  };
   paymentSections: PaymentSectionDTO[];
   /**
    * 売上に含めない手数料の明細（`_lsi_fee="1"` かつ `_lsi_fee_sales="0"`。例: Location Stock の送料の行）の当日分。
@@ -892,6 +900,13 @@ async function buildSettlementPreviewImpl(
     refundCount: gas.refundOrderSet.size,
     itemCount,
     voucherChangeAmount: roundInt(voucherChangeAmount),
+    voucherChangeBreakdown: {
+      autoTotal: voucherResolution.autoTotal,
+      manualTotal: voucherResolution.manualTotal,
+      skippedAutoAmount: voucherResolution.skippedAutoAmount,
+      skippedManualAmount: voucherResolution.skippedManualAmount,
+      legacy: voucherResolution.legacy,
+    },
     paymentSections,
     nonSalesFeeTotal,
     debug: debugEnabled

@@ -27,6 +27,8 @@ export interface VoucherDetectionRules {
 }
 
 export const DEFAULT_VOUCHER_KEYWORD = "商品券";
+/** 読取用正規表現の長さの上限（重い式で集計が止まらないように） */
+export const VOUCHER_NOTE_REGEX_MAX_LENGTH = 100;
 
 export const DEFAULT_VOUCHER_DETECTION_RULES: VoucherDetectionRules = {
   autoDetectionEnabled: true,
@@ -43,6 +45,9 @@ export function escapeRegExp(s: string): string {
 export function compileVoucherNoteRegex(src: string | null | undefined): { regex: RegExp | null; error: string | null } {
   const s = String(src ?? "").trim();
   if (!s) return { regex: null, error: null };
+  if (s.length > VOUCHER_NOTE_REGEX_MAX_LENGTH) {
+    return { regex: null, error: `読取用正規表現は ${VOUCHER_NOTE_REGEX_MAX_LENGTH} 文字までにしてください` };
+  }
   let re: RegExp;
   try {
     re = new RegExp(s);
@@ -59,19 +64,21 @@ export function compileVoucherNoteRegex(src: string | null | undefined): { regex
 
 /**
  * 保存された商品券設定を精算で使う形に直す。
- * 版の無い（配線前に保存した）設定は「注文メモから額面を読む」を ON とみなす。
- * 配線前は保存値にかかわらずメモを読んでいたため（初めの値 false が実際の動きと違っていた）。
+ *
+ * 版の無い設定（まだ保存していない店・配線前の画面で保存した店）は `legacy: true` にし、
+ * 項目は全部初めの値として読む。精算は今までどおり（自動判定＋手入力を両方足す・POS の登録は止めない）。
+ * 新しい画面で一度保存すると版が付き、保存した値と二重計上の防止が効き始める。
+ * こうしておくと main に入れた時点ではどの店の数も変わらず、店ごとに（Ciara から）切り替えられる。
  */
 export function resolveVoucherSettings(
   saved: (Partial<VoucherSettings> & { settingsVersion?: number }) | null | undefined,
   defaults: VoucherSettings,
-): VoucherSettings & { settingsVersion: number } {
-  const merged = { ...defaults, ...(saved ?? {}) };
+): VoucherSettings & { settingsVersion: number; legacy: boolean } {
   const version = Number(saved?.settingsVersion ?? 0);
-  if (!saved || version < VOUCHER_SETTINGS_VERSION) {
-    merged.voucherNoteParseEnabled = true;
+  if (!saved || !(version >= VOUCHER_SETTINGS_VERSION)) {
+    return { ...defaults, settingsVersion: version, legacy: true };
   }
-  return { ...merged, settingsVersion: version };
+  return { ...defaults, ...saved, settingsVersion: version, legacy: false };
 }
 
 export function voucherDetectionRulesFromSettings(s: VoucherSettings): VoucherDetectionRules {
@@ -137,6 +144,11 @@ export interface VoucherChangeResolution {
   /** 優先順位で数えなかった注文（自動を外した／手入力を外した） */
   skippedAutoOrderKeys: string[];
   skippedManualOrderKeys: string[];
+  /** 優先順位で外した額（自動の分・手入力の分） */
+  skippedAutoAmount: number;
+  skippedManualAmount: number;
+  /** 版の無い設定で、今までどおり両方足したとき true */
+  legacy: boolean;
 }
 
 /**
@@ -145,7 +157,7 @@ export interface VoucherChangeResolution {
  * 手入力は登録した日の精算に、自動は取引の日の精算に入るため、日をまたぐ注文は突き合わせられない（同じ日・同じ店のみ）。
  */
 export function resolveVoucherChange(input: {
-  settings: VoucherSettings;
+  settings: VoucherSettings & { legacy?: boolean };
   /** 特殊返金設定「商品券調整を精算に反映」 */
   reflectManualFromSpecialRefundSettings: boolean;
   autoByOrder: Record<string, number>;
@@ -159,7 +171,27 @@ export function resolveVoucherChange(input: {
     appliedManual: [],
     skippedAutoOrderKeys: [],
     skippedManualOrderKeys: [],
+    skippedAutoAmount: 0,
+    skippedManualAmount: 0,
+    legacy: Boolean(s.legacy),
   };
+  const amountOf = (e: ManualVoucherEvent) => {
+    const n = Number(e.voucherChangeAmount?.toString() ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  };
+  if (s.legacy) {
+    // 今までの式: 自動の合計 ＋（特殊返金設定で反映がオンなら）手入力の合計
+    const autoTotal = Object.values(input.autoByOrder).reduce((a, v) => a + (Number(v) || 0), 0);
+    const manual = input.reflectManualFromSpecialRefundSettings ? input.manualEvents : [];
+    const manualTotal = manual.reduce((a, e) => a + amountOf(e), 0);
+    return {
+      ...empty,
+      total: Math.round(autoTotal + manualTotal),
+      autoTotal: Math.round(autoTotal),
+      manualTotal: Math.round(manualTotal),
+      appliedManual: [...manual],
+    };
+  }
   if (!s.voucherFeatureEnabled || !s.reflectVoucherChangeInSettlement) return empty;
 
   const autoOn = Boolean(s.voucherAutoDetectionEnabled);
@@ -187,11 +219,14 @@ export function resolveVoucherChange(input: {
   const skippedManual: string[] = [];
   let autoTotal = 0;
   let manualTotal = 0;
+  let skippedAutoAmount = 0;
+  let skippedManualAmount = 0;
   const appliedManual: ManualVoucherEvent[] = [];
 
   for (const [k, v] of auto) {
     if (manualFirst && manualByOrder.has(k)) {
       skippedAuto.push(k);
+      skippedAutoAmount += v;
       continue;
     }
     autoTotal += v;
@@ -199,11 +234,11 @@ export function resolveVoucherChange(input: {
   for (const [k, list] of manualByOrder) {
     if (!manualFirst && auto.has(k)) {
       skippedManual.push(k);
+      skippedManualAmount += list.reduce((a, e) => a + amountOf(e), 0);
       continue;
     }
     for (const e of list) {
-      const n = Number(e.voucherChangeAmount?.toString() ?? 0);
-      if (Number.isFinite(n)) manualTotal += n;
+      manualTotal += amountOf(e);
       appliedManual.push(e);
     }
   }
@@ -215,10 +250,14 @@ export function resolveVoucherChange(input: {
     appliedManual,
     skippedAutoOrderKeys: skippedAuto,
     skippedManualOrderKeys: skippedManual,
+    skippedAutoAmount: Math.round(skippedAutoAmount),
+    skippedManualAmount: Math.round(skippedManualAmount),
+    legacy: false,
   };
 }
 
 /** POS「商品券調整」を受け付けるか */
-export function voucherManualAdjustmentAllowed(s: VoucherSettings): boolean {
+export function voucherManualAdjustmentAllowed(s: VoucherSettings & { legacy?: boolean }): boolean {
+  if (s.legacy) return true; // 版の無い設定は今までどおり止めない
   return Boolean(s.voucherFeatureEnabled && s.voucherManualAdjustmentEnabled);
 }

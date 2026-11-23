@@ -46,7 +46,11 @@ export async function action({ request }: ActionFunctionArgs) {
       ...DEFAULT_SPECIAL_REFUND_SETTINGS,
       ...(await getAppSetting<Partial<SpecialRefundSettings>>(shop.id, SPECIAL_REFUND_SETTINGS_KEY)),
     };
-    if (!voucherManualAdjustmentAllowed(voucherSettings) || !srSettings.enableVoucherChangeAdjustment) {
+    // 版の無い設定（まだ新しい画面で保存していない店）は今までどおり受け付ける
+    if (
+      !voucherSettings.legacy &&
+      (!voucherManualAdjustmentAllowed(voucherSettings) || !srSettings.enableVoucherChangeAdjustment)
+    ) {
       return corsJson(
         {
           ok: false,

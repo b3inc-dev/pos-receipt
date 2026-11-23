@@ -45,9 +45,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
   const saved = await getAppSetting<Partial<VoucherSettings>>(shop.id, VOUCHER_SETTINGS_KEY);
-  // 配線前に保存した設定（版なし）は「注文メモから額面を読む」を ON とみなす（精算と同じ解釈で見せる）
-  const { settingsVersion: _v, ...settings } = resolveVoucherSettings(saved, DEFAULT_VOUCHER_SETTINGS);
-  return { settings: settings as VoucherSettings };
+  // 版の無い設定は、精算と同じく全部初めの値として見せる（保存すると版が付き、保存した値が効き始める）
+  const { settingsVersion: _v, legacy, ...settings } = resolveVoucherSettings(saved, DEFAULT_VOUCHER_SETTINGS);
+  return { settings: settings as VoucherSettings, legacy };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -79,7 +79,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function VoucherSettingsPage() {
-  const { settings: initial } = useLoaderData<typeof loader>();
+  const { settings: initial, legacy } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const actionData = useActionData<{ ok?: boolean; error?: string }>();
   const location = useLocation();
@@ -127,6 +127,14 @@ export default function VoucherSettingsPage() {
             <Layout.Section>
               <Banner tone="critical" title="保存できませんでした">
                 <p>{actionData.error}</p>
+              </Banner>
+            </Layout.Section>
+          ) : legacy && !actionData?.ok ? (
+            <Layout.Section>
+              <Banner tone="info" title="この設定はまだ精算に効いていません">
+                <p>
+                  一度「保存」を押すと、ここの設定と、同じ注文の自動判定と手入力を片方だけ数える決まりが効き始めます。保存するまでは今までどおり両方を足します。
+                </p>
               </Banner>
             </Layout.Section>
           ) : null}

@@ -70,8 +70,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
     const allowedTypes = getAllowedEventTypes(merged);
     // 一覧には登録済みの商品券調整も出す（消す操作のため）。新しく登録できるかは voucherAdjustmentAllowed で返す
+    // 版の無い設定は今までどおり押せる
     const voucherAdjustmentAllowed =
-      voucherManualAdjustmentAllowed(voucherSettings) && allowedTypes.includes("voucher_change_adjustment");
+      voucherSettings.legacy ||
+      (voucherManualAdjustmentAllowed(voucherSettings) && allowedTypes.includes("voucher_change_adjustment"));
 
     const url = new URL(request.url);
     const sourceOrderId = url.searchParams.get("sourceOrderId");

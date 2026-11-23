@@ -173,25 +173,63 @@ describe("自動と手入力を合わせる（二重計上の防止）", () => {
   });
 });
 
-describe("保存した設定の読み方", () => {
-  it("配線前に保存した設定（版なし）は、メモから読むを ON とみなす（今までの動きのまま）", () => {
-    const r = resolveVoucherSettings({ voucherNoteParseEnabled: false }, DEFAULT_VOUCHER_SETTINGS);
-    assert.equal(r.voucherNoteParseEnabled, true);
-    assert.equal(resolveVoucherSettings(null, DEFAULT_VOUCHER_SETTINGS).voucherNoteParseEnabled, true);
-  });
-
-  it("新しい画面で保存した設定は、そのまま効く", () => {
+describe("保存した設定の読み方（main に入れた時点では数が変わらない）", () => {
+  it("版の無い設定は、保存値にかかわらず全部初めの値で legacy", () => {
     const r = resolveVoucherSettings(
-      { voucherNoteParseEnabled: false, settingsVersion: VOUCHER_SETTINGS_VERSION },
+      { voucherNoteParseEnabled: false, voucherDefaultLabel: "ギフト券", voucherManualAdjustmentEnabled: false },
       DEFAULT_VOUCHER_SETTINGS,
     );
-    assert.equal(r.voucherNoteParseEnabled, false);
+    assert.equal(r.legacy, true);
+    assert.equal(r.voucherNoteParseEnabled, true);
+    assert.equal(r.voucherDefaultLabel, "商品券");
+    assert.equal(r.voucherManualAdjustmentEnabled, true);
+    assert.equal(resolveVoucherSettings(null, DEFAULT_VOUCHER_SETTINGS).legacy, true);
   });
 
-  it("読取用正規表現: 空は初めの式、不正とかっこ無しはエラー", () => {
+  it("legacy では今までの式（自動＋手入力を両方足す）。POS の登録も止めない", () => {
+    const legacy = resolveVoucherSettings(null, DEFAULT_VOUCHER_SETTINGS);
+    const r = resolveVoucherChange({
+      settings: legacy,
+      reflectManualFromSpecialRefundSettings: true,
+      autoByOrder: { "6001": 500 },
+      manualEvents: [{ sourceOrderId: "6001", voucherChangeAmount: 500 }],
+    });
+    assert.equal(r.total, 1000);
+    assert.equal(r.legacy, true);
+    assert.equal(r.skippedAutoAmount, 0);
+    assert.equal(voucherManualAdjustmentAllowed(legacy), true);
+    // 特殊返金設定の「商品券調整を精算に反映」オフは今までどおり効く
+    const off = resolveVoucherChange({
+      settings: legacy,
+      reflectManualFromSpecialRefundSettings: false,
+      autoByOrder: { "6001": 500 },
+      manualEvents: [{ sourceOrderId: "6001", voucherChangeAmount: 500 }],
+    });
+    assert.equal(off.total, 500);
+  });
+
+  it("新しい画面で保存した設定は、そのまま効き、外した額を返す", () => {
+    const saved = resolveVoucherSettings(
+      { ...DEFAULT_VOUCHER_SETTINGS, voucherNoteParseEnabled: false, settingsVersion: VOUCHER_SETTINGS_VERSION },
+      DEFAULT_VOUCHER_SETTINGS,
+    );
+    assert.equal(saved.legacy, false);
+    assert.equal(saved.voucherNoteParseEnabled, false);
+    const r = resolveVoucherChange({
+      settings: saved,
+      reflectManualFromSpecialRefundSettings: true,
+      autoByOrder: { "6001": 500 },
+      manualEvents: [{ sourceOrderId: "6001", voucherChangeAmount: 450 }],
+    });
+    assert.equal(r.total, 450);
+    assert.equal(r.skippedAutoAmount, 500);
+  });
+
+  it("読取用正規表現: 空は初めの式、不正・かっこ無し・長すぎはエラー", () => {
     assert.deepEqual(compileVoucherNoteRegex(""), { regex: null, error: null });
     assert.ok(compileVoucherNoteRegex("額面([0-9]+)").regex);
     assert.ok(compileVoucherNoteRegex("額面[").error);
     assert.ok(compileVoucherNoteRegex("額面[0-9]+").error);
+    assert.ok(compileVoucherNoteRegex(`(${"a".repeat(120)})`).error);
   });
 });
