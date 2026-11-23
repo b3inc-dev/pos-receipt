@@ -147,7 +147,7 @@ export function processorRefundMismatchReason(
     (tx) => isProcessorTransaction(tx) && !gatewayMatches(tx.gateway, actual),
   );
   if (!mismatched) return null;
-  return `元の支払い（${String(mismatched.gateway ?? "決済会社")}）は Shopify で返金するとカード等に戻るため、別の手段で返した登録は記録だけにしました（Shopify では返金していません）`;
+  return `元の支払い（${String(mismatched.gateway ?? "決済会社")}）は Shopify で返金するとカード等に戻るため、別の返金方法で返した調整は記録だけにしました（Shopify では返金していません）`;
 }
 
 function buildRefundTransactions(
