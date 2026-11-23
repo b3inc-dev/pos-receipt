@@ -20,6 +20,7 @@
 | D12 | プライバシーポリシー URL は AppSetting `privacyPolicyUrl` 優先、なければ env `PRIVACY_POLICY_URL`。ダミー固定 URL なし | `privacyPolicyUrl.ts` + 一般設定 / ホーム |
 | D13 | `customers/data_request` は注文紐づけの ReceiptIssue / SpecialRefundEvent を列挙し PII 本文なしでログ。新規 PII 永続化なし。webhook は 200 | `webhooks.compliance.tsx` |
 | D14 | LIFF 会員証は、LINE ユーザー ID の顧客メタフィールドを決めた順で読む。既定は `line_crm.line_user_id`（LINE CRM＝Shop CRM for LINE の項目。line-crm の D-APP-14）→ `socialplus.line`（SocialPlus と、LINE CRM の互換の書き込み）。環境変数 `MEMBER_CARD_LINE_ID_METAFIELDS`（`<namespace>.<key>` をカンマ区切り、多くて 4 つ）で並べ替えられる。顧客の LINE ユーザー ID は「並べた順で最初に値が入っている項目」の値（LINE CRM の項目に値があれば、古い項目の別の ID では見つけない）。タグ `line:<id>` のファストパスはそのまま（タグで見つかった人も同じ決まりで確かめる）。全件スキャンは項目ごとに `metafields.<namespace>.<key>:*` を並べた順に行う。`socialplus.line` 以外は、定義の `adminFilterable` が FILTERABLE のときだけ全件を見る（絞り込みが効かない項目で全顧客を見ない。定義が無い・オフの項目は飛ばす。先の項目を定義の読み込み・検索のエラーで見られなかったら、後の項目で探さず `API_ERROR`。Throttled は定義の読み込みも検索もやり直し、使い切ったら `THROTTLED`）。`socialplus.line` は前と同じ | `app/utils/memberCardLineFields.ts` + `app/lib/customer.server.ts` + `app/lib/memberCardFieldFilter.server.ts` |
+| D22 | 売上に含めない送料等（明細の `_lsi_fee="1"` かつ `_lsi_fee_sales="0"`。Location Stock #76）は、支払方法別の金額に残したまま総売上・純売上・税・点数・割引から外し、`nonSalesFeeTotal` として分けて出す。領収書の金額は受け取った全額のまま（T 2026-11-23）。見分けは明細の属性だけ（名前は見ない）。店ごとの切り替えは Location Stock の管理画面の設定が明細に残す値で決まり、POS Receipt 側に設定は足さない。Settlement に列は足さず、保存済みの印字は「支払方法別の合計 − 総売上」で戻す（BUSINESS_RULES §7.1） | `nonSalesFeeLines.ts` + `aggregateGasStyleForOrders` + `buildSettlementPreviewImpl` |
 
 ## 2. 古い docs との差分（注意）
 
@@ -58,7 +59,7 @@
 | 返金ロケーション不一致 | その精算から除外 → **他店計上漏れ／過少**のリスク（設定依存） |
 | GraphQL エラー | リトライ／スロットルあり。同期失敗時 create は 500。キャッシュ失敗は精算成功を落とさない箇所あり |
 | 過去データ | 履歴は Settlement スナップショット。再計算 API はプレビュー中心 |
-| 領収書 | idempotencyKey。POS は createdBy 未送信 |
+| 領収書 | idempotencyKey。発行者は発行した人（POS のピン留め中スタッフ）の ID を createdByStaffId に保存 |
 
 ## 5. Printing API 一本化
 
@@ -74,7 +75,7 @@
 3. Shopify POS Pro / Lite プラン差分はコードで未検出（アプリ Lite/Pro とは別）
 4. 配送注文・送料を精算に含める／除外する業務ルールの正式決定（コード上は送料非集計）
 5. POS キャンセルと Admin キャンセルを件数上どう区別すべきか（コード上区別なし）
-6. `ReceiptIssue.createdBy` を運用で埋めるか
+6. ~~`ReceiptIssue.createdBy` を運用で埋めるか~~ → 決定（2026-11-23 4:20）: 領収書を発行した人 1 人を記録（販売担当とは別）
 7. line item properties を精算／領収書に出す要件の有無
 8. ギフトレシート（Shopify Gift Receipt）要件の有無（現行未実装）
 9. GitHub 上の CI / 必須チェックの有無（リポジトリ内 workflow なし）

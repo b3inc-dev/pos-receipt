@@ -38,21 +38,33 @@ describe("printApiCore outcomes", () => {
   it("distinguishes direct accept from dialog", () => {
     assert.match(
       printResultMessage({ outcome: PRINT_OUTCOME.DIRECT_ACCEPTED, extraConnected: 0 }),
-      /排出完了は未確認/,
+      /紙が出たか確かめて/,
     );
     assert.match(
       printResultMessage({ outcome: PRINT_OUTCOME.DIALOG_PRESENTED }),
-      /直接印字の成功ではありません/,
+      /印刷の画面を開きました/,
     );
     assert.match(
       printResultMessage({ outcome: PRINT_OUTCOME.NO_CONNECTED_PRINTER }),
-      /成功扱い/,
+      /つながっているレシートプリンタがありません/,
     );
   });
 
+  it("店の人に見せる文に、仕組みの名前や開発の言葉を出さない（T さん 11/23）", () => {
+    const texts = [
+      ...Object.values(PRINT_OUTCOME).map((outcome) => printResultMessage({ outcome, extraConnected: 1 })),
+      mapPrinterErrorMessage("out of paper"),
+      mapPrinterErrorMessage("Printer disconnected"),
+      mapPrinterErrorMessage("timeout"),
+    ];
+    for (const t of texts) {
+      assert.doesNotMatch(t, /API|HTML|api_version|ダイアログ|成否|成功扱い|排出|再送|接続機/, t);
+    }
+  });
+
   it("maps paper-out and disconnect errors", () => {
-    assert.match(mapPrinterErrorMessage("out of paper"), /用紙切れ/);
-    assert.match(mapPrinterErrorMessage("Printer disconnected"), /切断|オフライン/);
+    assert.match(mapPrinterErrorMessage("out of paper"), /用紙が切れて/);
+    assert.match(mapPrinterErrorMessage("Printer disconnected"), /つながっていません/);
   });
 
   it("times out without swallowing the original later resolution as success", async () => {
@@ -96,7 +108,7 @@ describe("printer discovery timeout", () => {
     t.mock.timers.tick(PRINT_TIMEOUT_MS);
     const result = await first;
     assert.equal(result.outcome, PRINT_OUTCOME.FAILED);
-    assert.match(result.error, /送信されていません/);
+    assert.match(result.error, /まだ印刷していません/);
     assert.equal(sends, 0);
     assert.equal((await printHtml("/fixture")).outcome, PRINT_OUTCOME.DIRECT_ACCEPTED);
     finishDiscovery([printer]);
@@ -120,7 +132,7 @@ it("a native discovery error is reported as unsent even if the system dialog was
     } };
     const result = await printHtml("/fixture", { allowDialog: true });
     assert.equal(result.outcome, PRINT_OUTCOME.FAILED);
-    assert.match(printResultMessage(result), /印刷は送信されていません/);
+    assert.match(printResultMessage(result), /まだ印刷していません/);
   }
   assert.equal(sends, 0);
 });

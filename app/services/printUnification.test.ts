@@ -124,9 +124,11 @@ describe("print unification", () => {
     assert.equal(preview.paymentSections[0].label, "現金");
   });
 
-  it("labels legacy stored printMode as unused for output", () => {
-    assert.match(displayPrintModeLabel("order_based"), /未使用/);
-    assert.equal(displayPrintModeLabel("shopify_printing"), "Shopify Printing API");
+  it("labels every stored printMode with the one store-facing name", () => {
+    // 前の設定（order_based など）が残っていても、店の人には同じ名前だけを見せる（T さん 11/23）
+    assert.equal(displayPrintModeLabel("order_based"), "POS につないだプリンタ");
+    assert.equal(displayPrintModeLabel("cloudprnt_direct"), "POS につないだプリンタ");
+    assert.equal(displayPrintModeLabel("shopify_printing"), "POS につないだプリンタ");
   });
 });
 

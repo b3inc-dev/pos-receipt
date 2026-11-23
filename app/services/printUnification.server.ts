@@ -5,6 +5,7 @@
  */
 import type { SettlementPreviewDTO } from "./settlementEngine.server";
 import type { PrintSettings } from "../utils/appSettings.server";
+import { nonSalesFeeTotalFromSaved } from "./nonSalesFeeLines";
 
 export const UNIFIED_PRINT_MODE = "shopify_printing" as const;
 export type UnifiedPrintMode = typeof UNIFIED_PRINT_MODE;
@@ -136,6 +137,8 @@ export function settlementRowToPreviewDTO(
     itemCount: settlement.itemCount,
     voucherChangeAmount: Number(settlement.voucherChangeAmount),
     paymentSections,
+    // 売上に含めない送料等（#87）は列に保存していないので、支払方法別の合計 − 総売上で戻す
+    nonSalesFeeTotal: nonSalesFeeTotalFromSaved(Number(settlement.total), paymentSections),
     appliedSpecialRefundEvents: [],
     appliedVoucherAdjustments: [],
     loyaltyUsageDisplayLabel: "ポイント利用",
@@ -149,9 +152,9 @@ export function displayPrintModeLabel(stored: string | null | undefined): string
   const runtime = resolveRuntimePrintMode(stored);
   if (runtime === UNIFIED_PRINT_MODE) {
     if (isLegacyPrintMode(stored)) {
-      return "Shopify Printing API（保存値は出力に未使用）";
+      return "POS につないだプリンタ";
     }
-    return "Shopify Printing API";
+    return "POS につないだプリンタ";
   }
-  return "Shopify Printing API";
+  return "POS につないだプリンタ";
 }

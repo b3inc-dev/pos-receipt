@@ -3,17 +3,15 @@
  * アプリ独自印字は Shopify Printing API に統一。旧方式は保存値の読み取りのみ。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate, useNavigation } from "react-router";
 import {
   Page,
   Layout,
   Card,
   Text,
   Checkbox,
-  Button,
   BlockStack,
   Banner,
-  InlineStack,
   Select,
 } from "@shopify/polaris";
 import { useState } from "react";
@@ -29,6 +27,7 @@ import {
   type SalesReceiptSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { SuccessToast } from "../components/admin-ui";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
 import { PaperWidthCorrespondence } from "../components/PaperWidthCorrespondence";
 import { parseSalesPaperWidth, parseSharedPaperWidth } from "../utils/paperWidthCorrespondence";
@@ -85,7 +84,7 @@ export async function action({ request }: ActionFunctionArgs) {
     cloudprntProfileName: str("cloudprntProfileName", existing.cloudprntProfileName ?? ""),
   };
   await setAppSetting(shop.id, PRINT_SETTINGS_KEY, settings);
-  return Response.json({ ok: true });
+  return Response.json({ ok: true, at: Date.now() });
 }
 
 export default function PrintSettingsPage() {
@@ -93,9 +92,12 @@ export default function PrintSettingsPage() {
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
+  const navigation = useNavigation();
+  const actionData = useActionData<{ ok: boolean; at?: number }>();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<PrintSettings>({ ...initial });
+  // 押してから終わるまで保存ボタンを処理中にし、二重に押せないようにする（UI ルール v1.1）
+  const saving = navigation.state !== "idle" && navigation.formMethod?.toLowerCase() === "post";
 
   const handleSave = () => {
     const fd = new FormData();
@@ -105,58 +107,55 @@ export default function PrintSettingsPage() {
       form.receiptPreviewBeforePrintRequired ? "true" : "false",
     );
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const set = <K extends keyof PrintSettings>(key: K, value: PrintSettings[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const legacyNote =
-    storedDefaultPrintMode && storedDefaultPrintMode !== UNIFIED_PRINT_MODE
-      ? `保存済みの旧 defaultPrintMode は「${storedDefaultPrintMode}」です。出力には使いません。`
-      : null;
+  // 前の版で別の印字のやり方を選んでいた店にだけ出す（いまは使っていないことを知らせる）
+  const hasLegacyMode = Boolean(storedDefaultPrintMode && storedDefaultPrintMode !== UNIFIED_PRINT_MODE);
 
   return (
     <PolarisPageWrapper>
       <Page
         title="印字設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
+        primaryAction={{
+          content: saving ? "処理中…" : "保存",
+          onAction: handleSave,
+          loading: saving,
+          disabled: saving,
+        }}
       >
         <Card padding="0">
           <TabGroupBar tabs={RECEIPT_TABS} />
         </Card>
         <Layout>
-          {saved && (
-            <Layout.Section>
-              <Banner tone="success">保存しました。</Banner>
-            </Layout.Section>
-          )}
+          {/* 保存できたかはトーストで、保存のたびに出す（UI ルール v1.1 7章） */}
+          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
+          {/* お知らせ枠は 1 画面に 1 つ（UI ルール v1.1） */}
           <Layout.Section>
             <Banner tone="info">
-              精算・点検・領収書・販売レシートのアプリ独自印字は Shopify Printing API（shopify.printing）に統一しています。
-              CloudPRNT ポーリングと精算注文経由の印字は選べません。通常の Shopify 販売注文の標準レシートは対象外です。
-              POS 11.11+ とペアリング済みレシートプリンタ（HTML 直印字）が必要です。
+              精算・点検・領収書・販売レシートは、POS につないだレシートプリンタで印刷します（Shopify POS 11.11 以上）。
+              ふつうの販売のレシート（Shopify の標準のレシート）はこの設定の対象外です。
+              {hasLegacyMode ? " 前の版で選んでいた印字のやり方は、いまは使っていません。" : ""}
             </Banner>
           </Layout.Section>
 
           <Layout.AnnotatedSection
-            title="印字方式"
-            description="実行時は常に Shopify Printing API。旧 Location.printMode は正規化のみ"
+            title="印字のやり方"
+            description="選ぶ設定はありません。POS につないだプリンタへ直接送ります。"
           >
             <Card>
-              <BlockStack gap="400">
+              <BlockStack gap="200">
                 <Text as="p" variant="bodyMd" fontWeight="semibold">
-                  Shopify Printing API（統一）
+                  POS につないだレシートプリンタへ直接送る
                 </Text>
                 <Text as="p" tone="subdued">
-                  接続中（connected: true）のプリンタへ HTML を送ります。未接続を成功扱いしません。
-                  システム印刷ダイアログを使う場合は直接印字成功と区別して表示します。
-                  print() の完了は API 受付であり、紙の排出完了ではありません。
+                  プリンタがつながっていないときは、印字できなかったと POS に出します。
+                  POS で「印字しました」と出ても、紙が出たかはプリンタで確かめてください。
                 </Text>
-                {legacyNote ? <Banner>{legacyNote}</Banner> : null}
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
@@ -172,7 +171,7 @@ export default function PrintSettingsPage() {
                   options={PAPER_WIDTH_OPTIONS}
                   value={form.cloudprntPaperWidth}
                   onChange={(v) => set("cloudprntPaperWidth", v)}
-                  helpText="精算・点検・領収書の HTML 幅です。販売レシートの幅は販売レシート設定です。"
+                  helpText="精算・点検・領収書の幅です。販売レシートの幅は販売レシート設定で選びます。"
                 />
                 <PaperWidthCorrespondence
                   sharedWidthMm={parseSharedPaperWidth(form.cloudprntPaperWidth)}
@@ -183,40 +182,15 @@ export default function PrintSettingsPage() {
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="領収書" description="§12.2.4">
+          <Layout.AnnotatedSection title="領収書" description="領収書を印字するときの決まりです。">
             <Card>
-              <BlockStack gap="400">
-                <Checkbox
-                  label="印字前にプレビュー必須"
-                  checked={form.receiptPreviewBeforePrintRequired}
-                  onChange={(v) => set("receiptPreviewBeforePrintRequired", v)}
-                />
-                <Text as="p" tone="subdued">
-                  領収書も販売レシートと同じ shopify.printing です。旧 receiptPrintMode は出力に使いません。
-                </Text>
-              </BlockStack>
+              <Checkbox
+                label="印字の前にプレビューを必ず見る"
+                checked={form.receiptPreviewBeforePrintRequired}
+                onChange={(v) => set("receiptPreviewBeforePrintRequired", v)}
+              />
             </Card>
           </Layout.AnnotatedSection>
-
-          <Layout.AnnotatedSection title="廃止した経路" description="管理画面から選べません。保存済みフラグは旧処理を復活させません">
-            <Card>
-              <BlockStack gap="300">
-                <Text as="p">CloudPRNT 直印字（print-payload ポーリング）— 410 Gone</Text>
-                <Text as="p">注文経由印字（SETTLEMENT / INSPECTION 注文の作成・更新・履行）— 呼び出しません</Text>
-                <Text as="p">
-                  「Printing API を有効化／優先」切替 — 常に Printing API。OFF 保存が残っていても旧経路は出ません。
-                </Text>
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-
-          <Layout.Section>
-            <InlineStack align="end">
-              <Button variant="primary" onClick={handleSave}>
-                保存
-              </Button>
-            </InlineStack>
-          </Layout.Section>
         </Layout>
       </Page>
     </PolarisPageWrapper>

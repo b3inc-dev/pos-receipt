@@ -69,7 +69,7 @@ function SalesReceiptModal() {
       }
       setStep("done");
     } catch (e) {
-      setError(toUserMessage(e?.message) || "印字に失敗しました");
+      setError(toUserMessage(e?.message) || "印刷できませんでした");
     } finally {
       setLoading(false);
     }
@@ -100,13 +100,13 @@ function SalesReceiptModal() {
 
   if (step === "done") {
     return (
-      <s-page heading="印字完了">
+      <s-page heading="印刷しました">
         <s-box padding="base">
           <s-stack gap="base">
             <s-text fontWeight="bold">
               {printResult?.outcome === PRINT_OUTCOME.DIALOG_PRESENTED
-                ? "システム印刷ダイアログを開きました"
-                : `${gift ? "ギフト" : "販売"}レシートをプリンタへ送信しました`}
+                ? "印刷の画面を開きました"
+                : `${gift ? "ギフト" : ""}レシートをプリンタに送りました`}
             </s-text>
             <s-text tone="subdued">
               {selectedOrder?.orderName || selectedOrder?.orderId}
@@ -122,7 +122,7 @@ function SalesReceiptModal() {
                 setStep("day_list");
               }}
             >
-              別の注文を印字
+              別の注文を印刷する
             </s-button>
           </s-stack>
         </s-box>
@@ -131,7 +131,7 @@ function SalesReceiptModal() {
   }
 
   return (
-    <s-page heading="販売レシート印字">
+    <s-page heading="レシートを印刷">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
@@ -148,11 +148,11 @@ function SalesReceiptModal() {
             </s-button>
             {error ? <s-banner tone="critical" heading={error} /> : null}
             <s-button variant="primary" onClick={() => handlePrint(false)} disabled={loading}>
-              {loading ? "印字中…" : `${gift ? "ギフト" : "販売"}レシートをプリンタへ送信`}
+              {loading ? "印刷中…" : `${gift ? "ギフト" : ""}レシートを印刷する`}
             </s-button>
             {printResult?.canUseDialog ? (
               <s-button onClick={() => handlePrint(true)} disabled={loading}>
-                システム印刷ダイアログを開く
+                ほかのプリンタを選んで印刷する
               </s-button>
             ) : null}
             <s-button

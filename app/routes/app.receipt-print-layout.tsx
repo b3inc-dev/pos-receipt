@@ -193,8 +193,7 @@ export default function ReceiptPrintLayoutPage() {
           ) : null}
           <Layout.Section>
             <Banner tone="info">
-              詳細テンプレート編集は「領収書テンプレート」タブ。ここでは印字 HTML
-              に効く主要項目だけを触り、見た目の一致を確認できます。
+              くわしい編集は「領収書テンプレート」タブで行います。ここでは主な項目だけを変えて、印刷の見た目を確かめられます。
             </Banner>
           </Layout.Section>
           <Layout.Section variant="oneHalf">
@@ -269,7 +268,7 @@ export default function ReceiptPrintLayoutPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
-                  印字 HTML プレビュー
+                  印刷の見本
                 </Text>
                 <Box
                   padding="300"

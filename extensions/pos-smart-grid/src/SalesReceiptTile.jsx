@@ -11,7 +11,7 @@ function SalesReceiptTile() {
   return (
     <s-tile
       heading="販売レシート"
-      subheading="属性付き印字"
+      subheading="レシートを印刷する"
       onClick={() => shopify.action.presentModal()}
     />
   );
