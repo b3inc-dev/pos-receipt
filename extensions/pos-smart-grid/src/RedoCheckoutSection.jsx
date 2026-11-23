@@ -6,6 +6,9 @@
  * - 下書き注文を作成: 今までどおり下書き注文を作る（onRedoDraft は親が持つ）
  *
  * POS に無い部品（s-select など）と、効かない属性（fontWeight・size・kind）は使わない。
+ *
+ * draftCommandFor: 下書きの確かめを s-modal で出す画面では、その s-modal の id を渡す
+ * （ボタンに command="--show" commandFor を付ける）。渡さなければ onRedoDraft だけを呼ぶ。
  */
 import { useState, useCallback } from "preact/hooks";
 import { getRedoCartPlan } from "../../common/orderPickerApi.js";
@@ -34,7 +37,14 @@ function planNotes(plan) {
   return out;
 }
 
-export function RedoCheckoutSection({ order, canRedoToCart, canRedoAsDraft, onRedoDraft, busy }) {
+export function RedoCheckoutSection({
+  order,
+  canRedoToCart,
+  canRedoAsDraft,
+  onRedoDraft,
+  draftCommandFor,
+  busy,
+}) {
   // idle → confirm → running → done / idle（失敗は message で出す）
   const [phase, setPhase] = useState("idle");
   const [plan, setPlan] = useState(null);
@@ -174,7 +184,12 @@ export function RedoCheckoutSection({ order, canRedoToCart, canRedoAsDraft, onRe
                   </s-button>
                 ) : null}
                 {canRedoAsDraft ? (
-                  <s-button variant="secondary" onClick={onRedoDraft} disabled={disabled}>
+                  <s-button
+                    variant="secondary"
+                    onClick={onRedoDraft}
+                    disabled={disabled}
+                    {...(draftCommandFor ? { command: "--show", commandFor: draftCommandFor } : {})}
+                  >
                     下書き注文を作成
                   </s-button>
                 ) : null}
