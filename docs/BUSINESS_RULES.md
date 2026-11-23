@@ -134,8 +134,8 @@ Location Stock の POS Lite 配送では、送料が注文の配送料でなく 
 
 ## 8. スタッフ名
 
-- 注文詳細 API が lineItems の `staffMember` を `staffMemberName` として返す
-- POS 詳細 UI で「販売: …」表示
+- 注文詳細 API は lineItems の `staffMember` を読まない（`read_users` が要り、無い店では注文の取得ごと 500 になるため。`read_users` は足さない）。`staffMemberName` は今は空で返し、POS 詳細 UI の「販売: …」は出ない
+- 帰属スタッフはアプリの記録（orders/create・orders/updated の `attributed_staffs`）から入れる形を #84 で別に進めている
 - 精算集計・精算レシート文言・領収書金額計算には **未使用**
 - `ReceiptIssue.createdBy` は API で受け取れるが、POS `receiptApi.js` は送っていない
 
