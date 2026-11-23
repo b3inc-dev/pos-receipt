@@ -229,7 +229,7 @@ export default function SettlementSettingsPage() {
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
           <Layout.Section>
-            <Banner tone="info">精算レシート・点検レシートの表題・表示項目・項目名・税表示・再処理を設定します。印字は Shopify Printing API に統一しています。</Banner>
+            <Banner tone="info">精算レシート・点検レシートの表題・表示項目・項目名・税表示・再処理を設定します。</Banner>
           </Layout.Section>
 
           <Layout.AnnotatedSection title="精算レシート基本" description="§5.2.1">
@@ -335,8 +335,7 @@ export default function SettlementSettingsPage() {
                 <Checkbox label="精算の再印字を許可" checked={form.allowReprintSettlement} onChange={(v) => set("allowReprintSettlement", v)} />
                 <Checkbox label="手動で対象日を指定可能" checked={form.allowManualTargetDate} onChange={(v) => set("allowManualTargetDate", v)} />
                 <Banner tone="warning">
-                  精算・点検用の Shopify 注文（SETTLEMENT / INSPECTION）は作成しません。
-                  保存済みの order_based 作成フラグを ON にしても監査用注文は作りません。再印字はアプリ DB の保存済み金額を使います。
+                  精算・点検のために Shopify に注文は作りません。印刷し直すときは、発行したときの金額を使います。
                 </Banner>
                 <Checkbox
                   label="旧ギフトカード API 集計（検証用・ON で有効）"

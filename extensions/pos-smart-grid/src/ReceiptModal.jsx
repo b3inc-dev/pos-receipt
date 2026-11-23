@@ -394,29 +394,28 @@ function ReceiptPrintControls({ receiptIssueId }) {
       setPrintMsg(printResultMessage(res));
     } catch (e) {
       setOutcome(PRINT_OUTCOME.FAILED);
-      setPrintMsg(toUserMessage(e?.message) || "印字に失敗しました");
+      setPrintMsg(toUserMessage(e?.message) || "印刷できませんでした");
     } finally {
       setPrintBusy(false);
     }
   };
 
   if (!receiptIssueId) {
-    return <s-text tone="critical">発行 ID が無いため印字できません</s-text>;
+    return <s-text tone="critical">領収書の記録が見つからないため印刷できません</s-text>;
   }
 
   return (
     <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
       <s-stack gap="small">
-        <s-text fontWeight="bold">Shopify Printing API</s-text>
         <s-text tone="subdued" fontSize="small">
-          保存済みの領収書を印字します。再印刷しても売上・返金・精算は増えません。送信成功は紙の排出完了ではありません。
+          保存済みの領収書を印刷します。印刷し直しても売上・返金・精算は増えません。
         </s-text>
         <s-button variant="primary" onClick={() => runPrint(false)} disabled={printBusy}>
-          {printBusy ? "送信中…" : "プリンタへ送信"}
+          {printBusy ? "印刷中…" : "領収書を印刷する"}
         </s-button>
         {canDialog ? (
           <s-button onClick={() => runPrint(true)} disabled={printBusy}>
-            システム印刷ダイアログを開く
+            ほかのプリンタを選んで印刷する
           </s-button>
         ) : null}
         {printMsg ? (

@@ -241,7 +241,7 @@ export default function SettlementHistoryPage() {
                     絞り込み
                   </Text>
                   <Text as="p" tone="subdued">
-                    日付、ロケーション、総売上、純売上、返金を比較できます。印字は Shopify Printing API です。実行日時は {data.timeZone} です。
+                    日付、ロケーション、総売上、純売上、返金を比較できます。実行日時は {data.timeZone} です。
                   </Text>
                   {data.rangeWarning ? <Banner tone="warning">{data.rangeWarning}</Banner> : null}
                   <div className="AdminHistory-filters">

@@ -137,7 +137,7 @@ export default function PrintSettingsPage() {
           {/* お知らせ枠は 1 画面に 1 つ（UI ルール v1.1） */}
           <Layout.Section>
             <Banner tone="info">
-              精算・点検・領収書・販売レシートは、POS につないだレシートプリンタへ Shopify の印刷の仕組みで直接送ります（POS 11.11 以上）。
+              精算・点検・領収書・販売レシートは、POS につないだレシートプリンタで印刷します（Shopify POS 11.11 以上）。
               ふつうの販売のレシート（Shopify の標準のレシート）はこの設定の対象外です。
               {hasLegacyMode ? " 前の版で選んでいた印字のやり方は、いまは使っていません。" : ""}
             </Banner>
@@ -189,18 +189,6 @@ export default function PrintSettingsPage() {
                 checked={form.receiptPreviewBeforePrintRequired}
                 onChange={(v) => set("receiptPreviewBeforePrintRequired", v)}
               />
-            </Card>
-          </Layout.AnnotatedSection>
-
-          <Layout.AnnotatedSection
-            title="使わなくなった印字のやり方"
-            description="前の版にあったもので、いまは選べません。"
-          >
-            <Card>
-              <BlockStack gap="200">
-                <Text as="p">CloudPRNT でプリンタが取りに来る印字</Text>
-                <Text as="p">精算・点検の注文（SETTLEMENT / INSPECTION）を作って印字する方法</Text>
-              </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
         </Layout>

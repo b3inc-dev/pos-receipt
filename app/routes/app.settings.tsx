@@ -418,13 +418,8 @@ export default function SettingsPage() {
                       </InlineStack>
 
                       <Text variant="bodySm" as="p">
-                        印字方式: Shopify Printing API（統一）
+                        印刷: POS につないだプリンタへ送ります
                       </Text>
-                      {loc.printMode && loc.printMode !== "shopify_printing" ? (
-                        <Text variant="bodySm" as="p" tone="subdued">
-                          保存値「{loc.printMode}」は出力に使いません。精算注文も CloudPRNT も起動しません。
-                        </Text>
-                      ) : null}
 
                       <Text variant="bodySm" as="p" tone="subdued">機能有効（§4.2.2）</Text>
                       <InlineStack gap="400" wrap>
@@ -519,9 +514,6 @@ export default function SettingsPage() {
                           placeholder="任意"
                           autoComplete="off"
                         />
-                        <Text variant="bodySm" as="p" tone="subdued">
-                          CloudPRNT 有効フラグは保存されていても印字出力には使いません。
-                        </Text>
                       </InlineStack>
 
                       <Text variant="bodySm" as="p" tone="subdued">売上サマリー関連（§4.2.5）</Text>

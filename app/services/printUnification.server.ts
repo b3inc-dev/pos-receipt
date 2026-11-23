@@ -152,9 +152,9 @@ export function displayPrintModeLabel(stored: string | null | undefined): string
   const runtime = resolveRuntimePrintMode(stored);
   if (runtime === UNIFIED_PRINT_MODE) {
     if (isLegacyPrintMode(stored)) {
-      return "Shopify Printing API（保存値は出力に未使用）";
+      return "POS につないだプリンタ";
     }
-    return "Shopify Printing API";
+    return "POS につないだプリンタ";
   }
-  return "Shopify Printing API";
+  return "POS につないだプリンタ";
 }
