@@ -1040,7 +1040,7 @@ function PreviewView({
                 <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
                   <s-stack gap="small">
                     <s-text type="strong" tone="caution">
-                      支払方法の行に入れられなかった特殊返金があります
+                      支払方法の行に入れられなかった返金方法変更があります
                     </s-text>
                     {preview.unmatchedRefundMethods.map((w, i) => (
                       <s-text key={`unmatched-${i}`} tone="caution" type="small">
@@ -1061,7 +1061,7 @@ function PreviewView({
               ) : null}
               {preview.pendingSpecialRefundOrderLabels?.length ? (
                 <s-text tone="caution">
-                  返金処理中の特殊返金があります（注文: {preview.pendingSpecialRefundOrderLabels.slice(0, 5).join("、")}）。この返金は上の金額に入っていません。点検は出せますが、精算（確定）の前に特殊返金の「返金を確かめる」を押してください（自動の確定をオンにした店では、数分たつと自動で読み直します）。
+                  返金処理中の返金方法変更があります（注文: {preview.pendingSpecialRefundOrderLabels.slice(0, 5).join("、")}）。この返金は上の金額に入っていません。点検は出せますが、精算（確定）の前に「返金方法変更」タイルでその注文を開き、「返金を確かめる」を押してください（自動の確定をオンにした店では、数分たつと自動で読み直します）。
                 </s-text>
               ) : null}
               {preview.confirmedFromDb ? (

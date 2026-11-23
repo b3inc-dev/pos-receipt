@@ -125,7 +125,7 @@ export async function createRefundReservation(
         ok: false,
         status: 400,
         code: "REFUND_METHOD_NOT_IN_MASTER",
-        message: "選んだ返金方法が、管理画面の「支払方法」で特殊返金に選べるものにありません。",
+        message: "選んだ返金方法は、管理画面の「支払方法」で「特殊返金で選べる」がオンになっていません。",
       };
     }
   }
