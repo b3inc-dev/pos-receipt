@@ -4,7 +4,8 @@
  * 設定項目は削らず再配置のみ。
  */
 import { Tabs } from "@shopify/polaris";
-import { useNavigate, useLocation } from "react-router";
+import { useLocation } from "react-router";
+import { useGuardedNavigate } from "./admin-ui";
 import { useMemo } from "react";
 
 export interface TabItem {
@@ -17,7 +18,8 @@ interface TabGroupBarProps {
 }
 
 export function TabGroupBar({ tabs }: TabGroupBarProps) {
-  const navigate = useNavigate();
+  // 未保存の変更があるときは、移る前に Shopify の確認を出す（UI ルール v1.1 7章）
+  const navigate = useGuardedNavigate();
   const location = useLocation();
   const search = location.search || "";
 

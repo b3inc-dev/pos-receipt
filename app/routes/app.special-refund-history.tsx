@@ -13,9 +13,7 @@ import {
   Button,
   BlockStack,
   InlineStack,
-  IndexTable,
   EmptyState,
-  TextField,
   Box,
   Select,
 } from "@shopify/polaris";
@@ -25,6 +23,7 @@ import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 import { ConfirmAction, StatusBanner, SuccessToast } from "../components/admin-ui";
+import { DateFilter } from "../components/DateFilter";
 import { decideSpecialRefundApproval } from "../services/specialRefundApproval.server";
 import {
   approvalDecidedByLabel,
@@ -258,7 +257,6 @@ export default function SpecialRefundHistoryPage() {
     navigate(`/app/order-adjustments?${params.toString()}`);
   };
 
-  const resourceName = { singular: "イベント", plural: "イベント" };
 
   return (
     <PolarisPageWrapper>
@@ -324,24 +322,9 @@ export default function SpecialRefundHistoryPage() {
                       onChange={(v) => handleFilter("approval", v)}
                     />
                   </Box>
-                  <Box minWidth="160px">
-                    <TextField
-                      label="開始日"
-                      type="date"
-                      value={dateFrom}
-                      onChange={(v) => handleFilter("dateFrom", v)}
-                      autoComplete="off"
-                    />
-                  </Box>
-                  <Box minWidth="160px">
-                    <TextField
-                      label="終了日"
-                      type="date"
-                      value={dateTo}
-                      onChange={(v) => handleFilter("dateTo", v)}
-                      autoComplete="off"
-                    />
-                  </Box>
+                  {/* 日付欄は共通の CSS（Admin-input）で枠からはみ出さないようにする（UI ルール v1.1 6章・13章） */}
+                  <DateFilter id="special-refund-history-from" label="開始日" value={dateFrom} onChange={(v) => handleFilter("dateFrom", v)} />
+                  <DateFilter id="special-refund-history-to" label="終了日" value={dateTo} onChange={(v) => handleFilter("dateTo", v)} />
                 </InlineStack>
               </BlockStack>
             </Card>
@@ -350,126 +333,127 @@ export default function SpecialRefundHistoryPage() {
           {/* テーブル */}
           <Layout.Section>
             <Card padding="0">
-              <IndexTable
-                resourceName={resourceName}
-                itemCount={items.length}
-                headings={[
-                  { title: "取引" },
-                  { title: "種別" },
-                  { title: "金額" },
-                  { title: "返金方法変更" },
-                  { title: "備考" },
-                  { title: "ステータス" },
-                  { title: "Shopify返金" },
-                  { title: "承認" },
-                  { title: "登録日時" },
-                ]}
-                selectable={false}
-                emptyState={
-                  <EmptyState
-                    heading="特殊返金・調整履歴がありません"
-                    image=""
-                  >
-                    <Text as="p" tone="subdued">
-                      POSの特殊返金タイルからイベントを登録すると、ここに履歴が表示されます。
-                    </Text>
-                  </EmptyState>
-                }
-              >
-                {items.map((item, idx) => (
-                  <IndexTable.Row id={item.id} key={item.id} position={idx}>
-                    <IndexTable.Cell>
-                      <BlockStack gap="100">
-                        <Text as="span" variant="bodyMd" fontWeight="semibold">
-                          {item.sourceOrderName ?? item.sourceOrderId}
-                        </Text>
-                        {item.createdBy && (
-                          <Text as="span" variant="bodySm" tone="subdued">
-                            担当: {item.createdBy}
-                          </Text>
-                        )}
-                        <InlineStack>
-                          <Button variant="plain" onClick={() => openOrderAdjustments(item.sourceOrderId)}>
-                            この注文の記録・変更
-                          </Button>
-                        </InlineStack>
-                      </BlockStack>
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>
-                      {eventTypeLabel(item.eventType)}
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>
-                      {fmtYen(item.amount)}
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>
-                      {item.originalPaymentMethod && item.actualRefundMethod
-                        ? `${item.originalPaymentMethod} → ${item.actualRefundMethod}`
-                        : item.voucherFaceValue
-                        ? `額面: ${fmtYen(item.voucherFaceValue)}`
-                        : "—"}
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>
-                      <Text as="span" variant="bodySm" tone="subdued">
-                        {item.note ?? "—"}
-                      </Text>
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>{statusBadge(item.status)}</IndexTable.Cell>
-                    <IndexTable.Cell>
-                      <BlockStack gap="100">
-                        {shopifyRefundBadge(item.shopifyRefundStatus)}
-                        {item.shopifyRefundStatus === "failed" && item.shopifyRefundError ? (
-                          <Text as="span" variant="bodySm" tone="subdued">
-                            {item.shopifyRefundError}
-                          </Text>
-                        ) : null}
-                      </BlockStack>
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>
-                      <BlockStack gap="100">
-                        {approvalBadge(item.approvalStatus)}
-                        {item.approvalReviewedAt ? (
-                          <Text as="span" variant="bodySm" tone="subdued">
-                            {new Date(item.approvalReviewedAt).toLocaleString("ja-JP", {
-                              timeZone: "Asia/Tokyo",
-                              year: "numeric", month: "2-digit", day: "2-digit",
-                              hour: "2-digit", minute: "2-digit",
-                            })}
-                            {" "}
-                            {item.approvalDecidedBy ?? "（決めた人は取れませんでした）"}
-                          </Text>
-                        ) : null}
-                        {item.status === "active" && normalizeApprovalStatus(item.approvalStatus) === "pending" ? (
-                          <InlineStack gap="200" wrap={false}>
-                            <ConfirmAction
-                              trigger="secondary"
-                              label="承認"
-                              heading={`${eventTypeLabel(item.eventType)}を承認しますか`}
-                              message={`${item.sourceOrderName ?? "この登録"} の ${fmtYen(item.amount)}（${item.originalPaymentMethod ?? "—"} → ${item.actualRefundMethod ?? "—"}）を登録した日の精算・売上サマリーに入れます。Shopify には何もしません。`}
-                              confirmLabel="承認する"
-                              fields={{ intent: "approval", eventId: item.id, decision: "approve" }}
-                            />
-                            <ConfirmAction
-                              label="却下"
-                              heading={`${eventTypeLabel(item.eventType)}を却下しますか`}
-                              message={`${item.sourceOrderName ?? "この登録"} の ${fmtYen(item.amount)} は精算・売上サマリーに入りません。あとから承認には戻せません。Shopify の返金は取り消されません。`}
-                              confirmLabel="却下する"
-                              fields={{ intent: "approval", eventId: item.id, decision: "reject" }}
-                            />
-                          </InlineStack>
-                        ) : null}
-                      </BlockStack>
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>
-                      <Text as="span" variant="bodySm" tone="subdued">
-                        {new Date(item.createdAt).toLocaleString("ja-JP", {
-                          year: "numeric", month: "2-digit", day: "2-digit",
-                          hour: "2-digit", minute: "2-digit",
-                        })}
-                      </Text>
-                    </IndexTable.Cell>
-                  </IndexTable.Row>
-                ))}
-              </IndexTable>
+              {items.length === 0 ? (
+                <EmptyState heading="特殊返金・調整履歴がありません" image="">
+                  <Text as="p" tone="subdued">
+                    POSの特殊返金タイルからイベントを登録すると、ここに履歴が表示されます。
+                  </Text>
+                </EmptyState>
+              ) : (
+                // スマホでは横スクロールさせず 1 件 1 枚のカードにする（data-label が各行の見出し。UI ルール v1.1 8章）
+                <div className="History-scroll">
+                  <table className="History-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">取引</th>
+                        <th scope="col">種別</th>
+                        <th scope="col" className="History-num">金額</th>
+                        <th scope="col">返金方法変更</th>
+                        <th scope="col">備考</th>
+                        <th scope="col">ステータス</th>
+                        <th scope="col">Shopify返金</th>
+                        <th scope="col">承認</th>
+                        <th scope="col">登録日時</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item) => (
+                        <tr key={item.id}>
+                          <td data-label="取引" className="History-id">
+                            <BlockStack gap="100">
+                              <Text as="span" variant="bodyMd" fontWeight="semibold">
+                                {item.sourceOrderName ?? item.sourceOrderId}
+                              </Text>
+                              {item.createdBy && (
+                                <Text as="span" variant="bodySm" tone="subdued">
+                                  担当: {item.createdBy}
+                                </Text>
+                              )}
+                              <InlineStack>
+                                <Button variant="plain" onClick={() => openOrderAdjustments(item.sourceOrderId)}>
+                                  この注文の記録・変更
+                                </Button>
+                              </InlineStack>
+                            </BlockStack>
+                          </td>
+                          <td data-label="種別" className="History-keep">
+                            {eventTypeLabel(item.eventType)}
+                          </td>
+                          <td data-label="金額" className="History-num">
+                            {fmtYen(item.amount)}
+                          </td>
+                          <td data-label="返金方法変更">
+                            {item.originalPaymentMethod && item.actualRefundMethod
+                              ? `${item.originalPaymentMethod} → ${item.actualRefundMethod}`
+                              : item.voucherFaceValue
+                              ? `額面: ${fmtYen(item.voucherFaceValue)}`
+                              : "—"}
+                          </td>
+                          <td data-label="備考" className="History-text">
+                            <Text as="span" variant="bodySm" tone="subdued">
+                              {item.note ?? "—"}
+                            </Text>
+                          </td>
+                          <td data-label="ステータス" className="History-keep">{statusBadge(item.status)}</td>
+                          <td data-label="Shopify返金">
+                            <BlockStack gap="100">
+                              {shopifyRefundBadge(item.shopifyRefundStatus)}
+                              {item.shopifyRefundStatus === "failed" && item.shopifyRefundError ? (
+                                <Text as="span" variant="bodySm" tone="subdued">
+                                  {item.shopifyRefundError}
+                                </Text>
+                              ) : null}
+                            </BlockStack>
+                          </td>
+                          <td data-label="承認">
+                            <BlockStack gap="100">
+                              {approvalBadge(item.approvalStatus)}
+                              {item.approvalReviewedAt ? (
+                                <Text as="span" variant="bodySm" tone="subdued">
+                                  {new Date(item.approvalReviewedAt).toLocaleString("ja-JP", {
+                                    timeZone: "Asia/Tokyo",
+                                    year: "numeric", month: "2-digit", day: "2-digit",
+                                    hour: "2-digit", minute: "2-digit",
+                                  })}
+                                  {" "}
+                                  {item.approvalDecidedBy ?? "（決めた人は取れませんでした）"}
+                                </Text>
+                              ) : null}
+                              {item.status === "active" && normalizeApprovalStatus(item.approvalStatus) === "pending" ? (
+                                <InlineStack gap="200" wrap={false}>
+                                  <ConfirmAction
+                                    trigger="secondary"
+                                    label="承認"
+                                    heading={`${eventTypeLabel(item.eventType)}を承認しますか`}
+                                    message={`${item.sourceOrderName ?? "この登録"} の ${fmtYen(item.amount)}（${item.originalPaymentMethod ?? "—"} → ${item.actualRefundMethod ?? "—"}）を登録した日の精算・売上サマリーに入れます。Shopify には何もしません。`}
+                                    confirmLabel="承認する"
+                                    fields={{ intent: "approval", eventId: item.id, decision: "approve" }}
+                                  />
+                                  <ConfirmAction
+                                    label="却下"
+                                    heading={`${eventTypeLabel(item.eventType)}を却下しますか`}
+                                    message={`${item.sourceOrderName ?? "この登録"} の ${fmtYen(item.amount)} は精算・売上サマリーに入りません。あとから承認には戻せません。Shopify の返金は取り消されません。`}
+                                    confirmLabel="却下する"
+                                    fields={{ intent: "approval", eventId: item.id, decision: "reject" }}
+                                  />
+                                </InlineStack>
+                              ) : null}
+                            </BlockStack>
+                          </td>
+                          <td data-label="登録日時">
+                            <Text as="span" variant="bodySm" tone="subdued">
+                              {new Date(item.createdAt).toLocaleString("ja-JP", {
+                                year: "numeric", month: "2-digit", day: "2-digit",
+                                hour: "2-digit", minute: "2-digit",
+                              })}
+                            </Text>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </Card>
           </Layout.Section>
 

@@ -23,6 +23,7 @@ import { resolveShop } from "../utils/shopResolver.server";
 import prisma from "../db.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SystemPageNav } from "../components/SystemPageNav";
+import { AdminIntro, SuccessToast } from "../components/admin-ui";
 import { isInhouseMode } from "../utils/planFeatures.server";
 import { useState, useCallback, useRef } from "react";
 
@@ -86,6 +87,16 @@ export default function BackfillPage() {
   const total = dayResults.length;
   const progress = total > 0 ? Math.round((processed / total) * 100) : 0;
   const done = total > 0 && processed === total;
+  const errorCount = dayResults.filter((r) => r.status === "error").length;
+  const stopped = !running && total > 0 && !done;
+  // 状態はバッジで 1 行に出す（処理中・完了・停止中・要確認。UI ルール v1.1 12章）
+  const runState: { label: string; tone?: "info" | "success" | "warning" } = running
+    ? { label: "処理中", tone: "info" }
+    : stopped
+    ? { label: "停止中" }
+    : errorCount > 0
+    ? { label: "要確認", tone: "warning" }
+    : { label: "完了", tone: "success" };
 
   const handleStart = useCallback(async () => {
     if (!selectedLocation || !selectedMonth) return;
@@ -160,12 +171,22 @@ export default function BackfillPage() {
         <SystemPageNav memberCardEnabled={memberCardEnabled} />
         <Layout>
           <Layout.Section>
-            <Banner tone="info">
-              <Text as="p">
-                指定した月のSalesSummaryCacheDailyを1日ずつ取得します。
-                キャッシュ済みの日はスキップされます。月単位で実行してください。
-              </Text>
-            </Banner>
+            {/* 画面全体の説明は AdminIntro（1〜2文）。開発用の名前（テーブル名）は出さない（UI ルール v1.1 5章・10章） */}
+            <AdminIntro>
+              <p>
+                選んだ月の売上サマリーの集計を、1日ずつ取り込みます。取込済みの日は飛ばすので、止めたあとは「続きから再開」で残りの日を進めます。画面を閉じると止まります。
+              </p>
+            </AdminIntro>
+            {/* 終わったらトーストで知らせる（成功は画面に残さない。UI ルール v1.1 5章） */}
+            <SuccessToast message={done && errorCount === 0 ? "取込完了しました" : null} trigger={dayResults} />
+            {/* 止まった・失敗した日があるときは、お知らせ枠 1 つに理由を出す（UI ルール v1.1 5章・12章） */}
+            {!running && errorCount > 0 && (
+              <Box paddingBlockStart="300">
+                <Banner tone="critical">
+                  <Text as="p">{errorCount}日を取り込めませんでした。日ごとの理由は下の進捗にあります。「続きから再開」で取り込めなかった日をもう一度試します。</Text>
+                </Banner>
+              </Box>
+            )}
           </Layout.Section>
 
           <Layout.Section>
@@ -193,10 +214,10 @@ export default function BackfillPage() {
                     <InlineStack gap="300">
                       {!running ? (
                         <Button variant="primary" onClick={handleStart} disabled={!selectedLocation || !selectedMonth}>
-                          取込開始
+                          {stopped || errorCount > 0 ? "続きから再開" : "取込開始"}
                         </Button>
                       ) : (
-                        <Button onClick={handleStop} tone="critical">
+                        <Button onClick={handleStop}>
                           停止
                         </Button>
                       )}
@@ -212,29 +233,31 @@ export default function BackfillPage() {
             <Layout.Section>
               <Card>
                 <BlockStack gap="300">
-                  <InlineStack align="space-between">
-                    <Text variant="headingSm" as="h2">進捗</Text>
-                    <Text as="span" tone="subdued">{processed} / {total}日 ({progress}%)</Text>
-                  </InlineStack>
+                  <Text variant="headingSm" as="h2">進捗</Text>
+                  {/* 状態のバッジと件数を 1 行で（UI ルール v1.1 12章） */}
+                  <div role="status">
+                    <InlineStack gap="200" align="space-between" blockAlign="center">
+                      <Badge tone={runState.tone}>{runState.label}</Badge>
+                      <span className="History-num">{processed} / {total}日（{progress}%）</span>
+                    </InlineStack>
+                  </div>
                   <ProgressBar progress={progress} size="small" />
-                  {done && (
-                    <Banner tone="success">
-                      <Text as="p">取込完了しました。</Text>
-                    </Banner>
-                  )}
                   <Box maxHeight="400px" overflowY="scroll">
                     <BlockStack gap="100">
                       {dayResults.map((r) => (
-                        <InlineStack key={r.targetDate} gap="200" align="start">
-                          <Text as="span" variant="bodySm" tone="subdued" style={{ minWidth: "110px" }}>
-                            {r.targetDate}
-                          </Text>
+                        <InlineStack key={r.targetDate} gap="200" align="start" blockAlign="center">
+                          <span className="History-num" style={{ minWidth: "110px", textAlign: "left", color: "#6d7175" }}>
+                            {r.targetDate.replace(/-/g, "/")}
+                          </span>
                           {r.status === "pending" && <Badge>待機中</Badge>}
-                          {r.status === "processing" && <Badge tone="attention">処理中…</Badge>}
+                          {r.status === "processing" && <Badge tone="info">処理中</Badge>}
                           {r.status === "done" && <Badge tone="success">取込済</Badge>}
-                          {r.status === "skipped" && <Badge tone="info">スキップ</Badge>}
+                          {r.status === "skipped" && <Badge>スキップ</Badge>}
                           {r.status === "error" && (
-                            <Badge tone="critical">エラー: {r.reason ?? ""}</Badge>
+                            <>
+                              <Badge tone="critical">失敗</Badge>
+                              {r.reason ? <Text as="span" variant="bodySm" tone="subdued">{r.reason}</Text> : null}
+                            </>
                           )}
                         </InlineStack>
                       ))}

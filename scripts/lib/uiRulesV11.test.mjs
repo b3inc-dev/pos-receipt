@@ -15,6 +15,8 @@ const OPEN_PR_SCREENS = new Set([
   "app.channel-budget-template-csv.tsx", "app.diagnostics.tsx", "app.plan.callback.tsx", "app.plan.tsx",
   "app.sales-summary-settings.tsx", "app.sales-summary.tsx", "app.settings.tsx", "app.print-settings.tsx",
   "app.receipt-print-layout.tsx", "app.settlement-print-layout.tsx", "app.settlement-settings.tsx",
+  // 印字の一本化（#22・#53）が直している画面
+  "app.location-profiles.tsx", "app.settlement-history.tsx",
 ]);
 const checked = routes.filter(({ name }) => !OPEN_PR_SCREENS.has(name));
 
@@ -70,5 +72,60 @@ test("自前の日付欄は共通の CSS（Admin-input）を付ける（6章・1
     for (const match of source.matchAll(/<input\s[^>]*?type="date"[^>]*>/g)) {
       assert.match(match[0], /className="[^"]*Admin-input/, `${name} の日付欄に Admin-input がない`);
     }
+  }
+});
+
+// 保存の帯（SaveBar）に移した設定の画面。画面の上の「保存」ボタン（Polaris の primaryAction）は置かない（7章）
+const SAVE_BAR_SCREENS = [
+  "app.budget-settings.tsx", "app.general-settings.tsx", "app.loyalty-settings.tsx", "app.special-refund-settings.tsx",
+  "app.voucher-settings.tsx", "app.sales-receipt-settings.tsx", "app.receipt-template.tsx",
+];
+
+test("設定の画面は Shopify の保存の帯で保存し、画面の上に保存ボタンを置かない（7章）", () => {
+  for (const file of SAVE_BAR_SCREENS) {
+    const source = readFileSync(`app/routes/${file}`, "utf8");
+    assert.match(source, /<StateSaveForm values=\{[^}]+\}+ onSave=\{handleSave\} onDiscard=\{/, `${file} に保存の帯がない`);
+    assert.equal((source.match(/<StateSaveForm\b/g) ?? []).length, 1, `${file} の保存の帯は 1 つ`);
+    assert.equal(/primaryAction=\{\{ content: "保存"/.test(source), false, `${file} に画面の上の保存ボタンが残っている`);
+    assert.match(source, /const navigate = useGuardedNavigate\(\);/, `${file} の「←」が未保存を確かめずに移る`);
+  }
+});
+
+test("保存の帯の囲みは、送る中身を作らず各画面の onSave に任せ、帯を 1 つだけ置く（7章）", () => {
+  const source = readFileSync("app/components/StateSaveForm.tsx", "utf8");
+  assert.equal((source.match(/<SaveBar\b/g) ?? []).length, 1);
+  assert.match(source, /event\.preventDefault\(\);/, "フォームをそのまま送らない");
+  assert.match(source, /onSave\(\)/);
+  assert.match(source, /failed=\{failed\}/, "失敗のあとは帯を出し直す");
+  assert.match(source, /onDiscard\(saved\.current\)/, "破棄は最後に保存した値に戻す");
+  assert.match(source, /closest\("ui-save-bar"\)/, "帯のボタンからの送信（二重の送信・破棄での送信）を止める");
+});
+
+// 表をスマホで 1 件 1 枚のカードにした画面（8章）
+const HISTORY_TABLE_SCREENS = ["app.receipt-history.tsx", "app.special-refund-history.tsx", "app.payment-methods.tsx"];
+
+test("表は History-table にし、各セルに data-label を付ける（Polaris の IndexTable はスマホで横スクロールになる。8章）", () => {
+  for (const file of HISTORY_TABLE_SCREENS) {
+    const source = readFileSync(`app/routes/${file}`, "utf8");
+    assert.equal(/IndexTable/.test(source), false, `${file} に IndexTable が残っている`);
+    assert.match(source, /<table className="History-table">/, file);
+    const cells = source.match(/<td\b[^>]*>/g) ?? [];
+    assert.ok(cells.length > 0, file);
+    for (const cell of cells) assert.match(cell, /data-label="/, `${file} の ${cell} に data-label がない`);
+  }
+});
+
+test("履歴の期間の欄は Polaris の日付欄でなく共通の日付欄（6章・13章）", () => {
+  for (const { name, source } of checked) {
+    assert.equal(/<TextField[^>]*type="date"/s.test(source.replace(/<TextField/g, "\n<TextField")), false, `${name} に Polaris の日付欄がある`);
+  }
+  const date = readFileSync("app/components/DateFilter.tsx", "utf8");
+  assert.match(date, /className="Admin-input"/);
+  assert.match(date, /type="date"/);
+});
+
+test("削除はブラウザの confirm() でなく確認の窓で出す（4章）", () => {
+  for (const { name, source } of checked) {
+    assert.equal(/\bconfirm\(/.test(source), false, `${name} がブラウザの confirm() を使っている`);
   }
 });

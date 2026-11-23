@@ -19,6 +19,7 @@ import {
   Divider,
   Badge,
   EmptyState,
+  Modal,
 } from "@shopify/polaris";
 import { useState, useCallback } from "react";
 import { authenticate } from "../shopify.server";
@@ -27,6 +28,7 @@ import prisma from "../db.server";
 import { autoDiscoverChannels } from "../services/salesChannelEngine.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
+import { SuccessToast } from "../components/admin-ui";
 
 // ── Loader ────────────────────────────────────────────────────────────────────
 
@@ -328,7 +330,10 @@ export default function SalesChannelsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addingNew, setAddingNew] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [savedBanner, setSavedBanner] = useState(false);
+  // 保存の成功はトーストで、保存のたびに出す（UI ルール v1.1 7章）。数を変えて同じ文でも毎回出す
+  const [savedCount, setSavedCount] = useState(0);
+  // 削除の確認の窓に出すチャネル（ブラウザの確認でなく画面の窓。UI ルール v1.1 4章）
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
 
@@ -359,8 +364,7 @@ export default function SalesChannelsPage() {
       setEditingId(null);
       setAddingNew(false);
       setIsSaving(false);
-      setSavedBanner(true);
-      setTimeout(() => setSavedBanner(false), 3000);
+      setSavedCount((n) => n + 1);
     },
     [submit]
   );
@@ -383,7 +387,7 @@ export default function SalesChannelsPage() {
 
   const handleDelete = useCallback(
     (id: string) => {
-      if (!confirm("このチャネルを削除します。過去のキャッシュも削除されます。よろしいですか？")) return;
+      setDeletingId(null);
       const formData = new FormData();
       formData.set("intent", "delete");
       formData.set("id", id);
@@ -404,11 +408,7 @@ export default function SalesChannelsPage() {
         <TabGroupBar tabs={REPORTS_TABS} />
         <Layout>
           <Layout.Section>
-            {savedBanner && (
-              <Banner tone="success" onDismiss={() => setSavedBanner(false)}>
-                保存しました
-              </Banner>
-            )}
+            <SuccessToast message={savedCount > 0 ? "保存しました" : null} trigger={savedCount} />
 
             <Card>
               <BlockStack gap="400">
@@ -447,7 +447,7 @@ export default function SalesChannelsPage() {
                           channel={ch}
                           onSave={handleSave}
                           onCancel={() => setEditingId(null)}
-                          onDelete={() => handleDelete(ch.id)}
+                          onDelete={() => setDeletingId(ch.id)}
                           isSaving={isSaving}
                         />
                       ) : (
@@ -502,6 +502,22 @@ export default function SalesChannelsPage() {
           </Layout.Section>
         </Layout>
       </Page>
+
+      <Modal
+        open={deletingId !== null}
+        onClose={() => setDeletingId(null)}
+        title="チャネルを削除しますか？"
+        primaryAction={{
+          content: "削除",
+          destructive: true,
+          onAction: () => { if (deletingId) handleDelete(deletingId); },
+        }}
+        secondaryActions={[{ content: "キャンセル", onAction: () => setDeletingId(null) }]}
+      >
+        <Modal.Section>
+          <Text as="p">このチャネルを削除します。過去のキャッシュも削除されます。元に戻せません。</Text>
+        </Modal.Section>
+      </Modal>
     </PolarisPageWrapper>
   );
 }

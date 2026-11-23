@@ -3,8 +3,9 @@
  * 要件 §8: 利用可能イベント種別・入力要件・表示名
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useActionData, useFetcher, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
-import { SuccessToast, AdminIntro } from "../components/admin-ui";
+import { useActionData, useFetcher, useLoaderData, useSubmit, useLocation } from "react-router";
+import { SuccessToast, AdminIntro, useGuardedNavigate } from "../components/admin-ui";
+import { StateSaveForm } from "../components/StateSaveForm";
 import {
   Page,
   Layout,
@@ -120,7 +121,8 @@ export default function SpecialRefundSettingsPage() {
   const submit = useSubmit();
   const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
-  const navigate = useNavigate();
+  // 「←」とタブは、未保存の変更があれば Shopify の確認を出してから移る（UI ルール v1.1 7章）
+  const navigate = useGuardedNavigate();
   const q = location.search || "";
   const [form, setForm] = useState<SpecialRefundSettings>({ ...initial });
 
@@ -141,260 +143,262 @@ export default function SpecialRefundSettingsPage() {
       <Page
         title="特殊返金設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
           <TabGroupBar tabs={SETTLEMENT_TABS} />
         </Card>
-        <Layout>
-          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
-          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
-          <Layout.Section>
-            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-            <AdminIntro><p>POS の「返金方法変更」タイルで使う登録の種類と、Shopify の注文に返金を作るか・精算に入れるかを決めます。オフにした種類は POS で登録できなくなります。</p></AdminIntro>
-          </Layout.Section>
+        {/* 保存は Shopify の保存の帯（値が保存したときと違うときだけ「破棄」「保存」）。画面の中に保存ボタンを置かない（UI ルール v1.1 7章） */}
+        <StateSaveForm values={form} onSave={handleSave} onDiscard={(saved) => setForm(saved)} result={actionData}>
+          <Layout>
+            {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+            <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
+            <Layout.Section>
+              {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+              <AdminIntro><p>POS の「返金方法変更」タイルで使う登録の種類と、Shopify の注文に返金を作るか・精算に入れるかを決めます。オフにした種類は POS で登録できなくなります。</p></AdminIntro>
+            </Layout.Section>
 
-          <Layout.AnnotatedSection
-            title="Shopify 返金の実行"
-            description="返金は POS の純正の返金で行い、タイルでは返金方法を変更します。純正で返金した注文の返金方法変更は、ここの選び方に関係なく Shopify では返金しません（金額は純正の返金のまま）。ここで選ぶのは、純正の返金が無い注文で返金方法変更を登録したときだけです。商品券釣銭登録とレシートの現金を直すは、いつも記録だけです。"
-          >
-            <Card>
-              <BlockStack gap="400">
-                <ChoiceList
-                  title="返金のしかた（純正の返金が無い注文）"
-                  choices={[
-                    {
-                      label: "記録だけ",
-                      value: "record_only",
-                      helpText:
-                        "アプリの記録と精算・売上サマリーにだけ入れます。Shopify の注文には返金を作りません。",
-                    },
-                    {
-                      label: "Shopify で返金まで",
-                      value: "shopify_execute",
-                      helpText:
-                        "POS で登録すると、Shopify の注文にも元の支払いへの返金を作ります。",
-                    },
-                  ]}
-                  selected={[form.refundProcessingMode]}
-                  onChange={(v) =>
-                    set(
-                      "refundProcessingMode",
-                      (v[0] === "record_only" ? "record_only" : "shopify_execute"),
-                    )
-                  }
-                />
-                {form.refundProcessingMode === "shopify_execute" ? (
-                  <>
-                    <Divider />
-                    {/* 現金で返した（cash_refund）・ほかの返金方法で返した（payment_method_override）は POS では 1 つの「返金方法変更」。設定の値は 2 つのまま、まとめて切り替える */}
-                    <Checkbox
-                      label="返金方法変更で、Shopify で返金まで行う"
-                      checked={form.shopifyExecuteCashRefund || form.shopifyExecutePaymentMethodOverride}
-                      onChange={(v) => {
-                        set("shopifyExecuteCashRefund", v);
-                        set("shopifyExecutePaymentMethodOverride", v);
-                      }}
-                      helpText={
-                        form.shopifyExecuteCashRefund !== form.shopifyExecutePaymentMethodOverride
-                          ? "今は「現金で返した」と「ほかの返金方法で返した」で設定が分かれています。押すと 2 つそろえます。"
-                          : undefined
-                      }
-                    />
-                  </>
-                ) : null}
-                <Checkbox
-                  label="登録し直すときは記録だけにする"
-                  checked={form.correctionUsesRecordOnly}
-                  onChange={(v) => set("correctionUsesRecordOnly", v)}
-                  helpText="間違えた登録を無効化して登録し直すとき、Shopify で 2 回返金しないようにします。オンをおすすめします。"
-                />
-                <Checkbox
-                  label="会計やり直し"
-                  checked={form.enableOrderRedoDraft}
-                  onChange={(v) => set("enableOrderRedoDraft", v)}
-                  helpText="キャンセル・返金済みの注文と同じ商品で、もう一度お会計できるようにします。"
-                />
-                {form.enableOrderRedoDraft ? (
+            <Layout.AnnotatedSection
+              title="Shopify 返金の実行"
+              description="返金は POS の純正の返金で行い、タイルでは返金方法を変更します。純正で返金した注文の返金方法変更は、ここの選び方に関係なく Shopify では返金しません（金額は純正の返金のまま）。ここで選ぶのは、純正の返金が無い注文で返金方法変更を登録したときだけです。商品券釣銭登録とレシートの現金を直すは、いつも記録だけです。"
+            >
+              <Card>
+                <BlockStack gap="400">
                   <ChoiceList
-                    title="会計やり直しの方法"
+                    title="返金のしかた（純正の返金が無い注文）"
                     choices={[
                       {
-                        label: "カートに入れる・下書き注文の両方（POS で選ぶ）",
-                        value: "both",
-                        helpText: "POS の注文の詳細に、ボタンを 2 つ出します。",
-                      },
-                      {
-                        label: "カートに入れるだけ",
-                        value: "cart",
+                        label: "記録だけ",
+                        value: "record_only",
                         helpText:
-                          "同じ商品・お客様・割引を POS のカートに入れ、そのままお会計します。削除した商品は同じ名前・値段のカスタム商品で入ります。",
+                          "アプリの記録と精算・売上サマリーにだけ入れます。Shopify の注文には返金を作りません。",
                       },
                       {
-                        label: "下書き注文だけ",
-                        value: "draft",
-                        helpText: "同じ商品で下書き注文を作ります。お会計は POS か管理画面の「下書き注文」でします。",
+                        label: "Shopify で返金まで",
+                        value: "shopify_execute",
+                        helpText:
+                          "POS で登録すると、Shopify の注文にも元の支払いへの返金を作ります。",
                       },
                     ]}
-                    selected={[form.orderRedoMethod]}
-                    onChange={(v) => set("orderRedoMethod", normalizeOrderRedoMethod(v[0]))}
+                    selected={[form.refundProcessingMode]}
+                    onChange={(v) =>
+                      set(
+                        "refundProcessingMode",
+                        (v[0] === "record_only" ? "record_only" : "shopify_execute"),
+                      )
+                    }
                   />
-                ) : null}
-                <Banner tone="warning">
-                  「Shopify で返金まで」にすると、純正の返金が無い注文で POS で登録した金額が、Shopify の注文に返金として入ります。登録を無効化しても、Shopify の返金は取り消されません。
-                </Banner>
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+                  {form.refundProcessingMode === "shopify_execute" ? (
+                    <>
+                      <Divider />
+                      {/* 現金で返した（cash_refund）・ほかの返金方法で返した（payment_method_override）は POS では 1 つの「返金方法変更」。設定の値は 2 つのまま、まとめて切り替える */}
+                      <Checkbox
+                        label="返金方法変更で、Shopify で返金まで行う"
+                        checked={form.shopifyExecuteCashRefund || form.shopifyExecutePaymentMethodOverride}
+                        onChange={(v) => {
+                          set("shopifyExecuteCashRefund", v);
+                          set("shopifyExecutePaymentMethodOverride", v);
+                        }}
+                        helpText={
+                          form.shopifyExecuteCashRefund !== form.shopifyExecutePaymentMethodOverride
+                            ? "今は「現金で返した」と「ほかの返金方法で返した」で設定が分かれています。押すと 2 つそろえます。"
+                            : undefined
+                        }
+                      />
+                    </>
+                  ) : null}
+                  <Checkbox
+                    label="登録し直すときは記録だけにする"
+                    checked={form.correctionUsesRecordOnly}
+                    onChange={(v) => set("correctionUsesRecordOnly", v)}
+                    helpText="間違えた登録を無効化して登録し直すとき、Shopify で 2 回返金しないようにします。オンをおすすめします。"
+                  />
+                  <Checkbox
+                    label="会計やり直し"
+                    checked={form.enableOrderRedoDraft}
+                    onChange={(v) => set("enableOrderRedoDraft", v)}
+                    helpText="キャンセル・返金済みの注文と同じ商品で、もう一度お会計できるようにします。"
+                  />
+                  {form.enableOrderRedoDraft ? (
+                    <ChoiceList
+                      title="会計やり直しの方法"
+                      choices={[
+                        {
+                          label: "カートに入れる・下書き注文の両方（POS で選ぶ）",
+                          value: "both",
+                          helpText: "POS の注文の詳細に、ボタンを 2 つ出します。",
+                        },
+                        {
+                          label: "カートに入れるだけ",
+                          value: "cart",
+                          helpText:
+                            "同じ商品・お客様・割引を POS のカートに入れ、そのままお会計します。削除した商品は同じ名前・値段のカスタム商品で入ります。",
+                        },
+                        {
+                          label: "下書き注文だけ",
+                          value: "draft",
+                          helpText: "同じ商品で下書き注文を作ります。お会計は POS か管理画面の「下書き注文」でします。",
+                        },
+                      ]}
+                      selected={[form.orderRedoMethod]}
+                      onChange={(v) => set("orderRedoMethod", normalizeOrderRedoMethod(v[0]))}
+                    />
+                  ) : null}
+                  <Banner tone="warning">
+                    「Shopify で返金まで」にすると、純正の返金が無い注文で POS で登録した金額が、Shopify の注文に返金として入ります。登録を無効化しても、Shopify の返金は取り消されません。
+                  </Banner>
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection
-            title="POS で使う種類"
-            description="POS の登録の画面に出る種類です。返金方法が現金かどうかで、記録の種類（現金返金・返金方法変更）は自動で決まります。"
-          >
-            <Card>
-              <BlockStack gap="300">
-                <Checkbox
-                  label="返金方法変更"
-                  checked={form.enableCashRefund || form.enablePaymentMethodOverride}
-                  onChange={(v) => {
-                    set("enableCashRefund", v);
-                    set("enablePaymentMethodOverride", v);
-                  }}
-                  helpText={
-                    form.enableCashRefund !== form.enablePaymentMethodOverride
-                      ? `今は${form.enableCashRefund ? "現金で返したときだけ" : "現金以外で返したときだけ"}使えます。押すと 2 つそろえます。`
-                      : "純正で返金した注文は、返金を選んで金額はそのまま、返金方法だけ選びます。"
-                  }
-                />
-                <Checkbox
-                  label="レシートの現金を直す"
-                  checked={form.enableReceiptCashAdjustment}
-                  onChange={(v) => set("enableReceiptCashAdjustment", v)}
-                  helpText="返金ではありません。レシートと実際の現金が違ったとき、精算の数字だけを直します。"
-                />
-                <Checkbox
-                  label="商品券釣銭登録"
-                  checked={form.enableVoucherChangeAdjustment}
-                  onChange={(v) => set("enableVoucherChangeAdjustment", v)}
-                  helpText="商品券で払ってお釣りを現金で渡したときの記録です。数え方は「商品券設定」で決めます。"
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            <Layout.AnnotatedSection
+              title="POS で使う種類"
+              description="POS の登録の画面に出る種類です。返金方法が現金かどうかで、記録の種類（現金返金・返金方法変更）は自動で決まります。"
+            >
+              <Card>
+                <BlockStack gap="300">
+                  <Checkbox
+                    label="返金方法変更"
+                    checked={form.enableCashRefund || form.enablePaymentMethodOverride}
+                    onChange={(v) => {
+                      set("enableCashRefund", v);
+                      set("enablePaymentMethodOverride", v);
+                    }}
+                    helpText={
+                      form.enableCashRefund !== form.enablePaymentMethodOverride
+                        ? `今は${form.enableCashRefund ? "現金で返したときだけ" : "現金以外で返したときだけ"}使えます。押すと 2 つそろえます。`
+                        : "純正で返金した注文は、返金を選んで金額はそのまま、返金方法だけ選びます。"
+                    }
+                  />
+                  <Checkbox
+                    label="レシートの現金を直す"
+                    checked={form.enableReceiptCashAdjustment}
+                    onChange={(v) => set("enableReceiptCashAdjustment", v)}
+                    helpText="返金ではありません。レシートと実際の現金が違ったとき、精算の数字だけを直します。"
+                  />
+                  <Checkbox
+                    label="商品券釣銭登録"
+                    checked={form.enableVoucherChangeAdjustment}
+                    onChange={(v) => set("enableVoucherChangeAdjustment", v)}
+                    helpText="商品券で払ってお釣りを現金で渡したときの記録です。数え方は「商品券設定」で決めます。"
+                  />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection
-            title="返金の予約"
-            description="POS で返金する前に、実際の返金方法を決めておけるようにするかを選びます。"
-          >
-            <Card>
-              <BlockStack gap="300">
-                <Checkbox
-                  label="返金の前に、実際の返金方法を予約できるようにする"
-                  checked={form.refundReservationEnabled}
-                  onChange={(v) => set("refundReservationEnabled", v)}
-                  helpText="オンにすると、まだ返金していない注文で「返金」を押したときに、返金方法と返金する額を先に入れられます。そのあと POS で返金すると、額が合えば自動でその返金方法に変えます（Shopify では返金しません）。初めはオフです。"
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            <Layout.AnnotatedSection
+              title="返金の予約"
+              description="POS で返金する前に、実際の返金方法を決めておけるようにするかを選びます。"
+            >
+              <Card>
+                <BlockStack gap="300">
+                  <Checkbox
+                    label="返金の前に、実際の返金方法を予約できるようにする"
+                    checked={form.refundReservationEnabled}
+                    onChange={(v) => set("refundReservationEnabled", v)}
+                    helpText="オンにすると、まだ返金していない注文で「返金」を押したときに、返金方法と返金する額を先に入れられます。そのあと POS で返金すると、額が合えば自動でその返金方法に変えます（Shopify では返金しません）。初めはオフです。"
+                  />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection
-            title="管理者の承認"
-            description="返金方法変更を、管理者が承認してから精算に入れるかを選びます。"
-          >
-            <Card>
-              <BlockStack gap="300">
-                <Checkbox
-                  label="返金方法変更は管理者の承認のあとで精算に入れる"
-                  checked={form.requireApprovalForPaymentMethodOverride}
-                  onChange={(v) => set("requireApprovalForPaymentMethodOverride", v)}
-                  helpText="オンにすると、POS で登録した返金方法変更と現金返金（純正の返金の返金方法変更・返金の予約を含む）は「承認待ち」になり、「返金方法変更・商品券釣銭登録 履歴」で承認するまで精算・点検・売上サマリーに入りません。却下したものは入りません。Shopify での返金の実行は今までどおりで、承認・却下では Shopify に何もしません。オフのときは今までどおり、登録した時点で精算に入ります。"
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            <Layout.AnnotatedSection
+              title="管理者の承認"
+              description="返金方法変更を、管理者が承認してから精算に入れるかを選びます。"
+            >
+              <Card>
+                <BlockStack gap="300">
+                  <Checkbox
+                    label="返金方法変更は管理者の承認のあとで精算に入れる"
+                    checked={form.requireApprovalForPaymentMethodOverride}
+                    onChange={(v) => set("requireApprovalForPaymentMethodOverride", v)}
+                    helpText="オンにすると、POS で登録した返金方法変更と現金返金（純正の返金の返金方法変更・返金の予約を含む）は「承認待ち」になり、「返金方法変更・商品券釣銭登録 履歴」で承認するまで精算・点検・売上サマリーに入りません。却下したものは入りません。Shopify での返金の実行は今までどおりで、承認・却下では Shopify に何もしません。オフのときは今までどおり、登録した時点で精算に入ります。"
+                  />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection
-            title="注文への記録"
-            description="返金方法変更・商品券釣銭登録を Shopify の注文にも記録するかを選びます。"
-          >
-            <Card>
-              <BlockStack gap="300">
-                <Checkbox
-                  label="返金方法変更・商品券釣銭登録を注文にも記録する"
-                  checked={form.writeOrderAdjustmentsMetafield}
-                  onChange={(v) => set("writeOrderAdjustmentsMetafield", v)}
-                  helpText="オンにすると、登録・変更・無効化のたびに、その注文に記録を書きます。注文を読むほかのアプリ（ciara-system など）が同じ記録で数えられます。精算はアプリの記録で数え、注文の記録が違うときはアプリの記録で書き直します。オンにする前の登録は、下の「前からの登録を注文に書く」で書きます。オフのときは注文に何も書かず、今までどおりアプリの記録だけで数えます。"
-                />
-                {initial.writeOrderAdjustmentsMetafield ? (
-                  <>
-                    <Divider />
-                    <BlockStack gap="200">
-                      <Text as="h3" variant="headingSm">前からの登録を注文に書く</Text>
-                      <Text as="p" tone="subdued">
-                        {`オンにする前の登録で、まだ注文に書いていない注文が ${backfillResult?.ok ? backfillResult.remaining : notWrittenCount} 件あります。精算ではまとめて書かないので、ここから書きます。注文を書くと売上サマリーの計算し直しが走るので、まず 1 件だけ書いて注文ページで確かめてから、${backfillMax} 件ずつ書いてください。`}
-                      </Text>
-                      <InlineStack gap="200">
-                        <Button
-                          onClick={() => runBackfill(1)}
-                          loading={backfillBusy}
-                          disabled={(backfillResult?.ok ? backfillResult.remaining : notWrittenCount) === 0}
-                        >
-                          1 件だけ書く
-                        </Button>
-                        <Button
-                          onClick={() => runBackfill(backfillMax)}
-                          loading={backfillBusy}
-                          disabled={(backfillResult?.ok ? backfillResult.remaining : notWrittenCount) === 0}
-                        >
-                          {`${backfillMax} 件書く`}
-                        </Button>
-                      </InlineStack>
-                      {backfillResult && !backfillResult.ok ? (
-                        <Text as="p" tone="critical">注文への記録がオフになっています。オンにして保存してから押してください。</Text>
-                      ) : null}
-                      {backfillResult?.ok ? (
-                        <BlockStack gap="100">
-                          <Text as="p">
-                            {`書きました: ${backfillResult.written.length} 件${backfillResult.written.length > 0 ? `（${backfillResult.written.map((w) => w.orderName).join("、")}）` : ""}`}
-                          </Text>
-                          {backfillResult.failed.map((f) => (
-                            <Text as="p" tone="critical" key={f.orderName}>{`書けませんでした: ${f.orderName}（${f.error}）。次からは精算のときに書き直します。`}</Text>
-                          ))}
-                        </BlockStack>
-                      ) : null}
-                    </BlockStack>
-                  </>
-                ) : null}
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
+            <Layout.AnnotatedSection
+              title="注文への記録"
+              description="返金方法変更・商品券釣銭登録を Shopify の注文にも記録するかを選びます。"
+            >
+              <Card>
+                <BlockStack gap="300">
+                  <Checkbox
+                    label="返金方法変更・商品券釣銭登録を注文にも記録する"
+                    checked={form.writeOrderAdjustmentsMetafield}
+                    onChange={(v) => set("writeOrderAdjustmentsMetafield", v)}
+                    helpText="オンにすると、登録・変更・無効化のたびに、その注文に記録を書きます。注文を読むほかのアプリ（ciara-system など）が同じ記録で数えられます。精算はアプリの記録で数え、注文の記録が違うときはアプリの記録で書き直します。オンにする前の登録は、下の「前からの登録を注文に書く」で書きます。オフのときは注文に何も書かず、今までどおりアプリの記録だけで数えます。"
+                  />
+                  {initial.writeOrderAdjustmentsMetafield ? (
+                    <>
+                      <Divider />
+                      <BlockStack gap="200">
+                        <Text as="h3" variant="headingSm">前からの登録を注文に書く</Text>
+                        <Text as="p" tone="subdued">
+                          {`オンにする前の登録で、まだ注文に書いていない注文が ${backfillResult?.ok ? backfillResult.remaining : notWrittenCount} 件あります。精算ではまとめて書かないので、ここから書きます。注文を書くと売上サマリーの計算し直しが走るので、まず 1 件だけ書いて注文ページで確かめてから、${backfillMax} 件ずつ書いてください。`}
+                        </Text>
+                        <InlineStack gap="200">
+                          <Button
+                            onClick={() => runBackfill(1)}
+                            loading={backfillBusy}
+                            disabled={(backfillResult?.ok ? backfillResult.remaining : notWrittenCount) === 0}
+                          >
+                            1 件だけ書く
+                          </Button>
+                          <Button
+                            onClick={() => runBackfill(backfillMax)}
+                            loading={backfillBusy}
+                            disabled={(backfillResult?.ok ? backfillResult.remaining : notWrittenCount) === 0}
+                          >
+                            {`${backfillMax} 件書く`}
+                          </Button>
+                        </InlineStack>
+                        {backfillResult && !backfillResult.ok ? (
+                          <Text as="p" tone="critical">注文への記録がオフになっています。オンにして保存してから押してください。</Text>
+                        ) : null}
+                        {backfillResult?.ok ? (
+                          <BlockStack gap="100">
+                            <Text as="p">
+                              {`書きました: ${backfillResult.written.length} 件${backfillResult.written.length > 0 ? `（${backfillResult.written.map((w) => w.orderName).join("、")}）` : ""}`}
+                            </Text>
+                            {backfillResult.failed.map((f) => (
+                              <Text as="p" tone="critical" key={f.orderName}>{`書けませんでした: ${f.orderName}（${f.error}）。次からは精算のときに書き直します。`}</Text>
+                            ))}
+                          </BlockStack>
+                        ) : null}
+                      </BlockStack>
+                    </>
+                  ) : null}
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection
-            title="精算に入れる"
-            description="オフにした種類は、登録しても精算・点検・売上サマリーに入れません。"
-          >
-            <Card>
-              <BlockStack gap="400">
-                <Checkbox
-                  label="返金方法変更を精算に入れる"
-                  checked={form.reflectCashRefundToSettlement || form.reflectPaymentOverrideToSettlement}
-                  onChange={(v) => {
-                    set("reflectCashRefundToSettlement", v);
-                    set("reflectPaymentOverrideToSettlement", v);
-                  }}
-                  helpText={
-                    form.reflectCashRefundToSettlement !== form.reflectPaymentOverrideToSettlement
-                      ? "今は「現金で返した」と「ほかの返金方法で返した」で設定が分かれています。押すと 2 つそろえます。"
-                      : undefined
-                  }
-                />
-                <Checkbox label="商品券釣銭登録を精算に入れる" checked={form.reflectVoucherAdjustmentToSettlement} onChange={(v) => set("reflectVoucherAdjustmentToSettlement", v)} />
-                <Checkbox label="レシートの現金を直すを精算に入れる" checked={form.reflectReceiptCashAdjustmentToSettlement} onChange={(v) => set("reflectReceiptCashAdjustmentToSettlement", v)} />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-        </Layout>
+            <Layout.AnnotatedSection
+              title="精算に入れる"
+              description="オフにした種類は、登録しても精算・点検・売上サマリーに入れません。"
+            >
+              <Card>
+                <BlockStack gap="400">
+                  <Checkbox
+                    label="返金方法変更を精算に入れる"
+                    checked={form.reflectCashRefundToSettlement || form.reflectPaymentOverrideToSettlement}
+                    onChange={(v) => {
+                      set("reflectCashRefundToSettlement", v);
+                      set("reflectPaymentOverrideToSettlement", v);
+                    }}
+                    helpText={
+                      form.reflectCashRefundToSettlement !== form.reflectPaymentOverrideToSettlement
+                        ? "今は「現金で返した」と「ほかの返金方法で返した」で設定が分かれています。押すと 2 つそろえます。"
+                        : undefined
+                    }
+                  />
+                  <Checkbox label="商品券釣銭登録を精算に入れる" checked={form.reflectVoucherAdjustmentToSettlement} onChange={(v) => set("reflectVoucherAdjustmentToSettlement", v)} />
+                  <Checkbox label="レシートの現金を直すを精算に入れる" checked={form.reflectReceiptCashAdjustmentToSettlement} onChange={(v) => set("reflectReceiptCashAdjustmentToSettlement", v)} />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
+          </Layout>
+        </StateSaveForm>
       </Page>
     </PolarisPageWrapper>
   );

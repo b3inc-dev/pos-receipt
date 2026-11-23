@@ -12,13 +12,10 @@ import {
   Button,
   BlockStack,
   InlineStack,
-  IndexTable,
-  useIndexResourceState,
   TextField,
   Select,
   Checkbox,
   Modal,
-  Banner,
   Box,
   Badge,
 } from "@shopify/polaris";
@@ -28,6 +25,7 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
+import { AdminIntro, DeleteIconButton, SuccessToast } from "../components/admin-ui";
 import { syncPaymentMethodsFromRecentOrders } from "../services/paymentMethodSync.server";
 
 const CATEGORY_OPTIONS = [
@@ -94,9 +92,6 @@ export default function PaymentMethodsPage() {
     selectableForPaymentOverride: false,
     enabled: true,
   });
-
-  const { selectedResources, allResourcesSelected, handleSelectionChange, clearSelection } =
-    useIndexResourceState(items.map((i) => i.id));
 
   const openCreate = useCallback(() => {
     setEditing(null);
@@ -187,50 +182,53 @@ export default function PaymentMethodsPage() {
     }
   }, [handleSave]);
 
+  // 削除はゴミ箱のボタン → 確認の窓（ブラウザの確認の窓でなく画面の窓。UI ルール v1.1 4章）。送る中身は今までと同じ
+  const [deleting, setDeleting] = useState<Item | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const handleDelete = useCallback(async (id: string) => {
-    if (!confirm("この支払方法を削除しますか？")) return;
-    const res = await fetch(`/api/settings/payment-methods/${id}`, { method: "DELETE" });
-    if (res.ok) revalidator.revalidate();
+    setDeleteBusy(true);
+    try {
+      const res = await fetch(`/api/settings/payment-methods/${id}`, { method: "DELETE" });
+      if (res.ok) revalidator.revalidate();
+    } finally {
+      setDeleteBusy(false);
+      setDeleting(null);
+    }
   }, [revalidator]);
 
-  const rowMarkup = items.map((item, index) => (
-    <IndexTable.Row
-      id={item.id}
-      key={item.id}
-      selected={selectedResources.includes(item.id)}
-      position={index}
-    >
-      <IndexTable.Cell>
-        <Text variant="bodyMd" fontWeight="semibold">{item.displayLabel}</Text>
-      </IndexTable.Cell>
-      <IndexTable.Cell>{item.rawGatewayPattern}</IndexTable.Cell>
-      <IndexTable.Cell>
+  const rowMarkup = items.map((item) => (
+    <tr key={item.id}>
+      <td data-label="表示名" className="History-text">
+        <Text as="span" variant="bodyMd" fontWeight="semibold">{item.displayLabel}</Text>
+        {/* Shopify 側の名前（cash・shopify_payments など）は英字のまま主役にせず、小さく添えるだけ（全画面点検 11/23） */}
+        <span className="History-memo">Shopify での名前: {item.rawGatewayPattern}</span>
+      </td>
+      <td data-label="分類" className="History-keep">
         {CATEGORY_OPTIONS.find((o) => o.value === item.category)?.label ?? item.category}
-      </IndexTable.Cell>
-      <IndexTable.Cell>
-        <Badge tone={item.isVoucher ? "attention" : "default"}>
+      </td>
+      <td data-label="商品券" className="History-keep">
+        <Badge tone={item.isVoucher ? "attention" : undefined}>
           {item.isVoucher ? "○" : "－"}
         </Badge>
-      </IndexTable.Cell>
-      <IndexTable.Cell>
-        <Badge tone={item.voucherChangeSupported ? "success" : "default"}>
+      </td>
+      <td data-label="釣銭あり" className="History-keep">
+        <Badge tone={item.voucherChangeSupported ? "success" : undefined}>
           {item.voucherChangeSupported ? "○" : "－"}
         </Badge>
-      </IndexTable.Cell>
-      <IndexTable.Cell>
-        <Badge tone={item.enabled ? "success" : "critical"}>
+      </td>
+      <td data-label="状態" className="History-keep">
+        {/* 色は意味で決める: 緑＝有効、灰＝停止（UI ルール v1.1 1章） */}
+        <Badge tone={item.enabled ? "success" : undefined}>
           {item.enabled ? "有効" : "無効"}
         </Badge>
-      </IndexTable.Cell>
-      <IndexTable.Cell>
-        <InlineStack gap="200">
+      </td>
+      <td data-label="操作" className="History-keep">
+        <InlineStack gap="200" blockAlign="center" wrap={false}>
           <Button size="slim" onClick={() => openEdit(item)}>編集</Button>
-          <Button size="slim" tone="critical" onClick={() => handleDelete(item.id)}>
-            削除
-          </Button>
+          <DeleteIconButton label={`${item.displayLabel}を削除`} onClick={() => setDeleting(item)} />
         </InlineStack>
-      </IndexTable.Cell>
-    </IndexTable.Row>
+      </td>
+    </tr>
   ));
 
   return (
@@ -245,14 +243,16 @@ export default function PaymentMethodsPage() {
         </Card>
         <Layout>
           <Layout.Section>
-            <Banner tone="info">
-              精算レシートの支払方法表示名・特殊返金で選択可能な返金方法をここで設定します。直近90日のPOS取引から決済名は自動登録されます。必要に応じて表示名・商品券フラグを手直ししてください。
-            </Banner>
-            {syncResult && syncResult.created > 0 ? (
-              <Banner tone="success">
-                直近90日の取引から {syncResult.created} 件の決済方法を自動登録しました（検出 {syncResult.gatewaysFound} 種類）。
-              </Banner>
-            ) : null}
+            {/* 画面全体の説明は AdminIntro（1〜2文）。自動登録の知らせはトースト（UI ルール v1.1 5章・7章） */}
+            <AdminIntro>
+              <p>精算レシートの支払方法表示名・特殊返金で選択可能な返金方法をここで設定します。直近90日のPOS取引から決済名は自動登録されます。必要に応じて表示名・商品券フラグを手直ししてください。</p>
+            </AdminIntro>
+            <SuccessToast
+              message={syncResult && syncResult.created > 0
+                ? `直近90日の取引から ${syncResult.created} 件の決済方法を自動登録しました（検出 ${syncResult.gatewaysFound} 種類）`
+                : null}
+              trigger={syncResult}
+            />
           </Layout.Section>
           <Layout.Section>
             <Card>
@@ -264,28 +264,44 @@ export default function PaymentMethodsPage() {
                   <Button onClick={openCreate}>支払方法を追加</Button>
                 </BlockStack>
               ) : (
-                <IndexTable
-                  resourceName={{ singular: "支払方法", plural: "支払方法" }}
-                  itemCount={items.length}
-                  selectedItemsCount={allResourcesSelected ? "All" : selectedResources.length}
-                  onSelectionChange={handleSelectionChange}
-                  headings={[
-                    { title: "表示名" },
-                    { title: "Gateway パターン" },
-                    { title: "分類" },
-                    { title: "商品券" },
-                    { title: "釣銭あり" },
-                    { title: "状態" },
-                    { title: "操作" },
-                  ]}
-                >
-                  {rowMarkup}
-                </IndexTable>
+                // スマホでは横スクロールさせず 1 件 1 枚のカードにする（data-label が各行の見出し。UI ルール v1.1 8章）
+                <div className="History-scroll">
+                  <table className="History-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">表示名</th>
+                        <th scope="col">分類</th>
+                        <th scope="col">商品券</th>
+                        <th scope="col">釣銭あり</th>
+                        <th scope="col">状態</th>
+                        <th scope="col">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>{rowMarkup}</tbody>
+                  </table>
+                </div>
               )}
             </Card>
           </Layout.Section>
         </Layout>
       </Page>
+
+      <Modal
+        open={deleting !== null}
+        onClose={() => setDeleting(null)}
+        title="支払方法を削除しますか？"
+        primaryAction={{
+          content: "削除",
+          destructive: true,
+          loading: deleteBusy,
+          onAction: () => { if (deleting) void handleDelete(deleting.id); },
+        }}
+        secondaryActions={[{ content: "キャンセル", onAction: () => setDeleting(null) }]}
+      >
+        <Modal.Section>
+          <Text as="p">「{deleting?.displayLabel}」を削除します。元に戻せません。</Text>
+        </Modal.Section>
+      </Modal>
 
       <Modal
         open={modalOpen}
@@ -303,14 +319,14 @@ export default function PaymentMethodsPage() {
         <Modal.Section>
           <BlockStack gap="400">
             <TextField
-              label="Gateway パターン（必須）"
+              label="Shopify での支払方法の名前（必須）"
               value={form.rawGatewayPattern}
               onChange={(v) => setForm((p) => ({ ...p, rawGatewayPattern: v }))}
-              helpText="Shopify の gateway 名に含まれる文字列。例: Cash, Credit, 現金"
+              helpText="Shopify の取引に記録される支払方法の名前（またはその一部）。例: 現金、cash"
               autoComplete="off"
             />
             <TextField
-              label="Formatted gateway パターン（任意）"
+              label="Shopify の画面に出る支払方法の名前（任意）"
               value={form.formattedGatewayPattern}
               onChange={(v) => setForm((p) => ({ ...p, formattedGatewayPattern: v }))}
               autoComplete="off"
