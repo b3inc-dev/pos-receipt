@@ -77,8 +77,10 @@ describe("一覧の画面は POS にある属性だけを使う", () => {
       assert.doesNotMatch(src, /<s-button[^>]*\bkind=/);
       // s-text の太字・大きさは type（fontWeight・size・fontSize は POS に無い）
       assert.doesNotMatch(src, /<s-text[^>]*\b(fontWeight|fontSize|size)=/);
-      // 行の間に線を引かない（純正は余白で区切る）
-      assert.doesNotMatch(src, /<s-divider/);
+      // 行の間に線を引かない（純正は余白で区切る）。線は固定の上下の境目だけ
+      if (rel.endsWith("OrderListRow.jsx")) assert.doesNotMatch(src, /<s-divider/);
+      // s-box に border は無い（POS では効かない）
+      assert.doesNotMatch(src, /<s-box[^>]*\bborder=/);
       // 角かっこの文字のバッジに戻さない
       assert.doesNotMatch(src, /［\$\{/);
     });

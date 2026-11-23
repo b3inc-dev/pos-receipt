@@ -265,7 +265,6 @@ export function OrderDayListScreen({
         {/* 上の固定: 検索欄〜「店名・時刻 に更新」まではスクロールしても動かない（直す前と同じ作り） */}
         <s-box
           padding="base"
-          border="base"
           style={{
             position: "sticky",
             top: 0,
@@ -332,26 +331,7 @@ export function OrderDayListScreen({
               )}
             </s-stack>
 
-            {badgeMode === "specialRefund" ? (
-              <s-stack direction="inline" gap="small-300" alignItems="center">
-                {LIST_SEGMENTS.map((seg) => (
-                  <s-button
-                    key={seg.value}
-                    variant={effectiveSegment === seg.value ? "primary" : "secondary"}
-                    onClick={() => {
-                      setListSegment(seg.value);
-                      if (isSearchMode) {
-                        setSearchDraft("");
-                        setSearchQuery("");
-                      }
-                    }}
-                  >
-                    {seg.label}
-                  </s-button>
-                ))}
-              </s-stack>
-            ) : null}
-
+            {/* 年・月・日の選択肢は日付のボタンのすぐ下に出す（種類の段の下に出ていた。T 2026-11-23） */}
             {!isSearchMode && (yearMenuOpen || monthMenuOpen || dayMenuOpen) ? (
               <s-stack gap="small-300">
                 {yearMenuOpen ? (
@@ -414,6 +394,26 @@ export function OrderDayListScreen({
               </s-stack>
             ) : null}
 
+            {badgeMode === "specialRefund" ? (
+              <s-stack direction="inline" gap="small-300" alignItems="center">
+                {LIST_SEGMENTS.map((seg) => (
+                  <s-button
+                    key={seg.value}
+                    variant={effectiveSegment === seg.value ? "primary" : "secondary"}
+                    onClick={() => {
+                      setListSegment(seg.value);
+                      if (isSearchMode) {
+                        setSearchDraft("");
+                        setSearchQuery("");
+                      }
+                    }}
+                  >
+                    {seg.label}
+                  </s-button>
+                ))}
+              </s-stack>
+            ) : null}
+
             {/* 純正の「たった今に更新」の位置。店名と取得した時刻（店のタイムゾーン） */}
             {locLoadError ? (
               <s-text type="small" tone="critical">{locLoadError}</s-text>
@@ -428,6 +428,9 @@ export function OrderDayListScreen({
             )}
           </s-stack>
         </s-box>
+
+        {/* 境目の線（POS の s-box に枠線の指定は無いので s-divider で引く） */}
+        <s-divider />
 
         <s-scroll-box
           blockSize="auto"
@@ -471,7 +474,16 @@ export function OrderDayListScreen({
               ) : (
                 <s-stack gap="small">
                   {visibleItems.length === 0 ? (
-                    <s-text type="small" color="subdued">この条件の取引はありません。</s-text>
+                    <s-stack gap="small-300">
+                      <s-text>
+                        {`${dayChipLabel}の取引は ${items.length} 件ありますが、「${
+                          LIST_SEGMENTS.find((x) => x.value === effectiveSegment)?.label ?? ""
+                        }」に当てはまるものはありません。`}
+                      </s-text>
+                      <s-button variant="secondary" onClick={() => setListSegment("all")}>
+                        すべて表示する
+                      </s-button>
+                    </s-stack>
                   ) : null}
                   {visibleItems.map((order) => (
                     <OrderListRow
@@ -496,11 +508,11 @@ export function OrderDayListScreen({
           </s-box>
         </s-scroll-box>
 
+        {footerTrailing ? <s-divider /> : null}
         {footerTrailing ? (
           /* 下の固定（右下）: 領収書の「履歴」など。FixedFooterNavBar と同じ作り */
           <s-box
             padding="base"
-            border="base"
             style={{
               position: "sticky",
               bottom: 0,
