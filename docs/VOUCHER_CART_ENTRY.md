@@ -22,6 +22,7 @@ T の決定（2026-11-23、カード）: 商品券釣有りの会計では、会
 | 注文 | Shopify | カートの項目は会計後も注文に残る。「_」始まりは POS の画面・レシートに出ないが、注文（管理画面・Admin API・webhook）には書かれる（shopify.dev Cart API, 2026-07） |
 | 自動登録 | `VoucherPostPurchaseBlock.jsx`（`pos.purchase.post.block.render`） | 目印があるときだけ `POST /api/voucher-adjustments/from-cart`（注文 ID）。結果を一行で出す。目印が無い会計では何も出さず、サーバーも呼ばない |
 | 拾い直し | `webhooks.orders.updated.tsx` | 知らせの `note_attributes` に額面があれば同じ関数を呼ぶ（会計後の画面を閉じた・端末の目印が消えたとき） |
+| 拾い直し（作成時） | `webhooks.orders.create.tsx`（`orders/create` の購読、HIGH RISK） | 作ったあと更新の無い注文は `orders/updated` が来ないことがあるので、作成の知らせでも同じ関数を呼ぶ。額面の項目が無い注文では何もしない。売上サマリー・返金計上は動かさない |
 | 会計が終わった画面の「管理」 | `VoucherOrderAction.jsx`（`pos.purchase.post.action.menu-item.render`）→ `VoucherModal.jsx`（`pos.purchase.post.action.render`） | 「商品券釣銭調整」の行から、その注文の商品券の画面を開く（自動で登録できなかったとき・額面を直すとき） |
 | 登録 | `voucherCartEntry.server.ts` `registerVoucherFromCartEntry` | 注文を読み直し、`customAttributes` の額面・商品券で払った額（`fetchOrderVoucherApplied`）から、後から登録したときと同じ行を作り、`pos.adjustments` と売上サマリーを直す |
 
@@ -48,3 +49,8 @@ T の決定（2026-11-23、カード）: 商品券釣有りの会計では、会
 - カートの項目が注文の `customAttributes`（GraphQL）と webhook の `note_attributes`（REST 形）のどちらにも同じキーで入ること。docs は「注文に書かれる」とだけ書いていて、欄の名前は書いていない。
 - `pos.purchase.post.block.render` で何も描かないとき、空の枠が出ないか。
 - 会計で `orders/updated` が届くか（届かなくても、会計後の画面で登録できていれば困らない）。
+
+## 店でする設定（本番も）
+
+- 会計後の画面のブロックは、店で有効にしないと出ない: Shopify 管理画面 → 販売チャネル → Point of Sale →「Point of Sale を編集」→ アプリのアイコン →「商品券 / 会計前の入力・釣銭調整」→「有効にする場所」をオン → 保存（https://help.shopify.com/en/manual/sell-in-person/getting-started/shopify-pos-from-admin/pos-ui-extensions）。開発ストアでは、これをするまで会計後の自動登録が動かなかった（2026-11-24 #1022）
+- `orders/create` の購読は `shopify app deploy`（自社用・公開用それぞれ）で反映する
