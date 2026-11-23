@@ -26,7 +26,11 @@ import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 import { ConfirmAction, StatusBanner, SuccessToast } from "../components/admin-ui";
 import { decideSpecialRefundApproval } from "../services/specialRefundApproval.server";
-import { normalizeApprovalStatus } from "../utils/specialRefundApproval";
+import {
+  approvalDecidedByLabel,
+  normalizeApprovalStatus,
+  resolveApprovalDecidedBy,
+} from "../utils/specialRefundApproval";
 
 const PAGE_SIZE = 30;
 
@@ -143,6 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         shopifyRefundError: true,
         approvalStatus: true,
         approvalReviewedAt: true,
+        approvalDecidedBy: true,
         createdAt: true,
       },
     }),
@@ -171,6 +176,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       shopifyRefundError: e.shopifyRefundError,
       approvalStatus: e.approvalStatus,
       approvalReviewedAt: e.approvalReviewedAt?.toISOString() ?? null,
+      approvalDecidedBy: approvalDecidedByLabel(e.approvalDecidedBy),
       createdAt: e.createdAt.toISOString(),
     })),
     pendingApprovalCount,
@@ -186,7 +192,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 /** 返金手段変更の承認／却下（設定「管理者の承認」がオンのときに承認待ちになったもの）。Shopify には何も書かない */
 export async function action({ request }: ActionFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
+  const auth = await authenticate.admin(request);
+  const { admin, session } = auth;
   const shop = await resolveShop(session.shop, admin);
   const formData = await request.formData();
   if (formData.get("intent") !== "approval") {
@@ -196,7 +203,13 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!eventId) {
     return { ok: false as const, message: "登録が見つかりません。画面を読み直してください。" };
   }
-  const result = await decideSpecialRefundApproval(admin, shop.id, eventId, formData.get("decision"));
+  const result = await decideSpecialRefundApproval(
+    admin,
+    shop.id,
+    eventId,
+    formData.get("decision"),
+    resolveApprovalDecidedBy(auth),
+  );
   if (!result.ok) return { ok: false as const, message: result.message };
   const order = result.sourceOrderName ?? "この登録";
   return {
@@ -414,6 +427,17 @@ export default function SpecialRefundHistoryPage() {
                     <IndexTable.Cell>
                       <BlockStack gap="100">
                         {approvalBadge(item.approvalStatus)}
+                        {item.approvalReviewedAt ? (
+                          <Text as="span" variant="bodySm" tone="subdued">
+                            {new Date(item.approvalReviewedAt).toLocaleString("ja-JP", {
+                              timeZone: "Asia/Tokyo",
+                              year: "numeric", month: "2-digit", day: "2-digit",
+                              hour: "2-digit", minute: "2-digit",
+                            })}
+                            {" "}
+                            {item.approvalDecidedBy ?? "（決めた人は取れませんでした）"}
+                          </Text>
+                        ) : null}
                         {item.status === "active" && normalizeApprovalStatus(item.approvalStatus) === "pending" ? (
                           <InlineStack gap="200" wrap={false}>
                             <ConfirmAction

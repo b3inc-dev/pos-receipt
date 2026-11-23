@@ -7,6 +7,8 @@ import {
   initialApprovalStatus,
   normalizeApprovalStatus,
   partitionSpecialRefundEventsByApproval,
+  resolveApprovalDecidedBy,
+  approvalDecidedByLabel,
 } from "./specialRefundApproval";
 import { DEFAULT_SPECIAL_REFUND_SETTINGS } from "./appSettings.server";
 
@@ -72,4 +74,24 @@ test("警告の文に件数と注文番号が出る", () => {
   ]);
   assert.match(msg, /2 件/);
   assert.match(msg, /#1001/);
+});
+
+test("決めた人: オンラインのセッションの名前 → メール → セッショントークンのユーザー ID → null", () => {
+  assert.equal(
+    resolveApprovalDecidedBy({
+      session: { onlineAccessInfo: { associated_user: { first_name: "花子", last_name: "山田", email: "h@example.com" } } },
+      sessionToken: { sub: "42" },
+    }),
+    "山田 花子",
+  );
+  assert.equal(
+    resolveApprovalDecidedBy({ session: { onlineAccessInfo: { associated_user: { email: "h@example.com" } } } }),
+    "h@example.com",
+  );
+  assert.equal(resolveApprovalDecidedBy({ session: {}, sessionToken: { sub: "42" } }), "shopify_user:42");
+  assert.equal(resolveApprovalDecidedBy({ session: {}, sessionToken: { sub: "gid://x" } }), null);
+  assert.equal(resolveApprovalDecidedBy({}), null);
+  assert.equal(approvalDecidedByLabel("shopify_user:42"), "ユーザー ID 42");
+  assert.equal(approvalDecidedByLabel("山田 花子"), "山田 花子");
+  assert.equal(approvalDecidedByLabel(null), null);
 });
