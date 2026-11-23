@@ -27,6 +27,7 @@
 | D19 | 精算注文（SETTLEMENT）を作るかは、印字設定「精算注文を作成」（`createSettlementOrderWhenPrinting`）の保存が無ければ ON。管理画面は保存が無いとチェックが入って見えるので、サーバーも同じにそろえる（今の本番の動きを続ける）。作らないのは、チェックを外して保存したとき・精算設定 `orderBasedCreateSettlementOrderEnabled=false`・`cloudprnt_direct`。作らなかったとき API は `settlementOrderSkipped: true` を返し、POS は「再インストール」を案内しない | `settlementSyncSettings.server.ts` `shouldCreateSettlementOrder` |
 | D20 | 前からある pending の特殊返金（ID が `pos_sr_` で始まらない）は、Shopify を読み直して決めるだけで返金を実行しない | `specialRefundLegacyRecheck.server.ts` / `api.special-refunds.$id.recheck.tsx` |
 | D21 | 確定値を守る（T の決定 2026-11-22・Issue #20）。確定済みの日は、もう一度「確定」を押しても DB の Settlement の値を返し、Shopify の精算注文は書き換えない。再集計は比べるために集計し、数が変わっていれば `changedSinceConfirm` を返す。**再確定**（create の `reconfirm: true`、T の決定 2026-11-23 4:20）は今の数で確定し直し、前の行は `status=superseded`・冪等キーなしで履歴に残す（migration なし）。order_based は精算注文も新しい値に直す。点検は毎回その時点の金額を保存し、返金処理中（pending）の特殊返金があっても警告つきで出す（T の決定 2026-11-23 4:25。pending の分は数に入れず、売上サマリーのキャッシュも書かない）。精算の確定・再確定・再集計は pending で止める（D18） | `api.settlements.create.tsx` / `api.settlements.recalculate.tsx` / `api.settlements.preview.tsx` / `settlementConfirmedPure.server.ts` |
+| D22 | 売上に含めない送料等（明細の `_lsi_fee="1"` かつ `_lsi_fee_sales="0"`。Location Stock #76）は、支払方法別の金額に残したまま総売上・純売上・税・点数・割引から外し、`nonSalesFeeTotal` として分けて出す。領収書の金額は受け取った全額のまま（T 2026-11-23）。見分けは明細の属性だけ（名前は見ない）。店ごとの切り替えは Location Stock の管理画面の設定が明細に残す値で決まり、POS Receipt 側に設定は足さない。Settlement に列は足さず、保存済みの印字は「支払方法別の合計 − 総売上」で戻す（BUSINESS_RULES §7.1） | `nonSalesFeeLines.ts` + `aggregateGasStyleForOrders` + `buildSettlementPreviewImpl` |
 
 ## 2. 古い docs との差分（注意）
 
@@ -109,3 +110,10 @@
 ## 9. 店ごとの運用は設定にする（2026-11-22）
 
 - **Ciara の精算の数え方はコードに書かず、管理画面で選ぶ**（T さんの決定 2026-11-22）: ciara-system の精算と違う所のうち、Ciara の運用に合わせた動き（注文の日で売上を数える、ノベルティを点数から外す、特定の店で wespo の返金を現金に付け替える、ギフトカードで払い出した返金を引く、取引件数から返金件数を引く、マイナスの合計を出す）は「精算の数え方」の設定にした。初めの値は今の動きなので、保存しない店は変わらない（[SETTLEMENT_CALC_SETTINGS.md](SETTLEMENT_CALC_SETTINGS.md)）。
+
+## 10. POS 拡張で使える部品（2026-11-23）
+
+- **POS の UI 拡張では `@shopify/ui-extensions` の point-of-sale にある部品だけを使う**。`s-select`・`s-option`・`s-checkbox` は POS に無く、エラーも出さずに何も描かれない。2843ee7（2026-03-10）から特殊返金の「返金種別」「元の支払手段」「実際の返金手段」「調整種別」が `s-select` で、選ぶ欄が出ないまま初めの値（現金返金・現金）で登録されていた。精算のロケーション選択（`s-select`）と領収書の「再発行として記録する」（`s-checkbox`）も同じく出ていなかった。
+- 1 つを選ぶ欄は `extensions/pos-smart-grid/src/PosChoiceField.jsx` の `PosChoiceField`（`s-choice-list`）、オン・オフは `PosToggleField` を使う。精算のロケーションは年・月と同じくボタンで開く一覧にした。
+- `scripts/lib/posExtensionComponents.test.mjs` が POS の拡張（target がすべて `pos.` の拡張と `extensions/common`）のソースを見て、POS に無い部品があると落ちる。部品の一覧は `@shopify/ui-extensions` 2025.10.x のもの。版を上げたら一覧を見直す（版が変わると試験が落ちて知らせる）。
+- POS の実機ではまだ見ていない（選ぶ欄の見た目・押したときの動きは実機で確かめる）。
