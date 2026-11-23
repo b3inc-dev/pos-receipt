@@ -11,10 +11,7 @@ import { runSalesSummaryRefreshFromOrderWebhook } from "../services/salesSummary
 import { enqueueSalesSummaryOrdersUpdatedJob } from "../services/salesSummaryWebhookQueue.server";
 import { syncRefundAggregationFromWebhookPayload } from "../services/refundAggregation.server";
 import { backgroundRefreshNeedsRetry } from "../services/salesSummaryBackgroundSlice.server";
-import {
-  registerVoucherFromCartEntry,
-  webhookPayloadHasVoucherCartFace,
-} from "../services/voucherCartEntry.server";
+import { runOrderAutoAdjustmentsFromWebhook } from "../services/orderAutoAdjustments.server";
 
 export const loader = async (_: LoaderFunctionArgs) => {
   return new Response("Method Not Allowed", { status: 405 });
@@ -54,32 +51,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response("OK", { status: 200 });
     }
 
-    // 会計の前に入れた商品券の額面: 会計後の画面で登録できなかったときの拾い直し（docs/VOUCHER_CART_ENTRY.md）。
-    // 知らせの中身に項目がある注文だけ読みに行く。失敗しても売上サマリーの処理は続ける
-    if (webhookPayloadHasVoucherCartFace(payload)) {
-      try {
-        const orderId = String((payload as { admin_graphql_api_id?: string; id?: number | string }).admin_graphql_api_id ?? (payload as { id?: number | string }).id ?? "");
-        if (orderId) {
-          const r = await registerVoucherFromCartEntry(admin, dbShop.id, orderId);
-          if (r.status === "created") {
-            console.log(`[orders/updated][pos-receipt] voucher from cart entry registered shop=${shop}`);
-          }
-        }
-      } catch (e) {
-        console.warn(`[orders/updated][pos-receipt] voucher from cart entry failed shop=${shop}`, e);
-      }
-    }
-
     const disabled = process.env.SALES_SUMMARY_WEBHOOK_REFRESH_DISABLED;
     if (disabled === "1" || disabled === "true") {
+      // 売上サマリーを止めていても、商品券・返金の予約の自動の調整は動かす
+      await runOrderAutoAdjustmentsFromWebhook(admin, dbShop.id, shop, payload);
       return new Response("OK", { status: 200 });
     }
 
+    // キューに積めたときは、自動の調整もキューの中で動く（salesSummaryWebhookQueue.server.ts）
     const queued = await enqueueSalesSummaryOrdersUpdatedJob(shop, payload);
     if (queued) {
       console.log(`[orders/updated][pos-receipt] sales-summary queued shop=${shop}`);
       return new Response("OK", { status: 200 });
     }
+
+    await runOrderAutoAdjustmentsFromWebhook(admin, dbShop.id, shop, payload);
 
     const { targetDates, errors } = await runSalesSummaryRefreshFromOrderWebhook(
       admin,

@@ -97,6 +97,11 @@ export async function registerVoucherFromCart(data) {
   return apiPost("/api/voucher-adjustments/from-cart", data);
 }
 
+/** GET /api/voucher-adjustments/from-cart → { enabled }（管理画面の「会計の前に額面を入れる」） */
+export async function getVoucherCartEntryEnabled() {
+  return apiGet("/api/voucher-adjustments/from-cart");
+}
+
 /**
  * POST /api/special-refunds/:id/void
  * @param {string} id

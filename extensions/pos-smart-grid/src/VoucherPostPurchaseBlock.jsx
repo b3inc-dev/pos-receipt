@@ -9,6 +9,8 @@ import { useEffect, useState } from "preact/hooks";
 import { registerVoucherFromCart } from "../../common/specialRefundApi.js";
 import { VOUCHER_CART_HINT_KEY, isHintFresh, postPurchaseMessage } from "../../common/voucherCartEntry.js";
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 export default async () => {
   render(<VoucherPostPurchaseBlock />, document.body);
 };
@@ -45,7 +47,13 @@ function VoucherPostPurchaseBlock() {
       if (orderId == null) return;
       if (alive) setMessage({ tone: "subdued", text: "商品券を登録しています…" });
       try {
-        const res = await registerVoucherFromCart({ sourceOrderId: String(orderId) });
+        // 会計の直後は商品券の取引がまだ読めないことがあるので、支払いが見つからないときは少し待って 2 回まで読み直す
+        let res = await registerVoucherFromCart({ sourceOrderId: String(orderId) });
+        for (let i = 0; i < 2 && res?.status === "no_voucher_payment"; i++) {
+          await sleep(3000);
+          if (!alive) return;
+          res = await registerVoucherFromCart({ sourceOrderId: String(orderId) });
+        }
         // 結果が出たら目印を消す（この注文に額面が無かったときも、次の会計に持ち越さない）
         await clearHint();
         if (alive) setMessage(postPurchaseMessage(res));
