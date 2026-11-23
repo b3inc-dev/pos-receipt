@@ -29,7 +29,7 @@ import {
 } from "../utils/salesSummarySettingsSections";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { StoreBody } from "../components/StoreBody";
-import { AdminBlock, ConfirmAction, PickList, SaveBar, StateBadge, StatusBanner, SuccessToast } from "../components/admin-ui";
+import { AdminBlock, ConfirmAction, PickList, SaveBar, StateBadge, StatusBanner, SuccessToast, confirmLeave } from "../components/admin-ui";
 import { withSearch } from "../utils/withSearch";
 
 function sectionOf(value: string | undefined): SalesSummarySectionKey {
@@ -41,7 +41,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const section = sectionOf(params.section);
   const { admin, session } = await authenticate.admin(request);
   const { settings, locations, link } = await loadSalesSummarySettingsPage(admin, session.shop);
-  return { section, settings, locations, link };
+  // ciara-system と入店数をそろえる（Ciara のカスタムアプリだけ）
+  const { ciaraVisitSyncAvailable } = await import("../services/ciaraVisitSync.server");
+  return { section, settings, locations, link, ciaraVisitSync: section === "footfall" && ciaraVisitSyncAvailable() };
 }
 
 type ActionResult =
@@ -144,6 +146,8 @@ function Checks({ items, values }: { items: { key: string; label: string; help?:
 }
 
 function SettingsForm({ data, failed }: { data: Data; failed: boolean }) {
+  const navigate = useNavigate();
+  const q = useLocation().search || "";
   const s = data.settings as unknown as Record<string, unknown> & SalesSummarySettings;
   const [visible, setVisible] = useState<string[]>(data.settings.visibleLocationIds);
   const [footfall, setFootfall] = useState<string[]>(data.settings.footfallTargetLocationIds);
@@ -203,6 +207,15 @@ function SettingsForm({ data, failed }: { data: Data; failed: boolean }) {
           <AdminBlock title="報告する店" description="選んだ店の POS だけで報告できます。「すべての店」なら、あとから足した店も報告できます。">
             <PickList label="報告する店" items={stores} value={footfall} onChange={setFootfall} allLabel="すべての店" name="footfallTargetLocationIds" />
           </AdminBlock>
+          {data.ciaraVisitSync ? (
+            <AdminBlock title="ciara-system とそろえる" description="POS と ciara-system のどちらで報告しても、あとから入れた入店数が両方に出るようにします。">
+              <div>
+                <button type="button" className="Admin-secondary" onClick={() => void confirmLeave().then(() => navigate(withSearch("/app/footfall-sync", q)))}>
+                  そろえる設定
+                </button>
+              </div>
+            </AdminBlock>
+          ) : null}
         </>
       ) : null}
       <SaveBar failed={failed} onDiscard={discard} />

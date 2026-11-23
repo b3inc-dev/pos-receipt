@@ -6,6 +6,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import { writeFootfallVisitors } from "../services/footfallWrite.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import {
   getAppSetting,
@@ -78,47 +79,27 @@ export async function action({ request }: ActionFunctionArgs) {
     const targetDateStr = String(targetDate);
     const visitorsNum = Number(visitors);
 
-    const saved = await prisma.footfallReport.upsert({
-      where: {
-        shopId_locationId_targetDate: {
-          shopId: shop.id,
-          locationId: locationGid,
-          targetDate: targetDateStr,
-        },
-      },
-      update: { visitors: visitorsNum, createdBy: createdBy ? String(createdBy) : null },
-      create: {
-        shopId: shop.id,
-        locationId: locationGid,
-        targetDate: targetDateStr,
-        visitors: visitorsNum,
-        createdBy: createdBy ? String(createdBy) : null,
-      },
+    if (!Number.isInteger(visitorsNum) || visitorsNum < 0) {
+      return corsJson({ ok: false, error: "入店数は 0 以上の整数で入れてください" }, { status: 400 });
+    }
+
+    await writeFootfallVisitors(prisma, {
+      shopId: shop.id,
+      locationGid,
+      date: targetDateStr,
+      visitors: visitorsNum,
+      source: "pos",
+      enteredAt: new Date(),
+      createdBy: createdBy ? String(createdBy) : null,
+    });
+    const saved = await prisma.footfallReport.findUnique({
+      where: { shopId_locationId_targetDate: { shopId: shop.id, locationId: locationGid, targetDate: targetDateStr } },
     });
 
-    // 日次キャッシュの conv を即時更新
-    const cached = await prisma.salesSummaryCacheDaily.findUnique({
-      where: {
-        shopId_locationId_targetDate: {
-          shopId: shop.id,
-          locationId: locationGid,
-          targetDate: targetDateStr,
-        },
-      },
-    });
-    if (cached) {
-      const conv = visitorsNum > 0 ? cached.orders / visitorsNum : null;
-      await prisma.salesSummaryCacheDaily.update({
-        where: {
-          shopId_locationId_targetDate: {
-            shopId: shop.id,
-            locationId: locationGid,
-            targetDate: targetDateStr,
-          },
-        },
-        data: { visitors: visitorsNum, conv },
-      });
-    }
+    // Ciara のカスタムアプリで ciara-system とそろえているときは、この 1 日ぶんをすぐ送る（待たせない。失敗しても 10 分ごとの回で送る）
+    void import("../services/ciaraVisitSync.server")
+      .then((m) => m.pushFootfallToCiara(shop.id, locationGid, targetDateStr))
+      .catch((e) => console.warn("[footfall] ciara push failed", e));
 
     return corsJson({ ok: true, saved: { ...saved } });
   } catch (err) {

@@ -38,5 +38,9 @@ if (typeof queueMicrotask !== "undefined") {
     import("./services/ciaraBudgetSync.server")
       .then((m) => m.ensureCiaraBudgetSyncScheduler())
       .catch(() => {});
+    // ciara-system と入店数をそろえる（自社用で鍵があるときだけ動く）
+    import("./services/ciaraVisitSync.server")
+      .then((m) => m.ensureCiaraVisitSyncScheduler())
+      .catch(() => {});
   });
 }
