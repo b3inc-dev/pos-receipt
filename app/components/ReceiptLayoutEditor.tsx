@@ -5,7 +5,7 @@
  * 左: ブロックの一覧（並べ替え・表示切替・削除・設定）／見た目／コード
  * 右: プレビュー（receiptLayoutRender.ts の印字と同じ関数で描く。見本のデータ）
  */
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   BlockStack,
   Box,
@@ -41,7 +41,7 @@ import {
   type ReceiptKind,
   type ReceiptLayout,
 } from "../services/receiptLayoutSchema";
-import { TEMPLATE_VARIABLES } from "../services/receiptLayoutVariables";
+import { readableSummaryText, TEMPLATE_VARIABLES } from "../services/receiptLayoutVariables";
 
 type Tab = "blocks" | "style" | "code";
 
@@ -52,10 +52,28 @@ function newBlockId(type: string, blocks: LayoutBlock[]): string {
   return id;
 }
 
+/** 表示・非表示の切り替え（目のアイコン）。隠しているときは目に斜線 */
+function VisibilityIconButton({ hidden, onClick }: { hidden: boolean; onClick: () => void }) {
+  const id = "vis-" + useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const label = hidden ? "表示する（今は隠している）" : "隠す（今は表示している）";
+  return (
+    <>
+      <s-button
+        variant="tertiary"
+        icon={hidden ? "hide" : "view"}
+        accessibilityLabel={label}
+        interestFor={id}
+        onClick={onClick}
+      />
+      <s-tooltip id={id}>{hidden ? "表示する" : "隠す"}</s-tooltip>
+    </>
+  );
+}
+
 function blockSummary(block: LayoutBlock): string {
   const def = getBlockDef(block.type);
   if (!def?.summaryKey) return "";
-  const v = String(block.settings[def.summaryKey] ?? "").replace(/\s+/g, " ").trim();
+  const v = readableSummaryText(String(block.settings[def.summaryKey] ?? "")).replace(/\s+/g, " ").trim();
   return v.length > 24 ? `${v.slice(0, 24)}…` : v;
 }
 
@@ -381,13 +399,10 @@ export function ReceiptLayoutEditor({
                           <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", gap: 2 }}>
                             <MoveIconButton label="上へ" direction="up" onClick={() => move(i, -1)} disabled={i === 0} />
                             <MoveIconButton label="下へ" direction="down" onClick={() => move(i, 1)} disabled={i === layout.blocks.length - 1} />
-                            <Button
-                              variant="tertiary"
-                              accessibilityLabel={block.hidden ? "表示する" : "隠す"}
+                            <VisibilityIconButton
+                              hidden={block.hidden === true}
                               onClick={() => setBlocks(layout.blocks.map((b) => (b.id === block.id ? { ...b, hidden: !b.hidden } : b)))}
-                            >
-                              {block.hidden ? "表示" : "隠す"}
-                            </Button>
+                            />
                             <DeleteIconButton
                               label="削除"
                               onClick={() => {

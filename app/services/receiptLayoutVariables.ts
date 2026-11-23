@@ -76,3 +76,15 @@ export const TEMPLATE_VARIABLES: Record<ReceiptKind, TemplateVariable[]> = {
     { name: "receipt.payments", label: "支払方法の一覧（label・amount）" },
   ],
 };
+
+/** 変数の名前 → 一覧に出す短い名前（「表題（【精算レシート】…）」の括弧の中は省く） */
+const VARIABLE_SHORT_LABELS: Record<string, string> = Object.fromEntries(
+  Object.values(TEMPLATE_VARIABLES)
+    .flat()
+    .map((v) => [v.name, v.label.replace(/（.*$/, "").replace(/^「(.+)」か「(.+)」$/, "$1／$2")]),
+);
+
+/** ブロックの一覧では {{ shop.name }} などを「［ストア名］」のように読める形にする（印字は変えない） */
+export function readableSummaryText(text: string): string {
+  return text.replace(/\{\{-?\s*([\w.]+)[^}]*\}\}/g, (_, name: string) => `［${VARIABLE_SHORT_LABELS[name] ?? "値"}］`);
+}
