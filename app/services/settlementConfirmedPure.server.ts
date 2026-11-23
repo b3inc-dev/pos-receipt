@@ -8,6 +8,7 @@
  */
 import type { SettlementPreviewDTO } from "./settlementEngine.server";
 import { extractLocationNumericId, normalizeLocationGid } from "../utils/locationGid";
+import { nonSalesFeeTotalFromSaved } from "./nonSalesFeeLines";
 
 /** 点検レシートの行は periodLabel が「点検_」で始まる（api.settlements.create と同じ判定） */
 export function isInspectionSettlementRow(row: { periodLabel?: string | null }): boolean {
@@ -105,6 +106,7 @@ export function settlementRowToPreview(
   locationName: string,
   loyaltyUsageDisplayLabel = "ポイント利用",
 ): SettlementPreviewDTO {
+  const paymentSections = parseSavedPaymentSections(row.paymentSectionsJson);
   return {
     locationId: row.locationId,
     locationName,
@@ -120,7 +122,9 @@ export function settlementRowToPreview(
     refundCount: row.refundCount,
     itemCount: row.itemCount,
     voucherChangeAmount: num(row.voucherChangeAmount),
-    paymentSections: parseSavedPaymentSections(row.paymentSectionsJson),
+    paymentSections,
+    // 売上に含めない送料等は列が無いので、保存した総売上と支払方法別の合計の差から戻す（印字と同じ）
+    nonSalesFeeTotal: nonSalesFeeTotalFromSaved(num(row.total), paymentSections),
     appliedSpecialRefundEvents: [],
     appliedVoucherAdjustments: [],
     loyaltyUsageDisplayLabel,

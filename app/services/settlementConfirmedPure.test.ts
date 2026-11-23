@@ -107,6 +107,20 @@ describe("settlementRowToPreview", () => {
     assert.deepEqual(p.appliedSpecialRefundEvents, []);
     assert.equal(p.settlementTxFirstHm, null);
   });
+  it("売上に含めない送料等は保存した総売上と支払方法別の合計の差から戻す（印字ルートと同じ）", () => {
+    const row = {
+      ...baseRow,
+      total: "14000",
+      paymentSectionsJson: JSON.stringify([
+        { gateway: "cash", label: "現金", net: 10000, refund: 300 },
+        { label: "クレジット", net: 5000 },
+      ]),
+    };
+    // 支払方法別の合計 14,700 − 総売上 14,000 = 700
+    assert.equal(settlementRowToPreview(row, "本店").nonSalesFeeTotal, 700);
+    // 送料の無い日（差が 0）は 0
+    assert.equal(settlementRowToPreview({ ...row, total: "14700" }, "本店").nonSalesFeeTotal, 0);
+  });
   it("通貨が無い行は JPY（印字ルートと同じ既定値）", () => {
     const p = settlementRowToPreview({ ...baseRow, currency: null }, "");
     assert.equal(p.currency, "JPY");

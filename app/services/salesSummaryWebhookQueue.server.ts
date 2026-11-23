@@ -5,6 +5,8 @@
  * - SALES_SUMMARY_WEBHOOK_DEBOUNCE_SECONDS=8 で同一ショップの連続 Webhook をまとめられる
  */
 import prisma from "../db.server";
+import { syncRefundAggregationFromWebhookPayload } from "./refundAggregation.server";
+import { syncRefundAggregationForQueuedWebhook } from "./refundAggregationWebhookSync.server";
 import PgBoss from "pg-boss";
 import { executeSalesSummaryOrderWebhookJob } from "./salesSummaryWebhookRefresh.server";
 import { backgroundRefreshNeedsRetry } from "./salesSummaryBackgroundSlice.server";
@@ -61,6 +63,17 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
           }
           const disabled = process.env.SALES_SUMMARY_WEBHOOK_REFRESH_DISABLED;
           if (disabled === "1" || disabled === "true") continue;
+
+          // 同期経路と同じく返金計上店（pos.refund_aggregation_location_gid）を書く。
+          // 売上サマリーの再計算より先に行い、再計算が失敗・再試行になっても書かれるようにする。
+          // 失敗はログのみ（ジョブは失敗にしない）。ジョブごとの処理なので、再計算をまとめるときも省かない。
+          await syncRefundAggregationForQueuedWebhook(
+            syncRefundAggregationFromWebhookPayload,
+            admin,
+            dbShop.id,
+            shopDomain,
+            payload,
+          );
 
           // 積まれた時刻を渡し、そのあとに始まった再計算で済んでいる日は数え直さない
           const { targetDates, errors, skipped } = await executeSalesSummaryOrderWebhookJob(

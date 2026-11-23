@@ -3,13 +3,15 @@
 要件書を正本とし、GAS は CloudPRNT 非対応のみの参考実装として、今回のアプリで **CloudPRNT 対応を追加** する前提で比較しました。  
 ロケーション名や自社用の調整は、管理画面から各社ごとに設定できる想定です。
 
+> **2026-11-22 更新（main `77b6de6` のコードで確認）**: 本書は 2026-03 の比較メモ。その後、精算は GAS 型の集計（`app/services/settlementAggregatePure.server.ts` の `aggregateGasStyleForOrders`）に置きかわり、売上サマリーも精算プレビュー（`buildSettlementPreview`）を使うようになった。そのため §7.2・§7.3・§7.4 の税率と、§8.1〜§8.7 の「POS（アプリ）」の列が古くなっていたので、今の動きに書き直した。印字は main で Shopify Printing API を先に試す形になり、精算注文（order_based）と CloudPRNT は旧経路として残る（一本化は PR #22）。業務ルールの正本は `docs/BUSINESS_RULES.md`。ciara-system との違いは本書の対象外。
+
 **実装済み（2026-03 対応）**  
 - 1.1・1.2: 日次集計のタイムゾーンを Shopify の `shop.ianaTimezone`（フォールバック: 一般設定の defaultTimezone）で算出し、精算・売上サマリー・特殊返金イベントの対象日に適用。  
-- 1.3: 返金の再集計（別パス）を実装。その日に `updated_at` で更新された注文を取得し、`refund.createdAt` がその日かつ「その日作成」でない注文の返金のみをオーバーレイして payment sections と refundTotal / refundCount にマージ。  
+- 1.3: 返金の再集計（別パス）を実装。その日に `updated_at` で更新された注文を取得し、`refund.createdAt` がその日かつ「その日作成」でない注文の返金のみをオーバーレイして payment sections と refundTotal / refundCount にマージ。（2026-11 現在: 注文のユニオンのメインループで返金を数えるので、オーバーレイは使っていない。§8.1・§8.3）  
 - 1.4・1.5: 特殊返金イベント（cash_refund / receipt_cash_adjustment undo・extra / payment_method_override）を精算の total・refundTotal・paymentSections に反映。  
 - **§7.1**: 精算注文は `order_based` のときのみ作成し、`cloudprnt_direct` のときは作成しない（api.settlements.create で分岐済み。コメントでガイド 8.1 を明記）。  
-- **§7.2**: 返金・特殊返金反映後に税・net を再計算（effectiveGross = total - refundTotal - discounts、税 10% 込で tax / netSales を算出）。  
-- **§7.3**: 売上サマリーの actual を純売上（粗利 − その日の返金）に変更。注文の refunds 集計と `getRefundOverlayForDay` でオーバーレイを加味。
+- **§7.2**: 返金・特殊返金反映後に税・net を再計算（2026-11 現在: 支払方法別の合計から total を出し、精算設定の消費税率で税込みとして tax / netSales に分ける）。  
+- **§7.3**: 売上サマリーの actual を純売上に変更（2026-11 現在: 精算プレビューの netSales をそのまま使う）。
 
 ---
 
@@ -60,6 +62,7 @@
 - その日の **注文** を `created_at` で取得したうえで、**その日に `updated_at` で更新された注文**を別クエリで取得（`REFUNDS_ORDERS_QUERY`、`refunds.createdAt` 含む）。
 - 「その日に作成された注文」に含まれない注文についてのみ、`refund.createdAt` がその日（ショップタイムゾーンで算出した UTC 範囲）の返金を集計し、`computeRefundsOnlyForDay` でオーバーレイを算出。
 - `mergeRefundOverlay` で payment sections と refundTotal / refundCount にマージし、二重計上を避けている。
+- 2026-11 現在: 上のオーバーレイは精算・売上サマリーとも使っていない（`overlayRefundCount` は常に 0）。その日の返金は created ∪ updated のユニオンのメインループで数える（§8.1・§8.3）。
 
 ---
 
@@ -119,8 +122,8 @@
 - **cloudprnt_direct** のときは精算注文を生成しない。
 
 **現在の実装**  
-- `api.settlements.create` で Settlement レコードと、order_based の場合は精算注文の作成を行っている。  
-- 印字方式（order_based / cloudprnt_direct）に応じて「精算注文を作る／作らない」の分岐は、実装と要件の対応を確認するとよい（現状は order_based 前提で問題なさそう）。
+- `api.settlements.create` で Settlement レコードと、order_based の場合は精算注文の作成を行っている（§7.1 で対応済み）。  
+- 2026-11 現在: 印字は Printing API を先に試す。精算注文を作らない形への一本化は PR #22。
 
 ---
 
@@ -151,6 +154,8 @@
 ---
 
 ## 3. CloudPRNT 対応で追加したい点（GAS にはない）
+
+> 2026-11 現在: CloudPRNT は main で印字用のデータを作るだけ（実機アダプタなし）。印字の主な経路は Shopify Printing API に移り、PR #22 で CloudPRNT は廃止（410）、精算注文も作らない予定。以下は 2026-03 時点の考え方として残す。
 
 - **印字方式の分岐**  
   - **order_based**: 精算レシートは「精算注文」を経由して印字（従来の GAS に近い）。  
@@ -228,23 +233,25 @@
 ### 7.2 税・net の再計算 ✅ 対応済
 
 - **内容**: 返金オーバーレイ・特殊返金反映後に、税・net を再計算する。
-- **対応**: 精算エンジンで、`effectiveGross = total - refundTotal - discounts` から税（10% 込）と netSales を算出し、返却前に再計算するようにした。
+- **対応**: 精算エンジンで、返却前に税と netSales を再計算する。2026-11 現在は、支払方法別の（売上 − 返金）の合計を total とし、精算設定の「消費税率（%）」（未設定は 10%）で税込みとして分ける（`splitTaxInclusiveToNetAndTax`）。
 
 ### 7.3 売上サマリーの返金反映 ✅ 対応済
 
 - **内容**: 売上サマリーの actual を「その日の返金」を反映した純売上とする。
-- **対応**: 日次注文クエリに `refunds` を追加し、その日の注文の返金合計に加え、`getRefundOverlayForDay` で「その日作成でない注文のその日付の返金」を加味。`actual = gross - refundsFromOrders - overlay.refundTotal` で純売上を算出。
+- **対応（2026-11 現在）**: 売上サマリーの日次は `computeAndCacheDailySummary` が精算プレビュー（`buildSettlementPreview`）を呼び、`actual = preview.netSales`（税抜きの純売上）とする。精算と売上サマリーの数字の差をなくすため。2026-03 版の `getRefundOverlayForDay` によるオーバーレイは今の売上サマリーでは使っていない。
 
 ### 7.4 その他（設計の違い）
 
 - **GAS 固有の運用**: スプレッドシート依存、Gift Card 返金記録、Script Properties などは、ガイドどおりアプリでは採用せず、DB・管理画面設定に寄せた設計のまま。
-- **税率**: 精算の税再計算では 10%（10/110）を固定で使用。他税率・設定化は要件に応じて追加可能。
+- **税率**: 精算設定の「消費税率（%）」で変えられる（未設定は 10%）。2026-03 版の「10% 固定」は古い。
 
 ---
 
 ## 8. 精算プレビュー「数字が合わない」原因になりうるロケーション別集計の相違（GAS vs POS）
 
 GAS 精算レシート（`GAS_精算レシート.md`）のロケーション別集計と、pos-receipt の精算プレビュー（`settlementEngine.server.ts`）では、以下の設計差があるため、**同じ日・同じロケーションでも数字が一致しない場合**があります。
+
+> **2026-11-22 更新**: §8.1〜§8.5 と §8.7 の差は、その後の GAS 型の集計（`aggregateGasStyleForOrders`）でほぼ解消した。各節の表の「POS（アプリ）」の列は今の動きに書き直し、2026-03 時点の動きは「旧」として残した。
 
 ### 8.0 件数・売上が GAS より多くなる原因（修正済み）✅
 
@@ -275,57 +282,59 @@ GAS 精算レシート（`GAS_精算レシート.md`）のロケーション別�
 
 | 項目 | GAS | POS（アプリ） |
 |------|-----|----------------|
-| 集計に使う注文 | **created_at がその日** の注文 ＋ **updated_at がその日** の注文（`fetchAllOrdersSmart` でユニオン）＋ 当日 **updated** のキャンセル済み | **2026-03 対応**: `created` 検索結果を **createdAt で暦日厳密フィルタ**したもの ＋ **updated_at がその日（非キャンセル）** ＋ **当日 updated のキャンセル済み** を **id ユニオン**（`settlementEngine.unionOrdersById`）。返金オーバーレイは二重計上防止のため **オフ**（返金はメインループで計上） |
+| 集計に使う注文 | **created_at がその日** の注文 ＋ **updated_at がその日** の注文（`fetchAllOrdersSmart` でユニオン）＋ 当日 **updated** のキャンセル済み | **2026-03 対応**: `created` 検索結果を **createdAt で暦日厳密フィルタ**したもの ＋ **updated_at がその日（非キャンセル）** ＋ **当日 updated のキャンセル済み** を **id ユニオン**（`settlementEngine` の `unionSettlementOrdersById`）。返金オーバーレイは二重計上防止のため **オフ**（返金はメインループで計上） |
 | 補足 | 「その日に更新された注文」も集計対象 | 旧実装は created のみ＋返金オーバーレイで売上が欠けるケースがあった |
 
 **影響（旧実装時）**  
 - 前日作成・当日キャプチャ（または当日更新で売上追加）した注文は、GAS ではその日の売上に含まれるが、**created のみ**のアプリでは **total に含まれない** ため、**売上・件数が少なく出る**可能性がありました。
 
-**未対応（GAS ④）**  
-- `fetchAllOrdersSmart` の **processed_at フォールバック**（①③のユニオンが 0 件のときのみ JST の `processed_at` で再取得）は、現状アプリでは未実装です。該当する稀なケースでは GAS と差が残ります。
+**GAS ④（processed_at フォールバック）: 対応済み（2026-11 確認）**  
+- ユニオンが 0 件のときだけ、店舗タイムゾーンの暦日で `processed_at` を使って取り直す（`buildSettlementPreview`）。2026-03 版の「未実装」は古い。
 
 ### 8.2 total（総売上）の算出根拠
 
 | 項目 | GAS | POS（アプリ） |
 |------|-----|----------------|
-| total の元データ | **「その日」に発生したトランザクション**のみ。各 Tx の `createdAt` がその日（JST）か、REFUND は「その日の Refund に紐づく」かで判定。total = 支払方法別 (sale − refund) の合計 | **その日に created_at の注文**の `totalPriceSet` の合計。注文に紐づく **全 refund** を別途 refundTotal で集計し、effectiveGross = total − refundTotal − discounts で税・純売上を再計算 |
-| 日付の意味 | **取引発生日（トランザクション日）** ベース | **注文作成日** ベース |
+| total の元データ | **「その日」に発生したトランザクション**のみ。各 Tx の `createdAt` がその日（JST）か、REFUND は「その日の Refund に紐づく」かで判定。total = 支払方法別 (sale − refund) の合計 | **今（2026-11）: GAS と同じ**。その日（店舗タイムゾーン）の Tx か、その日の Refund に紐づく REFUND の Tx だけを支払方法別に集め、特殊返金を反映したあと、支払方法別の (net − refund) の合計を total にする。旧（2026-03）: その日に created の注文の `totalPriceSet` の合計 |
+| 日付の意味 | **取引発生日（トランザクション日）** ベース | **今: 取引発生日ベース**（旧: 注文作成日ベース） |
 
 **影響**  
-- 同じ「その日」でも、GAS は「その日に発生した取引」、POS は「その日に作成された注文の金額」なので、**日付をまたぐ取引**（例: 23:55 作成・00:05 キャプチャ）で total がずれます。
-- 行合計との整合: GAS は「payment sections の net 合計 ＝ header の total」になるよう補正するガードあり。POS には同様のガードはありません。
+- 旧実装では日付をまたぐ取引（例: 23:55 作成・00:05 キャプチャ）で total がずれた。今は GAS と同じ考え方。
+- 行合計との整合: 今は total を支払方法別の行の合計から出すので、行と合計は一致する（GAS のガードと同じ結果）。
 
 ### 8.3 返金の「その日」の扱い
 
 | 項目 | GAS | POS（アプリ） |
 |------|-----|----------------|
-| 返金を「その日」に含める条件 | **refund.createdAt** がその日（JST）の返金のみ「その日の返金」として集計（aggregate 内＋ computeRefundsOnlyForDay） | 初回: 「その日に created の注文」に紐づく **全 refund** を refundTotal に加算（refund の日付で絞らない）。オーバーレイ: 「その日に updated の注文で、その日に created でないもの」について **refund.createdAt がその日** の返金を追加 |
-| 返金の日付帰属 | **返金が処理された日** | 注文作成日ベースの集計に「その注文の全返金」を載せるため、**その日に作成された注文の翌日返金**も、その日の精算の refundTotal に含まれる |
+| 返金を「その日」に含める条件 | **refund.createdAt** がその日（JST）の返金のみ「その日の返金」として集計（aggregate 内＋ computeRefundsOnlyForDay） | **今（2026-11）: GAS と同じ**。その日（店舗タイムゾーン）に作られた Refund とその Tx だけを数える。返金オーバーレイは使わない（ユニオンのメインループで数えるので二重にしない）。どの店舗に載せるかは返金の計上ロケーション（メタフィールド・設定、`refundAggregation.server.ts`）で決める。旧（2026-03）: その日に created の注文の全 refund ＋ オーバーレイ |
+| 返金の日付帰属 | **返金が処理された日** | **今: 返金が処理された日**（旧: 注文作成日） |
 
 **影響**  
-- 「その日に作成された注文」を翌日返金した場合: GAS では翌日の精算に返金が乗るが、POS ではその日（注文作成日）の refundTotal に含まれるため、**返金の日付帰属**が異なります。
+- 旧実装では、翌日返金がその日（注文作成日）の精算に入った。今は GAS と同じく返金した日の精算に入る。
 
 ### 8.4 refund_count（返金件数）の定義
 
 | 項目 | GAS | POS（アプリ） |
 |------|-----|----------------|
-| refund_count | **返金が 1 件以上ある注文の数**（refundOrderSet.size） | **Refund オブジェクトの件数**（1 注文に複数返金なら複数カウント）＋ オーバーレイの refund 件数 |
+| refund_count | **返金が 1 件以上ある注文の数**（refundOrderSet.size） | **今（2026-11）: GAS と同じ**（`refundOrderSet.size`）。支払方法別の行の返金件数は Tx の件数。旧（2026-03）: Refund オブジェクトの件数 |
 
 **影響**  
-- 1 注文で複数回返金している場合、GAS は 1、POS は 2 以上になるなど、**件数が一致しません**。
+- 旧実装では 1 注文で複数回返金すると件数がずれた。今は GAS と同じ。
 
 ### 8.5 割引・ポイント（discounts / vip）の按分
 
 | 項目 | GAS | POS（アプリ） |
 |------|-----|----------------|
-| 割引・VIP | aggregate 内で **その日の売上・返金の比率（keepRatioToday）** を按分して discounts / vip_points_used を集計 | 注文の `totalDiscountsSet` をそのまま合計。ポイントは特殊返金イベントの `originalPaymentMethod === "points"` のみ。**按分なし** |
+| 割引・VIP | aggregate 内で **その日の売上・返金の比率（keepRatioToday）** を按分して discounts / vip_points_used を集計 | **今（2026-11）: GAS と同じ按分**（`keepRatioToday`）。ポイント利用額は明細の割引のうち「ポイント/会員施策設定」の決まり（VIP-・SP-POINT-・Shop Point など）に合うものを按分して数える。Shopify の税（`taxShopify`）も同じ比率で按分する。旧（2026-03）: 注文の `totalDiscountsSet` をそのまま合計・按分なし |
 
 **影響**  
-- 一部返金や部分キャンセルがある注文では、GAS は按分した割引・ポイント、POS は注文単位の値のため、**discounts / vip の内訳がずれる**ことがあります。
+- 旧実装では一部返金・部分キャンセルで内訳がずれた。今は GAS と同じ考え方。
 
 ---
 
 ### 8.6 まとめ：数字が合わないときに確認するポイント
+
+> 以下 1〜5 は 2026-03 の旧実装のときの確認ポイント。今の main では §8.1〜§8.5 の差はほぼ無いので、合わないときはまず、ロケーション・日付（店舗タイムゾーン）・返金の計上ロケーションの設定・特殊返金の反映設定・「旧ギフトカード API 集計」の ON/OFF を確かめる。業務ルールは `docs/BUSINESS_RULES.md`。
 
 1. **total が GAS より少ない**  
    → 前日作成・当日キャプチャ（または当日更新）の注文が POS では「その日の売上」に含まれていない可能性（§8.1・8.2）。
@@ -351,11 +360,11 @@ GAS に合わせる場合は、注文対象の「updated_at ユニオン」、to
 | # | 項目 | GAS の集計方法 | POS（アプリ）の集計方法 | 主な影響 |
 |---|------|----------------|-------------------------|----------|
 | 1 | **集計対象注文の絞り方** | クエリで **`-tag:SETTLEMENT -status:cancelled`** を必ず指定。精算注文・キャンセルは取得しない | 修正後: 同上。修正前は指定がなく、かつタグ判定が大文字で効かず精算注文が混入 | 修正前: 件数・売上が約2倍になる（§8.0） |
-| 2 | **注文の範囲** | **created_at がその日** ∪ **updated_at がその日** のユニオン。2本のクエリをマージ | **created_at がその日** のみ。updated_at は返金オーバーレイ用の別クエリで、返金分だけ追加 | 前日作成・当日キャプチャは GAS には含まれるが POS の total には含まれない（§8.1） |
-| 3 | **total の根拠** | **その日に発生したトランザクション**だけ。Tx の createdAt（またはその日の Refund 紐づき）で判定。total = 支払方法別 (sale − refund) の合計 | **その日に created の注文**の totalPriceSet 合計。注文作成日ベース | 日付をまたぐ取引で total がずれる（§8.2） |
-| 4 | **返金の「その日」** | **refund.createdAt がその日**の返金のみ「その日の返金」として計上 | その日 created の注文の**全 refund** をその日の refundTotal に含める。オーバーレイで「その日付の返金」を追加 | 翌日返金の日付帰属が GAS と POS で違う（§8.3） |
-| 5 | **refund_count** | 返金が 1 件以上ある**注文の数** | **Refund オブジェクトの件数**（1 注文で複数返金なら複数） | 件数が一致しない（§8.4） |
-| 6 | **割引・ポイント** | その日の売上・返金の**按分**で discounts / vip を集計 | 注文の totalDiscountsSet をそのまま合計。按分なし | 部分返金などで内訳がずれる（§8.5） |
-| 7 | **整合性ガード** | 行合計（payment sections の net）と header の total が一致するよう補正 | なし | 行と合計が一致しない場合がある |
+| 2 | **注文の範囲** | **created_at がその日** ∪ **updated_at がその日** のユニオン。2本のクエリをマージ | 今: created ∪ updated ∪ 当日 updated のキャンセル済みのユニオン。0 件のときは processed_at で取り直す（旧: created のみ） | 今は差なし（§8.1） |
+| 3 | **total の根拠** | **その日に発生したトランザクション**だけ。Tx の createdAt（またはその日の Refund 紐づき）で判定。total = 支払方法別 (sale − refund) の合計 | 今: GAS と同じ（旧: その日に created の注文の totalPriceSet 合計） | 今は差なし（§8.2） |
+| 4 | **返金の「その日」** | **refund.createdAt がその日**の返金のみ「その日の返金」として計上 | 今: GAS と同じ。載せる店舗は返金の計上ロケーションで決める（旧: その日 created の注文の全 refund） | 今は差なし（§8.3） |
+| 5 | **refund_count** | 返金が 1 件以上ある**注文の数** | 今: GAS と同じ（旧: Refund オブジェクトの件数） | 今は差なし（§8.4） |
+| 6 | **割引・ポイント** | その日の売上・返金の**按分**で discounts / vip を集計 | 今: GAS と同じ按分（旧: 按分なし） | 今は差なし（§8.5） |
+| 7 | **整合性ガード** | 行合計（payment sections の net）と header の total が一致するよう補正 | 今: total を行の合計から出すので一致する（旧: なし） | 今は差なし |
 
 以上が、GAS 実装と比較したうえでの「意図とずれている箇所」「対応内容」「残りの相違点」および**精算プレビュー数字の相違原因**の整理です。
