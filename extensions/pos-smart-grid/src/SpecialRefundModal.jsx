@@ -707,6 +707,10 @@ function OrderDetailView({
 }) {
   const activeEvents = events.filter((e) => e.status === "active");
   const voidedEvents = events.filter((e) => e.status === "voided");
+  // 商品券釣銭調整は「商品券釣有り」の注文だけ（一覧の「商品券釣有り」の印と同じ判定: 支払方法マスタの
+  // 釣り有りの商品券で払った、またはメモに「商品券」）。支払いが 1 件も読めない注文は判定できないので押せるまま。
+  const voucherAdjustable =
+    Boolean(order?.estimatedVoucherChange) || (order?.transactions ?? []).length === 0;
 
   return (
     <s-page heading="特殊返金調整・商品券釣銭調整">
@@ -838,7 +842,7 @@ function OrderDetailView({
           middleDisabled={loading}
           rightLabel="商品券釣銭調整"
           onRight={onVoucher}
-          rightDisabled={loading}
+          rightDisabled={loading || !voucherAdjustable}
         />
       </s-stack>
       <SpecialRefundConfirmModal
