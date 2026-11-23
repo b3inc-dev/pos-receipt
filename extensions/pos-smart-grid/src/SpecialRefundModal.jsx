@@ -39,6 +39,7 @@ import {
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
+import { FormHeading, FormHero, FormLine, yen } from "./AdjustFormParts.jsx";
 import { VoucherFaceCandidates } from "./VoucherFaceCandidates.jsx";
 import { adjustmentBadges, adjustmentKindLabel, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
 import { financialStatusLabel, listSegmentsForTile } from "./orderDisplayUtils.js";
@@ -1605,61 +1606,70 @@ function VoucherAdjustmentForm({
     }
   };
 
+  // 入力・確認とも、確かめる所（釣銭）を大きく、取引と金額は「左に項目名・右に値」の行で（T 2026-11-24）。
+  // 下は固定: 左に「戻る」、右に「確認する」「登録する」
   if (confirming) {
     return (
-      <s-page heading="商品券釣銭を登録">
+      <s-page heading="商品券釣銭登録">
         <s-scroll-box>
           <s-box padding="base">
-            <s-stack gap="base">
-              <s-text type="strong">この内容で登録します</s-text>
-              <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                <s-stack gap="small">
-                  <Row label="取引" value={order?.orderName ?? "-"} />
-                  <Row label="商品券額面" value={`¥${face.toLocaleString()}`} />
-                  <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
-                  <Row label="釣銭" value={`¥${Number(changeAmount ?? 0).toLocaleString()}`} />
-                  {note ? <Row label="メモ" value={note} /> : null}
-                </s-stack>
+            <s-stack gap="none">
+              <s-text>この内容で商品券釣銭を登録します。</s-text>
+              <s-box paddingBlockStart="base">
+                <FormHero
+                  label="釣銭"
+                  value={yen(changeAmount)}
+                  sub={`額面 ${yen(face)} − 商品券で払った額 ${yen(applied)}`}
+                />
               </s-box>
-              {error ? <s-text tone="critical">{error}</s-text> : null}
-              <s-stack gap="small">
-                <s-button kind="primary" onClick={handleSubmit} loading={loading}>
-                  登録する
-                </s-button>
-                <s-button kind="secondary" onClick={() => setConfirming(false)} disabled={loading}>
-                  修正する
-                </s-button>
-              </s-stack>
+              <FormHeading>内容</FormHeading>
+              <FormLine label="取引" value={order?.orderName ?? "-"} />
+              <FormLine label="商品券の額面" value={yen(face)} />
+              <FormLine label="商品券で払った額" value={yen(applied)} />
+              {note ? <FormLine label="メモ" value={note} /> : null}
+              {error ? (
+                <s-box paddingBlockStart="base">
+                  <s-text tone="critical">{error}</s-text>
+                </s-box>
+              ) : null}
             </s-stack>
           </s-box>
         </s-scroll-box>
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={() => setConfirming(false)}
+          leftDisabled={loading}
+          rightLabel="登録する"
+          onRight={handleSubmit}
+          rightDisabled={loading}
+          rightLoading={loading}
+        />
       </s-page>
     );
   }
 
+  const total = roundMoney(order?.totalPrice?.amount ?? 0);
   return (
     <s-page heading="商品券釣銭を登録">
       <s-scroll-box>
         <s-box padding="base">
-          <s-stack gap="base">
-            {/* 取引情報と元の支払い（支払方法ごと） */}
-            <OrderTenderPanel order={order} lines={tenderLines} />
-            {order?.estimatedVoucherChange ? (
-              <s-text tone="subdued" fontSize="small">この取引は商品券釣有りの可能性があります</s-text>
-            ) : null}
-
+          <s-stack gap="none">
             <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
 
-            {/* 商品券額面（入れるのはこれだけ） */}
-            <s-text-field
-              label="受け取った商品券の額面（円）"
-              value={faceValue}
-              type="number"
-              onInput={(e) => setFaceValue(e?.currentTarget?.value ?? "")}
-              placeholder="例: 5000"
-            />
+            {/* 取引: 合計と元の支払方法ごとの額 */}
+            <FormHeading>取引</FormHeading>
+            <FormLine label={order?.orderName ?? "この取引"} value={`合計 ${yen(total)}`} strong />
+            {tenderLines.map((line) => (
+              <FormLine
+                key={line.gateway || line.label}
+                label={line.label}
+                value={line.refunded > 0 ? `${yen(line.paid)}（返金 ${yen(line.refunded)}）` : yen(line.paid)}
+              />
+            ))}
 
-            {/* 商品券で払った額（注文の取引から。読めないときだけ手で入れる） */}
+            {/* 商品券: 払った額（注文から。読めないときだけ手で入れる）と額面 */}
+            <FormHeading>商品券</FormHeading>
             {appliedState === "manual" ? (
               <s-text-field
                 label="商品券で払った額（円）"
@@ -1669,43 +1679,59 @@ function VoucherAdjustmentForm({
                 placeholder="注文の支払いを読めなかったので入れてください"
               />
             ) : (
-              <Row
-                label="商品券で払った額（注文から）"
-                value={appliedState === "loading" ? "読み込み中…" : `¥${applied.toLocaleString()}`}
+              <FormLine
+                label="商品券で払った額"
+                value={appliedState === "loading" ? "読み込み中…" : yen(applied)}
+                strong
               />
             )}
+            <s-box paddingBlockStart="small">
+              <s-text-field
+                label="受け取った商品券の額面（円）"
+                value={faceValue}
+                type="number"
+                onInput={(e) => setFaceValue(e?.currentTarget?.value ?? "")}
+                placeholder="例: 5000"
+              />
+            </s-box>
             {/* 額面の候補: 払った額より上の近い 100 円区切り 1 つ + 500 円区切り 2 つ（全額反映は釣銭が出ないのでやめた。T 2026-11-24） */}
             {appliedState !== "loading" && appliedAmount !== "" && applied > 0 ? (
-              <VoucherFaceCandidates amount={applied} selected={faceValue} onPick={setFaceValue} disabled={loading} />
+              <s-box paddingBlockStart="small">
+                <VoucherFaceCandidates amount={applied} selected={faceValue} onPick={setFaceValue} disabled={loading} />
+              </s-box>
             ) : null}
 
-            {/* 釣銭（自動） */}
-            <Row
-              label="釣銭（額面 − 払った額）"
-              value={changeAmount == null ? "-" : `¥${changeAmount.toLocaleString()}`}
-            />
+            {/* 釣銭（自動）: 確かめる所なので大きく */}
+            <s-box paddingBlockStart="base">
+              <FormHero label="釣銭（額面 − 商品券で払った額）" value={changeAmount == null ? "-" : yen(changeAmount)} />
+            </s-box>
 
-            {/* メモ */}
-            <s-text-field
-              label="メモ（任意）"
-              value={note}
-              onInput={(e) => setNote(e?.currentTarget?.value ?? "")}
-              placeholder="補足説明など"
-            />
+            <s-box paddingBlockStart="base">
+              <s-text-field
+                label="メモ（任意）"
+                value={note}
+                onInput={(e) => setNote(e?.currentTarget?.value ?? "")}
+                placeholder="補足説明など"
+              />
+            </s-box>
 
-            {error ? <s-text tone="critical">{error}</s-text> : null}
-
-            <s-stack gap="small">
-              <s-button kind="primary" onClick={handleConfirm} disabled={loading}>
-                確認する
-              </s-button>
-              <s-button kind="secondary" onClick={onBack} disabled={loading}>
-                戻る
-              </s-button>
-            </s-stack>
+            {error ? (
+              <s-box paddingBlockStart="base">
+                <s-text tone="critical">{error}</s-text>
+              </s-box>
+            ) : null}
           </s-stack>
         </s-box>
       </s-scroll-box>
+      <FixedFooterNavBar
+        centerAlignWithButtons
+        leftLabel="戻る"
+        onLeft={onBack}
+        leftDisabled={loading}
+        rightLabel="確認する"
+        onRight={handleConfirm}
+        rightDisabled={loading}
+      />
     </s-page>
   );
 }

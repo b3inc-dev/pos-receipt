@@ -12,6 +12,7 @@ import {
 } from "../../common/voucherCartEntry.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { VoucherFaceCandidates } from "./VoucherFaceCandidates.jsx";
+import { FormHeading, FormHero, FormLine, yen as yenStr } from "./AdjustFormParts.jsx";
 
 function readCart() {
   try {
@@ -109,60 +110,72 @@ export function VoucherCartScreen({ onOpenList }) {
     }
   };
 
+  // 入力の画面も注文の詳細と同じ形（T 2026-11-24）: 見出しで区切り「左に項目名・右に値」、釣銭の見込みは大きく。
+  // 下は固定: 左に「戻る」、右に「カートに入れる」
+  const estimatedChange = face != null && Number.isFinite(total) && total > 0 ? Math.max(0, face - total) : null;
   return (
     <s-page heading="会計前登録">
       <s-scroll-box>
         <s-box padding="base">
-          <s-stack gap="base">
+          <s-stack gap="none">
             {error ? <s-banner tone="critical">{error}</s-banner> : null}
-            <s-section heading="額面">
-              <s-stack gap="small">
-                <s-text tone="subdued">
-                  入れたあと、いつもどおり「商品券釣有り」で会計してください。会計が終わると、商品券の釣銭を自動で登録します。
-                </s-text>
-                {Number.isFinite(total) && total > 0 ? (
-                  <s-stack direction="inline" justifyContent="space-between">
-                    <s-text tone="subdued">カートの合計</s-text>
-                    <s-text>{yen(total)}</s-text>
-                  </s-stack>
-                ) : null}
-                {current != null ? (
-                  <s-stack direction="inline" justifyContent="space-between">
-                    <s-text tone="subdued">いま入っている額面</s-text>
-                    <s-badge tone="info">{yen(current)}</s-badge>
-                  </s-stack>
-                ) : null}
-                <s-text-field
-                  label="商品券の額面（円）"
-                  value={input}
-                  type="number"
-                  onInput={(e) => setInput(e?.currentTarget?.value ?? "")}
-                  placeholder="例: 5000"
+            <s-text color="subdued">
+              入れたあと、いつもどおり「商品券釣有り」で会計してください。会計が終わると、商品券の釣銭を自動で登録します。
+            </s-text>
+
+            <FormHeading>カート</FormHeading>
+            {Number.isFinite(total) && total > 0 ? <FormLine label="カートの合計" value={yenStr(total)} strong /> : null}
+            {current != null ? <FormLine label="いま入っている額面" value={yenStr(current)} /> : null}
+
+            <FormHeading>商品券</FormHeading>
+            <s-text-field
+              label="商品券の額面（円）"
+              value={input}
+              type="number"
+              onInput={(e) => setInput(e?.currentTarget?.value ?? "")}
+              placeholder="例: 5000"
+            />
+            {/* 額面の候補: カートの合計より上の近い 100 円区切り 1 つ + 500 円区切り 2 つ（T 2026-11-24） */}
+            {Number.isFinite(total) && total > 0 ? (
+              <s-box paddingBlockStart="small">
+                <VoucherFaceCandidates amount={total} selected={input} onPick={setInput} disabled={saving} />
+              </s-box>
+            ) : null}
+            {estimatedChange != null ? (
+              <s-box paddingBlockStart="base">
+                <FormHero
+                  label="釣銭の見込み（額面 − カートの合計）"
+                  value={yenStr(estimatedChange)}
+                  sub="商品券だけで払ったときの額です。登録する釣銭は、会計のあと商品券で払った額から出します。"
                 />
-                {/* 額面の候補: カートの合計より大きい 500 円刻みを 3 つ（T 2026-11-24） */}
-                {Number.isFinite(total) && total > 0 ? (
-                  <VoucherFaceCandidates amount={total} selected={input} onPick={setInput} disabled={saving} />
-                ) : null}
-                <s-button variant="primary" onClick={save} disabled={saving || face == null}>
-                  {current != null ? "額面を入れ直す" : "カートに入れる"}
+              </s-box>
+            ) : null}
+            {current != null ? (
+              <s-box paddingBlockStart="base">
+                <s-button tone="critical" onClick={remove} disabled={saving}>
+                  額面を外す
                 </s-button>
-                {current != null ? (
-                  <s-button tone="critical" onClick={remove} disabled={saving}>
-                    額面を外す
-                  </s-button>
-                ) : null}
-              </s-stack>
-            </s-section>
-            <s-section heading="会計のあとで登録する">
-              <s-stack gap="small">
-                <s-text tone="subdued">会計が終わった注文に、あとから商品券の額面を登録します。</s-text>
-                <s-button onClick={onOpenList} disabled={saving}>注文の一覧を開く</s-button>
-              </s-stack>
-            </s-section>
+              </s-box>
+            ) : null}
+
+            <FormHeading>会計のあとで登録する</FormHeading>
+            <s-text color="subdued">会計が終わった注文に、あとから商品券の額面を登録します。</s-text>
+            <s-box paddingBlockStart="small">
+              <s-button onClick={onOpenList} disabled={saving}>注文の一覧を開く</s-button>
+            </s-box>
           </s-stack>
         </s-box>
       </s-scroll-box>
-      <FixedFooterNavBar leftLabel="戻る" onLeft={dismiss} centerAlignWithButtons />
+      <FixedFooterNavBar
+        centerAlignWithButtons
+        leftLabel="戻る"
+        onLeft={dismiss}
+        leftDisabled={saving}
+        rightLabel={current != null ? "入れ直す" : "カートに入れる"}
+        onRight={save}
+        rightDisabled={saving || face == null}
+        rightLoading={saving}
+      />
     </s-page>
   );
 }
