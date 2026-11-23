@@ -22,6 +22,7 @@ import {
   DEFAULT_PRINT_SETTINGS,
   type PrintSettings,
 } from "../utils/appSettings.server";
+import { nonSalesFeeTotalFromSaved } from "../services/nonSalesFeeLines";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -77,6 +78,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       itemCount: settlement.itemCount,
       voucherChangeAmount: Number(settlement.voucherChangeAmount),
       paymentSections,
+      nonSalesFeeTotal: nonSalesFeeTotalFromSaved(Number(settlement.total), paymentSections),
       appliedSpecialRefundEvents: [],
       appliedVoucherAdjustments: [],
       loyaltyUsageDisplayLabel: "ポイント利用",
