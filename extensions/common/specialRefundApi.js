@@ -97,6 +97,11 @@ export async function listRefundReservations(sourceOrderId) {
   return apiGet("/api/refund-reservations", { sourceOrderId });
 }
 
+/** GET /api/refund-reservations（注文なし）→ { enabled }（管理画面の「返金の予約」がオンか） */
+export async function getRefundReservationEnabled() {
+  return apiGet("/api/refund-reservations");
+}
+
 export async function createRefundReservation(data) {
   return apiPost("/api/refund-reservations", data);
 }
