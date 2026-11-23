@@ -12,11 +12,11 @@ function money(v) {
  */
 export function reservationRowsFromInput(rows) {
   const list = Array.isArray(rows) ? rows : [];
-  if (list.length === 0) return { ok: false, error: "返す手段を選んでください", rows: [] };
+  if (list.length === 0) return { ok: false, error: "返金方法を選んでください", rows: [] };
   const out = [];
   for (let i = 0; i < list.length; i++) {
     const r = list[i] ?? {};
-    if (!String(r.method ?? "").trim()) return { ok: false, error: `${i + 1} 行目の返す手段を選んでください`, rows: [] };
+    if (!String(r.method ?? "").trim()) return { ok: false, error: `${i + 1} 行目の返金方法を選んでください`, rows: [] };
     const isLast = i === list.length - 1;
     const amount = isLast ? null : money(r.amount);
     if (!isLast && !(amount > 0)) return { ok: false, error: `${i + 1} 行目の金額を 0 より大きく入れてください`, rows: [] };
