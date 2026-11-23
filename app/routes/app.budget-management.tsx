@@ -580,6 +580,30 @@ export default function BudgetManagementPage() {
             </Card>
           </Layout.Section>
 
+          {/* 日別一覧の入力（店舗・月ごと） */}
+          {hasAccess && (
+            <Layout.Section>
+              <Card>
+                <InlineStack align="space-between" blockAlign="center" gap="300" wrap>
+                  <BlockStack gap="100">
+                    <Text variant="headingSm" as="h2">日別一覧で入力</Text>
+                    <Text as="p" tone="subdued">店舗と月を選ぶと 1 日〜月末が並び、まとめて入力して保存できます。</Text>
+                  </BlockStack>
+                  <Button
+                    onClick={() => {
+                      // 絞り込み中の店舗・月をそのまま開く（埋め込みの host などもそのまま渡す）
+                      const params = new URLSearchParams(location.search);
+                      params.delete("page");
+                      navigate(`/app/budget-management/daily?${params.toString()}`);
+                    }}
+                  >
+                    日別一覧で入力
+                  </Button>
+                </InlineStack>
+              </Card>
+            </Layout.Section>
+          )}
+
           {/* 予算追加フォーム */}
           {hasAccess && (
             <Layout.Section>
