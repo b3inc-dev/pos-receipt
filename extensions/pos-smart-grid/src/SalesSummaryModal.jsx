@@ -17,6 +17,7 @@ import {
   getDailySummary,
   getPeriodSummary,
   getSalesMonthDaily,
+  newSalesSummaryLoadId,
   reportFootfall,
 } from "../../common/salesSummaryApi.js";
 import { getAvailableMonths } from "../../common/settlementApi.js";
@@ -1526,8 +1527,10 @@ function SalesSummaryModal() {
       let result;
       if (grain === "daily") {
         const mr = monthRangeForTargetDate(targetDate);
+        // 日次と当月の期間で同じ「今日・その店」を数えるので、同じ loadId を付けて 1 回にまとめる
+        const loadId = newSalesSummaryLoadId();
         const [dailySettled, monthSettled] = await Promise.allSettled([
-          getDailySummary({ targetDate, locationIds: locationIdsForApi }),
+          getDailySummary({ targetDate, locationIds: locationIdsForApi, loadId }),
           mr
             ? getPeriodSummary({
                 dateFrom: mr.dateFrom,
@@ -1535,6 +1538,7 @@ function SalesSummaryModal() {
                 budgetDateTo: mr.budgetDateTo,
                 progressAsOfDate: targetDate,
                 locationIds: locationIdsForApi,
+                loadId,
               })
             : Promise.resolve(null),
         ]);

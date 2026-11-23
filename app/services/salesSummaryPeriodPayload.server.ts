@@ -29,6 +29,7 @@ import {
   tryLoadPeriodAggregatesFromRollup,
   syncRollupsMatchingPeriodRequest,
 } from "./salesSummaryPeriodRollup.server";
+import { shareWithinLoad } from "../utils/salesSummaryLoadShare.server";
 import type { Shop } from "@prisma/client";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
@@ -75,6 +76,10 @@ export type BuildPeriodSalesSummaryOptions = {
   budgetDateTo?: string | null;
   progressAsOfDate?: string | null;
   locationIdsParam?: string[];
+  /** POS の 1 回の読み込みを表す ID（日次 API と「今日」の計算を共有する）。未指定なら共有しない */
+  loadId?: string | null;
+  /** true のときチャネル行を数えない（POS の個店表示はチャネル行も合計も出さない） */
+  skipChannels?: boolean;
 };
 
 export async function buildPeriodSalesSummaryPayload(
@@ -87,6 +92,8 @@ export async function buildPeriodSalesSummaryPayload(
   const budgetDateToParam = options.budgetDateTo ?? null;
   const progressAsOfParam = options.progressAsOfDate ?? null;
   const locationIdsParam = options.locationIdsParam ?? [];
+  const loadId = options.loadId ?? null;
+  const skipChannels = options.skipChannels === true;
 
   const settings = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
   const merged = mergeAndNormalizeSalesSummarySettings(settings ?? undefined);
@@ -155,8 +162,8 @@ export async function buildPeriodSalesSummaryPayload(
     return empty();
   }
 
-  await autoDiscoverChannels(admin, shop.id);
-  const enabledChannels = await getEnabledSalesChannels(shop.id);
+  if (!skipChannels) await autoDiscoverChannels(admin, shop.id);
+  const enabledChannels = skipChannels ? [] : await getEnabledSalesChannels(shop.id);
   const shopIanaTz = await getShopTimezoneForDaily(admin, shop.id);
   const shopCalendarToday = getCalendarDateStringInTimeZone(new Date(), shopIanaTz);
 
@@ -276,7 +283,9 @@ export async function buildPeriodSalesSummaryPayload(
       if (budget <= 0) break;
       locAttempts += 1;
       try {
-        await computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, day);
+        await shareWithinLoad(loadId, `loc|${shop.id}|${loc.shopifyLocationGid}|${day}`, () =>
+          computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, day),
+        );
       } catch {
         /* ignore */
       }
@@ -289,13 +298,15 @@ export async function buildPeriodSalesSummaryPayload(
       if (budget <= 0) break;
       chAttempts += 1;
       try {
-        await computeAndCacheChannelDailySummary(
-          admin,
-          shop.id,
-          ch.id,
-          ch.displayName,
-          ch.sourceNames,
-          day,
+        await shareWithinLoad(loadId, `ch|${shop.id}|${ch.id}|${day}`, () =>
+          computeAndCacheChannelDailySummary(
+            admin,
+            shop.id,
+            ch.id,
+            ch.displayName,
+            ch.sourceNames,
+            day,
+          ),
         );
       } catch {
         /* ignore */

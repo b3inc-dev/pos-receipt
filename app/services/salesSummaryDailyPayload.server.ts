@@ -22,6 +22,7 @@ import {
 } from "../utils/salesSummaryBudgetFromDb.server";
 import { sumOptionalBudgetColumn } from "../utils/salesSummaryTotals";
 import { getShopTimezoneForDaily, getCalendarDateStringInTimeZone } from "../utils/shopTimezone.server";
+import { shareWithinLoad } from "../utils/salesSummaryLoadShare.server";
 import type { Shop } from "@prisma/client";
 
 type SalesSummaryAdmin = Parameters<typeof computeAndCacheDailySummary>[0];
@@ -49,6 +50,16 @@ export type BuildDailySalesSummaryOptions = {
   /** 空配列 = 全店（POS API と同じ） */
   locationIdsParam?: string[];
   forceRecompute?: boolean;
+  /**
+   * POS の 1 回の読み込みを表す ID。同じ ID の期間 API と「今日」の計算を共有する（数え方は同じ）。
+   * 未指定なら共有しない。
+   */
+  loadId?: string | null;
+  /**
+   * true のときチャネル（オンライン等）の行を数えない。
+   * POS の個店表示はチャネル行も合計も出さないため、その分の問い合わせを省く。
+   */
+  skipChannels?: boolean;
 };
 
 export async function buildDailySalesSummaryPayload(
@@ -64,6 +75,8 @@ export async function buildDailySalesSummaryPayload(
   const targetDate = options.targetDate?.trim() || shopCalendarToday;
   const locationIdsParam = options.locationIdsParam ?? [];
   const forceRecompute = options.forceRecompute === true;
+  const loadId = options.loadId ?? null;
+  const skipChannels = options.skipChannels === true;
 
   const emptyPayload = (): DailySalesSummaryPayload => ({
     rows: [],
@@ -166,7 +179,9 @@ export async function buildDailySalesSummaryPayload(
       }
     }
 
-    const row = await computeAndCacheDailySummary(admin, shop.id, locationGid, loc.name, targetDate);
+    const row = await shareWithinLoad(loadId, `loc|${shop.id}|${locationGid}|${targetDate}`, () =>
+      computeAndCacheDailySummary(admin, shop.id, locationGid, loc.name, targetDate),
+    );
     return {
       ...row,
       footfallReportingEnabled: isFootfallReportingAllowedForLocation(merged, locationGid),
@@ -195,8 +210,8 @@ export async function buildDailySalesSummaryPayload(
     return { ...r, budget, budgetRatio };
   });
 
-  await autoDiscoverChannels(admin, shop.id);
-  const enabledChannels = await getEnabledSalesChannels(shop.id);
+  if (!skipChannels) await autoDiscoverChannels(admin, shop.id);
+  const enabledChannels = skipChannels ? [] : await getEnabledSalesChannels(shop.id);
   const buildChannelRow = async (
     ch: Awaited<ReturnType<typeof getEnabledSalesChannels>>[number],
   ): Promise<ChannelDailySummaryDTO> => {
@@ -221,7 +236,9 @@ export async function buildDailySalesSummaryPayload(
         };
       }
     }
-    return computeAndCacheChannelDailySummary(admin, shop.id, ch.id, ch.displayName, ch.sourceNames, targetDate);
+    return shareWithinLoad(loadId, `ch|${shop.id}|${ch.id}|${targetDate}`, () =>
+      computeAndCacheChannelDailySummary(admin, shop.id, ch.id, ch.displayName, ch.sourceNames, targetDate),
+    );
   };
 
   let channelRows: ChannelDailySummaryDTO[] = [];

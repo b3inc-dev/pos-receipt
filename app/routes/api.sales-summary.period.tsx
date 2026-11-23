@@ -7,6 +7,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
+import { parseSalesSummaryLoadId } from "../utils/salesSummaryLoadShare.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import { buildPeriodSalesSummaryPayload } from "../services/salesSummaryPeriodPayload.server";
 
@@ -23,12 +24,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     const url = new URL(request.url);
+    const locationIdsParam = url.searchParams.getAll("locationIds[]");
     const payload = await buildPeriodSalesSummaryPayload(admin, shop, {
       dateFrom: url.searchParams.get("dateFrom"),
       dateTo: url.searchParams.get("dateTo"),
       budgetDateTo: url.searchParams.get("budgetDateTo"),
       progressAsOfDate: url.searchParams.get("progressAsOfDate"),
-      locationIdsParam: url.searchParams.getAll("locationIds[]"),
+      locationIdsParam,
+      loadId: parseSalesSummaryLoadId(url.searchParams.get("loadId")),
+      // 個店表示（店を指定）では POS がチャネル行も合計も出さないので数えない
+      skipChannels: locationIdsParam.length > 0,
     });
 
     return corsJson(payload);
