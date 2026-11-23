@@ -81,7 +81,7 @@ export async function action({ request }: ActionFunctionArgs) {
     enableCashRefund: bool("enableCashRefund", true),
     enablePaymentMethodOverride: bool("enablePaymentMethodOverride", true),
     enableVoucherChangeAdjustment: bool("enableVoucherChangeAdjustment", true),
-    enableReceiptCashAdjustment: bool("enableReceiptCashAdjustment", true),
+    enableReceiptCashAdjustment: bool("enableReceiptCashAdjustment", false),
     requireOriginalPaymentMethodForPaymentOverride: bool("requireOriginalPaymentMethodForPaymentOverride", true),
     requireActualRefundMethodForPaymentOverride: bool("requireActualRefundMethodForPaymentOverride", true),
     requireNoteForCashRefund: bool("requireNoteForCashRefund", false),

@@ -315,7 +315,8 @@ export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
   enableCashRefund: true,
   enablePaymentMethodOverride: true,
   enableVoucherChangeAdjustment: true,
-  enableReceiptCashAdjustment: true,
+  // 初めはオフ（T の決定 2026-11-24: レジ誤差は店の負担で本部に報告するので、基本は使わない）
+  enableReceiptCashAdjustment: false,
   requireOriginalPaymentMethodForPaymentOverride: true,
   requireActualRefundMethodForPaymentOverride: true,
   requireNoteForCashRefund: false,
