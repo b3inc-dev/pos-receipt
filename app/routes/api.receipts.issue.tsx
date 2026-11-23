@@ -10,6 +10,9 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
 import { encodeReceiptPrintSnapshot, renderReceiptHtmlByPaperWidth } from "../services/receiptPrintSnapshot.server";
+import { getPrintLayout, renderLayoutForPrint } from "../services/receiptLayoutPrint.server";
+import { LAYOUT_RECEIPT_ORDER_QUERY, receiptTemplateData } from "../services/receiptLayoutAdapters";
+import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import { getAppSetting } from "../utils/appSettings.server";
 import { issuerNameAtIssue, normalizeStaffId, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
 
@@ -113,6 +116,32 @@ export async function action({ request }: ActionFunctionArgs) {
     const effectiveProviso = String(proviso || templateData.defaultProviso || "お買上品代として");
     const locationId = order.retailLocation?.id ?? "";
     const locationName = order.retailLocation?.name ?? "";
+    // 管理画面のレイアウト（#69）を「印字に使う」にしているときだけ。発行の時点の HTML を保存する（再印刷も同じ紙面）
+    const receiptLayout = await getPrintLayout(shop.id, "receipt");
+    let layoutSource: {
+      shop: { name?: string; currencyCode?: string } | null;
+      order: Record<string, unknown> | null;
+      timezone: string;
+    } | null = null;
+    if (receiptLayout) {
+      try {
+        const res = await admin.graphql(LAYOUT_RECEIPT_ORDER_QUERY, { variables: { id: gid } });
+        const json = (await res.json()) as {
+          errors?: unknown[];
+          data?: { shop?: { name?: string; currencyCode?: string }; order?: Record<string, unknown> | null };
+        };
+        if (!json.errors?.length && json.data?.order) {
+          layoutSource = {
+            shop: json.data.shop ?? null,
+            order: json.data.order,
+            timezone: await getShopTimezoneForDaily(admin, shop.id),
+          };
+        }
+      } catch {
+        layoutSource = null;
+      }
+    }
+
     const issued = await prisma.$transaction(async (tx) => {
       const created = await tx.receiptIssue.create({
         data: {
@@ -135,14 +164,42 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
 
+      let rendered: Record<58 | 80, string> = renderReceiptHtmlByPaperWidth(
+        { ...created, proviso: created.proviso ?? effectiveProviso },
+        locationName,
+        templateData as unknown as Record<string, unknown>,
+      );
+      if (receiptLayout && layoutSource) {
+        // レイアウトで作れなくても（タイムゾーンの設定の誤りなど）領収書の発行は止めない
+        try {
+          const data = receiptTemplateData({
+            shop: layoutSource.shop,
+            order: layoutSource.order,
+            issue: {
+              recipientName: created.recipientName ?? "",
+              proviso: created.proviso ?? effectiveProviso,
+              amount: Number(created.amount),
+              currency: created.currency ?? "JPY",
+              orderName: created.orderName ?? "",
+              createdAt: created.createdAt,
+            },
+            timezone: layoutSource.timezone,
+            printedAt: created.createdAt.toISOString(),
+          });
+          const html58 = renderLayoutForPrint(receiptLayout, data, 58);
+          const html80 = renderLayoutForPrint(receiptLayout, data, 80);
+          // どちらかでも作れなければ、今までの領収書のまま（58 と 80 で紙面が違うものを保存しない）
+          if (html58 && html80) rendered = { 58: html58, 80: html80 };
+        } catch (e) {
+          console.warn("[receipt-layout] receipt render failed; using the standard receipt", {
+            error: (e instanceof Error ? e.message : String(e)).slice(0, 200),
+          });
+        }
+      }
       const printSnapshotJson = encodeReceiptPrintSnapshot({
         locationName,
         templateData: templateData as unknown as Record<string, unknown>,
-        renderedHtmlByPaperWidth: renderReceiptHtmlByPaperWidth(
-          { ...created, proviso: created.proviso ?? effectiveProviso },
-          locationName,
-          templateData as unknown as Record<string, unknown>,
-        ),
+        renderedHtmlByPaperWidth: rendered,
       });
 
       return tx.receiptIssue.update({

@@ -24,6 +24,8 @@ import {
 } from "../services/salesReceiptPrint.server";
 import { GIFT_LAYOUT_KEY, type GiftLayout } from "../utils/salesReceiptSettings";
 import { GIFT_ORDER_QUERY, giftOrderHtml } from "../services/giftOrderReceipt";
+import { getPrintLayout, PRINT_CSP } from "../services/receiptLayoutPrint.server";
+import { layoutOrderHtml } from "../services/receiptLayoutOrderPrint.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -66,6 +68,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const gid = orderId.startsWith("gid://") ? orderId : `gid://shopify/Order/${orderId}`;
     const copy = new URL(request.url).searchParams.get("copy");
+    if (copy !== null && copy !== "gift") {
+      return corsErrorJson(request, { ok: false, error: "帳票種別が無効です。" }, 400);
+    }
+    const paperWidthMm = settings.paperWidthMm === 58 ? 58 : 80;
+
+    // 管理画面のレイアウト（#69）を「印字に使う」にしているときだけ。作れなければ今までの印字
+    const layoutKind = copy === "gift" ? "gift" : "sales";
+    const layout = await getPrintLayout(shop.id, layoutKind);
+    if (layout) {
+      const result = await layoutOrderHtml(admin, shop.id, gid, layout, {
+        kind: layoutKind,
+        paperWidthMm,
+        shopName: settings.headerTitle || undefined,
+      });
+      if (result.status === "not_found") {
+        return corsErrorJson(request, { ok: false, error: "注文が見つかりません。" }, 404);
+      }
+      if (result.status === "ok") {
+        return corsHtml(request, result.html, { headers: { "Content-Security-Policy": PRINT_CSP } });
+      }
+    }
+
     if (copy === "gift") {
       const giftLayout = await getAppSetting<GiftLayout>(shop.id, GIFT_LAYOUT_KEY);
       const html = await giftOrderHtml(async (after) => {
@@ -77,7 +101,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       if (html === null) return corsErrorJson(request, { ok: false, error: "注文が見つかりません。" }, 404);
       return corsHtml(request, html);
     }
-    if (copy !== null) return corsErrorJson(request, { ok: false, error: "帳票種別が無効です。" }, 400);
     const response = await admin.graphql(SALES_RECEIPT_ORDER_QUERY, { variables: { id: gid } });
     const json = (await response.json()) as {
       errors?: unknown[];

@@ -22,7 +22,8 @@ export function TabGroupBar({ tabs }: TabGroupBarProps) {
   const search = location.search || "";
 
   const selected = useMemo(() => {
-    const idx = tabs.findIndex((t) => t.path === location.pathname);
+    // 下の階層（/app/receipt-layouts/sales など）でもそのタブを選択中にする
+    const idx = tabs.findIndex((t) => t.path === location.pathname || location.pathname.startsWith(`${t.path}/`));
     return idx >= 0 ? idx : 0;
   }, [tabs, location.pathname]);
 
@@ -38,6 +39,7 @@ export function TabGroupBar({ tabs }: TabGroupBarProps) {
 /** 1. レシート */
 export const RECEIPT_TABS: TabItem[] = [
   { path: "/app/sales-receipt-layout", label: "販売レイアウト" },
+  { path: "/app/receipt-layouts", label: "レイアウト編集" },
   { path: "/app/sales-receipt-settings", label: "販売レシート設定" },
   { path: "/app/receipt-template", label: "領収書テンプレート" },
   { path: "/app/receipt-print-layout", label: "領収書印字プレビュー" },

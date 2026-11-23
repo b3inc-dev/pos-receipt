@@ -19,12 +19,14 @@ import {
 } from "../utils/appSettings.server";
 import { resolvePaperWidthMm } from "../services/printUnification.server";
 import { buildSettlementReprintView } from "../services/settlementPrintSnapshot.server";
+import { getPrintLayout, PRINT_CSP } from "../services/receiptLayoutPrint.server";
+import { layoutSettlementHtml } from "../services/receiptLayoutSettlementPrint.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
-    const { shop } = authResult;
+    const { admin, shop } = authResult;
     const id = params.id;
     if (!id) {
       return corsErrorJson(request, { ok: false, error: "id is required" }, 400);
@@ -50,6 +52,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const printSettings =
       (await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {};
     const devicePaperWidthMm = resolvePaperWidthMm(printSettings);
+
+    // 管理画面のレイアウト（#69）を「印字に使う」にしているときだけ。作れなければ今までの印字
+    const layout = await getPrintLayout(shop.id, "settlement");
+    if (layout) {
+      const html = await layoutSettlementHtml(admin, shop.id, settlement, layout, {
+        currentLocationName,
+        paperWidthMm: devicePaperWidthMm,
+      }).catch((e: unknown) => {
+        console.warn("[receipt-layout] settlement print failed; falling back", {
+          error: (e instanceof Error ? e.message : String(e)).slice(0, 200),
+        });
+        return null;
+      });
+      if (html) return corsHtml(request, html, { headers: { "Content-Security-Policy": PRINT_CSP } });
+    }
 
     const reprint = buildSettlementReprintView(settlement, {
       currentLocationName,
