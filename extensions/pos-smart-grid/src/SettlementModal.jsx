@@ -1100,6 +1100,12 @@ function PreviewView({
                 </s-box>
               ) : null}
 
+              {preview.awaitingApprovalSpecialRefunds?.length ? (
+                <s-text tone="caution">
+                  {preview.awaitingApprovalWarning ??
+                    `管理者の承認待ちの付け替えが ${preview.awaitingApprovalSpecialRefunds.length} 件あります。承認されるまで上の金額に入っていません。`}
+                </s-text>
+              ) : null}
               {preview.pendingSpecialRefundOrderLabels?.length ? (
                 <s-text tone="caution">
                   返金処理中の特殊返金があります（注文: {preview.pendingSpecialRefundOrderLabels.slice(0, 5).join("、")}）。この返金は上の金額に入っていません。点検は出せますが、精算（確定）の前に特殊返金の「Shopify 返金を確かめる」を押してください（自動の確定をオンにした店では、数分たつと自動で読み直します）。

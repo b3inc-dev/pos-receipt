@@ -206,12 +206,19 @@ model SpecialRefundEvent {
   shopifyRefundId         String?
   shopifyRefundError      String?
   shopifyRefundProcessedAt DateTime?
+  /// 管理者の承認（支払方法の付け替え・設定でオンのときだけ）: none | pending | approved | rejected
+  /// pending・rejected は精算・売上サマリーに数えない。status（active | voided）とは別に持つ
+  approvalStatus          String   @default("none")
+  approvalReviewedAt      DateTime?
+  /// 承認・却下した管理画面の人（オンラインのセッションなら名前、なければ Shopify のユーザー ID「shopify_user:<ID>」）。取れないときは null。DB にだけ残す
+  approvalDecidedBy       String?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
   @@index([shopId, sourceOrderId])
   @@index([locationId, createdAt])
   @@index([eventType, createdAt])
+  @@index([shopId, approvalStatus])
 }
 
 // ========== 20.6 領収書テンプレート（MVP は 1 件のみ active） ==========

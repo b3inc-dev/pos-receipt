@@ -273,7 +273,8 @@ describe("pending（Shopify 返金の成否が分からない）— 監査 P1-1"
 
   it("settlementEngine は上乗せの前に pending を確かめ、精算 API は 409 で返す", () => {
     const engine = readFileSync(new URL("./settlementEngine.server.ts", import.meta.url), "utf8");
-    const guard = engine.indexOf("assertNoPendingSpecialRefunds(otherEvents)");
+    // 承認待ちの付け替えも含めて確かめる（otherEventsReflected = 承認で分ける前）
+    const guard = engine.indexOf("assertNoPendingSpecialRefunds(otherEventsReflected)");
     const apply = engine.indexOf("applySpecialRefundEventsToTotals(");
     assert.ok(guard > 0 && apply > guard);
     const apiErr = readFileSync(new URL("../utils/settlementApiError.server.ts", import.meta.url), "utf8");

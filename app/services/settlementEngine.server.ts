@@ -55,6 +55,11 @@ import {
 } from "./specialRefundOverlayPure.server";
 import { fetchGiftCardRefundsForDay } from "./settlementGiftCardRefunds.server";
 import {
+  awaitingApprovalWarningMessage,
+  partitionSpecialRefundEventsByApproval,
+  type AwaitingApprovalSpecialRefund,
+} from "../utils/specialRefundApproval";
+import {
   SETTLEMENT_CALC_SETTINGS_KEY,
   paymentSectionTxCount,
   resolveSettlementCalcSettings,
@@ -120,6 +125,12 @@ export interface SettlementPreviewDTO {
    * マスタに無い返金方法は「未分類」の行に入っている。精算は確定できる（合計は正しい）。
    */
   unmatchedRefundMethods?: (UnmatchedRefundMethodWarning & { message: string })[];
+  /**
+   * 管理者の承認待ちの返金手段変更（設定でオンのときだけ。無いときは入れない）。
+   * 上の金額には入っていない。精算は確定できる（承認したあとは再集計で入る）。
+   */
+  awaitingApprovalSpecialRefunds?: AwaitingApprovalSpecialRefund[];
+  awaitingApprovalWarning?: string;
   appliedSpecialRefundEvents: {
     id: string;
     eventType: string;
@@ -903,7 +914,7 @@ async function buildSettlementPreviewImpl(
   const voucherAdjustments = srSettings.reflectVoucherAdjustmentToSettlement
     ? voucherAdjustmentsAll
     : [];
-  const otherEvents = otherEventsAll.filter((e) => {
+  const otherEventsReflected = otherEventsAll.filter((e) => {
     if (e.eventType === "cash_refund") return srSettings.reflectCashRefundToSettlement;
     if (e.eventType === "payment_method_override") {
       return srSettings.reflectPaymentOverrideToSettlement;
@@ -913,6 +924,11 @@ async function buildSettlementPreviewImpl(
     }
     return true;
   });
+  // 管理者の承認（設定でオンのときの付け替えだけ）: 承認待ち・却下は数えない。
+  // 売上サマリーも buildSettlementPreview を通るので同じになる。
+  // Shopify 返金の成否が分からない（pending）ものは、承認待ちでも Shopify 側に返金がありうるので下の確認には含める。
+  const { counted: otherEvents, awaitingApproval: awaitingApprovalEvents } =
+    partitionSpecialRefundEventsByApproval(otherEventsReflected);
 
   // 精算に入る特殊返金で Shopify 返金の成否が分からないもの（pending）があれば確定しない。
   // 数えると Shopify の返金と上乗せの二重、数えないと返金の抜けになりうるため（監査 P1-1）。
@@ -922,13 +938,13 @@ async function buildSettlementPreviewImpl(
   let pendingSpecialRefundOrderLabels: string[] | undefined;
   if (opts?.allowPendingSpecialRefunds) {
     try {
-      assertNoPendingSpecialRefunds(otherEvents);
+      assertNoPendingSpecialRefunds(otherEventsReflected);
     } catch (err) {
       if (!(err instanceof SpecialRefundPendingError)) throw err;
       pendingSpecialRefundOrderLabels = err.orderLabels;
     }
   } else {
-    assertNoPendingSpecialRefunds(otherEvents);
+    assertNoPendingSpecialRefunds(otherEventsReflected);
   }
 
   /** DB の手入力調整 + ノート観測（GAS _voucher_change_total と同系） */
@@ -1065,6 +1081,20 @@ async function buildSettlementPreviewImpl(
     taxShopify,
     ...(legacyGiftOn ? { legacyGiftCardsAddedAmount, legacyGiftCardsAddedCount } : {}),
     ...(giftCardRefundOn ? { giftCardRefundAmount, giftCardRefundCount } : {}),
+    ...(awaitingApprovalEvents.length > 0
+      ? (() => {
+          const items = awaitingApprovalEvents.map((e) => ({
+            id: e.id,
+            eventType: e.eventType,
+            amount: roundInt(Number(e.amount)),
+            sourceOrderName: e.sourceOrderName,
+          }));
+          return {
+            awaitingApprovalSpecialRefunds: items,
+            awaitingApprovalWarning: awaitingApprovalWarningMessage(items),
+          };
+        })()
+      : {}),
     ...(unmatchedRefundMethods.length > 0
       ? {
           unmatchedRefundMethods: unmatchedRefundMethods.map((w) => ({

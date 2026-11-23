@@ -449,7 +449,8 @@ describe("つなぎ込み", () => {
     const fetch = src.indexOf("const createdRaw   = await fetchAllOrders(");
     assert.ok(call > 0 && fetch > 0 && call < fetch);
     assert.ok(src.slice(call, fetch).includes("refreshDailySummary: false"));
-    assert.ok(src.includes("assertNoPendingSpecialRefunds(otherEvents)"), "決められなかったものは今までどおり止める");
+    // #91: 承認で分ける前の一覧（otherEventsReflected）で確かめる
+    assert.ok(/assertNoPendingSpecialRefunds\(otherEvents(Reflected)?\)/.test(src), "決められなかったものは今までどおり止める");
   });
 
   it("POS の一覧は、返す前に自動の確定を呼ぶ", () => {
