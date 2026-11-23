@@ -85,7 +85,7 @@ export async function runCiaraBudgetSync(shopId: string, admin: AdminClient): Pr
   if (!ciaraBudgetSyncAvailable()) return finish({ ...base, ok: false, message: "このアプリでは使えません" });
   if (!settings.enabled) return finish({ ...base, ok: false, message: "取り込みがオフです" });
   const secret = ciaraBudgetSyncSecret();
-  if (!secret) return finish({ ...base, ok: false, message: "鍵（CIARA_BUDGET_SYNC_SECRET）が入っていません" });
+  if (!secret) return finish({ ...base, ok: false, message: "サーバーの準備がまだです" });
   if (!isAllowedEndpoint(settings.endpointUrl)) {
     return finish({ ...base, ok: false, message: "ciara-system の URL が正しくありません（https:// で始まる URL）" });
   }
@@ -102,7 +102,7 @@ export async function runCiaraBudgetSync(shopId: string, admin: AdminClient): Pr
       headers: { "X-Cron-Secret": secret, Accept: "application/json" },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
-    if (res.status === 401) return finish({ ...base, ok: false, message: "ciara-system に鍵が合わないと断られました" });
+    if (res.status === 401) return finish({ ...base, ok: false, message: "ciara-system につなげませんでした（合言葉が合いません）" });
     if (res.status === 404) return finish({ ...base, ok: false, message: "ciara-system の読む口が止まっているか、URL が違います" });
     if (!res.ok) return finish({ ...base, ok: false, message: `ciara-system が失敗を返しました（${res.status}）` });
     json = await res.json();

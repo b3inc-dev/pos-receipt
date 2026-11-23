@@ -78,17 +78,22 @@ export default function BudgetSyncPage() {
 
   const back = () => void confirmLeave().then(() => navigate(`/app/budget-management${location.search}`));
 
-  // お知らせ枠は 1 つ: 失敗 → 鍵が無い → 案内 の順
-  let notice: { tone: "critical" | "warning"; title: string; text: string } | null = null;
+  // お知らせ枠は 1 つ（失敗のときだけ）
+  let notice: { tone: "critical"; title: string; text: string } | null = null;
   if (actionData && !actionData.ok) {
     notice = { tone: "critical", title: actionData.intent === "run" ? "取り込めませんでした" : "保存できませんでした", text: actionData.message };
-  } else if (!hasSecret) {
-    notice = {
-      tone: "warning",
-      title: "まだ動きません",
-      text: "サーバーに ciara-system と同じ鍵（CIARA_BUDGET_SYNC_SECRET）が入っていません。鍵を入れると 1 時間ごとに取り込みます。",
-    };
   }
+  // つながりの状態（サーバーの設定の名前は出さない）
+  const connected = hasSecret && settings.enabled && Boolean(last?.ok);
+  const connectionNote = connected
+    ? "1 時間ごとに取り込んでいます。"
+    : !settings.enabled
+      ? "取り込みをオンにして保存すると、つながりを確かめます。"
+      : !hasSecret
+        ? "サーバーの準備がまだです。準備ができると 1 時間ごとに取り込みます。"
+        : last && !last.ok
+          ? last.message
+          : "「今すぐ取り込む」を押すと、つながりを確かめます。";
 
   return (
     <PolarisPageWrapper>
@@ -148,6 +153,11 @@ export default function BudgetSyncPage() {
           <Layout.AnnotatedSection title="前回の取り込み" description="1 時間ごと（毎時 7 分）に動きます。すぐに合わせたいときは「今すぐ取り込む」を押します。">
             <Card>
               <BlockStack gap="300">
+                <InlineStack gap="200" blockAlign="center">
+                  <Text as="span" variant="headingSm">ciara-system とのつながり</Text>
+                  <Badge tone={connected ? "success" : "attention"}>{connected ? "つながっています" : "まだです"}</Badge>
+                </InlineStack>
+                <Text as="p" tone="subdued">{connectionNote}</Text>
                 <InlineStack align="space-between" blockAlign="center" gap="200">
                   {last ? (
                     <InlineStack gap="200" blockAlign="center">
@@ -174,11 +184,6 @@ export default function BudgetSyncPage() {
                       </Text>
                     )}
                   </BlockStack>
-                )}
-                {(!settings.enabled || !hasSecret) && (
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {!settings.enabled ? "取り込みをオンにして保存すると押せます。" : "鍵が入ると押せます。"}
-                  </Text>
                 )}
               </BlockStack>
             </Card>
