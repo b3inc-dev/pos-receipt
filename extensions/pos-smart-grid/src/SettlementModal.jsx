@@ -545,7 +545,7 @@ function MainView({
                     ) : (
                       <s-stack gap="small">
                         <s-text tone="subdued" size="small">ロケーションが見つかりません</s-text>
-                        <s-button kind="plain" onClick={onRetryLocations}>再読み込み</s-button>
+                        <s-button kind="plain" onClick={onRetryLocations}>再読込</s-button>
                       </s-stack>
                     )}
                   </s-box>
@@ -802,7 +802,7 @@ function PreviewView({
           <s-divider />
           <FixedFooterNavBar
             centerAlignWithButtons
-            leftLabel="履歴一覧"
+            leftLabel="戻る"
             onLeft={onBackToHistory}
             leftDisabled={loading}
             middleLabel="点検"
@@ -1017,7 +1017,7 @@ function PreviewView({
 
         <FixedFooterNavBar
           centerAlignWithButtons
-          leftLabel="履歴一覧"
+          leftLabel="戻る"
           onLeft={onBackToHistory}
           leftDisabled={loading}
           middleLabel="点検"
@@ -1345,7 +1345,14 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
 function HistoryDetailView({ item, onBack }) {
   return (
     <s-page heading="精算履歴明細">
-      <s-scroll-box>
+      <s-stack
+        gap="none"
+        blockSize="100%"
+        inlineSize="100%"
+        minBlockSize="0"
+        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+      >
+      <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
         <s-box padding="base">
           {!item ? (
             <s-text tone="subdued">明細データがありません。</s-text>
@@ -1384,10 +1391,11 @@ function HistoryDetailView({ item, onBack }) {
             </s-stack>
           )}
         </s-box>
-        <s-box padding="base">
-          <s-button kind="plain" onClick={onBack}>← 戻る</s-button>
-        </s-box>
       </s-scroll-box>
+      <s-divider />
+      {/* 一覧に戻るボタンは、下の固定の左寄せに「戻る」でそろえる（T, 2026-11-23） */}
+      <FixedFooterNavBar centerAlignWithButtons leftLabel="戻る" onLeft={onBack} />
+      </s-stack>
     </s-page>
   );
 }
