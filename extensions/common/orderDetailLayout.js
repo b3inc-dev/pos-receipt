@@ -45,12 +45,15 @@ export function orderPaymentSummaryLines(order) {
   return out;
 }
 
-/** 注文の状態の印の色（一覧のバッジと同じ考え方: キャンセル=赤、返金=黄） */
+/**
+ * 注文の状態の印の色。一覧のバッジ（orderDisplayUtils の refundBadge）と同じ:
+ * キャンセル=赤、一部返金=黄（caution）、返金済=橙（warning）
+ */
 export function financialStatusTone(status, cancelledAt) {
   if (cancelledAt) return "critical";
   const s = String(status || "").toUpperCase();
-  if (s === "REFUNDED" || s === "PARTIALLY_REFUNDED") return "warning";
-  if (s === "PENDING" || s === "AUTHORIZED") return "caution";
+  if (s === "PARTIALLY_REFUNDED") return "caution";
+  if (s === "REFUNDED") return "warning";
   return "neutral";
 }
 

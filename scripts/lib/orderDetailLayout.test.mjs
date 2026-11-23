@@ -35,9 +35,9 @@ describe("orderPaymentSummaryLines", () => {
 });
 
 describe("financialStatusTone", () => {
-  it("キャンセル=赤、返金=黄、ほか=灰", () => {
+  it("一覧のバッジと同じ: キャンセル=赤、一部返金=黄、返金済=橙、ほか=灰", () => {
     assert.equal(financialStatusTone("PAID", "2026-11-23T00:00:00Z"), "critical");
-    assert.equal(financialStatusTone("PARTIALLY_REFUNDED"), "warning");
+    assert.equal(financialStatusTone("PARTIALLY_REFUNDED"), "caution");
     assert.equal(financialStatusTone("REFUNDED"), "warning");
     assert.equal(financialStatusTone("PAID"), "neutral");
   });
