@@ -1,5 +1,5 @@
 /**
- * 特殊返金・商品券調整を注文メタフィールド `pos.adjustments` に書く／読む（docs/ORDER_ADJUSTMENTS_METAFIELD.md）。
+ * 返金方法変更・商品券釣銭登録を注文メタフィールド `pos.adjustments` に書く／読む（docs/ORDER_ADJUSTMENTS_METAFIELD.md）。
  * 値は毎回、その注文の DB の行（全部）から作り直してまるごと書く。書けなくても登録は取り消さず、
  * 行に metafieldSyncError を残す（精算は警告を出し、次の書き込みで直る）。
  */
@@ -77,7 +77,7 @@ export function metafieldWrittenOf(sync: OrderAdjustmentsSyncResult): boolean | 
   return sync.skipped ? null : true;
 }
 
-/** その店で、特殊返金・商品券調整を注文メタフィールドに書く・読むか（特殊返金設定。初めはオフ） */
+/** その店で、返金方法変更・商品券釣銭登録を注文メタフィールドに書く・読むか（特殊返金設定。初めはオフ） */
 export async function isOrderAdjustmentsMetafieldEnabled(shopId: string): Promise<boolean> {
   const raw = await getAppSetting<Partial<SpecialRefundSettings>>(shopId, SPECIAL_REFUND_SETTINGS_KEY);
   return { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...raw }.writeOrderAdjustmentsMetafield === true;

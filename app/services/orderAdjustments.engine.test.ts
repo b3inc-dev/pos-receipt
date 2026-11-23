@@ -1,5 +1,5 @@
 /**
- * 特殊返金・商品券調整を注文メタフィールド pos.adjustments に残し、精算はそこから数える
+ * 返金方法変更・商品券釣銭登録を注文メタフィールド pos.adjustments に残し、精算はそこから数える
  * （docs/ORDER_ADJUSTMENTS_METAFIELD.md）。登録・変更・無効化の API と精算・売上サマリーを、合成データで動かして確かめる。
  * （Prisma と Shopify GraphQL だけ差し替える。node --experimental-test-module-mocks が要る: npm test が付ける）
  */

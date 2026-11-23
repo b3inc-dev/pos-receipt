@@ -1,5 +1,5 @@
 /**
- * /app/special-refund-history — 特殊返金・商品券調整 履歴
+ * /app/special-refund-history — 返金方法変更・商品券釣銭登録 履歴
  * 要件書 §19.3: 管理画面 - 特殊返金履歴一覧・取引別確認
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
@@ -38,7 +38,7 @@ const EVENT_TYPE_OPTIONS = [
   { label: "すべて", value: "" },
   { label: "現金返金", value: "cash_refund" },
   { label: "返金方法変更", value: "payment_method_override" },
-  { label: "商品券調整", value: "voucher_change_adjustment" },
+  { label: "商品券釣銭登録", value: "voucher_change_adjustment" },
   { label: "レシート現金調整", value: "receipt_cash_adjustment" },
 ];
 
@@ -46,7 +46,7 @@ function eventTypeLabel(t: string) {
   const map: Record<string, string> = {
     cash_refund: "現金返金",
     payment_method_override: "返金方法変更",
-    voucher_change_adjustment: "商品券調整",
+    voucher_change_adjustment: "商品券釣銭登録",
     receipt_cash_adjustment: "レシート現金調整",
   };
   return map[t] ?? t;
@@ -263,7 +263,7 @@ export default function SpecialRefundHistoryPage() {
   return (
     <PolarisPageWrapper>
       <Page
-        title="特殊返金・商品券調整 履歴"
+        title="返金方法変更・商品券釣銭登録 履歴"
         backAction={{ content: "戻る", onAction: to("/app") }}
       >
         <Card padding="0">

@@ -2,7 +2,7 @@
  * POST /api/admin/settlement-metafields/ensure
  * 管理画面: 注文メタフィールド定義を一括作成（冪等）
  * - namespace settlement（精算結果）
- * - namespace pos（特殊返金・商品券調整・返金集計ロケーション等）
+ * - namespace pos（返金方法変更・商品券釣銭登録・返金集計ロケーション等）
  */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";

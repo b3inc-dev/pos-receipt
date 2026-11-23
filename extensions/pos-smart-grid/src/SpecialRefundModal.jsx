@@ -1,21 +1,21 @@
 /**
- * 特殊返金・商品券調整モーダル
+ * 返金方法変更・商品券釣銭登録モーダル
  * 要件書 §7, §23.2
  *
  * Steps:
  *   day_list     → ロケーション・年月日＋その日の取引一覧（バッジ）
- *   order_detail → 取引サマリー＋イベント一覧＋固定フッターで特殊返金／商品券調整を選択
+ *   order_detail → 取引サマリー＋イベント一覧＋固定フッターで特殊返金／商品券釣銭登録を選択
  *   form_refund  → 特殊返金フォーム
- *   form_voucher → 商品券調整フォーム（額面だけ入れる。使った額は注文の取引から）
+ *   form_voucher → 商品券釣銭登録フォーム（額面だけ入れる。使った額は注文の取引から）
  *   form_edit    → 登録の「変更」（前の登録を無効にし、直した内容の登録を足す。Shopify の返金はしない）
  *
  * タイルごとに一覧の最初の絞り込みを変える: 「返金・商品券」タイルは返金・キャンセル、「商品券」タイルは商品券釣有り
  * （VoucherModal.jsx が initialListSegment="voucher_change" で開く）
  *
- * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券調整」→ form_voucher へ直行
+ * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券釣銭登録」→ form_voucher へ直行
  */
 import { render } from "preact";
-import { useState, useCallback, useEffect } from "preact/hooks";
+import { useState, useCallback, useEffect, useRef } from "preact/hooks";
 import { getOrder, createRedoDraft } from "../../common/orderPickerApi.js";
 import { PosChoiceField } from "./PosChoiceField.jsx";
 import { NativeRefundReassignForm } from "./NativeRefundReassignForm.jsx";
@@ -28,6 +28,7 @@ import {
   recheckLegacySpecialRefund,
   editSpecialRefund,
   getVoucherApplied,
+  getRefundReservationEnabled,
 } from "../../common/specialRefundApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import {
@@ -117,7 +118,7 @@ function tryDismissModal() {
   return false;
 }
 
-// 特殊返金の event_type 選択肢（voucher_change_adjustment は商品券調整フォームで別途扱う）
+// 特殊返金の event_type 選択肢（voucher_change_adjustment は商品券釣銭登録フォームで別途扱う）
 const FALLBACK_PAYMENT_METHODS = [
   { value: "cash", label: "現金" },
   { value: "manual", label: "手動決済" },
@@ -277,7 +278,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
   // まだ純正で返金していない注文で「ここで登録する」を選んだとき（返金の予約の画面を飛ばす）
   const [reservationSkipped, setReservationSkipped] = useState(false);
 
-  // 取引詳細: 「特殊返金」または「商品券調整」から起動
+  // 取引詳細: 「特殊返金」または「商品券釣銭登録」から起動
   useEffect(() => {
     const vid = sessionStorage.getItem(STORAGE_KEY_VOUCHER);
     const rid = sessionStorage.getItem(STORAGE_KEY_REFUND);
@@ -305,6 +306,24 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
       .finally(() => setOrderEntryLoading(false));
   }, []);
 
+  // 「返金前に登録」（返金の予約）: 一覧の右下のボタンから、まだ返金していない注文を選んで予約の画面へ（T 2026-11-24）
+  const [reservationEnabled, setReservationEnabled] = useState(false);
+  const [reserveMode, setReserveMode] = useState(false);
+  const reserveModeRef = useRef(false);
+  reserveModeRef.current = reserveMode;
+  useEffect(() => {
+    if (initialListSegment === "voucher_change") return;
+    let alive = true;
+    getRefundReservationEnabled()
+      .then((res) => {
+        if (alive) setReservationEnabled(res?.enabled === true);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [initialListSegment]);
+
   const handleOrderSelect = useCallback(async (orderId) => {
     setLoading(true);
     setError("");
@@ -318,7 +337,8 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
       setOrderCorrectionContext(res.orderCorrectionContext ?? null);
         setNativeRefunds(Array.isArray(res.nativeRefunds) ? res.nativeRefunds : null);
       setFromOrderEntry(false);
-      setStep("order_detail");
+      // 「返金前に登録」から選んだ注文は、注文の詳細を挟まずに予約の画面へ
+      setStep(reserveModeRef.current ? "form_refund" : "order_detail");
     } catch (e) {
       setBootstrapError(toUserMessage(e?.message) || "取得に失敗しました");
     } finally {
@@ -544,12 +564,17 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
   if (step === "day_list") {
     return (
       <OrderDayListScreen
-        pageHeading="返金・商品券（取引を選択）"
+        key={reserveMode ? "reserve" : "list"}
+        pageHeading={reserveMode ? "返金前に登録（取引を選択）" : "返金・商品券（取引を選択）"}
         badgeMode="specialRefund"
         onSelectOrderId={handleOrderSelect}
         noticeError={bootstrapError}
         onDismissNotice={() => setBootstrapError("")}
-        initialSegment={initialListSegment}
+        initialSegment={reserveMode ? "all" : initialListSegment}
+        onBack={reserveMode ? () => setReserveMode(false) : undefined}
+        listAction={
+          reservationEnabled && !reserveMode ? { label: "返金前に登録", onClick: () => setReserveMode(true) } : null
+        }
       />
     );
   }
@@ -634,7 +659,8 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
         allowedEventTypes={allowedEventTypes}
         onBack={() => {
           if (fromOrderEntry && tryDismissModal()) return;
-          setStep("order_detail");
+          // 「返金前に登録」の一覧から来たときは一覧へ戻る
+          setStep(reserveMode ? "day_list" : "order_detail");
         }}
         onOtherRegistration={() => {
           setError("");
@@ -712,7 +738,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
           setStep("order_detail");
         }}
         onSuccess={async (res) => {
-          const parts = ["登録しました（商品券調整は記録のみで、返金はしません）。"];
+          const parts = ["登録しました（商品券釣銭登録は記録だけで、返金はしません）。"];
           if (res?.event?.countDate) parts.push(`注文の日（${shortDateLabel(res.event.countDate)}）の精算に入ります。`);
           if (res?.settlementAlreadyConfirmed) {
             parts.push("その日の精算はもう確定しています。精算の画面でその日を開き「更新」を押し、「今の数で再確定する」を押してください。");
@@ -764,7 +790,7 @@ function OrderDetailView({
     Boolean(order?.estimatedVoucherChange) || (order?.transactions ?? []).length === 0;
 
   return (
-    <s-page heading="特殊返金調整・商品券釣銭調整">
+    <s-page heading="特殊返金調整・商品券釣銭登録">
       <s-stack
         gap="none"
         blockSize="100%"
@@ -900,7 +926,7 @@ function OrderDetailView({
           middleLabel="特殊返金調整"
           onMiddle={onRefund}
           middleDisabled={loading}
-          rightLabel="商品券釣銭調整"
+          rightLabel="商品券釣銭登録"
           onRight={onVoucher}
           rightDisabled={loading || !voucherAdjustable}
         />
@@ -1431,7 +1457,7 @@ function SpecialRefundForm({
 }
 
 // ──────────────────────────────────────────────
-// 商品券調整フォーム
+// 商品券釣銭登録フォーム
 // ──────────────────────────────────────────────
 function VoucherAdjustmentForm({
   order,
@@ -1516,7 +1542,7 @@ function VoucherAdjustmentForm({
 
   if (confirming) {
     return (
-      <s-page heading="商品券釣銭調整を登録">
+      <s-page heading="商品券釣銭を登録">
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
@@ -1547,7 +1573,7 @@ function VoucherAdjustmentForm({
   }
 
   return (
-    <s-page heading="商品券釣銭調整を登録">
+    <s-page heading="商品券釣銭を登録">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
