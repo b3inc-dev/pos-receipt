@@ -31,6 +31,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       loadId: parseSalesSummaryLoadId(url.searchParams.get("loadId")),
       // 個店表示（店を指定）では POS がチャネル行も合計も出さないので数えない
       skipChannels: locationIdsParam.length > 0,
+      // 保存済みの数字だけを返す（全店表示で「○時○分時点」を先に出す用。数え直さない）
+      cachedOnly: url.searchParams.get("cachedOnly") === "1",
     });
 
     return corsJson({

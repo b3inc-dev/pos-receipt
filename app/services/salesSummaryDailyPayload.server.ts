@@ -42,6 +42,13 @@ export type DailySalesSummaryPayload = {
   targetDate: string;
   calendarToday: string;
   displayOptions: ReturnType<typeof mergeAndNormalizeSalesSummarySettings>;
+  /**
+   * cachedOnly のときだけ付く。保存済みの数字だけで組み立てたか。
+   * false = どこかの店・チャネルに保存済みが無い（rows は空。画面は最新の数え直しを待つ）。
+   */
+  cacheComplete?: boolean;
+  /** cachedOnly のときだけ付く。使った保存済みの中で一番古い保存時刻（ISO） */
+  cachedAsOf?: string | null;
 };
 
 export type BuildDailySalesSummaryOptions = {
@@ -60,6 +67,11 @@ export type BuildDailySalesSummaryOptions = {
    * POS の個店表示はチャネル行も合計も出さないため、その分の問い合わせを省く。
    */
   skipChannels?: boolean;
+  /**
+   * true のとき Shopify で数え直さず、保存済みの日次集計（webhook 等で更新済み）だけを返す。
+   * POS の全店表示で「○時○分時点」の数字を先に出すため。数え方は変えない（保存済みを読むだけ）。
+   */
+  cachedOnly?: boolean;
 };
 
 export async function buildDailySalesSummaryPayload(
@@ -77,6 +89,7 @@ export async function buildDailySalesSummaryPayload(
   const forceRecompute = options.forceRecompute === true;
   const loadId = options.loadId ?? null;
   const skipChannels = options.skipChannels === true;
+  const cachedOnly = options.cachedOnly === true;
 
   const emptyPayload = (): DailySalesSummaryPayload => ({
     rows: [],
@@ -139,6 +152,17 @@ export async function buildDailySalesSummaryPayload(
 
   const today = shopCalendarToday;
   const isPastDate = targetDate < today;
+
+  if (cachedOnly) {
+    return buildDailyPayloadFromCacheOnly({
+      shopId: shop.id,
+      targetDate,
+      calendarToday: shopCalendarToday,
+      merged,
+      targetLocations,
+      skipChannels,
+    });
+  }
 
   const buildRow = async (
     loc: SalesSummaryLocationRow,
@@ -282,5 +306,141 @@ export async function buildDailySalesSummaryPayload(
     targetDate,
     calendarToday: shopCalendarToday,
     displayOptions: merged,
+  };
+}
+
+/** 保存済みの日次集計だけで日次ペイロードを作る（Shopify は呼ばない） */
+async function buildDailyPayloadFromCacheOnly(p: {
+  shopId: string;
+  targetDate: string;
+  calendarToday: string;
+  merged: ReturnType<typeof mergeAndNormalizeSalesSummarySettings>;
+  targetLocations: SalesSummaryLocationRow[];
+  skipChannels: boolean;
+}): Promise<DailySalesSummaryPayload> {
+  const { shopId, targetDate, calendarToday, merged, targetLocations } = p;
+  const incomplete = (): DailySalesSummaryPayload => ({
+    rows: [],
+    channelRows: [],
+    totals: { actual: 0, orders: 0, items: 0, budget: null, visitors: null },
+    targetDate,
+    calendarToday,
+    displayOptions: merged,
+    cacheComplete: false,
+    cachedAsOf: null,
+  });
+
+  const idVariants: string[] = [];
+  for (const l of targetLocations) {
+    idVariants.push(l.shopifyLocationGid);
+    const raw = l.shopifyLocationGid.replace("gid://shopify/Location/", "");
+    if (raw) idVariants.push(raw);
+  }
+  const caches = await prisma.salesSummaryCacheDaily.findMany({
+    where: { shopId, locationId: { in: idVariants }, targetDate },
+  });
+  let oldest: Date | null = null;
+  const noteTime = (d: Date | null | undefined) => {
+    if (d && (!oldest || d < oldest)) oldest = d;
+  };
+
+  const rowsBase: Array<DailySummaryRowDTO & { footfallReportingEnabled: boolean }> = [];
+  for (const loc of targetLocations) {
+    const gid = loc.shopifyLocationGid;
+    const raw = gid.replace("gid://shopify/Location/", "");
+    const cached = caches.find((c) => c.locationId === gid) ?? caches.find((c) => c.locationId === raw);
+    if (!cached) return incomplete();
+    noteTime(cached.updatedAt);
+    rowsBase.push({
+      locationId: gid,
+      locationName: loc.name,
+      targetDate,
+      actual: Number(cached.actual),
+      orders: cached.orders,
+      items: cached.items,
+      visitors: cached.visitors,
+      budget: cached.budget !== null ? Number(cached.budget) : null,
+      budgetRatio: cached.budgetRatio !== null ? Number(cached.budgetRatio) : null,
+      conv: cached.conv !== null ? Number(cached.conv) : null,
+      atv: cached.atv !== null ? Number(cached.atv) : null,
+      setRate: cached.setRate !== null ? Number(cached.setRate) : null,
+      unit: cached.unit !== null ? Number(cached.unit) : null,
+      currency: "JPY",
+      footfallReportingEnabled: isFootfallReportingAllowedForLocation(merged, gid),
+    });
+  }
+
+  // 予算は数え直し時と同じく予算表から（保存済みの budget 列より新しい）
+  const budgetByLocDay = await getLocationBudgetAmountsForDayBatch(
+    shopId,
+    rowsBase.map((r) => r.locationId),
+    targetDate,
+  );
+  const rows = rowsBase.map((r) => {
+    const budget = budgetByLocDay.get(r.locationId) ?? null;
+    const budgetRatio = budget != null && budget > 0 ? r.actual / budget : null;
+    return { ...r, budget, budgetRatio };
+  });
+
+  let channelRows: ChannelDailySummaryDTO[] = [];
+  if (!p.skipChannels) {
+    const enabledChannels = await getEnabledSalesChannels(shopId);
+    if (enabledChannels.length > 0) {
+      const chCaches = await prisma.salesChannelCacheDaily.findMany({
+        where: { shopId, channelId: { in: enabledChannels.map((c) => c.id) }, targetDate },
+      });
+      for (const ch of enabledChannels) {
+        const cached = chCaches.find((c) => c.channelId === ch.id);
+        // チャネルの対象（source_name）が変わった後の保存済みは使わない（数え直し時と同じ条件）
+        if (!cached || ch.sourceNamesJson !== ch.sourceNamesSnapshot) return incomplete();
+        noteTime(cached.updatedAt);
+        channelRows.push({
+          channelId: ch.id,
+          channelName: ch.displayName,
+          targetDate,
+          actual: Number(cached.actual),
+          orders: cached.orders,
+          items: cached.items,
+          budget: cached.budget !== null ? Number(cached.budget) : null,
+          budgetRatio: cached.budgetRatio !== null ? Number(cached.budgetRatio) : null,
+          atv: cached.atv !== null ? Number(cached.atv) : null,
+          setRate: cached.setRate !== null ? Number(cached.setRate) : null,
+          unit: cached.unit !== null ? Number(cached.unit) : null,
+          currency: cached.currency,
+        });
+      }
+      const budgetByChannelDay = await getChannelBudgetAmountsForDayBatch(
+        shopId,
+        channelRows.map((r) => r.channelId),
+        targetDate,
+      );
+      channelRows = channelRows.map((r) => {
+        const budget = budgetByChannelDay.get(r.channelId) ?? null;
+        const budgetRatio = budget != null && budget > 0 ? r.actual / budget : null;
+        return { ...r, budget, budgetRatio };
+      });
+    }
+  }
+
+  const grandForBudget = [...rows, ...channelRows];
+  const totals = {
+    actual: rows.reduce((s, r) => s + r.actual, 0) + channelRows.reduce((s, r) => s + r.actual, 0),
+    orders: rows.reduce((s, r) => s + r.orders, 0) + channelRows.reduce((s, r) => s + r.orders, 0),
+    items: rows.reduce((s, r) => s + r.items, 0) + channelRows.reduce((s, r) => s + r.items, 0),
+    budget: sumOptionalBudgetColumn(grandForBudget, "budget"),
+    visitors: rows.some((r) => r.visitors !== null)
+      ? rows.reduce((s, r) => s + (r.visitors ?? 0), 0)
+      : null,
+  };
+  const asOf = oldest as Date | null;
+  return {
+    rows,
+    channelRows,
+    totals,
+    targetDate,
+    calendarToday,
+    displayOptions: merged,
+    cacheComplete: true,
+    cachedAsOf: asOf ? asOf.toISOString() : null,
   };
 }

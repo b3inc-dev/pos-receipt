@@ -155,6 +155,13 @@ function fmtAmount(n) {
   return `¥${fmtNum(n)}`;
 }
 
+/** 「15:42時点」形式（端末の時刻。店舗の端末は日本時間）。時刻が無ければ「保存済み」 */
+function cachedAsOfLabel(cached) {
+  const d = cached?.at;
+  if (!d || Number.isNaN(d.getTime())) return "保存済み";
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}時点`;
+}
+
 /** サマリー行の locationId と POS セッション GID を照合（数値のみ / GID 形式の差を吸収） */
 function locationIdsMatch(a, b) {
   if (a == null || b == null) return false;
@@ -1511,11 +1518,28 @@ function SalesSummaryModal() {
     ],
   );
   const [loadedSummaryParamsKey, setLoadedSummaryParamsKey] = useState(null);
+  /** 全店・今日で保存済みの数字を出しているとき { at: 保存時刻 | null }（最新に差し替えたら null） */
+  const [cachedAsOf, setCachedAsOf] = useState(null);
+  /** 保存済みを出したあと、裏で数え直している途中か */
+  const [refreshing, setRefreshing] = useState(false);
+  /** 保存済みを出したあと、数え直しに失敗したか */
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const loadSeqRef = useRef(0);
+  // loadData の依存に入れると、読み込みのたびに読み込み直しが起きるので ref で読む
+  const shopCalendarDayRef = useRef(shopCalendarDay);
+  shopCalendarDayRef.current = shopCalendarDay;
 
   const loadData = useCallback(async () => {
     const keyForRequest = summaryParamsKey;
+    const seq = ++loadSeqRef.current;
+    /** 後から始まった読み込みがあれば、この読み込みの結果は捨てる */
+    const stale = () => seq !== loadSeqRef.current;
+    let shownCached = false;
     setLoading(true);
     setError("");
+    setCachedAsOf(null);
+    setRefreshing(false);
+    setRefreshFailed(false);
     try {
       if (scope === "single" && !sessionGid) {
         setData(null);
@@ -1527,6 +1551,42 @@ function SalesSummaryModal() {
       let result;
       if (grain === "daily") {
         const mr = monthRangeForTargetDate(targetDate);
+
+        // 全店・今日: 保存済みの数字（○時○分時点）を先に出し、裏で数え直して差し替える
+        if (scope === "all" && isTodayDate(targetDate, shopCalendarDayRef.current)) {
+          try {
+            const [cachedDaily, cachedMonth] = await Promise.all([
+              getDailySummary({ targetDate, locationIds: locationIdsForApi, cachedOnly: true }),
+              mr
+                ? getPeriodSummary({
+                    dateFrom: mr.dateFrom,
+                    dateTo: mr.dateTo,
+                    budgetDateTo: mr.budgetDateTo,
+                    progressAsOfDate: targetDate,
+                    locationIds: locationIdsForApi,
+                    cachedOnly: true,
+                  })
+                : Promise.resolve(null),
+            ]);
+            if (stale()) return;
+            if (cachedDaily?.cacheComplete === true && (!mr || cachedMonth?.cacheComplete === true)) {
+              const asOf = cachedDaily.cachedAsOf ? new Date(cachedDaily.cachedAsOf) : null;
+              setData(cachedDaily);
+              setDailyMonthPeriod(cachedMonth?.rows ? cachedMonth : null);
+              setLoadedSummaryParamsKey(keyForRequest);
+              setLastLoadedAt(asOf);
+              setCachedAsOf({ at: asOf });
+              if (cachedDaily.calendarToday) setShopCalendarDay(cachedDaily.calendarToday);
+              setFooterFootfallInput("");
+              setLoading(false);
+              setRefreshing(true);
+              shownCached = true;
+            }
+          } catch {
+            // 保存済みが読めなくても、数え直しの結果を待てばよい
+          }
+        }
+
         // 日次と当月の期間で同じ「今日・その店」を数えるので、同じ loadId を付けて 1 回にまとめる
         const loadId = newSalesSummaryLoadId();
         const [dailySettled, monthSettled] = await Promise.allSettled([
@@ -1542,6 +1602,7 @@ function SalesSummaryModal() {
               })
             : Promise.resolve(null),
         ]);
+        if (stale()) return;
         if (dailySettled.status === "rejected") {
           const reason = dailySettled.reason;
           throw reason instanceof Error ? reason : new Error(String(reason));
@@ -1561,6 +1622,7 @@ function SalesSummaryModal() {
           budgetDateTo,
           locationIds: locationIdsForApi,
         });
+        if (stale()) return;
       } else {
         setDailyMonthPeriod(null);
         const dateFrom = periodAppliedFrom;
@@ -1573,8 +1635,10 @@ function SalesSummaryModal() {
           return;
         }
         result = await getPeriodSummary({ dateFrom, dateTo, locationIds: locationIdsForApi });
+        if (stale()) return;
       }
       setData(result);
+      setCachedAsOf(null);
       setLoadedSummaryParamsKey(keyForRequest);
       setLastLoadedAt(new Date());
       if (grain === "daily" && result?.calendarToday) {
@@ -1591,12 +1655,21 @@ function SalesSummaryModal() {
         setFooterFootfallInput("");
       }
     } catch (err) {
-      setError(toUserMessage(err?.message));
-      setData(null);
-      setDailyMonthPeriod(null);
-      setLoadedSummaryParamsKey(null);
+      if (stale()) return;
+      if (shownCached) {
+        // 保存済みの数字は出したまま、最新にできなかったことだけ知らせる
+        setRefreshFailed(true);
+      } else {
+        setError(toUserMessage(err?.message));
+        setData(null);
+        setDailyMonthPeriod(null);
+        setLoadedSummaryParamsKey(null);
+      }
     } finally {
-      setLoading(false);
+      if (!stale()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [summaryParamsKey, scope, sessionGid, grain, targetDate, selectedYear, selectedMonth, periodAppliedFrom, periodAppliedTo, locationIdsForApi]);
 
@@ -2293,6 +2366,16 @@ function SalesSummaryModal() {
                     読み込み中…
                   </s-text>
                 ) : null}
+                {!summaryShowLoading && cachedAsOf && refreshing ? (
+                  <s-banner status="info">
+                    {`${cachedAsOfLabel(cachedAsOf)}の数字です。最新の数字に更新しています…`}
+                  </s-banner>
+                ) : null}
+                {!summaryShowLoading && cachedAsOf && refreshFailed ? (
+                  <s-banner status="warning">
+                    {`最新の数字を取れませんでした。${cachedAsOfLabel(cachedAsOf)}の数字を表示しています。「更新」でもう一度試せます。`}
+                  </s-banner>
+                ) : null}
                 {error ? (
                   <s-banner status="critical">{error}</s-banner>
                 ) : null}
@@ -2421,7 +2504,7 @@ function SalesSummaryModal() {
             {/* POS Stock: FixedFooterNavBar centerAlignWithButtons と同型（space-between 3 子） */}
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
               <s-button kind="secondary" onClick={loadData} disabled={loading}>
-                {loading ? "更新中.." : "更新"}
+                {loading || refreshing ? "更新中.." : "更新"}
               </s-button>
               {showFooterFootfallButton ? (
                 <s-box style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>

@@ -58,6 +58,7 @@ export async function getDailySummary(options) {
   if (targetDate) params.set("targetDate", targetDate);
   if (recompute) params.set("recompute", "1");
   if (loadId) params.set("loadId", loadId);
+  if (options?.cachedOnly === true) params.set("cachedOnly", "1");
   for (const id of locationIds) params.append("locationIds[]", id);
   return apiFetch(`/api/sales-summary/daily?${params.toString()}`);
 }
@@ -72,6 +73,7 @@ export async function getPeriodSummary(options) {
   const loadId = options?.loadId;
   const params = new URLSearchParams();
   if (loadId) params.set("loadId", loadId);
+  if (options?.cachedOnly === true) params.set("cachedOnly", "1");
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
   if (budgetDateTo) params.set("budgetDateTo", budgetDateTo);
