@@ -19,6 +19,7 @@ import { useState, useCallback, useEffect } from "preact/hooks";
 import { getOrder, createRedoDraft } from "../../common/orderPickerApi.js";
 import { PosChoiceField } from "./PosChoiceField.jsx";
 import { NativeRefundReassignForm } from "./NativeRefundReassignForm.jsx";
+import { RefundReservationForm } from "./RefundReservationForm.jsx";
 import {
   listSpecialRefunds,
   createSpecialRefund,
@@ -271,6 +272,8 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
   const [nativeRefunds, setNativeRefunds] = useState(null);
   // 純正で返金した注文で「レシートの現金を直す」を選んだとき
   const [refundFormOther, setRefundFormOther] = useState(false);
+  // まだ純正で返金していない注文で「ここで登録する」を選んだとき（返金の予約の画面を飛ばす）
+  const [reservationSkipped, setReservationSkipped] = useState(false);
 
   // 取引詳細: 「特殊返金」または「商品券調整」から起動
   useEffect(() => {
@@ -554,6 +557,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
         }}
         onRefund={() => {
           setRefundFormOther(false);
+          setReservationSkipped(false);
           setStep("form_refund");
         }}
         onVoucher={() => setStep("form_voucher")}
@@ -597,6 +601,27 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
           if (fromOrderEntry && tryDismissModal()) return;
           setStep("order_detail");
         }}
+      />
+    );
+  }
+
+  // まだ純正で返金していない注文: 返金の手段を先に決める（予約）。純正で返金したら自動で付け替える
+  const reservationAllowed =
+    !allowedEventTypes || allowedEventTypes.includes("cash_refund") || allowedEventTypes.includes("payment_method_override");
+  if (step === "form_refund" && !reservationSkipped && reservationAllowed && Array.isArray(nativeRefunds) && nativeRefunds.length === 0) {
+    return (
+      <RefundReservationForm
+        order={selectedOrder}
+        allowedEventTypes={allowedEventTypes}
+        onBack={() => {
+          if (fromOrderEntry && tryDismissModal()) return;
+          setStep("order_detail");
+        }}
+        onOtherRegistration={() => {
+          setError("");
+          setReservationSkipped(true);
+        }}
+        onApplied={refreshEvents}
       />
     );
   }

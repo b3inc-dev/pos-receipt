@@ -11,6 +11,10 @@ import { runSalesSummaryRefreshFromOrderWebhook } from "../services/salesSummary
 import { enqueueSalesSummaryOrdersUpdatedJob } from "../services/salesSummaryWebhookQueue.server";
 import { syncRefundAggregationFromWebhookPayload } from "../services/refundAggregation.server";
 import { backgroundRefreshNeedsRetry } from "../services/salesSummaryBackgroundSlice.server";
+import {
+  applyRefundReservationsForOrder,
+  hasPendingReservation,
+} from "../services/refundReservation.server";
 
 export const loader = async (_: LoaderFunctionArgs) => {
   return new Response("Method Not Allowed", { status: 405 });
@@ -48,6 +52,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!dbShop) {
       console.log(`[orders/updated][pos-receipt] shop not in DB, skip refresh: ${shop}`);
       return new Response("OK", { status: 200 });
+    }
+
+    // 返金の予約: その注文に使う前の予約があるときだけ、できた純正の返金に付け替えを作る（docs/REFUND_RESERVATION.md）。
+    // 失敗しても売上サマリーの処理は続ける（POS で予約を開くと当て直す）
+    try {
+      const orderId = String(
+        (payload as { admin_graphql_api_id?: string; id?: number | string }).admin_graphql_api_id ??
+          (payload as { id?: number | string }).id ??
+          "",
+      );
+      if (orderId && (await hasPendingReservation(dbShop.id, orderId))) {
+        const r = await applyRefundReservationsForOrder(admin, dbShop.id, orderId);
+        if (r.applied || r.review) {
+          console.log(`[orders/updated][pos-receipt] refund reservation applied=${r.applied} review=${r.review} shop=${shop}`);
+        }
+      }
+    } catch (e) {
+      console.warn(`[orders/updated][pos-receipt] refund reservation failed shop=${shop}`, e);
     }
 
     const disabled = process.env.SALES_SUMMARY_WEBHOOK_REFRESH_DISABLED;
