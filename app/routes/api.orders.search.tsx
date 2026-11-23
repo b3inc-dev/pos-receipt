@@ -15,7 +15,12 @@ import { buildSearchQuery, normalizeLocationIdForQuery } from "../utils/orderSea
 import { hasVoucherLikeGatewayHeuristic, matchPaymentMethodMaster } from "../utils/paymentMethodMatch.server";
 import { graphqlWithCustomerFallback } from "../utils/protectedCustomerData";
 import { isShopifyRefundPending } from "../services/specialRefundOverlayPure.server";
-import { pickOrdersRefundedAtLocation, type RefundedAtLocationOrder } from "../utils/ordersRefundedAtLocation";
+import {
+  pickOrdersRefundedAtLocation,
+  shouldAddOrdersRefundedAtLocation,
+  type RefundedAtLocationOrder,
+} from "../utils/ordersRefundedAtLocation";
+import { searchDateRange } from "../utils/shopifySearchDate";
 
 const ORDERS_SEARCH_QUERY_TEMPLATE = `#graphql
   query OrdersSearch($first: Int!, $after: String, $query: String) {
@@ -139,15 +144,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo ?? {};
 
-    // ほかの店舗で売って、この店舗で返品した注文（日付の一覧の 1 ページ目だけ足す。検索・続きの読み込みでは足さない）
+    // ほかの店舗で売って、この店舗で返品した注文（返金のタイルの一覧が印を送ったときの、日付の一覧の 1 ページ目だけ足す。
+    // 印の無い一覧（領収書・商品券釣銭登録・返金前登録・今の版の POS）・検索・続きの読み込みでは足さない）
     let refundedHere: RefundedAtLocationOrder[] = [];
     const locRawForRefund = normalizeLocationIdForQuery(locationId);
-    if (locRawForRefund && !q?.trim() && !cursor && dateFrom && dateTo) {
+    if (
+      shouldAddOrdersRefundedAtLocation({
+        includeRefundedHere: url.searchParams.get("includeRefundedHere"),
+        locationRaw: locRawForRefund,
+        q,
+        cursor,
+        dateFrom,
+        dateTo,
+      })
+    ) {
       try {
-        const start = getDayRangeInUtc(dateFrom, timezone).startUtcIso;
-        const end = getDayRangeInUtc(dateTo, timezone).endUtcIso;
+        const start = getDayRangeInUtc(dateFrom as string, timezone).startUtcIso;
+        const end = getDayRangeInUtc(dateTo as string, timezone).endUtcIso;
         // 返金のある注文だけ（その日に更新）。販売店で絞らず、返金の取引の店で選ぶ
-        const refundQuery = `updated_at:>="${start}" AND updated_at:<="${end}" AND (financial_status:refunded OR financial_status:partially_refunded)`;
+        const refundQuery = `${searchDateRange("updated_at", start, end)} AND (financial_status:refunded OR financial_status:partially_refunded)`;
         const found: Record<string, unknown>[] = [];
         let after: string | null = null;
         for (let page = 0; page < REFUNDED_AT_LOCATION_MAX_PAGES; page++) {
@@ -163,7 +178,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           after = r.data.orders.pageInfo.endCursor ?? null;
           if (!after) break;
         }
-        refundedHere = pickOrdersRefundedAtLocation(found as RefundedAtLocationOrder[], locRawForRefund, start, end);
+        refundedHere = pickOrdersRefundedAtLocation(found as RefundedAtLocationOrder[], locRawForRefund as string, start, end);
       } catch (e) {
         // 読めなくても、この店舗で売った注文の一覧は出す
         console.warn("[orders/search] refunded-at-location read failed", e);

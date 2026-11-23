@@ -48,3 +48,21 @@ export function pickOrdersRefundedAtLocation(
   }
   return out;
 }
+
+/**
+ * 一覧に「ほかの店舗で売って、この店舗で返品した注文」を足すか。
+ * 返金のタイルの一覧が印（includeRefundedHere=1）を送ったときの、日付の一覧の 1 ページ目だけ。
+ * 印の無い一覧（領収書・商品券釣銭登録・返金前登録・前の版の POS）・検索・続きの読み込みでは足さない。
+ */
+export function shouldAddOrdersRefundedAtLocation(p: {
+  includeRefundedHere: string | null | undefined;
+  locationRaw: string | null | undefined;
+  q: string | null | undefined;
+  cursor: string | null | undefined;
+  dateFrom: string | null | undefined;
+  dateTo: string | null | undefined;
+}): boolean {
+  const flag = String(p.includeRefundedHere ?? "").trim().toLowerCase();
+  if (flag !== "1" && flag !== "true") return false;
+  return Boolean(p.locationRaw && !p.q?.trim() && !p.cursor && p.dateFrom && p.dateTo);
+}

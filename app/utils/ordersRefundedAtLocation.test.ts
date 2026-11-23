@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pickOrdersRefundedAtLocation } from "./ordersRefundedAtLocation";
+import { pickOrdersRefundedAtLocation, shouldAddOrdersRefundedAtLocation } from "./ordersRefundedAtLocation";
 
 const S = "2026-11-23T15:00:00Z"; // 11/24 0:00 JST
 const E = "2026-11-24T14:59:59Z";
@@ -28,4 +28,15 @@ test("ほかの店舗で売って、この店舗でその日に返品した注�
 
 test("店舗が分からなければ何も選ばない", () => {
   assert.deepEqual(pickOrdersRefundedAtLocation([order("o1", "1", "2026-11-24T03:00:00Z", "2")], "", S, E), []);
+});
+
+test("足すのは、印を送った日付の一覧の 1 ページ目だけ（印なし・検索・続きでは足さない）", () => {
+  const base = { includeRefundedHere: "1", locationRaw: "1001", q: null, cursor: null, dateFrom: "2026-11-24", dateTo: "2026-11-24" };
+  assert.equal(shouldAddOrdersRefundedAtLocation(base), true);
+  assert.equal(shouldAddOrdersRefundedAtLocation({ ...base, includeRefundedHere: null }), false);
+  assert.equal(shouldAddOrdersRefundedAtLocation({ ...base, includeRefundedHere: "0" }), false);
+  assert.equal(shouldAddOrdersRefundedAtLocation({ ...base, q: "#1001" }), false);
+  assert.equal(shouldAddOrdersRefundedAtLocation({ ...base, cursor: "abc" }), false);
+  assert.equal(shouldAddOrdersRefundedAtLocation({ ...base, locationRaw: null }), false);
+  assert.equal(shouldAddOrdersRefundedAtLocation({ ...base, dateFrom: null }), false);
 });

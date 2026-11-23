@@ -255,12 +255,14 @@ export function OrderDayListScreen({
   const buildSearchParams = useCallback(
     (cursor) => {
       const base = { locationId: locationIdParam, limit: 50, cursor };
+      // 返金のタイルの一覧だけ、ほかの店舗で売ってこの店舗で返品した注文も足す
+      if (storeSwitch) base.includeRefundedHere = true;
       if (isSearchMode) {
         return { ...base, q: searchQuery.trim() };
       }
       return { ...base, dateFrom: dateStr, dateTo: dateStr };
     },
-    [locationIdParam, isSearchMode, searchQuery, dateStr],
+    [locationIdParam, isSearchMode, searchQuery, dateStr, storeSwitch],
   );
 
   const reloadList = useCallback(async () => {
