@@ -25,6 +25,6 @@ export function findSelectableRefundMethod<T extends SelectableRefundMethod>(
 export function refundMethodNotInMasterMessage(actualRefundMethod: unknown): string {
   const shown = String(actualRefundMethod ?? "").trim();
   return shown
-    ? `返金方法「${shown}」は支払方法マスタで特殊返金に選べる返金方法ではありません。管理画面の「支払方法」で登録してから、POS の特殊返金を開き直してください。`
-    : "返金方法を選んでください（支払方法マスタで特殊返金に選べる返金方法から選びます）。";
+    ? `返金方法「${shown}」は、管理画面の「支払方法」で「特殊返金で選べる」がオンになっていません。オンにしてから、この画面を開き直してください。`
+    : "返金方法を選んでください（管理画面の「支払方法」で「特殊返金で選べる」がオンの返金方法から選びます）。";
 }
