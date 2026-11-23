@@ -117,7 +117,7 @@ function model(name: string) {
     count: async (a: any = {}) => rows().filter((x) => matchWhere(x, a.where)).length,
     create: async (a: any) => {
       // schema.prisma の @default / @updatedAt と同じ値を入れる
-      const defaults = name === "specialRefundEvent" ? { approvalStatus: "none", approvalReviewedAt: null } : {};
+      const defaults = name === "specialRefundEvent" ? { approvalStatus: "none", approvalReviewedAt: null, approvalDecidedBy: null } : {};
       const row = { id: `${name}_${idSeq++}`, createdAt: new Date(), updatedAt: new Date(), ...defaults, ...a.data };
       rows().push(row);
       return row;
@@ -274,15 +274,17 @@ test("承認／却下: 承認待ちだけを書き換え、Shopify には何も�
     },
   };
   const { decideSpecialRefundApproval } = await import("./specialRefundApproval.server.ts");
-  const r1 = await decideSpecialRefundApproval(spyAdmin as any, SHOP_ID, "ev1", "approve");
+  const r1 = await decideSpecialRefundApproval(spyAdmin as any, SHOP_ID, "ev1", "approve", "shopify_user:42");
   assert.equal(r1.ok, true);
   assert.equal(store.specialRefundEvent[0].approvalStatus, "approved");
   assert.ok(store.specialRefundEvent[0].approvalReviewedAt instanceof Date);
+  assert.equal(store.specialRefundEvent[0].approvalDecidedBy, "shopify_user:42");
   assert.ok(calls.every((c) => !/^mutation|Create|Update|Set$/i.test(c)), `Shopify mutations: ${calls.join(",")}`);
   // 2 回目（ほかの人が先に決めた）は断る
   const r2 = await decideSpecialRefundApproval(spyAdmin as any, SHOP_ID, "ev1", "reject");
   assert.equal(r2.ok, false);
   assert.equal(store.specialRefundEvent[0].approvalStatus, "approved");
+  assert.equal(store.specialRefundEvent[0].approvalDecidedBy, "shopify_user:42"); // 後の人で上書きしない
   // 売上サマリーのキャッシュは承認後の数
   const cache = store.salesSummaryCacheDaily.find((r) => r.targetDate === TARGET_DATE);
   const engine = await import("./settlementEngine.server.ts");

@@ -28,6 +28,8 @@ export async function decideSpecialRefundApproval(
   shopId: string,
   eventId: string,
   decision: unknown,
+  /** 決めた人（resolveApprovalDecidedBy の結果）。取れないときは null */
+  decidedBy: string | null = null,
 ): Promise<SpecialRefundApprovalResult> {
   const event = await prisma.specialRefundEvent.findFirst({ where: { id: eventId, shopId } });
   if (!event) return { ok: false, code: "NOT_FOUND", message: "登録が見つかりません。画面を読み直してください。" };
@@ -37,7 +39,7 @@ export async function decideSpecialRefundApproval(
   // 二人が同時に押したとき、後の人は「承認待ちではありません」にする（承認待ちのときだけ書き換える）
   const updated = await prisma.specialRefundEvent.updateMany({
     where: { id: event.id, shopId, status: "active", approvalStatus: "pending" },
-    data: { approvalStatus: check.next, approvalReviewedAt: new Date() },
+    data: { approvalStatus: check.next, approvalReviewedAt: new Date(), approvalDecidedBy: decidedBy },
   });
   if (updated.count !== 1) {
     return {

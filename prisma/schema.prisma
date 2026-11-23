@@ -210,6 +210,8 @@ model SpecialRefundEvent {
   /// pending・rejected は精算・売上サマリーに数えない。status（active | voided）とは別に持つ
   approvalStatus          String   @default("none")
   approvalReviewedAt      DateTime?
+  /// 承認・却下した管理画面の人（オンラインのセッションなら名前、なければ Shopify のユーザー ID「shopify_user:<ID>」）。取れないときは null。DB にだけ残す
+  approvalDecidedBy       String?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
