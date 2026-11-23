@@ -780,7 +780,8 @@ async function buildSettlementPreviewImpl(
   const qCancelled = `location_id:${locIdRaw} updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement status:cancelled`;
   // 販売店舗とは別の店舗で処理した返金も拾う。後段で対象店舗の返金 TX のみに
   // 縮約してから union するため、他店舗の売上は混入しない。
-  const qRefundUpdated = `updated_at:>=${dayRange.startUtcIso} updated_at:<=${dayRange.endUtcIso} tag_not:settlement`;
+  // 値は二重引用符で囲む（囲まないと時刻が効かず前の日の注文が混ざる。#102 の shopifySearchDate.ts と同じ形）
+  const qRefundUpdated = `updated_at:>="${dayRange.startUtcIso}" updated_at:<="${dayRange.endUtcIso}" tag_not:settlement`;
 
   const createdRaw   = await fetchAllOrders(admin, qCreated, "CREATED_AT");
   await sleep(GRAPHQL_PAGE_DELAY_MS);
