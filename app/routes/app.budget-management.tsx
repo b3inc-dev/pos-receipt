@@ -31,6 +31,7 @@ import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { ciaraBudgetSyncAvailable } from "../services/ciaraBudgetSync.server";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
+import { normalizeDateInput } from "../utils/budgetMonthGrid";
 
 const PAGE_SIZE = 50;
 
@@ -53,7 +54,7 @@ function monthOptions() {
   for (let offset = -3; offset <= 12; offset++) {
     const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    options.push({ label: key, value: key });
+    options.push({ label: `${d.getFullYear()}年${d.getMonth() + 1}月`, value: key });
   }
   return options;
 }
@@ -239,7 +240,9 @@ async function importBudgetsFromCsvText(params: {
     const rawDate = idxDate >= 0 ? (parts[idxDate] ?? "").trim() : (parts[1] ?? "").trim();
     const rawAmount = idxAmount >= 0 ? (parts[idxAmount] ?? "").trim() : (parts[2] ?? "").trim();
 
-    const targetDate = rawDateJa || rawDate;
+    // 日付は 2026/11/24 でも 2026-11-24 でもよい（保存は 2026-11-24 の形）
+    const rawTargetDate = rawDateJa || rawDate;
+    const targetDate = rawTargetDate ? normalizeDateInput(rawTargetDate) ?? "" : "";
     const amountRaw = rawBudgetJa || rawAmount;
     const amount = parseBudgetAmount(amountRaw);
 
@@ -260,6 +263,10 @@ async function importBudgetsFromCsvText(params: {
     if (amount === null) {
       // 金額空欄は更新せずスキップ（テンプレート下書きを許容）
       skipped++;
+      continue;
+    }
+    if (rawTargetDate && !targetDate) {
+      errors.push(`日付が読めない行: ${parts.join(",")}（2026/11/24 の形で書いてください）`);
       continue;
     }
     if (!locationId || !targetDate) {
@@ -635,7 +642,7 @@ export default function BudgetManagementPage() {
                       onChange={setNewLocId}
                     />
                     <TextField
-                      label="日付 (YYYY-MM-DD)"
+                      label="日付"
                       type="date"
                       value={newDate}
                       onChange={setNewDate}
@@ -734,7 +741,7 @@ export default function BudgetManagementPage() {
                 <BlockStack gap="300">
                   <Text variant="headingSm" as="h2">CSVインポート</Text>
                   <Text as="p" tone="subdued">
-                    フォーマットは「ロケーション名,日付,予算」（テンプレート）または「locationId,targetDate,amount」（従来）に対応しています。
+                    見出しは「ロケーション名,日付,予算」です（上のテンプレートと同じ）。日付は 2026/11/24 のように書きます。前の形の CSV もそのまま読めます。
                   </Text>
                   {importError && <Banner tone="critical"><Text as="p">{importError}</Text></Banner>}
                   {importResult && <Banner tone="success"><Text as="p">{importResult}</Text></Banner>}
@@ -783,7 +790,7 @@ export default function BudgetManagementPage() {
                   <IndexTable.Row id={item.id} key={item.id} position={idx}>
                     <IndexTable.Cell>
                       <Text as="span" variant="bodyMd" fontWeight="semibold">
-                        {item.targetDate}
+                        {item.targetDate.replace(/-/g, "/")}
                       </Text>
                     </IndexTable.Cell>
                     <IndexTable.Cell>{item.locationName}</IndexTable.Cell>

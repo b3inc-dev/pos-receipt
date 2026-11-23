@@ -289,6 +289,7 @@ export default function BudgetDailyPage() {
     <PolarisPageWrapper>
       <Page
         title="予算を日別に入力"
+        fullWidth
         subtitle="店舗と月を選ぶと、その月の毎日の予算を一覧で入力できます。店舗は複数選べます。"
         backAction={{ content: "予算管理", onAction: back }}
       >
@@ -320,7 +321,7 @@ export default function BudgetDailyPage() {
                     <InlineStack align="space-between" blockAlign="center">
                       <Text as="p" variant="bodyMd">店舗（{selectedIds.length} / {data.locations.length}）</Text>
                       <Button
-                        variant="plain"
+                        size="slim"
                         onClick={() => go({ locationIds: allSelected ? [data.locations[0].id] : data.locations.map((l) => l.id) })}
                       >
                         {allSelected ? "1 店に戻す" : "すべて選ぶ"}
