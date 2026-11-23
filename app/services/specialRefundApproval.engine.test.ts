@@ -368,7 +368,7 @@ test("登録 API: 設定オンなら現金返金（現金への付け替え）�
 
 test("登録 API: 設定オンでもレシート現金調整は承認の対象外", async () => {
   store.specialRefundEvent = [];
-  setSpecialRefundSettings({ refundProcessingMode: "record_only", requireApprovalForPaymentMethodOverride: true });
+  setSpecialRefundSettings({ refundProcessingMode: "record_only", requireApprovalForPaymentMethodOverride: true, enableReceiptCashAdjustment: true });
   const { status, json } = await postSpecialRefund({
     ...overrideBody,
     eventType: "receipt_cash_adjustment",
@@ -377,4 +377,17 @@ test("登録 API: 設定オンでもレシート現金調整は承認の対象�
   });
   assert.equal(status, 201, JSON.stringify(json));
   assert.equal(json.event.approvalStatus, "none");
+});
+
+test("登録 API: レシートの現金を直すは初めはオフ（設定でオンにした店だけ登録できる）", async () => {
+  store.specialRefundEvent = [];
+  setSpecialRefundSettings({ refundProcessingMode: "record_only" });
+  const { status } = await postSpecialRefund({
+    ...overrideBody,
+    eventType: "receipt_cash_adjustment",
+    adjustKind: "undo",
+    originalPaymentMethod: null,
+  });
+  assert.ok(status >= 400, `status ${status}`);
+  assert.equal(store.specialRefundEvent.length, 0);
 });

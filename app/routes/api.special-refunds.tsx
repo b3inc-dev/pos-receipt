@@ -94,7 +94,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       where: {
         shopId: shop.id,
         sourceOrderId,
-        eventType: { in: allowedTypes },
+        // 過去の記録は、その種類を今オフにしていても出す（精算には入っているため）。オン・オフは新しい登録だけに効く
       },
       orderBy: { createdAt: "desc" },
     });

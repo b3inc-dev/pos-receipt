@@ -220,7 +220,7 @@ const KIND_LABEL: Record<string, string> = {
   cash_refund: "現金返金",
   payment_method_override: "返金方法変更",
   receipt_cash_adjustment: "レシートの現金を直す",
-  voucher_change_adjustment: "商品券",
+  voucher_change_adjustment: "商品券釣銭登録",
 };
 
 function yen(n: number): string {
