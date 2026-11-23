@@ -27,3 +27,31 @@ describe("toUserMessage", () => {
     assert.equal(toUserMessage("この日はもう精算済みです"), "この日はもう精算済みです");
   });
 });
+
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { withStatus } from "../../extensions/common/errorMessage.js";
+import { specialRefundEventTypeLabel } from "../../extensions/common/specialRefundLabels.js";
+
+describe("画面に出すエラー文と表記", () => {
+  it("API クライアントはエラー文に (HTTP 500) のような番号を付けない", () => {
+    const dir = fileURLToPath(new URL("../../extensions/common/", import.meta.url));
+    for (const f of readdirSync(dir).filter((n) => n.endsWith(".js"))) {
+      const src = readFileSync(dir + f, "utf8");
+      assert.equal(/` \(HTTP \$\{/.test(src), false, f);
+    }
+  });
+
+  it("withStatus は番号を err.status に残し、文は変えない", () => {
+    const e = withStatus(new Error("うまくいきませんでした"), 500);
+    assert.equal(e.message, "うまくいきませんでした");
+    assert.equal(e.status, 500);
+  });
+
+  it("特殊返金の種類は日本語の名前にする", () => {
+    assert.equal(specialRefundEventTypeLabel("cash_refund"), "現金返金");
+    assert.equal(specialRefundEventTypeLabel("payment_method_override"), "返金手段変更");
+    assert.equal(specialRefundEventTypeLabel("something_new"), "特殊返金");
+    assert.equal(specialRefundEventTypeLabel(undefined), "特殊返金");
+  });
+});

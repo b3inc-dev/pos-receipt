@@ -24,6 +24,7 @@ import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { formatYmdSlash, formatJstHm } from "../../common/dateDisplay.js";
+import { specialRefundEventTypeLabel } from "../../common/specialRefundLabels.js";
 import { printSettlementReceipt, getPrintSettings } from "../../common/printApi.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 
@@ -887,7 +888,7 @@ function PreviewView({
   for (const ev of preview.appliedSpecialRefundEvents ?? []) {
     eventRows.push({
       key: `sr-${ev.id}`,
-      label: `${ev.sourceOrderName ?? "-"}（${ev.eventType ?? "-"}）`,
+      label: `${ev.sourceOrderName ?? "-"}（${specialRefundEventTypeLabel(ev.eventType)}）`,
       value: `¥${Number(ev.amount).toLocaleString()}`,
     });
   }
@@ -1053,7 +1054,7 @@ function PreviewView({
                 <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
                   <s-stack gap="none">
                     <s-box padding="small">
-                      <s-text fontWeight="bold" fontSize="small">適用済みイベント</s-text>
+                      <s-text fontWeight="bold" fontSize="small">反映した特殊返金・商品券調整</s-text>
                     </s-box>
                     <s-divider />
                     {eventRows.map((row, i) => (

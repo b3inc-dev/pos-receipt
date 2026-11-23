@@ -52,3 +52,18 @@ export function toUserMessage(msg) {
   if (t.includes("throttled") || t.includes("混雑しています")) return MAP.throttled;
   return msg;
 }
+
+/**
+ * エラーに HTTP の番号を付ける（画面の文には出さない。調べるときに err.status で見る）。
+ * @param {Error} err
+ * @param {number} [status]
+ * @returns {Error}
+ */
+export function withStatus(err, status) {
+  if (status) {
+    try {
+      err.status = status;
+    } catch (_) {}
+  }
+  return err;
+}
