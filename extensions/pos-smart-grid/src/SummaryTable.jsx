@@ -50,9 +50,10 @@ export function SummaryLine({ label, value, strong = false, indent = false, tone
 /** 支払方法別の 1 行: 支払方法 / 件数 / 金額。indent は返金の行 */
 export function PaymentLine({ label, count, amount, indent = false, tone }) {
   return (
-    <s-box paddingBlock="small-300" paddingInlineStart={indent ? "base" : "none"}>
+    <s-box paddingBlock="small-300">
+      {/* 字下げは項目名の欄の中だけ（行ごと下げると件数・金額の列が右にずれる） */}
       <s-stack direction="inline" gap="none" alignItems="center" inlineSize="100%">
-        <s-box inlineSize="54%" minInlineSize="0" maxInlineSize="54%">
+        <s-box inlineSize="54%" minInlineSize="0" maxInlineSize="54%" paddingInlineStart={indent ? "base" : "none"}>
           <s-text type={indent ? "small" : "generic"} color={indent ? "subdued" : "base"}>
             {label}
           </s-text>

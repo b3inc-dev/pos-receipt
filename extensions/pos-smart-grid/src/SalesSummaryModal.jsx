@@ -25,6 +25,7 @@ import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { formatYmdSlash, formatJstHm } from "../../common/dateDisplay.js";
 import { MetricCard } from "./SummaryTable.jsx";
+import { formatYmdWithWeekday } from "../../common/summaryTableLayout.js";
 
 export default async () => {
   render(<SalesSummaryModal />, document.body);
@@ -1102,9 +1103,7 @@ function HistoryDailyDetailView({
                 <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setViewDate(addDays(viewDate, -1))}>
                   前日
                 </s-button>
-                <s-text emphasis="bold" size="small">
-                  {formatYmdSlash(viewDate)}
-                </s-text>
+                <s-text type="strong">{formatYmdWithWeekday(viewDate)}</s-text>
                 <s-button kind="secondary" disabled={!canNextDay} onClick={() => setViewDate(addDays(viewDate, 1))}>
                   翌日
                 </s-button>
@@ -1807,9 +1806,7 @@ function SalesSummaryModal() {
                   <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setTargetDate(addDays(targetDate, -1))}>
                     前日
                   </s-button>
-                  <s-text emphasis="bold" size="small">
-                    {formatYmdSlash(targetDate)}
-                  </s-text>
+                  <s-text type="strong">{formatYmdWithWeekday(targetDate)}</s-text>
                   <s-button kind="secondary" disabled={!canNextDay} onClick={() => setTargetDate(addDays(targetDate, 1))}>
                     翌日
                   </s-button>
