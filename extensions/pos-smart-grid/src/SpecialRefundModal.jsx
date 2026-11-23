@@ -39,6 +39,7 @@ import {
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
+import { VoucherFaceCandidates } from "./VoucherFaceCandidates.jsx";
 import { adjustmentBadges, adjustmentKindLabel, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
 import { financialStatusLabel, listSegmentsForTile } from "./orderDisplayUtils.js";
 import { RedoCheckoutSection } from "./RedoCheckoutSection.jsx";
@@ -1636,11 +1637,9 @@ function VoucherAdjustmentForm({
                 value={appliedState === "loading" ? "読み込み中…" : `¥${applied.toLocaleString()}`}
               />
             )}
-            {/* 全額反映: 商品券で払った額をそのまま額面に入れる（釣銭なし。違えば直す） */}
+            {/* 額面の候補: 払った額より上の近い 100 円区切り 1 つ + 500 円区切り 2 つ（全額反映は釣銭が出ないのでやめた。T 2026-11-24） */}
             {appliedState !== "loading" && appliedAmount !== "" && applied > 0 ? (
-              <s-button kind="secondary" onClick={() => setFaceValue(String(roundMoney(applied)))} disabled={loading}>
-                {`払った額 ¥${roundMoney(applied).toLocaleString()} を額面に入れる（全額反映）`}
-              </s-button>
+              <VoucherFaceCandidates amount={applied} selected={faceValue} onPick={setFaceValue} disabled={loading} />
             ) : null}
 
             {/* 釣銭（自動） */}
