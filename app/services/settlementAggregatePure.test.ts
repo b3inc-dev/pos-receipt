@@ -285,6 +285,78 @@ describe("aggregateGasStyleForOrders — 返金帰属", () => {
     };
   }
 
+  it("店の付かない返金（管理画面）は metafield の店で 1 回だけ数え、販売店では数えない", () => {
+    const order = saleOrder({
+      id: "o-admin-refund-mf",
+      retailLocation: { id: locA },
+      refundAggregationLocationGid: locB,
+      transactions: [
+        {
+          id: "o-admin-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "cash",
+          location: { id: locA },
+        },
+        {
+          id: "o-admin-refund",
+          createdAt: "2026-10-08T03:00:00Z",
+          kind: "REFUND",
+          amountSet: money(300),
+          gateway: "cash",
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T03:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-admin-refund",
+              kind: "REFUND",
+              amountSet: money(300),
+              gateway: "cash",
+            },
+          ],
+        },
+      ],
+    });
+
+    // metafield の店 B（販売店ではない）: 返金だけを 1 回数える
+    const mergedB = mergeCrossLocationRefundOrders(
+      [],
+      [order],
+      alwaysInRange,
+      locB,
+      "200",
+      "refund_transaction_pos_location",
+    );
+    assert.equal(mergedB.length, 1);
+    assert.deepEqual(mergedB[0].transactions?.map((tx) => tx.id), ["o-admin-refund"]);
+    const gasB = aggregateGasStyleForOrders(mergedB, alwaysInRange, attributionOpts(locB, "200"));
+    assert.equal(gasB.pay["現金"]?.sale ?? 0, 0);
+    assert.equal(gasB.pay["現金"]?.refund, 300);
+    assert.equal(gasB.refundOrderSet.size, 1);
+
+    // 販売店 A: 売上は数えるが、返金は数えない
+    const gasA = aggregateGasStyleForOrders([order], alwaysInRange, attributionOpts(locA, "100"));
+    assert.equal(gasA.pay["現金"]?.sale, 1000);
+    assert.equal(gasA.pay["現金"]?.refund ?? 0, 0);
+    assert.equal(gasA.refundOrderSet.size, 0);
+
+    // metafield が別の店（C）なら B には足さない
+    const mergedOther = mergeCrossLocationRefundOrders(
+      [],
+      [{ ...order, refundAggregationLocationGid: "gid://shopify/Location/300" }],
+      alwaysInRange,
+      locB,
+      "200",
+      "refund_transaction_pos_location",
+    );
+    assert.equal(mergedOther.length, 0);
+  });
+
   it("他ロケーションの返金は件数・金額・点数に載せない", () => {
     const order = saleOrder({
       id: "o4",

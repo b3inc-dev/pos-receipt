@@ -164,13 +164,59 @@ export function buildCrossLocationRefundOnlyOrder(
     );
   });
 
-  if (refunds.length === 0 && transactions.length === 0) return null;
+  if (refunds.length === 0 && transactions.length === 0) {
+    // 店の付いた返金 TX が当日 1 つも無い返金（管理画面・外部の返金）は、
+    // 注文の metafield（返金を数える店）が精算の店と同じときだけ、その返金を残す。
+    // 販売店側は decideRefundAttributionForSettlement が同じ metafield を見て数えないので、2 回は数えない。
+    return buildMetafieldAttributedRefundOnlyOrder(
+      order,
+      inRange,
+      settlementLocationId,
+      locIdRaw,
+    );
+  }
   return {
     ...order,
     transactions,
     refunds,
     // 注文単位の最新値ではなく、上で残した返金 TX の店舗を正本にする。
     refundAggregationLocationGid: settlementLocationId,
+  };
+}
+
+/**
+ * 当日の返金に店の付いた返金 TX が 1 つも無く、注文の metafield が精算の店を指すとき、
+ * 当日の返金だけを残した入力を作る（Shopify 管理画面で返金し、返金を数える店を別の店にした注文）。
+ */
+function buildMetafieldAttributedRefundOnlyOrder(
+  order: GasStyleOrder,
+  inRange: (iso?: string) => boolean,
+  settlementLocationId: string,
+  locIdRaw: string,
+): GasStyleOrder | null {
+  if (getPosLocationFromRefundTransactions(order, inRange)) return null;
+  const metafieldGid = normalizeLocationGid(order.refundAggregationLocationGid);
+  if (!metafieldGid) return null;
+  if (!locationGidMatches(metafieldGid, settlementLocationId, locIdRaw)) return null;
+
+  const refunds = (order.refunds ?? []).filter((refund) => inRange(refund.createdAt));
+  if (refunds.length === 0) return null;
+  const refundTxIds = new Set<string>();
+  for (const refund of refunds) {
+    for (const tx of refund.transactions ?? []) {
+      if (tx.id) refundTxIds.add(tx.id);
+    }
+  }
+  const transactions = (order.transactions ?? []).filter((tx) => {
+    if (String(tx.kind ?? "").toUpperCase() !== "REFUND") return false;
+    if (tx.id && refundTxIds.has(tx.id)) return true;
+    return inRange(tx.createdAt) && !tx.location?.id;
+  });
+  return {
+    ...order,
+    transactions,
+    refunds,
+    refundAggregationLocationGid: metafieldGid,
   };
 }
 
