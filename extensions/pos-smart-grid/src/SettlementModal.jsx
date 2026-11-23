@@ -4,7 +4,8 @@
  *
  * Steps:
  *   main     → 固定ヘッダー（ロケーション・年/月）+ 履歴一覧 + 固定フッター
- *   preview  → 精算（集計結果表示）。発行確認は s-modal で重ね表示
+ *   preview  → 精算（集計結果表示）。大事な案内（読み込み中・エラー等）は一覧の上に出す
+ *   confirm  → 点検／精算の発行確認（画面ごと切り替える。重ね表示は使わない）
  *   done     → 完了（印字方式別メッセージ）
  *   historyDetail → 精算履歴明細
  */
@@ -22,13 +23,14 @@ import { getAppUrl } from "../../common/appUrl.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
-import { formatYmdSlash } from "../../common/dateDisplay.js";
+import { formatYmdSlash, formatJstHm } from "../../common/dateDisplay.js";
 import { printSettlementReceipt, getPrintSettings } from "../../common/printApi.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 
 /**
- * 発行確認モーダル（POS Stock / 入庫確定と同型）
- * s-modal は常時マウントし、フッターの s-button に command="--show" commandFor={id} で開く。
+ * 以前の発行確認モーダルの id。
+ * 発行確認は「confirm」の画面に切り替える形にした（iPhone の POS で、点検を押しても確認が出ず
+ * 見出しだけ変わって見えたため）。s-modal はもう置いていないが、閉じる呼び出しは残しても害はない。
  */
 const SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID = "pos-receipt-settlement-issue-inspection";
 const SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID = "pos-receipt-settlement-issue-settle";
@@ -78,6 +80,8 @@ function SettlementModal() {
   const [isInspection, setIsInspection] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  /** 精算の数を読み込んだ時刻（ms）。画面に「HH:MM 時点」と出して、更新が効いたことをわかるようにする */
+  const [previewLoadedAt, setPreviewLoadedAt] = useState(null);
   const [locationLoadError, setLocationLoadError] = useState("");
   const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
 
@@ -226,6 +230,7 @@ function SettlementModal() {
         });
         setTargetDate(date);
         setPreview(res.preview);
+        setPreviewLoadedAt(Date.now());
         setStep(openStep);
         if (refreshMonthRows) {
           await loadMonthRows(selectedLocation.locationId, selectedYear, selectedMonth);
@@ -284,6 +289,7 @@ function SettlementModal() {
       });
       setTargetDate(d);
       setPreview(res.preview);
+      setPreviewLoadedAt(Date.now());
       setStep("preview");
     } catch (e) {
       setError(toUserMessage(e?.message) || "日別明細の取得に失敗しました");
@@ -303,6 +309,7 @@ function SettlementModal() {
         targetDate,
       });
       setPreview(res.preview);
+      setPreviewLoadedAt(Date.now());
     } catch (e) {
       setError(toUserMessage(e?.message) || "再集計に失敗しました");
     } finally {
@@ -381,41 +388,50 @@ function SettlementModal() {
 
   if (step === "preview") {
     return (
-      <>
-        <PreviewView
-          preview={preview}
-          targetDate={targetDate}
-          canPrevDay={targetDate > "2020-01-01"}
-          canNextDay={targetDate < todayStr()}
-          isInspection={isInspection}
-          loading={loading}
-          error={error}
-          onPickDate={(d) => fetchPreviewForDate({ date: d, inspection: isInspection, openStep: "preview" })}
-          onRecalculate={handleRecalculate}
-          onPrepareInspectionIssue={() => {
-            setIsInspection(true);
-            setError("");
-          }}
-          onPrepareSettleIssue={() => {
-            setIsInspection(false);
-            setError("");
-          }}
-          onBackToHistory={() => {
-            hideSettlementIssueConfirmModals();
-            setStep("main");
-          }}
-        />
-        <SettlementIssueConfirmModals
-          preview={preview}
-          printMode={selectedLocation?.printMode ?? "order_based"}
-          loading={loading}
-          error={error}
-          onExecute={handleCreate}
-          onRequestClose={() => {
-            if (!loading) setError("");
-          }}
-        />
-      </>
+      <PreviewView
+        preview={preview}
+        targetDate={targetDate}
+        canPrevDay={targetDate > "2020-01-01"}
+        canNextDay={targetDate < todayStr()}
+        loading={loading}
+        error={error}
+        loadedAt={previewLoadedAt}
+        onPickDate={(d) => fetchPreviewForDate({ date: d, inspection: false, openStep: "preview" })}
+        onRecalculate={handleRecalculate}
+        onPrepareInspectionIssue={() => {
+          setIsInspection(true);
+          setError("");
+          setStep("confirm");
+        }}
+        onPrepareSettleIssue={() => {
+          setIsInspection(false);
+          setError("");
+          setStep("confirm");
+        }}
+        onBackToHistory={() => {
+          hideSettlementIssueConfirmModals();
+          setStep("main");
+        }}
+      />
+    );
+  }
+
+  if (step === "confirm") {
+    return (
+      <SettlementIssueConfirmView
+        preview={preview}
+        printMode={selectedLocation?.printMode ?? "order_based"}
+        isInspection={isInspection}
+        loading={loading}
+        error={error}
+        onExecute={handleCreate}
+        onBack={() => {
+          if (loading) return;
+          setError("");
+          setIsInspection(false);
+          setStep("preview");
+        }}
+      />
     );
   }
 
@@ -725,9 +741,9 @@ function PreviewView({
   targetDate,
   canPrevDay,
   canNextDay,
-  isInspection,
   loading,
   error,
+  loadedAt,
   onPickDate,
   onRecalculate,
   onPrepareInspectionIssue,
@@ -736,7 +752,7 @@ function PreviewView({
 }) {
   if (!preview) {
     return (
-      <s-page heading={isInspection ? "点検レシート" : "精算"}>
+      <s-page heading="精算">
         <s-stack
           gap="none"
           blockSize="100%"
@@ -770,8 +786,10 @@ function PreviewView({
           <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
             <s-box padding="base">
               <s-stack gap="base">
-                <s-text tone="subdued" size="small">当日の精算を読み込み中…</s-text>
-                {error ? <s-text tone="critical">{error}</s-text> : null}
+                <SettlementTopNotices loading={loading} error={error} />
+                {!loading && !error ? (
+                  <s-text tone="subdued" size="small">精算の数を読み込み中…</s-text>
+                ) : null}
                 {!loading ? (
                   <s-button kind="secondary" onClick={() => onPickDate(targetDate)}>
                     再読み込み
@@ -788,13 +806,9 @@ function PreviewView({
             leftDisabled={loading}
             middleLabel="点検"
             onMiddle={onPrepareInspectionIssue}
-            middleCommand="--show"
-            middleCommandFor={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID}
             middleDisabled
             rightLabel="精算"
             onRight={onPrepareSettleIssue}
-            rightCommand="--show"
-            rightCommandFor={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID}
             rightTone="success"
             rightDisabled
           />
@@ -886,7 +900,7 @@ function PreviewView({
   }
 
   return (
-    <s-page heading={isInspection ? "点検レシート" : "精算"}>
+    <s-page heading="精算">
       <s-stack
         gap="none"
         blockSize="100%"
@@ -921,9 +935,14 @@ function PreviewView({
               <s-button kind="secondary" disabled={!canPrevDay || loading} onClick={() => onPickDate(addDays(targetDate, -1))}>
                 前日
               </s-button>
-              <s-text emphasis="bold" size="small">
-                {formatYmdSlash(targetDate)}
-              </s-text>
+              <s-stack gap="none" alignItems="center">
+                <s-text emphasis="bold" size="small">
+                  {formatYmdSlash(targetDate)}
+                </s-text>
+                <s-text tone="subdued" size="small">
+                  {loading ? "読み込み中…" : loadedAt ? `${formatJstHm(loadedAt)} 時点の数` : ""}
+                </s-text>
+              </s-stack>
               <s-button kind="secondary" disabled={!canNextDay || loading} onClick={() => onPickDate(addDays(targetDate, 1))}>
                 翌日
               </s-button>
@@ -936,6 +955,12 @@ function PreviewView({
         <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
           <s-box padding="base">
             <s-stack gap="base">
+              {/*
+                大事な案内は一覧の「上」に出す（下に出すと iPhone ではスクロールしないと気づけない）。
+                確定済み・確定のあとに数が変わった・返金処理中などの案内を足すときも、ここに置く。
+              */}
+              <SettlementTopNotices loading={loading} error={error} />
+
               {/* 精算内容 */}
               <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="none">
@@ -1042,8 +1067,6 @@ function PreviewView({
                   </s-stack>
                 </s-box>
               ) : null}
-
-              {error ? <s-text tone="critical">{error}</s-text> : null}
             </s-stack>
           </s-box>
         </s-scroll-box>
@@ -1057,13 +1080,9 @@ function PreviewView({
           leftDisabled={loading}
           middleLabel="点検"
           onMiddle={onPrepareInspectionIssue}
-          middleCommand="--show"
-          middleCommandFor={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID}
           middleDisabled={loading}
           rightLabel="精算"
           onRight={onPrepareSettleIssue}
-          rightCommand="--show"
-          rightCommandFor={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID}
           rightTone="success"
           rightDisabled={loading}
         />
@@ -1072,80 +1091,87 @@ function PreviewView({
   );
 }
 
-/** 精算・点検それぞれ専用の s-modal（POS Stock: ボタン command + commandFor で開閉） */
-function SettlementIssueConfirmModals({ preview, printMode, loading, error, onExecute, onRequestClose }) {
+/**
+ * 精算画面の上に出す案内（読み込み中・エラー）。
+ * s-banner は POS にある部品。文は見出し（heading）に入れる（端末によって本文が畳まれることがあるため）。
+ */
+function SettlementTopNotices({ loading, error, busyLabel = "読み込み中です。少しお待ちください。" }) {
+  if (!loading && !error) return null;
+  return (
+    <s-stack gap="small">
+      {loading ? <s-banner tone="info" heading={busyLabel} /> : null}
+      {!loading && error ? <s-banner tone="critical" heading={error} /> : null}
+    </s-stack>
+  );
+}
+
+/**
+ * 点検／精算の発行確認。画面ごと切り替える（重ね表示の s-modal は使わない）。
+ * 案内・確認の中身・発行ボタンがスクロールなしで見えるよう、上から 何をするか → 結果の案内 → 中身 の順に置く。
+ */
+function SettlementIssueConfirmView({ preview, printMode, isInspection, loading, error, onExecute, onBack }) {
   const printModeLabel =
     printMode === "cloudprnt_direct"
-      ? "CloudPRNT直印字"
-      : "注文経由印字（精算注文を作成します）";
+      ? "プリンタへ直接印字"
+      : "注文経由で印字（精算用の注文を作ります）";
 
   const rows = [
     { label: "ロケーション", value: preview?.locationName ?? "-" },
     { label: "対象日", value: formatYmdSlash(preview?.targetDate ?? "-") },
     { label: "総売上", value: `¥${Number(preview?.total ?? 0).toLocaleString()}`, valueBold: true },
     { label: "件数", value: `${preview?.orderCount ?? 0}件` },
-    { label: "印字方式", value: printModeLabel },
   ];
+  if (!isInspection) rows.push({ label: "印字", value: printModeLabel });
 
-  const body = (headingLine) => (
-    <s-scroll-box>
-      <s-box padding="base">
-        <s-stack gap="base">
-          <s-text fontWeight="bold">{headingLine}</s-text>
-          <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-            <s-stack gap="none">
-              {rows.map((row, i, arr) => (
-                <SummaryRow
-                  key={row.label}
-                  label={row.label}
-                  value={row.value}
-                  valueBold={row.valueBold}
-                  divider={i < arr.length - 1}
-                />
-              ))}
-            </s-stack>
-          </s-box>
-          {error ? <s-text tone="critical">{error}</s-text> : null}
-        </s-stack>
-      </s-box>
-    </s-scroll-box>
-  );
+  const title = isInspection ? "点検レシートを発行します" : "精算を確定して、精算レシートを発行します";
+  const note = isInspection
+    ? "点検ではこの日の精算は確定しません。"
+    : "確定すると、この日の数が精算履歴に残ります。";
 
   return (
-    <>
-      <s-modal id={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID} heading="発行確認">
-        {body("点検レシートを発行します")}
-        <s-button
-          slot="secondary-actions"
-          kind="secondary"
-          command="--hide"
-          commandFor={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID}
-          onClick={onRequestClose}
-          disabled={loading}
-        >
-          戻る
-        </s-button>
-        <s-button slot="primary-action" onClick={onExecute} disabled={loading}>
-          {loading ? "発行中.." : "発行する"}
-        </s-button>
-      </s-modal>
-      <s-modal id={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID} heading="発行確認">
-        {body("精算レシートを発行します")}
-        <s-button
-          slot="secondary-actions"
-          kind="secondary"
-          command="--hide"
-          commandFor={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID}
-          onClick={onRequestClose}
-          disabled={loading}
-        >
-          戻る
-        </s-button>
-        <s-button slot="primary-action" onClick={onExecute} disabled={loading}>
-          {loading ? "発行中.." : "発行する"}
-        </s-button>
-      </s-modal>
-    </>
+    <s-page heading={isInspection ? "点検レシートの発行" : "精算の発行"}>
+      <s-stack
+        gap="none"
+        blockSize="100%"
+        inlineSize="100%"
+        minBlockSize="0"
+        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+      >
+        <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
+          <s-box padding="base">
+            <s-stack gap="base">
+              <SettlementTopNotices loading={loading} error={error} busyLabel="発行中です。画面を閉じずにお待ちください。" />
+              <s-text fontWeight="bold">{title}</s-text>
+              <s-text tone="subdued" size="small">{note}</s-text>
+              <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
+                <s-stack gap="none">
+                  {rows.map((row, i, arr) => (
+                    <SummaryRow
+                      key={row.label}
+                      label={row.label}
+                      value={row.value}
+                      valueBold={row.valueBold}
+                      divider={i < arr.length - 1}
+                    />
+                  ))}
+                </s-stack>
+              </s-box>
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+        <s-divider />
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={onBack}
+          leftDisabled={loading}
+          rightLabel={loading ? "発行中.." : "発行する"}
+          onRight={onExecute}
+          rightTone="success"
+          rightDisabled={loading || !preview}
+        />
+      </s-stack>
+    </s-page>
   );
 }
 
