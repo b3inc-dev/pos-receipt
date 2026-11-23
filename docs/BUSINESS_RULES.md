@@ -170,6 +170,8 @@ Location Stock の POS Lite 配送では、送料が注文の配送料でなく 
 
 反映後に税・net の再計算ロジックあり（エンジン後半）。
 
+「POS 登録時に Shopify で実返金」の店でも、元の支払いが決済会社の支払い（Shopify Payments など）で、実際に返した手段が違う（例: カード払いを現金で返した）ときは Shopify では返金せず記録だけにする（`skipped`。D26）。Shopify Payments の返金は元のカードにしか戻らず、現金も渡すと二重に返すため。
+
 Shopify 返金の状態（`shopifyRefundStatus`）による扱い:
 
 | 状態 | 精算での扱い |
