@@ -309,7 +309,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (nativeRefundIdStr && !existingIdempotentEvent) {
       if (eventTypeStr !== "cash_refund" && eventTypeStr !== "payment_method_override") {
         return corsJson(
-          { ok: false, error: "純正の返金の付け替えは、返金の手段を変える登録だけです" },
+          { ok: false, error: "純正の返金は、返金方法変更だけ登録できます" },
           { status: 400 },
         );
       }

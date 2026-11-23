@@ -138,7 +138,7 @@ function buildVoidConfirmMessage(event) {
     return msg;
   }
   if (event?.refundSource === "native") {
-    msg += "\n\nこれは純正の返金の付け替えです。無効にすると、その返金は元の支払方法の返金に戻ります（純正の返金はそのまま）。";
+    msg += "\n\nこれは純正の返金の返金方法変更です。無効にすると、その返金は元の支払方法の返金に戻ります（純正の返金はそのまま）。";
   } else if (event?.shopifyRefundStatus === "success") {
     msg += "\n\n【重要】この調整では Shopify に返金をしています。";
     msg += "無効にしても Shopify の返金は取り消されません。";
@@ -1221,7 +1221,7 @@ function SpecialRefundForm({
       return;
     }
     if (showPaymentFields && !refundMethods.some((m) => m.value === actualRefundMethod)) {
-      setError(refundMethodsMessage(refundMethodsState) || "実際の返金手段を選んでください");
+      setError(refundMethodsMessage(refundMethodsState) || "返金方法を選んでください");
       return;
     }
     if (!idempotencyKey) {
@@ -1274,8 +1274,8 @@ function SpecialRefundForm({
                   <Row label="金額" value={`¥${Number(amount).toLocaleString()}`} />
                   {showPaymentFields ? (
                     <>
-                      <Row label="元の手段" value={paymentLabel(originalPaymentMethod, paymentMethods)} />
-                      <Row label="返金手段" value={paymentLabel(actualRefundMethod, refundMethods)} />
+                      <Row label="元の支払方法" value={paymentLabel(originalPaymentMethod, paymentMethods)} />
+                      <Row label="返金方法" value={paymentLabel(actualRefundMethod, refundMethods)} />
                     </>
                   ) : null}
                   {showAdjustKind ? (
@@ -1313,7 +1313,7 @@ function SpecialRefundForm({
             {/* 純正の返金の付け替えが出ない理由（POS で返金した記録が無い注文） */}
             {noNativeRefund ? (
               <s-text type="small" color="subdued">
-                この注文には POS で返金した記録がありません。POS で返品・返金した注文では、返金額のまま手段だけを付け替える画面になります。
+                この注文には POS で返金した記録がありません。POS で返品・返金した注文では、返金額のまま返金方法だけを変更する画面になります。
               </s-text>
             ) : null}
 
@@ -1344,12 +1344,12 @@ function SpecialRefundForm({
               <>
                 {originalFromOrder && paymentMethods.length === 1 ? (
                   <s-stack gap="none">
-                    <s-text tone="subdued" fontSize="small">元の支払手段（この注文の支払い）</s-text>
+                    <s-text tone="subdued" fontSize="small">元の支払方法（この注文の支払い）</s-text>
                     <s-text fontWeight="bold">{paymentMethods[0].label}</s-text>
                   </s-stack>
                 ) : (
                   <PosChoiceField
-                    label={originalFromOrder ? "元の支払手段（この注文で払われたものから選ぶ）" : "元の支払手段"}
+                    label={originalFromOrder ? "元の支払方法（この注文で払われたものから選ぶ）" : "元の支払方法"}
                     value={originalPaymentMethod}
                     options={paymentMethods}
                     onChange={setOriginalPaymentMethod}
@@ -1357,7 +1357,7 @@ function SpecialRefundForm({
                 )}
                 {refundMethods.length > 0 ? (
                   <PosChoiceField
-                    label="実際の返金手段"
+                    label="返金方法"
                     value={actualRefundMethod}
                     options={refundMethods}
                     onChange={setActualRefundMethod}
@@ -1667,7 +1667,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
       return;
     }
     if (needsMethod && !refundMethods.some((m) => m.value === actualRefundMethod)) {
-      setError(refundMethodsMessage(refundMethodsState) || "実際の返金手段を選んでください");
+      setError(refundMethodsMessage(refundMethodsState) || "返金方法を選んでください");
       return;
     }
     setConfirming(true);
@@ -1728,7 +1728,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
                   ) : (
                     <Row label="金額" value={`¥${Number(amount).toLocaleString()}`} />
                   )}
-                  {needsMethod ? <Row label="返金手段" value={methodLabel(actualRefundMethod)} /> : null}
+                  {needsMethod ? <Row label="返金方法" value={methodLabel(actualRefundMethod)} /> : null}
                   <Row label="数える日" value={EDIT_DATE_MODES.find((d) => d.value === dateMode)?.label ?? dateMode} />
                   <Row label="わけ" value={reason.trim()} />
                 </s-stack>
@@ -1793,7 +1793,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
             ) : isNative ? (
               <s-stack gap="none">
                 <Row label="金額（純正の返金のまま）" value={`¥${Number(amount).toLocaleString()}`} />
-                <s-text tone="subdued" fontSize="small">分け方を変えるときは、無効にしてから付け替え直してください。</s-text>
+                <s-text tone="subdued" fontSize="small">分け方を変えるときは、無効にしてから変更し直してください。</s-text>
               </s-stack>
             ) : (
               <s-text-field
@@ -1807,7 +1807,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
             {needsMethod ? (
               refundMethods.length > 0 ? (
                 <PosChoiceField
-                  label="実際の返金手段"
+                  label="返金方法"
                   value={actualRefundMethod}
                   options={refundMethods}
                   onChange={setActualRefundMethod}
@@ -1842,7 +1842,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
               label="直したわけ（必須）"
               value={reason}
               onInput={(e) => setReason(e?.currentTarget?.value ?? "")}
-              placeholder="例: 返金手段の選び間違い"
+              placeholder="例: 返金方法の選び間違い"
             />
 
             {error ? <s-text tone="critical">{error}</s-text> : null}
