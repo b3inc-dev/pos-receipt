@@ -25,6 +25,8 @@ import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
 import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import { expandLocationIdsForBudgetQuery } from "../utils/salesSummaryBudgetFromDb.server";
+import { applyBudgetDayChanges } from "../services/budgetWrite.server";
+import { getCiaraSyncedLocationIds } from "../services/ciaraBudgetSync.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SaveBar, SuccessToast, UnitInput, confirmLeave, markFormDirty } from "../components/admin-ui";
 import {
@@ -131,8 +133,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (selected.length === 0 && locations[0]) selected = [locations[0]];
 
   const saved = await loadMonthBudgets(shop.id, selected.map((l) => l.id), month);
+  // ciara-system から取り込む店（Ciara のカスタムアプリで取り込みがオンのときだけ）は見るだけ
+  const syncedLocationIds = await getCiaraSyncedLocationIds(shop.id);
 
   return {
+    syncedLocationIds,
     locations: locations.map((l) => ({ id: l.id, name: l.name })),
     selected: selected.map((l) => ({ id: l.id, name: l.name })),
     month,
@@ -203,6 +208,13 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
       rowErrors,
     } satisfies ActionResult, { status: 400 });
   }
+  const synced = new Set(await getCiaraSyncedLocationIds(shop.id));
+  if ([...changesByGid.keys()].some((g) => synced.has(g))) {
+    return Response.json({
+      ok: false,
+      error: "ciara-system から取り込んでいる店の予算は、ここでは変えられません。ciara-system で入力してください。何も保存していません。",
+    } satisfies ActionResult, { status: 400 });
+  }
   const total = [...changesByGid.values()].reduce((n, c) => n + c.length, 0);
   if (total === 0) {
     return Response.json({ ok: true, saved: 0 } satisfies ActionResult);
@@ -225,38 +237,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
 
   await prisma.$transaction(async (tx) => {
     for (const [gid, changes] of changesByGid) {
-      const legacyIds = expandLocationIdsForBudgetQuery(gid).filter((v) => v !== gid);
-      const changedDates = changes.map((c) => c.date);
-      // 数字だけの店舗 ID で入った古い行は、同じ日を書き直すときに GID の行へまとめる（二重に数えない）
-      if (legacyIds.length > 0) {
-        await tx.budget.deleteMany({
-          where: { shopId: shop.id, locationId: { in: legacyIds }, targetDate: { in: changedDates } },
-        });
-      }
-      for (const c of changes) {
-        if (c.after === null) {
-          await tx.budget.deleteMany({ where: { shopId: shop.id, locationId: gid, targetDate: c.date } });
-        } else {
-          await tx.budget.upsert({
-            where: { shopId_locationId_targetDate: { shopId: shop.id, locationId: gid, targetDate: c.date } },
-            update: { amount: c.after },
-            create: { shopId: shop.id, locationId: gid, targetDate: c.date, amount: c.after },
-          });
-        }
-      }
-      // 売上サマリーの日次の控え（予算・予算比）も同じ値にする（POS の予算登録と同じ）
-      const cached = await tx.salesSummaryCacheDaily.findMany({
-        where: { shopId: shop.id, locationId: gid, targetDate: { in: changedDates } },
-        select: { id: true, targetDate: true, actual: true },
-      });
-      const afterByDate = new Map(changes.map((c) => [c.date, c.after]));
-      for (const row of cached) {
-        const budget = afterByDate.get(row.targetDate) ?? null;
-        await tx.salesSummaryCacheDaily.update({
-          where: { id: row.id },
-          data: { budget, budgetRatio: budget && budget > 0 ? Number(row.actual) / budget : null },
-        });
-      }
+      await applyBudgetDayChanges(tx, shop.id, gid, changes);
     }
   });
 
@@ -437,6 +418,7 @@ function DailyBudgetGrid({
     if (!stores.some((s) => s.id === activeStore)) setActiveStore(stores[0]?.id ?? "");
   }, [stores, activeStore]);
   const readOnly = !data.hasAccess;
+  const syncedIds = new Set(data.syncedLocationIds);
   const saving = navigation.state === "submitting";
 
   const perStore = stores.map((s) => {
@@ -557,7 +539,10 @@ function DailyBudgetGrid({
                     <tr>
                       <th className="BudgetDaily-date" scope="col">日付</th>
                       {stores.map((s) => (
-                        <th key={s.id} scope="col" className={colClass(s.id, "BudgetDaily-cell")}>{s.name}</th>
+                        <th key={s.id} scope="col" className={colClass(s.id, "BudgetDaily-cell")}>
+                          {s.name}
+                          {syncedIds.has(s.id) ? <div className="BudgetDaily-sub">ciara-system から取り込み（見るだけ）</div> : null}
+                        </th>
                       ))}
                     </tr>
                   </thead>
@@ -589,6 +574,7 @@ function DailyBudgetGrid({
                                   inputMode="numeric"
                                   autoComplete="off"
                                   form="budget-daily-fill-only"
+                                  readOnly={syncedIds.has(p.store.id)}
                                   value={fills[p.store.id] ?? ""}
                                   onChange={(e) => {
                                     const v = e.currentTarget.value;
@@ -598,7 +584,7 @@ function DailyBudgetGrid({
                                 <Button
                                   size="slim"
                                   onClick={() => fillEmptyDays(p.store.id)}
-                                  disabled={!fill.ok || fill.value === null || p.emptyDays === 0}
+                                  disabled={syncedIds.has(p.store.id) || !fill.ok || fill.value === null || p.emptyDays === 0}
                                   accessibilityLabel={`${p.store.name}の空欄の ${p.emptyDays} 日に入れる`}
                                 >
                                   {`${p.emptyDays} 日に入れる`}
@@ -633,7 +619,7 @@ function DailyBudgetGrid({
                                   autoComplete="off"
                                   value={inputs[p.store.id]?.[d.date] ?? ""}
                                   onChange={(e) => setDay(p.store.id, d.date, e.currentTarget.value)}
-                                  readOnly={readOnly}
+                                  readOnly={readOnly || syncedIds.has(p.store.id)}
                                   aria-invalid={error ? true : undefined}
                                 />
                                 {error ? <div className="BudgetDaily-err" role="alert">{error}</div> : null}
