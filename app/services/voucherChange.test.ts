@@ -233,3 +233,71 @@ describe("保存した設定の読み方（main に入れた時点では数が�
     assert.ok(compileVoucherNoteRegex(`(${"a".repeat(120)})`).error);
   });
 });
+
+describe("納金金額から商品券の釣銭を引く", () => {
+  const saved = { ...DEFAULT_VOUCHER_SETTINGS, legacy: false };
+
+  it("商品券だけで払い釣銭を現金で渡した注文は、釣銭を納金から引く（T さんの開発ストアの例: 725 + 340）", () => {
+    // #1024・#1025 は商品券釣有りで会計額ちょうど。釣銭は手入力（会計前の入力）で登録
+    const a = order("gid://shopify/Order/1024", 2275, [{ gw: "gift_card", fg: "釣有り", amt: 2275 }]);
+    const b = order("gid://shopify/Order/1025", 2660, [{ gw: "gift_card", fg: "釣有り", amt: 2660 }]);
+    const c = order("gid://shopify/Order/1026", 3420, [{ gw: "cash", amt: 3420 }]);
+    const gas = aggregateGasStyleForOrders([a, b, c], always);
+    assert.equal(gas.pay["現金"].sale, 3420);
+    const r = resolveVoucherChange({
+      settings: saved,
+      reflectManualFromSpecialRefundSettings: true,
+      autoByOrder: gas.voucherChangeByOrder,
+      cashCapByOrder: gas.voucherCashCapByOrder,
+      manualEvents: [
+        { sourceOrderId: "1024", voucherChangeAmount: 725 },
+        { sourceOrderId: "1025", voucherChangeAmount: 340 },
+      ],
+    });
+    assert.equal(r.total, 1065);
+    assert.equal(r.cashDepositDeduction, 1065);
+    assert.equal(3420 - r.cashDepositDeduction, 2355);
+  });
+
+  it("商品券＋現金で現金の預かりが多い注文は、現金をもう抑えてあるので二重に引かない", () => {
+    const gas = aggregateGasStyleForOrders([giftWithChange], always);
+    assert.equal(gas.pay["現金"].sale, 500);
+    const r = resolveVoucherChange({
+      settings: saved,
+      reflectManualFromSpecialRefundSettings: true,
+      autoByOrder: gas.voucherChangeByOrder,
+      cashCapByOrder: gas.voucherCashCapByOrder,
+      manualEvents: [],
+    });
+    assert.equal(r.total, 500);
+    assert.equal(r.cashDepositDeduction, 0);
+  });
+
+  it("手入力が現金の上限より大きければ、差だけ引く", () => {
+    const r = resolveVoucherChange({
+      settings: saved,
+      reflectManualFromSpecialRefundSettings: true,
+      autoByOrder: { "6001": 500 },
+      cashCapByOrder: { "gid://shopify/Order/6001": 500 },
+      manualEvents: [{ sourceOrderId: "6001", voucherChangeAmount: 800 }],
+    });
+    assert.equal(r.cashDepositDeduction, 300);
+  });
+
+  it("設定オフ・版の無い設定では引かない（今までどおり）", () => {
+    const input = {
+      reflectManualFromSpecialRefundSettings: true,
+      autoByOrder: {},
+      cashCapByOrder: {},
+      manualEvents: [{ sourceOrderId: "1025", voucherChangeAmount: 340 }],
+    };
+    assert.equal(
+      resolveVoucherChange({ ...input, settings: { ...saved, deductVoucherChangeFromCashDeposit: false } }).cashDepositDeduction,
+      0,
+    );
+    assert.equal(
+      resolveVoucherChange({ ...input, settings: resolveVoucherSettings(null, DEFAULT_VOUCHER_SETTINGS) }).cashDepositDeduction,
+      0,
+    );
+  });
+});

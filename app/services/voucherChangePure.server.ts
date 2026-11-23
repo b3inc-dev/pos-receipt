@@ -114,6 +114,11 @@ export interface VoucherChangeResolution {
   skippedManualAmount: number;
   /** 版の無い設定で、今までどおり両方足したとき true */
   legacy: boolean;
+  /**
+   * 納金金額（現金）から引く商品券の釣銭。数えた釣銭のうち、現金の上限でまだ引いていない分。
+   * 設定「納金金額から引く」がオフ・版の無い設定では 0（今までどおり）。
+   */
+  cashDepositDeduction: number;
 }
 
 /**
@@ -127,6 +132,8 @@ export function resolveVoucherChange(input: {
   reflectManualFromSpecialRefundSettings: boolean;
   autoByOrder: Record<string, number>;
   manualEvents: ManualVoucherEvent[];
+  /** 現金の上限で支払方法別の現金からもう引いた分（注文ごと）。納金金額で二重に引かないため */
+  cashCapByOrder?: Record<string, number>;
 }): VoucherChangeResolution {
   const s = input.settings;
   const empty: VoucherChangeResolution = {
@@ -139,6 +146,7 @@ export function resolveVoucherChange(input: {
     skippedAutoAmount: 0,
     skippedManualAmount: 0,
     legacy: Boolean(s.legacy),
+    cashDepositDeduction: 0,
   };
   const amountOf = (e: ManualVoucherEvent) => {
     const n = Number(e.voucherChangeAmount?.toString() ?? 0);
@@ -186,6 +194,8 @@ export function resolveVoucherChange(input: {
   let manualTotal = 0;
   let skippedAutoAmount = 0;
   let skippedManualAmount = 0;
+  /** 注文ごとに実際に数えた釣銭（納金金額から引く額を決めるため） */
+  const countedByOrder = new Map<string, number>();
   const appliedManual: ManualVoucherEvent[] = [];
 
   for (const [k, v] of auto) {
@@ -195,6 +205,7 @@ export function resolveVoucherChange(input: {
       continue;
     }
     autoTotal += v;
+    countedByOrder.set(k, (countedByOrder.get(k) ?? 0) + v);
   }
   for (const [k, list] of manualByOrder) {
     if (!manualFirst && auto.has(k)) {
@@ -204,6 +215,7 @@ export function resolveVoucherChange(input: {
     }
     for (const e of list) {
       manualTotal += amountOf(e);
+      countedByOrder.set(k, (countedByOrder.get(k) ?? 0) + amountOf(e));
       appliedManual.push(e);
     }
   }
@@ -218,7 +230,27 @@ export function resolveVoucherChange(input: {
     skippedAutoAmount: Math.round(skippedAutoAmount),
     skippedManualAmount: Math.round(skippedManualAmount),
     legacy: false,
+    cashDepositDeduction: s.deductVoucherChangeFromCashDeposit
+      ? cashDepositDeductionFor(countedByOrder, input.cashCapByOrder ?? {})
+      : 0,
   };
+}
+
+/**
+ * 注文ごとに「数えた釣銭 − 現金の上限でもう引いた分」を足す。
+ * 例: 商品券 3,000 円で 2,660 円の会計 → 支払は商品券 2,660 円だけ、釣銭 340 円はレジの現金から出る → 納金から 340 円引く。
+ * 例: 商品券 1,000 円＋現金 1,000 円で 1,500 円の会計 → 現金はもう 500 円に抑えてある → 納金からはもう引かない。
+ */
+function cashDepositDeductionFor(countedByOrder: Map<string, number>, cashCapByOrder: Record<string, number>): number {
+  const cap = new Map<string, number>();
+  for (const [k, v] of Object.entries(cashCapByOrder)) {
+    cap.set(normalizeOrderKey(k), (cap.get(normalizeOrderKey(k)) ?? 0) + (Number(v) || 0));
+  }
+  let sum = 0;
+  for (const [k, counted] of countedByOrder) {
+    sum += Math.max(0, counted - (cap.get(k) ?? 0));
+  }
+  return Math.round(sum);
 }
 
 /** POS「商品券調整」を受け付けるか */

@@ -177,6 +177,7 @@ Location Stock の POS Lite 配送では、送料が注文の配送料でなく 
   - 版の無い設定（新しい画面でまだ保存していない店）は全部初めの値として読み、今までの式（自動＋手入力を両方足す・POS の登録は止めない）のまま。画面で一度保存すると `settingsVersion: 2` が付いて上の決まりが効く。main に入れた時点ではどの店の数も変わらず、店ごと（Ciara から）に切り替える
   - 判定優先順位で外した額は精算プレビューの `voucherChangeBreakdown` に出し、POS の精算画面にも行として出す
   - 読取用正規表現は 100 文字まで
+  - 納金金額（現金）: 「納金金額から商品券の釣銭を引く」（初めオン・版のある設定だけ）なら、数えた釣銭のうち現金の上限でまだ引いていない分（注文ごとに 釣銭 − 現金の預かり超過）を `voucherChangeBreakdown.cashDepositDeduction` として出し、POS の納金金額から引く。支払方法別の現金・総売上は変えない
 - `legacyGiftCardAggregationEnabled` が true のとき Gift Cards API 発行分を加算（POS union に含まれる order は二重加算回避）。失敗時は加算せず続行
 
 ---

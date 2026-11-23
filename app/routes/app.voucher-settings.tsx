@@ -79,6 +79,7 @@ export async function action({ request }: ActionFunctionArgs) {
     voucherDefaultLabel: String(get("voucherDefaultLabel") ?? "商品券").trim(),
     voucherAdjustmentPriority: (get("voucherAdjustmentPriority") as "manual_first" | "auto_first") || "manual_first",
     reflectVoucherChangeInSettlement: bool("reflectVoucherChangeInSettlement", true),
+    deductVoucherChangeFromCashDeposit: bool("deductVoucherChangeFromCashDeposit", true),
     reflectVoucherChangeInReceiptDisplay: bool("reflectVoucherChangeInReceiptDisplay", true),
     voucherChangeDisplayLabel: String(get("voucherChangeDisplayLabel") ?? "商品券おつり").trim(),
   };
@@ -110,6 +111,7 @@ export default function VoucherSettingsPage() {
     fd.set("voucherDefaultLabel", form.voucherDefaultLabel);
     fd.set("voucherAdjustmentPriority", form.voucherAdjustmentPriority);
     fd.set("reflectVoucherChangeInSettlement", form.reflectVoucherChangeInSettlement ? "true" : "false");
+    fd.set("deductVoucherChangeFromCashDeposit", form.deductVoucherChangeFromCashDeposit ? "true" : "false");
     fd.set("reflectVoucherChangeInReceiptDisplay", form.reflectVoucherChangeInReceiptDisplay ? "true" : "false");
     fd.set("voucherChangeDisplayLabel", form.voucherChangeDisplayLabel);
     submit(fd, { method: "post" });
@@ -235,6 +237,12 @@ export default function VoucherSettingsPage() {
                   どちらか片方だけを数えるので、差額が 2 回足されることはありません（同じ日・同じ店の精算の中で）。
                 </Text>
                 <Checkbox label="精算に商品券のお釣りを反映する" checked={form.reflectVoucherChangeInSettlement} onChange={(v) => set("reflectVoucherChangeInSettlement", v)} />
+                <Checkbox
+                  label="納金金額から商品券の釣銭を引く"
+                  helpText="商品券で払ったお客様にお釣りをレジの現金から渡した分を、精算の納金金額（現金）から引きます。支払方法別の現金の金額は変わりません。"
+                  checked={form.deductVoucherChangeFromCashDeposit}
+                  onChange={(v) => set("deductVoucherChangeFromCashDeposit", v)}
+                />
                 <Text as="p" variant="bodySm" tone="subdued">
                   精算レシートに差額の行を出すかは「精算レシート印字レイアウト」の「商品券釣有り差額行を含める」で決めます。
                 </Text>

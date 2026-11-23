@@ -225,6 +225,11 @@ export function aggregateGasStyleForOrders(
   /** voucherChangeObserved の注文ごとの内訳（キーは注文 ID）。手入力との二重計上を防ぐのに使う */
   voucherChangeByOrder: Record<string, number>;
   /**
+   * 現金の預かりが会計に必要な額より多かった分（注文ごと）。支払方法別の現金からはもう引いてある。
+   * 納金金額から商品券の釣銭を引くとき、この分を二重に引かないために使う。
+   */
+  voucherCashCapByOrder: Record<string, number>;
+  /**
    * 売上に含めない手数料の明細（`_lsi_fee="1"` かつ `_lsi_fee_sales="0"`）の当日分（売った分 − 計上対象の返金分）。
    * 支払方法別の金額（pay）には入ったまま。総売上はここを引く（settlementEngine）。
    */
@@ -240,6 +245,7 @@ export function aggregateGasStyleForOrders(
   let taxTotalShopify = 0;
   let voucherChangeObserved = 0;
   const voucherChangeByOrder: Record<string, number> = {};
+  const voucherCashCapByOrder: Record<string, number> = {};
   let nonSalesFeeTotal = 0;
   const voucherKeywordRe = new RegExp(escapeRegExp(voucherRules.keyword));
   const voucherGatewayNames = voucherAppliedGatewayNames(voucherRules.keyword);
@@ -302,6 +308,9 @@ export function aggregateGasStyleForOrders(
       const neededCashForOrder = Math.max(0, orderFinal - nonCashSaleTotal);
       effectiveCashSale = Math.min(rawCashSale, neededCashForOrder);
       orderVoucherCashChange = Math.max(0, rawCashSale - effectiveCashSale);
+      if (orderVoucherCashChange > 0) {
+        voucherCashCapByOrder[o.id] = (voucherCashCapByOrder[o.id] ?? 0) + orderVoucherCashChange;
+      }
     }
     const hasVoucherInNote = voucherKeywordRe.test(o.note ?? "");
     const hasVoucherInGateway = Object.keys(gwSaleMapToday).some((k) => voucherKeywordRe.test(k));
@@ -453,6 +462,7 @@ export function aggregateGasStyleForOrders(
     taxTotalShopify: Math.round(taxTotalShopify),
     voucherChangeObserved: Math.round(voucherChangeObserved),
     voucherChangeByOrder,
+    voucherCashCapByOrder,
     nonSalesFeeTotal: Math.round(nonSalesFeeTotal),
   };
 }

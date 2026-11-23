@@ -221,6 +221,8 @@ export interface VoucherSettings {
   voucherDefaultLabel: string;
   voucherAdjustmentPriority: "manual_first" | "auto_first";
   reflectVoucherChangeInSettlement: boolean;
+  /** 商品券のお釣りを現金で渡した分を、精算の納金金額（現金）から引く */
+  deductVoucherChangeFromCashDeposit: boolean;
   reflectVoucherChangeInReceiptDisplay: boolean;
   voucherChangeDisplayLabel: string;
 }
@@ -234,6 +236,7 @@ export const DEFAULT_VOUCHER_SETTINGS: VoucherSettings = {
   voucherDefaultLabel: "商品券",
   voucherAdjustmentPriority: "manual_first",
   reflectVoucherChangeInSettlement: true,
+  deductVoucherChangeFromCashDeposit: true,
   reflectVoucherChangeInReceiptDisplay: true,
   voucherChangeDisplayLabel: "商品券おつり",
 };

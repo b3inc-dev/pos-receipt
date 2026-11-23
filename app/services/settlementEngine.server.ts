@@ -96,6 +96,8 @@ export interface SettlementPreviewDTO {
     skippedAutoAmount: number;
     skippedManualAmount: number;
     legacy: boolean;
+    /** 納金金額（現金）から引く商品券の釣銭。POS の納金金額・精算レシートの納金額はこれを引いた額 */
+    cashDepositDeduction: number;
   };
   paymentSections: PaymentSectionDTO[];
   /**
@@ -835,6 +837,7 @@ async function buildSettlementPreviewImpl(
     reflectManualFromSpecialRefundSettings: srSettings.reflectVoucherAdjustmentToSettlement,
     autoByOrder: gas.voucherChangeByOrder,
     manualEvents: voucherAdjustmentsAll,
+    cashCapByOrder: gas.voucherCashCapByOrder,
   });
   const voucherAdjustments = voucherAdjustmentsAll.filter((e) =>
     voucherResolution.appliedManual.includes(e),
@@ -906,6 +909,7 @@ async function buildSettlementPreviewImpl(
       skippedAutoAmount: voucherResolution.skippedAutoAmount,
       skippedManualAmount: voucherResolution.skippedManualAmount,
       legacy: voucherResolution.legacy,
+      cashDepositDeduction: voucherResolution.cashDepositDeduction,
     },
     paymentSections,
     nonSalesFeeTotal,
