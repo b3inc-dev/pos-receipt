@@ -842,6 +842,13 @@ function PreviewView({
       value: `¥${Number(preview.voucherChangeAmount).toLocaleString()}`,
     });
   }
+  // 売上に含めない送料等（支払方法別には入っている分。総売上には入れていない）
+  if (Number(preview.nonSalesFeeTotal ?? 0) !== 0) {
+    summaryRows.push({
+      label: "売上に含めない送料等",
+      value: `¥${Number(preview.nonSalesFeeTotal).toLocaleString()}`,
+    });
+  }
 
   const countRows = [
     { label: "売上件数", value: `${preview.orderCount}件` },

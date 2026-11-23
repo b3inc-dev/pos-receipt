@@ -151,17 +151,12 @@ describe("executeShopifyRefundForEvent", () => {
                 },
               }
             : {
-                data: {
-                  refundCreate: {
-                    refund: null,
-                    userErrors: [
-                      {
-                        code: "IDEMPOTENCY_CONCURRENT_REQUEST",
-                        message: "A request with this idempotency key is still running",
-                      },
-                    ],
+                errors: [
+                  {
+                    message: "A request with this idempotency key is still running",
+                    extensions: { code: "IDEMPOTENCY_CONCURRENT_REQUEST" },
                   },
-                },
+                ],
               },
       }),
     };
