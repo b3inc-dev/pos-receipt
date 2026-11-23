@@ -5,6 +5,7 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import "@shopify/polaris/build/esm/styles.css";
 import { authenticate } from "../shopify.server";
 import { AppNavBar } from "../components/AppNavBar";
+import { LoadingIndicator } from "../components/admin-ui";
 import { isInhouseMode } from "../utils/planFeatures.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -32,30 +33,12 @@ export function ErrorBoundary() {
 export default function AppLayout() {
   const { apiKey, memberCardEnabled } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
-  const isLoading = navigation.state === "loading";
+  const isLoading = navigation.state !== "idle";
 
   return (
     <AppProvider embedded apiKey={apiKey}>
-      {isLoading && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            padding: "12px 16px",
-            background: "#2563eb",
-            color: "#fff",
-            fontSize: "14px",
-            fontWeight: 500,
-            textAlign: "center",
-            zIndex: 9999,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-          }}
-        >
-          読み込み中…
-        </div>
-      )}
+      {/* 画面を移る間は Shopify 上端の細い線（Shop Point と同じ） */}
+      <LoadingIndicator loading={isLoading} />
       {/* 左サイドバー用（管理画面でアプリ選択時に下部などに出すメニュー）※他アプリ同様 href はパスのみ */}
       {/* @ts-expect-error s-app-nav / s-link は polaris.js の Web コンポーネント */}
       <s-app-nav>

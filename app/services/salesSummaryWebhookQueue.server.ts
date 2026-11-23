@@ -49,7 +49,7 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
 
   await boss.work(
     SALES_SUMMARY_WEBHOOK_QUEUE_NAME,
-    { teamSize: 2, pollingIntervalSeconds: 2 },
+    { teamSize: 2, pollingIntervalSeconds: 2, includeMetadata: true },
     async (jobs) => {
       const { unauthenticated } = await import("../shopify.server");
       for (const job of jobs) {
@@ -66,7 +66,7 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
 
           // 同期経路と同じく返金計上店（pos.refund_aggregation_location_gid）を書く。
           // 売上サマリーの再計算より先に行い、再計算が失敗・再試行になっても書かれるようにする。
-          // 失敗はログのみ（ジョブは失敗にしない）。
+          // 失敗はログのみ（ジョブは失敗にしない）。ジョブごとの処理なので、再計算をまとめるときも省かない。
           await syncRefundAggregationForQueuedWebhook(
             syncRefundAggregationFromWebhookPayload,
             admin,
@@ -75,11 +75,19 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
             payload,
           );
 
-          const { targetDates, errors } = await executeSalesSummaryOrderWebhookJob(
+          // 積まれた時刻を渡し、そのあとに始まった再計算で済んでいる日は数え直さない
+          const { targetDates, errors, skipped } = await executeSalesSummaryOrderWebhookJob(
             admin,
             dbShop.id,
             payload,
+            { jobCreatedAt: job.createdOn ?? null },
           );
+          if (skipped) {
+            console.log(
+              `[pg-boss] sales-summary skip (already refreshed) shop=${shopDomain} dates=${targetDates.join(",")}`,
+            );
+            continue;
+          }
           if (backgroundRefreshNeedsRetry(errors)) {
             console.warn(
               `[pg-boss] sales-summary partial shop=${shopDomain} dates=${targetDates.join(",")}`,

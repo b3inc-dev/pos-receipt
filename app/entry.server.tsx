@@ -6,7 +6,10 @@ import type { EntryContext } from "react-router";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 
-export const streamTimeout = 5000;
+// loader が Promise のまま返した集計（売上サマリーなど）を待つ上限。
+// 店が多い日は 1 分ほどかかるので、途中で打ち切らない長さにする。
+// Promise を返さない画面は、描き終わった時点で応答が終わるので影響しない。
+export const streamTimeout = 120_000;
 
 export default async function handleRequest(
   request: Request,

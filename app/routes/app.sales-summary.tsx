@@ -2,8 +2,8 @@
  * /app/sales-summary — 管理画面用 売上サマリー（閲覧専用）
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { redirect, useLoaderData, useSearchParams } from "react-router";
-import { useMemo } from "react";
+import { Await, redirect, useLoaderData, useNavigation, useSearchParams } from "react-router";
+import { Suspense, useMemo } from "react";
 import {
   Page,
   Layout,
@@ -247,6 +247,82 @@ function toDailyRowFromCache(
   };
 }
 
+/**
+ * 今日の分を開いたとき、数え直しが終わるまで先に見せる「保存済みの数字」（T の判断 2026-11-23）。
+ * 注文が更新されるたびに裏で書き直している日次の保存（売上サマリーのキャッシュ）を読むだけで、
+ * Shopify は呼ばない。数え方は数え直しと同じ（同じ関数が書いた値）。
+ * 表示する店のどれかに保存が無いときは null（合計がずれて見えないよう、出さない）。
+ */
+async function loadTodayCachePreview(
+  shopId: string,
+  targetLocations: LocationRow[],
+  targetDate: string,
+  showChannels: boolean,
+  timeZone: string,
+) {
+  const cached = await prisma.salesSummaryCacheDaily.findMany({
+    where: {
+      shopId,
+      locationId: { in: expandLocationIdsForCacheQuery(targetLocations) },
+      targetDate,
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  const byLoc = new Map<string, (typeof cached)[number]>();
+  for (const row of cached) {
+    const canon = resolveCanonicalLocationGid(targetLocations, row.locationId);
+    if (canon && !byLoc.has(canon)) byLoc.set(canon, row);
+  }
+  if (targetLocations.some((l) => !byLoc.has(l.shopifyLocationGid))) return null;
+
+  const budgetByLocDay = await getLocationBudgetAmountsForDayBatch(
+    shopId,
+    targetLocations.map((l) => l.shopifyLocationGid),
+    targetDate,
+  );
+  const rows = targetLocations.map((l) => {
+    const r = toDailyRowFromCache(l.shopifyLocationGid, l.name, targetDate, byLoc.get(l.shopifyLocationGid)!);
+    const budget = budgetByLocDay.get(r.locationId) ?? null;
+    return { ...r, budget, budgetRatio: budget != null && budget > 0 ? r.actual / budget : null };
+  });
+  let oldest = Math.min(...[...byLoc.values()].map((r) => r.updatedAt.getTime()));
+
+  const channelRows: Array<Record<string, string | number | null>> = [];
+  if (showChannels) {
+    const channels = await getEnabledSalesChannels(shopId);
+    const chCache = channels.length === 0
+      ? []
+      : await prisma.salesChannelCacheDaily.findMany({
+          where: { shopId, channelId: { in: channels.map((c) => c.id) }, targetDate },
+        });
+    for (const ch of channels) {
+      const c = chCache.find((x) => x.channelId === ch.id);
+      if (!c || ch.sourceNamesJson !== ch.sourceNamesSnapshot) return null;
+      oldest = Math.min(oldest, c.updatedAt.getTime());
+      channelRows.push({
+        channelId: ch.id,
+        channelName: ch.displayName,
+        actual: Number(c.actual),
+        orders: c.orders,
+        items: c.items,
+        budget: c.budget !== null ? Number(c.budget) : null,
+        budgetRatio: c.budgetRatio !== null ? Number(c.budgetRatio) : null,
+        atv: c.atv !== null ? Number(c.atv) : null,
+        setRate: c.setRate !== null ? Number(c.setRate) : null,
+        unit: c.unit !== null ? Number(c.unit) : null,
+      });
+    }
+  }
+  // いちばん古い保存の時刻を「この時点の数字」として出す
+  const asOf = new Intl.DateTimeFormat("ja-JP", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(oldest));
+  return { rows, channelRows, asOf };
+}
+
 function fmtYen(n: number | null) {
   if (n === null) return "-";
   return `¥${Math.round(n).toLocaleString("ja-JP")}`;
@@ -437,33 +513,82 @@ export async function loader({ request }: LoaderFunctionArgs) {
       };
     }
 
-    if (view === "daily") {
-      const failedLocationErrors = new Map<string, string>();
-      const today = shopCalendarToday;
-      const shouldRecompute = targetDate >= today;
-      const wantDebug = forceRecomputeDaily === true;
-      const recomputeDebugLocations: Array<unknown> = [];
-      const rowsRaw: Array<Awaited<ReturnType<typeof computeAndCacheDailySummary>> | null> = [];
-      for (const loc of validTargetLocations) {
-        try {
-          const candidates = buildLocationIdCandidates(loc.shopifyLocationGid);
-          const cached = await prisma.salesSummaryCacheDaily.findFirst({
-            where: {
-              shopId: shop.id,
-              locationId: { in: candidates },
-              targetDate,
-            },
-            orderBy: { updatedAt: "desc" },
-          });
-          // 過去日のみ DB キャッシュを読む。当日は常に再計算（以前は「当日かつキャッシュあり」で再計算に到達せず数値が永遠に更新されない不具合があった）
-          const useLocationDailyCache =
-            Boolean(cached) && !forceRecomputeDaily && targetDate < today;
-          if (useLocationDailyCache) {
-            rowsRaw.push(toDailyRowFromCache(loc.shopifyLocationGid, loc.name, targetDate, cached));
-            continue;
-          }
-          // 過去日はキャッシュ固定: キャッシュ未作成時のみ計算して埋める（recompute=1 のときは常に再計算）
-          if (!shouldRecompute && !cached) {
+    // 月次の「この月のチャネルだけやり直す」は、保存を消してから移る（重い集計より前に済ませる）
+    if (view === "period" && forceRecomputeChannelMonth && showChannels) {
+      const { dateFrom, dateTo } = monthRange(targetMonth);
+      await prisma.salesChannelCacheDaily.deleteMany({
+        where: { shopId: shop.id, targetDate: { gte: dateFrom, lte: dateTo } },
+      });
+      const next = new URL(request.url);
+      next.searchParams.delete("recomputeChannelMonth");
+      next.searchParams.set("channelNotice", "channelMonthRebuilt");
+      return redirect(next.pathname + next.search);
+    }
+
+    // 画面の枠（条件の欄）は先に返し、店ごとの集計はあとから流し込む（Shop Point の売上レポートと同じ形）。
+    // 集計の中身・数え方は前と同じ。
+    const frame = {
+      hasAccess: true,
+      planMessage: "",
+      view,
+      targetDate,
+      targetMonth,
+      selectedLocationId,
+      showChannels,
+      calendarToday: shopCalendarToday,
+      locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
+      locationCount: validTargetLocations.length,
+    };
+
+    // 今日の分は、数え直しが終わるまで保存済みの数字を「HH:MM 時点」で先に見せる
+    const cachePreview =
+      view === "daily" && targetDate >= shopCalendarToday && !forceRecomputeDaily
+        ? await loadTodayCachePreview(shop.id, validTargetLocations, targetDate, showChannels, shopIanaTz).catch(
+            () => null,
+          )
+        : null;
+
+    const computeReport = async () => {
+      if (view === "daily") {
+        const failedLocationErrors = new Map<string, string>();
+        const today = shopCalendarToday;
+        const shouldRecompute = targetDate >= today;
+        const wantDebug = forceRecomputeDaily === true;
+        const recomputeDebugLocations: Array<unknown> = [];
+        const rowsRaw: Array<Awaited<ReturnType<typeof computeAndCacheDailySummary>> | null> = [];
+        for (const loc of validTargetLocations) {
+          try {
+            const candidates = buildLocationIdCandidates(loc.shopifyLocationGid);
+            const cached = await prisma.salesSummaryCacheDaily.findFirst({
+              where: {
+                shopId: shop.id,
+                locationId: { in: candidates },
+                targetDate,
+              },
+              orderBy: { updatedAt: "desc" },
+            });
+            // 過去日のみ DB キャッシュを読む。当日は常に再計算（以前は「当日かつキャッシュあり」で再計算に到達せず数値が永遠に更新されない不具合があった）
+            const useLocationDailyCache =
+              Boolean(cached) && !forceRecomputeDaily && targetDate < today;
+            if (useLocationDailyCache) {
+              rowsRaw.push(toDailyRowFromCache(loc.shopifyLocationGid, loc.name, targetDate, cached));
+              continue;
+            }
+            // 過去日はキャッシュ固定: キャッシュ未作成時のみ計算して埋める（recompute=1 のときは常に再計算）
+            if (!shouldRecompute && !cached) {
+              const computed = await computeWithRetry(
+                admin,
+                shop.id,
+                loc.shopifyLocationGid,
+                loc.name,
+                targetDate,
+                wantDebug
+              );
+              if (wantDebug && (computed as any)?.debug) recomputeDebugLocations.push(computed);
+              rowsRaw.push(computed);
+              continue;
+            }
+            // 当日/未来日(入力誤り含む)は最新化のため再計算
             const computed = await computeWithRetry(
               admin,
               shop.id,
@@ -474,100 +599,372 @@ export async function loader({ request }: LoaderFunctionArgs) {
             );
             if (wantDebug && (computed as any)?.debug) recomputeDebugLocations.push(computed);
             rowsRaw.push(computed);
-            continue;
+          } catch (err) {
+            failedLocationErrors.set(loc.name, toErrorMessage(err));
+            rowsRaw.push(null);
           }
-          // 当日/未来日(入力誤り含む)は最新化のため再計算
-          const computed = await computeWithRetry(
-            admin,
-            shop.id,
-            loc.shopifyLocationGid,
-            loc.name,
-            targetDate,
-            wantDebug
-          );
-          if (wantDebug && (computed as any)?.debug) recomputeDebugLocations.push(computed);
-          rowsRaw.push(computed);
-        } catch (err) {
-          failedLocationErrors.set(loc.name, toErrorMessage(err));
-          rowsRaw.push(null);
+        }
+        let rows = rowsRaw.filter((r): r is NonNullable<typeof r> => r !== null);
+
+        const budgetByLocDay = await getLocationBudgetAmountsForDayBatch(
+          shop.id,
+          rows.map((r) => r.locationId),
+          targetDate,
+        );
+        rows = rows.map((r) => {
+          const budget = budgetByLocDay.get(r.locationId) ?? null;
+          const budgetRatio = budget != null && budget > 0 ? r.actual / budget : null;
+          return { ...r, budget, budgetRatio };
+        });
+
+        const failedDetailsDaily = Array.from(failedLocationErrors.entries()).map(
+          ([name, reason]) => `${name}: ${reason}`,
+        );
+        const loadErrorDaily = buildLocationFailureLoadError(syncWarning, failedDetailsDaily);
+
+        // ── チャネル行集計（daily） ──────────────────────────────────────────────
+        if (!showChannels) {
+          return {
+            hasAccess: true, planMessage: "", view, targetDate, targetMonth,
+            selectedLocationId, showChannels,
+            calendarToday: shopCalendarToday,
+            recomputeDailyApplied: forceRecomputeDaily,
+            recomputeChannelMonthApplied: false,
+            recomputeDebug: wantDebug ? { locations: recomputeDebugLocations } : null,
+            locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
+            rows, channelRows: [],
+            loadError: loadErrorDaily,
+            loadWarning: null,
+          };
+        }
+        await autoDiscoverChannels(admin, shop.id);
+        const enabledChannels = await getEnabledSalesChannels(shop.id);
+        const isPastDate = targetDate < today;
+        const recomputeDebugChannels: Array<unknown> = [];
+        const channelRows: Array<{
+          channelId: string; channelName: string;
+          actual: number; orders: number; items: number;
+          budget: number | null; budgetRatio: number | null;
+          atv: number | null; setRate: number | null; unit: number | null;
+          debug?: unknown;
+        }> = [];
+        for (const ch of enabledChannels) {
+          try {
+            if (isPastDate && !forceRecomputeDaily) {
+              const cached = await prisma.salesChannelCacheDaily.findFirst({
+                where: { shopId: shop.id, channelId: ch.id, targetDate },
+              });
+              if (cached && ch.sourceNamesJson === ch.sourceNamesSnapshot) {
+                channelRows.push({
+                  channelId: ch.id, channelName: ch.displayName,
+                  actual: Number(cached.actual), orders: cached.orders, items: cached.items,
+                  budget: cached.budget !== null ? Number(cached.budget) : null,
+                  budgetRatio: cached.budgetRatio !== null ? Number(cached.budgetRatio) : null,
+                  atv: cached.atv !== null ? Number(cached.atv) : null,
+                  setRate: cached.setRate !== null ? Number(cached.setRate) : null,
+                  unit: cached.unit !== null ? Number(cached.unit) : null,
+                });
+                continue;
+              }
+            }
+            const row = await computeAndCacheChannelDailySummary(
+              admin,
+              shop.id,
+              ch.id,
+              ch.displayName,
+              ch.sourceNames,
+              targetDate,
+              { debug: wantDebug },
+            );
+            if (wantDebug && (row as any)?.debug) recomputeDebugChannels.push(row);
+            channelRows.push({ channelId: ch.id, channelName: ch.displayName, ...row });
+          } catch { /* チャネル1件の失敗で全体を落とさない */ }
+        }
+
+        return {
+          hasAccess: true,
+          planMessage: "",
+          view,
+          targetDate,
+          targetMonth,
+          selectedLocationId,
+          showChannels,
+          calendarToday: shopCalendarToday,
+          recomputeDailyApplied: forceRecomputeDaily,
+          recomputeChannelMonthApplied: false,
+          recomputeDebug: wantDebug ? { locations: recomputeDebugLocations, channels: recomputeDebugChannels } : null,
+          locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
+          rows,
+          channelRows,
+          loadError: loadErrorDaily,
+          loadWarning: null,
+        };
+      }
+
+      const { dateFrom, dateTo } = monthRange(targetMonth);
+      const channelMonthRebuildNotice =
+        url.searchParams.get("channelNotice") === "channelMonthRebuilt";
+      const failedLocationErrors = new Map<string, string>();
+      const today = shopCalendarToday;
+      const locationIdsForQuery = expandLocationIdsForCacheQuery(validTargetLocations);
+      const daysInMonth = eachDay(dateFrom, dateTo);
+
+      const prefetchLocationCaches = await prisma.salesSummaryCacheDaily.findMany({
+        where: {
+          shopId: shop.id,
+          locationId: { in: locationIdsForQuery },
+          targetDate: { gte: dateFrom, lte: dateTo },
+        },
+        select: { locationId: true, targetDate: true },
+      });
+      const locationCacheSet = buildLocationDayCacheSet(
+        prefetchLocationCaches,
+        validTargetLocations,
+        resolveCanonicalLocationGid,
+      );
+
+      const locationWork: Array<{ day: string; loc: LocationRow }> = [];
+      for (const day of daysInMonth) {
+        for (const loc of validTargetLocations) {
+          if (!needsLocationDayCompute(day, loc.shopifyLocationGid, today, locationCacheSet)) continue;
+          locationWork.push({ day, loc });
         }
       }
-      let rows = rowsRaw.filter((r): r is NonNullable<typeof r> => r !== null);
-
-      const budgetByLocDay = await getLocationBudgetAmountsForDayBatch(
-        shop.id,
-        rows.map((r) => r.locationId),
-        targetDate,
+      locationWork.sort(
+        (a, b) => a.day.localeCompare(b.day) || a.loc.name.localeCompare(b.loc.name),
       );
-      rows = rows.map((r) => {
-        const budget = budgetByLocDay.get(r.locationId) ?? null;
-        const budgetRatio = budget != null && budget > 0 ? r.actual / budget : null;
-        return { ...r, budget, budgetRatio };
-      });
 
-      const failedDetailsDaily = Array.from(failedLocationErrors.entries()).map(
+      const maxPeriod = getSalesSummaryPeriodMaxComputes();
+      let budget = maxPeriod === 0 ? Number.MAX_SAFE_INTEGER : maxPeriod;
+      let locationAttempts = 0;
+      for (const { day, loc } of locationWork) {
+        if (budget <= 0) break;
+        locationAttempts += 1;
+        try {
+          await computeWithRetry(admin, shop.id, loc.shopifyLocationGid, loc.name, day);
+        } catch (err) {
+          if (!failedLocationErrors.has(loc.name)) {
+            failedLocationErrors.set(loc.name, toErrorMessage(err));
+          }
+        }
+        budget -= 1;
+      }
+      const skippedLocation = Math.max(0, locationWork.length - locationAttempts);
+
+      const cacheRows = await prisma.salesSummaryCacheDaily.findMany({
+        where: {
+          shopId: shop.id,
+          locationId: { in: locationIdsForQuery },
+          targetDate: { gte: dateFrom, lte: dateTo },
+        },
+      });
+      const todayStrForPeriod = shopCalendarToday;
+      const yesterdayStrForPeriod = addCalendarDaysToIsoDate(shopCalendarToday, -1);
+      const locationMap = new Map<
+        string,
+        {
+          locationId: string;
+          locationName: string;
+          actualTotal: number;
+          budgetTotal: number | null;
+          orders: number;
+          items: number;
+          visitors: number | null;
+          progressBudgetToday: number;
+          progressBudgetPrev: number;
+        }
+      >();
+      for (const loc of validTargetLocations) {
+        locationMap.set(loc.shopifyLocationGid, {
+          locationId: loc.shopifyLocationGid,
+          locationName: loc.name,
+          actualTotal: 0,
+          budgetTotal: null,
+          orders: 0,
+          items: 0,
+          visitors: null,
+          progressBudgetToday: 0,
+          progressBudgetPrev: 0,
+        });
+      }
+      for (const row of cacheRows) {
+        const canon = resolveCanonicalLocationGid(validTargetLocations, row.locationId);
+        if (!canon) continue;
+        const entry = locationMap.get(canon);
+        if (!entry) continue;
+        entry.actualTotal += Number(row.actual);
+        entry.orders += row.orders;
+        entry.items += row.items;
+        if (row.visitors !== null) {
+          entry.visitors = (entry.visitors ?? 0) + row.visitors;
+        }
+      }
+
+      const periodBudgetByLoc = await sumLocationBudgetsForPeriodBatch(
+        shop.id,
+        validTargetLocations.map((l) => l.shopifyLocationGid),
+        dateFrom,
+        dateTo,
+        todayStrForPeriod,
+        yesterdayStrForPeriod,
+      );
+      for (const loc of validTargetLocations) {
+        const entry = locationMap.get(loc.shopifyLocationGid);
+        if (!entry) continue;
+        const pb = periodBudgetByLoc.get(loc.shopifyLocationGid);
+        if (!pb) continue;
+        entry.budgetTotal = pb.budgetTotal;
+        entry.progressBudgetToday = pb.progressBudgetToday;
+        entry.progressBudgetPrev = pb.progressBudgetPrev;
+      }
+
+      const rows = Array.from(locationMap.values()).map((entry) => ({
+        locationId: entry.locationId,
+        locationName: entry.locationName,
+        actualTotal: entry.actualTotal,
+        budgetTotal: entry.budgetTotal,
+        achievementRate:
+          entry.budgetTotal && entry.budgetTotal > 0 ? entry.actualTotal / entry.budgetTotal : null,
+        progressBudgetToday: entry.progressBudgetToday,
+        progressRateToday:
+          entry.progressBudgetToday > 0 ? entry.actualTotal / entry.progressBudgetToday : null,
+        progressBudgetPrev: entry.progressBudgetPrev,
+        progressRatePrev:
+          entry.progressBudgetPrev > 0 ? entry.actualTotal / entry.progressBudgetPrev : null,
+        orders: entry.orders,
+        items: entry.items,
+        visitors: entry.visitors,
+        conv:
+          entry.visitors !== null && entry.visitors > 0 ? entry.orders / entry.visitors : null,
+        atv: entry.orders > 0 ? entry.actualTotal / entry.orders : null,
+        setRate: entry.orders > 0 ? entry.items / entry.orders : null,
+        unit: entry.items > 0 ? entry.actualTotal / entry.items : null,
+      }));
+
+      const failedDetailsPeriodEarly = Array.from(failedLocationErrors.entries()).map(
         ([name, reason]) => `${name}: ${reason}`,
       );
-      const loadErrorDaily = buildLocationFailureLoadError(syncWarning, failedDetailsDaily);
+      const loadErrorPeriod = buildLocationFailureLoadError(syncWarning, failedDetailsPeriodEarly);
 
-      // ── チャネル行集計（daily） ──────────────────────────────────────────────
+      const loadWarningPeriodOnly =
+        maxPeriod !== 0 && skippedLocation > 0
+          ? `月次表示では1回の読み込みで実行する計算件数に上限があります（残りおおよそ${skippedLocation}件）。ページを再読み込みすると続きが埋まります。まとめて取得する場合はアプリのバックフィル画面で月単位の取得が使えます。`
+          : null;
+
+      // ── チャネル行集計（period） ─────────────────────────────────────────────
       if (!showChannels) {
         return {
           hasAccess: true, planMessage: "", view, targetDate, targetMonth,
           selectedLocationId, showChannels,
           calendarToday: shopCalendarToday,
-          recomputeDailyApplied: forceRecomputeDaily,
-          recomputeChannelMonthApplied: false,
-          recomputeDebug: wantDebug ? { locations: recomputeDebugLocations } : null,
+          recomputeDailyApplied: false,
+          recomputeChannelMonthApplied: channelMonthRebuildNotice,
           locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
           rows, channelRows: [],
-          loadError: loadErrorDaily,
-          loadWarning: null,
+          loadError: loadErrorPeriod,
+          loadWarning: loadWarningPeriodOnly,
         };
       }
       await autoDiscoverChannels(admin, shop.id);
-      const enabledChannels = await getEnabledSalesChannels(shop.id);
-      const isPastDate = targetDate < today;
-      const recomputeDebugChannels: Array<unknown> = [];
-      const channelRows: Array<{
-        channelId: string; channelName: string;
-        actual: number; orders: number; items: number;
-        budget: number | null; budgetRatio: number | null;
-        atv: number | null; setRate: number | null; unit: number | null;
-        debug?: unknown;
-      }> = [];
-      for (const ch of enabledChannels) {
-        try {
-          if (isPastDate && !forceRecomputeDaily) {
-            const cached = await prisma.salesChannelCacheDaily.findFirst({
-              where: { shopId: shop.id, channelId: ch.id, targetDate },
+      const enabledChannelsPeriod = await getEnabledSalesChannels(shop.id);
+      const prefetchChannelCaches =
+        enabledChannelsPeriod.length === 0
+          ? []
+          : await prisma.salesChannelCacheDaily.findMany({
+              where: {
+                shopId: shop.id,
+                channelId: { in: enabledChannelsPeriod.map((c) => c.id) },
+                targetDate: { gte: dateFrom, lte: dateTo },
+              },
+              select: { channelId: true, targetDate: true },
             });
-            if (cached && ch.sourceNamesJson === ch.sourceNamesSnapshot) {
-              channelRows.push({
-                channelId: ch.id, channelName: ch.displayName,
-                actual: Number(cached.actual), orders: cached.orders, items: cached.items,
-                budget: cached.budget !== null ? Number(cached.budget) : null,
-                budgetRatio: cached.budgetRatio !== null ? Number(cached.budgetRatio) : null,
-                atv: cached.atv !== null ? Number(cached.atv) : null,
-                setRate: cached.setRate !== null ? Number(cached.setRate) : null,
-                unit: cached.unit !== null ? Number(cached.unit) : null,
-              });
-              continue;
-            }
-          }
-          const row = await computeAndCacheChannelDailySummary(
-            admin,
-            shop.id,
-            ch.id,
-            ch.displayName,
-            ch.sourceNames,
-            targetDate,
-            { debug: wantDebug },
-          );
-          if (wantDebug && (row as any)?.debug) recomputeDebugChannels.push(row);
-          channelRows.push({ channelId: ch.id, channelName: ch.displayName, ...row });
-        } catch { /* チャネル1件の失敗で全体を落とさない */ }
+      const channelCachePresence = new Set(
+        prefetchChannelCaches.map((r) => `${r.channelId}|${r.targetDate}`),
+      );
+
+      type EnabledCh = (typeof enabledChannelsPeriod)[number];
+      const channelWork: Array<{ day: string; ch: EnabledCh }> = [];
+      for (const day of daysInMonth) {
+        const shouldRecompute = day >= todayStrForPeriod;
+        for (const ch of enabledChannelsPeriod) {
+          const hasCache = channelCachePresence.has(`${ch.id}|${day}`);
+          if (!shouldRecompute && hasCache) continue;
+          channelWork.push({ day, ch });
+        }
       }
+      channelWork.sort(
+        (a, b) =>
+          a.day.localeCompare(b.day) || a.ch.displayName.localeCompare(b.ch.displayName),
+      );
+
+      let channelAttempts = 0;
+      for (const { day, ch } of channelWork) {
+        if (budget <= 0) break;
+        channelAttempts += 1;
+        try {
+          await computeAndCacheChannelDailySummary(
+            admin, shop.id, ch.id, ch.displayName, ch.sourceNames, day
+          );
+        } catch { /* 1日1チャネルの失敗で全体を落とさない */ }
+        budget -= 1;
+      }
+      const skippedChannel = Math.max(0, channelWork.length - channelAttempts);
+      const skippedTotal = skippedLocation + skippedChannel;
+      const loadWarning =
+        maxPeriod !== 0 && skippedTotal > 0
+          ? `月次表示では1回の読み込みで実行する計算件数に上限があります（残りおおよそ${skippedTotal}件）。ページを再読み込みすると続きが埋まります。まとめて取得する場合はアプリのバックフィル画面で月単位の取得が使えます。`
+          : null;
+      const channelCacheRows =
+        enabledChannelsPeriod.length === 0
+          ? []
+          : await prisma.salesChannelCacheDaily.findMany({
+              where: {
+                shopId: shop.id,
+                channelId: { in: enabledChannelsPeriod.map((c) => c.id) },
+                targetDate: { gte: dateFrom, lte: dateTo },
+              },
+            });
+      const channelMap = new Map<string, {
+        channelId: string; channelName: string;
+        actualTotal: number; budgetTotal: number | null;
+        orders: number; items: number;
+        progressBudgetToday: number; progressBudgetPrev: number;
+      }>();
+      for (const ch of enabledChannelsPeriod) {
+        channelMap.set(ch.id, {
+          channelId: ch.id, channelName: ch.displayName,
+          actualTotal: 0, budgetTotal: null, orders: 0, items: 0,
+          progressBudgetToday: 0, progressBudgetPrev: 0,
+        });
+      }
+      for (const row of channelCacheRows) {
+        const entry = channelMap.get(row.channelId);
+        if (!entry) continue;
+        entry.actualTotal += Number(row.actual);
+        entry.orders += row.orders;
+        entry.items += row.items;
+        if (row.budget !== null) {
+          entry.budgetTotal = (entry.budgetTotal ?? 0) + Number(row.budget);
+          if (row.targetDate <= todayStrForPeriod) entry.progressBudgetToday += Number(row.budget);
+          if (row.targetDate <= yesterdayStrForPeriod) entry.progressBudgetPrev += Number(row.budget);
+        }
+      }
+      const channelRows = Array.from(channelMap.values()).map((entry) => ({
+        channelId: entry.channelId,
+        channelName: entry.channelName,
+        actualTotal: entry.actualTotal,
+        budgetTotal: entry.budgetTotal,
+        achievementRate: entry.budgetTotal && entry.budgetTotal > 0 ? entry.actualTotal / entry.budgetTotal : null,
+        progressBudgetToday: entry.progressBudgetToday,
+        progressRateToday: entry.progressBudgetToday > 0 ? entry.actualTotal / entry.progressBudgetToday : null,
+        progressBudgetPrev: entry.progressBudgetPrev,
+        progressRatePrev: entry.progressBudgetPrev > 0 ? entry.actualTotal / entry.progressBudgetPrev : null,
+        orders: entry.orders,
+        items: entry.items,
+        atv: entry.orders > 0 ? entry.actualTotal / entry.orders : null,
+        setRate: entry.orders > 0 ? entry.items / entry.orders : null,
+        unit: entry.items > 0 ? entry.actualTotal / entry.items : null,
+      }));
 
       return {
         hasAccess: true,
@@ -578,309 +975,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
         selectedLocationId,
         showChannels,
         calendarToday: shopCalendarToday,
-        recomputeDailyApplied: forceRecomputeDaily,
-        recomputeChannelMonthApplied: false,
-        recomputeDebug: wantDebug ? { locations: recomputeDebugLocations, channels: recomputeDebugChannels } : null,
+        recomputeDailyApplied: false,
+        recomputeChannelMonthApplied: channelMonthRebuildNotice,
+        recomputeDebug: null,
         locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
         rows,
         channelRows,
-        loadError: loadErrorDaily,
-        loadWarning: null,
-      };
-    }
-
-    const { dateFrom, dateTo } = monthRange(targetMonth);
-    const channelMonthRebuildNotice =
-      url.searchParams.get("channelNotice") === "channelMonthRebuilt";
-    if (forceRecomputeChannelMonth && showChannels) {
-      await prisma.salesChannelCacheDaily.deleteMany({
-        where: { shopId: shop.id, targetDate: { gte: dateFrom, lte: dateTo } },
-      });
-      const next = new URL(request.url);
-      next.searchParams.delete("recomputeChannelMonth");
-      next.searchParams.set("channelNotice", "channelMonthRebuilt");
-      return redirect(next.pathname + next.search);
-    }
-    const failedLocationErrors = new Map<string, string>();
-    const today = shopCalendarToday;
-    const locationIdsForQuery = expandLocationIdsForCacheQuery(validTargetLocations);
-    const daysInMonth = eachDay(dateFrom, dateTo);
-
-    const prefetchLocationCaches = await prisma.salesSummaryCacheDaily.findMany({
-      where: {
-        shopId: shop.id,
-        locationId: { in: locationIdsForQuery },
-        targetDate: { gte: dateFrom, lte: dateTo },
-      },
-      select: { locationId: true, targetDate: true },
-    });
-    const locationCacheSet = buildLocationDayCacheSet(
-      prefetchLocationCaches,
-      validTargetLocations,
-      resolveCanonicalLocationGid,
-    );
-
-    const locationWork: Array<{ day: string; loc: LocationRow }> = [];
-    for (const day of daysInMonth) {
-      for (const loc of validTargetLocations) {
-        if (!needsLocationDayCompute(day, loc.shopifyLocationGid, today, locationCacheSet)) continue;
-        locationWork.push({ day, loc });
-      }
-    }
-    locationWork.sort(
-      (a, b) => a.day.localeCompare(b.day) || a.loc.name.localeCompare(b.loc.name),
-    );
-
-    const maxPeriod = getSalesSummaryPeriodMaxComputes();
-    let budget = maxPeriod === 0 ? Number.MAX_SAFE_INTEGER : maxPeriod;
-    let locationAttempts = 0;
-    for (const { day, loc } of locationWork) {
-      if (budget <= 0) break;
-      locationAttempts += 1;
-      try {
-        await computeWithRetry(admin, shop.id, loc.shopifyLocationGid, loc.name, day);
-      } catch (err) {
-        if (!failedLocationErrors.has(loc.name)) {
-          failedLocationErrors.set(loc.name, toErrorMessage(err));
-        }
-      }
-      budget -= 1;
-    }
-    const skippedLocation = Math.max(0, locationWork.length - locationAttempts);
-
-    const cacheRows = await prisma.salesSummaryCacheDaily.findMany({
-      where: {
-        shopId: shop.id,
-        locationId: { in: locationIdsForQuery },
-        targetDate: { gte: dateFrom, lte: dateTo },
-      },
-    });
-    const todayStrForPeriod = shopCalendarToday;
-    const yesterdayStrForPeriod = addCalendarDaysToIsoDate(shopCalendarToday, -1);
-    const locationMap = new Map<
-      string,
-      {
-        locationId: string;
-        locationName: string;
-        actualTotal: number;
-        budgetTotal: number | null;
-        orders: number;
-        items: number;
-        visitors: number | null;
-        progressBudgetToday: number;
-        progressBudgetPrev: number;
-      }
-    >();
-    for (const loc of validTargetLocations) {
-      locationMap.set(loc.shopifyLocationGid, {
-        locationId: loc.shopifyLocationGid,
-        locationName: loc.name,
-        actualTotal: 0,
-        budgetTotal: null,
-        orders: 0,
-        items: 0,
-        visitors: null,
-        progressBudgetToday: 0,
-        progressBudgetPrev: 0,
-      });
-    }
-    for (const row of cacheRows) {
-      const canon = resolveCanonicalLocationGid(validTargetLocations, row.locationId);
-      if (!canon) continue;
-      const entry = locationMap.get(canon);
-      if (!entry) continue;
-      entry.actualTotal += Number(row.actual);
-      entry.orders += row.orders;
-      entry.items += row.items;
-      if (row.visitors !== null) {
-        entry.visitors = (entry.visitors ?? 0) + row.visitors;
-      }
-    }
-
-    const periodBudgetByLoc = await sumLocationBudgetsForPeriodBatch(
-      shop.id,
-      validTargetLocations.map((l) => l.shopifyLocationGid),
-      dateFrom,
-      dateTo,
-      todayStrForPeriod,
-      yesterdayStrForPeriod,
-    );
-    for (const loc of validTargetLocations) {
-      const entry = locationMap.get(loc.shopifyLocationGid);
-      if (!entry) continue;
-      const pb = periodBudgetByLoc.get(loc.shopifyLocationGid);
-      if (!pb) continue;
-      entry.budgetTotal = pb.budgetTotal;
-      entry.progressBudgetToday = pb.progressBudgetToday;
-      entry.progressBudgetPrev = pb.progressBudgetPrev;
-    }
-
-    const rows = Array.from(locationMap.values()).map((entry) => ({
-      locationId: entry.locationId,
-      locationName: entry.locationName,
-      actualTotal: entry.actualTotal,
-      budgetTotal: entry.budgetTotal,
-      achievementRate:
-        entry.budgetTotal && entry.budgetTotal > 0 ? entry.actualTotal / entry.budgetTotal : null,
-      progressBudgetToday: entry.progressBudgetToday,
-      progressRateToday:
-        entry.progressBudgetToday > 0 ? entry.actualTotal / entry.progressBudgetToday : null,
-      progressBudgetPrev: entry.progressBudgetPrev,
-      progressRatePrev:
-        entry.progressBudgetPrev > 0 ? entry.actualTotal / entry.progressBudgetPrev : null,
-      orders: entry.orders,
-      items: entry.items,
-      visitors: entry.visitors,
-      conv:
-        entry.visitors !== null && entry.visitors > 0 ? entry.orders / entry.visitors : null,
-      atv: entry.orders > 0 ? entry.actualTotal / entry.orders : null,
-      setRate: entry.orders > 0 ? entry.items / entry.orders : null,
-      unit: entry.items > 0 ? entry.actualTotal / entry.items : null,
-    }));
-
-    const failedDetailsPeriodEarly = Array.from(failedLocationErrors.entries()).map(
-      ([name, reason]) => `${name}: ${reason}`,
-    );
-    const loadErrorPeriod = buildLocationFailureLoadError(syncWarning, failedDetailsPeriodEarly);
-
-    const loadWarningPeriodOnly =
-      maxPeriod !== 0 && skippedLocation > 0
-        ? `月次表示では1回の読み込みで実行する計算件数に上限があります（残りおおよそ${skippedLocation}件）。ページを再読み込みすると続きが埋まります。まとめて取得する場合はアプリのバックフィル画面で月単位の取得が使えます。`
-        : null;
-
-    // ── チャネル行集計（period） ─────────────────────────────────────────────
-    if (!showChannels) {
-      return {
-        hasAccess: true, planMessage: "", view, targetDate, targetMonth,
-        selectedLocationId, showChannels,
-        calendarToday: shopCalendarToday,
-        recomputeDailyApplied: false,
-        recomputeChannelMonthApplied: channelMonthRebuildNotice,
-        locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
-        rows, channelRows: [],
         loadError: loadErrorPeriod,
-        loadWarning: loadWarningPeriodOnly,
+        loadWarning,
       };
-    }
-    await autoDiscoverChannels(admin, shop.id);
-    const enabledChannelsPeriod = await getEnabledSalesChannels(shop.id);
-    const prefetchChannelCaches =
-      enabledChannelsPeriod.length === 0
-        ? []
-        : await prisma.salesChannelCacheDaily.findMany({
-            where: {
-              shopId: shop.id,
-              channelId: { in: enabledChannelsPeriod.map((c) => c.id) },
-              targetDate: { gte: dateFrom, lte: dateTo },
-            },
-            select: { channelId: true, targetDate: true },
-          });
-    const channelCachePresence = new Set(
-      prefetchChannelCaches.map((r) => `${r.channelId}|${r.targetDate}`),
-    );
-
-    type EnabledCh = (typeof enabledChannelsPeriod)[number];
-    const channelWork: Array<{ day: string; ch: EnabledCh }> = [];
-    for (const day of daysInMonth) {
-      const shouldRecompute = day >= todayStrForPeriod;
-      for (const ch of enabledChannelsPeriod) {
-        const hasCache = channelCachePresence.has(`${ch.id}|${day}`);
-        if (!shouldRecompute && hasCache) continue;
-        channelWork.push({ day, ch });
-      }
-    }
-    channelWork.sort(
-      (a, b) =>
-        a.day.localeCompare(b.day) || a.ch.displayName.localeCompare(b.ch.displayName),
-    );
-
-    let channelAttempts = 0;
-    for (const { day, ch } of channelWork) {
-      if (budget <= 0) break;
-      channelAttempts += 1;
-      try {
-        await computeAndCacheChannelDailySummary(
-          admin, shop.id, ch.id, ch.displayName, ch.sourceNames, day
-        );
-      } catch { /* 1日1チャネルの失敗で全体を落とさない */ }
-      budget -= 1;
-    }
-    const skippedChannel = Math.max(0, channelWork.length - channelAttempts);
-    const skippedTotal = skippedLocation + skippedChannel;
-    const loadWarning =
-      maxPeriod !== 0 && skippedTotal > 0
-        ? `月次表示では1回の読み込みで実行する計算件数に上限があります（残りおおよそ${skippedTotal}件）。ページを再読み込みすると続きが埋まります。まとめて取得する場合はアプリのバックフィル画面で月単位の取得が使えます。`
-        : null;
-    const channelCacheRows =
-      enabledChannelsPeriod.length === 0
-        ? []
-        : await prisma.salesChannelCacheDaily.findMany({
-            where: {
-              shopId: shop.id,
-              channelId: { in: enabledChannelsPeriod.map((c) => c.id) },
-              targetDate: { gte: dateFrom, lte: dateTo },
-            },
-          });
-    const channelMap = new Map<string, {
-      channelId: string; channelName: string;
-      actualTotal: number; budgetTotal: number | null;
-      orders: number; items: number;
-      progressBudgetToday: number; progressBudgetPrev: number;
-    }>();
-    for (const ch of enabledChannelsPeriod) {
-      channelMap.set(ch.id, {
-        channelId: ch.id, channelName: ch.displayName,
-        actualTotal: 0, budgetTotal: null, orders: 0, items: 0,
-        progressBudgetToday: 0, progressBudgetPrev: 0,
-      });
-    }
-    for (const row of channelCacheRows) {
-      const entry = channelMap.get(row.channelId);
-      if (!entry) continue;
-      entry.actualTotal += Number(row.actual);
-      entry.orders += row.orders;
-      entry.items += row.items;
-      if (row.budget !== null) {
-        entry.budgetTotal = (entry.budgetTotal ?? 0) + Number(row.budget);
-        if (row.targetDate <= todayStrForPeriod) entry.progressBudgetToday += Number(row.budget);
-        if (row.targetDate <= yesterdayStrForPeriod) entry.progressBudgetPrev += Number(row.budget);
-      }
-    }
-    const channelRows = Array.from(channelMap.values()).map((entry) => ({
-      channelId: entry.channelId,
-      channelName: entry.channelName,
-      actualTotal: entry.actualTotal,
-      budgetTotal: entry.budgetTotal,
-      achievementRate: entry.budgetTotal && entry.budgetTotal > 0 ? entry.actualTotal / entry.budgetTotal : null,
-      progressBudgetToday: entry.progressBudgetToday,
-      progressRateToday: entry.progressBudgetToday > 0 ? entry.actualTotal / entry.progressBudgetToday : null,
-      progressBudgetPrev: entry.progressBudgetPrev,
-      progressRatePrev: entry.progressBudgetPrev > 0 ? entry.actualTotal / entry.progressBudgetPrev : null,
-      orders: entry.orders,
-      items: entry.items,
-      atv: entry.orders > 0 ? entry.actualTotal / entry.orders : null,
-      setRate: entry.orders > 0 ? entry.items / entry.orders : null,
-      unit: entry.items > 0 ? entry.actualTotal / entry.items : null,
-    }));
-
-    return {
-      hasAccess: true,
-      planMessage: "",
-      view,
-      targetDate,
-      targetMonth,
-      selectedLocationId,
-      showChannels,
-      calendarToday: shopCalendarToday,
-      recomputeDailyApplied: false,
-      recomputeChannelMonthApplied: channelMonthRebuildNotice,
-      recomputeDebug: null,
-      locations: visibleLocations.map((l) => ({ id: l.shopifyLocationGid, name: l.name })),
-      rows,
-      channelRows,
-      loadError: loadErrorPeriod,
-      loadWarning,
     };
+    const report = computeReport().catch((err) => ({
+      ...frame,
+      recomputeDailyApplied: false,
+      recomputeChannelMonthApplied: false,
+      recomputeDebug: null,
+      rows: [] as Array<Record<string, string | number | null>>,
+      channelRows: [] as Array<Record<string, string | number | null>>,
+      loadError: toErrorMessage(err),
+      loadWarning: null as string | null,
+    }));
+    // 集計が失敗しても未処理の reject にしない（画面には失敗の帯を出す）
+    report.catch(() => {});
+    return { ...frame, cachePreview, report };
   } catch (err) {
     const message = err instanceof Error ? err.message : "売上サマリーの読み込みに失敗しました";
     const today = new Date().toISOString().slice(0, 10);
@@ -905,27 +1022,61 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 }
 
-export default function SalesSummaryAdminPage() {
-  const data = useLoaderData<typeof loader>();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const recomputeDebug = (data as any).recomputeDebug as
+type SalesSummaryLoaderData = Exclude<Awaited<ReturnType<typeof loader>>, Response>;
+type SalesSummaryReport = SalesSummaryLoaderData extends infer R
+  ? R extends { report: Promise<infer P> } ? P : R
+  : never;
+
+/** 集計を待つ間の 1 文（UI_RULES 9章: 画面を先に出し、集計はあとから出す） */
+function ReportLoading({ view, locationCount }: { view: string; locationCount: number }) {
+  return (
+    <Layout.Section>
+      <Card>
+        <div role="status" aria-busy="true">
+          <Text as="p" fontWeight="semibold">
+            {view === "daily"
+              ? `集計しています。${locationCount > 1 ? `${locationCount} 店の分を順に数えるので、` : ""}1 分ほどかかることがあります。`
+              : "集計しています。まだ数えていない日があると、1 分ほどかかることがあります。"}
+          </Text>
+        </div>
+      </Card>
+    </Layout.Section>
+  );
+}
+
+function ReportFailed() {
+  return (
+    <Layout.Section>
+      <Banner tone="critical" title="集計できませんでした">
+        ページを読み込み直してください。続くときは、少し時間をおいてから開いてください。
+      </Banner>
+    </Layout.Section>
+  );
+}
+
+function ReportBody({
+  report,
+  searchParams,
+  setSearchParams,
+  provisionalAsOf = null,
+}: {
+  report: SalesSummaryReport;
+  searchParams: URLSearchParams;
+  setSearchParams: (next: URLSearchParams) => void;
+  /** 数え直し中に保存済みの数字を見せるときの時点（HH:MM）。あると表を薄くし、上に時点を書く */
+  provisionalAsOf?: string | null;
+}) {
+  const recomputeDebug = (report as any).recomputeDebug as
     | null
     | { locations?: Array<any>; channels?: Array<any> };
   const recomputeDebugLocations = recomputeDebug?.locations ?? [];
   const recomputeDebugChannels = recomputeDebug?.channels ?? [];
 
-  const setParam = (key: string, value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    setSearchParams(next);
-  };
-
   const tableRows = useMemo(() => {
-    if (!data.hasAccess) return [];
+    if (!true) return [];
     const locationBody =
-      data.view === "daily"
-        ? data.rows.map((r) => [
+      report.view === "daily"
+        ? report.rows.map((r) => [
             String(r.locationName ?? ""),
             fmtYen((r.actual as number) ?? 0),
             fmtYen((r.budget as number | null) ?? null),
@@ -938,7 +1089,7 @@ export default function SalesSummaryAdminPage() {
             `${Number(r.items ?? 0).toLocaleString("ja-JP")}点`,
             fmtYen((r.unit as number | null) ?? null),
           ])
-        : data.rows.map((r) => [
+        : report.rows.map((r) => [
             String(r.locationName ?? ""),
             fmtYen((r.actualTotal as number) ?? 0),
             r.budgetTotal != null ? fmtYen(Number(r.budgetTotal)) : "-",
@@ -956,11 +1107,11 @@ export default function SalesSummaryAdminPage() {
             fmtYen((r.unit as number | null) ?? null),
           ]);
 
-    const channelRows = data.channelRows ?? [];
+    const channelRows = report.channelRows ?? [];
 
     // チャネル行（POS以外のチャネル集計）
     const channelBody =
-      data.view === "daily"
+      report.view === "daily"
         ? channelRows.map((r) => [
             `[${String(r.channelName ?? "")}]`,
             fmtYen((r.actual as number) ?? 0),
@@ -991,20 +1142,20 @@ export default function SalesSummaryAdminPage() {
           ]);
 
     // 各合計行
-    const posRows = data.rows as Array<Record<string, unknown>>;
+    const posRows = report.rows as Array<Record<string, unknown>>;
     const chRows = channelRows as Array<Record<string, unknown>>;
     const grandRows = [...posRows, ...chRows];
 
-    const posTotal = data.view === "daily"
+    const posTotal = report.view === "daily"
       ? buildDailyTotalRowCells(posRows, "POS合計")
       : buildPeriodTotalRowCells(posRows, "POS合計");
     const channelTotal = channelBody.length > 0
-      ? (data.view === "daily"
+      ? (report.view === "daily"
           ? buildDailyTotalRowCells(chRows, "チャネル合計")
           : buildPeriodTotalRowCells(chRows, "チャネル合計"))
       : null;
     const grandTotal = channelBody.length > 0 && locationBody.length > 0
-      ? (data.view === "daily"
+      ? (report.view === "daily"
           ? buildDailyTotalRowCells(grandRows, "総合計")
           : buildPeriodTotalRowCells(grandRows, "総合計"))
       : null;
@@ -1024,7 +1175,7 @@ export default function SalesSummaryAdminPage() {
       result.push(...locationBody);
     }
     return result;
-  }, [data.hasAccess, data.view, data.rows, data.channelRows]);
+  }, [true, report.view, report.rows, report.channelRows]);
 
   const dailyHeadings = [
     "ロケーション",
@@ -1058,23 +1209,18 @@ export default function SalesSummaryAdminPage() {
   ];
 
   return (
-    <PolarisPageWrapper>
-      <Page title="売上サマリー（管理画面）">
-        <Card padding="0">
-          <TabGroupBar tabs={REPORTS_TABS} />
-        </Card>
-        <Layout>
-          {data.loadError && (
+    <>
+          {report.loadError && (
             <Layout.Section>
-              <Banner tone="critical">売上サマリー読込エラー: {data.loadError}</Banner>
+              <Banner tone="critical">売上サマリー読込エラー: {report.loadError}</Banner>
             </Layout.Section>
           )}
-          {data.loadWarning && (
+          {report.loadWarning && (
             <Layout.Section>
-              <Banner tone="warning">{data.loadWarning}</Banner>
+              <Banner tone="warning">{report.loadWarning}</Banner>
             </Layout.Section>
           )}
-          {data.hasAccess && data.recomputeDailyApplied && (
+          {report.recomputeDailyApplied && (
             <Layout.Section>
               <Banner tone="success">
                 この日の店舗行とチャネル行を、保存済みのキャッシュを使わずに取り直しました。次にページを開くときは、またキャッシュが使われます。
@@ -1126,7 +1272,7 @@ export default function SalesSummaryAdminPage() {
               )}
             </Layout.Section>
           )}
-          {data.hasAccess && data.recomputeChannelMonthApplied && (
+          {report.recomputeChannelMonthApplied && (
             <Layout.Section>
               <Banner tone="success">
                 表示中の月について、チャネル用の日ごとの保存データをいったん消してから集計し直しました。月次の店舗行は従来どおりです。
@@ -1144,9 +1290,68 @@ export default function SalesSummaryAdminPage() {
               </Box>
             </Layout.Section>
           )}
+              <Layout.Section>
+                <Card>
+                  {provisionalAsOf && (
+                    <Box paddingBlockEnd="200">
+                      <Text as="p" variant="headingSm" tone="subdued">
+                        参考：{provisionalAsOf} 時点の数字（いま数え直しているので、最新ではありません）
+                      </Text>
+                    </Box>
+                  )}
+                  <div style={provisionalAsOf ? { opacity: 0.45 } : undefined}>
+                  {tableRows.length === 0 ? (
+                    <Text tone="subdued" as="p">表示対象データがありません。</Text>
+                  ) : (
+                    <Box overflowX="scroll" maxWidth="100%">
+                      <DataTable
+                        columnContentTypes={
+                          report.view === "daily"
+                            ? (["text", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric"] as const)
+                            : (["text", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric"] as const)
+                        }
+                        headings={report.view === "daily" ? dailyHeadings : periodHeadings}
+                        rows={tableRows}
+                      />
+                    </Box>
+                  )}
+                  </div>
+                </Card>
+              </Layout.Section>
+    </>
+  );
+}
+
+export default function SalesSummaryAdminPage() {
+  const data = useLoaderData<typeof loader>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // 条件を変えて読み込んでいる間は、条件の欄を止める（二重に押せないように）
+  const busy = useNavigation().state !== "idle";
+
+  const setParam = (key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setSearchParams(next);
+  };
+
+  // 集計は loader から Promise のまま届く（権限が無いときなどは、そのままの値）
+  const reportSource = ("report" in data ? data.report : data) as
+    | Promise<SalesSummaryReport>
+    | SalesSummaryReport;
+  const locationCount = "locationCount" in data ? Number(data.locationCount) : 0;
+  const cachePreview = "cachePreview" in data ? data.cachePreview : null;
+
+  return (
+    <PolarisPageWrapper>
+      <Page title="売上サマリー（管理画面）">
+        <Card padding="0">
+          <TabGroupBar tabs={REPORTS_TABS} />
+        </Card>
+        <Layout>
           {!data.hasAccess && (
             <Layout.Section>
-              <Banner tone="warning">{data.planMessage}</Banner>
+              <Banner tone="warning">{"planMessage" in data ? data.planMessage : ""}</Banner>
             </Layout.Section>
           )}
           {data.hasAccess && (
@@ -1163,6 +1368,7 @@ export default function SalesSummaryAdminPage() {
                         ]}
                         value={data.view}
                         onChange={(v) => setParam("view", v)}
+                        disabled={busy}
                       />
                       {data.view === "daily" ? (
                         <Box minWidth="220px">
@@ -1170,6 +1376,7 @@ export default function SalesSummaryAdminPage() {
                             type="date"
                             value={data.targetDate}
                             onChange={(e) => setParam("targetDate", e.currentTarget.value)}
+                            disabled={busy}
                             style={{ width: "100%", padding: 8 }}
                           />
                         </Box>
@@ -1179,6 +1386,7 @@ export default function SalesSummaryAdminPage() {
                             type="month"
                             value={data.targetMonth}
                             onChange={(e) => setParam("targetMonth", e.currentTarget.value)}
+                            disabled={busy}
                             style={{ width: "100%", padding: 8 }}
                           />
                         </Box>
@@ -1191,6 +1399,7 @@ export default function SalesSummaryAdminPage() {
                         ]}
                         value={data.selectedLocationId}
                         onChange={(v) => setParam("locationId", v)}
+                        disabled={busy}
                       />
                       <Select
                         label="チャネル行"
@@ -1200,10 +1409,12 @@ export default function SalesSummaryAdminPage() {
                         ]}
                         value={data.showChannels ? "1" : "0"}
                         onChange={(v) => setParam("showChannels", v)}
+                        disabled={busy}
                       />
                       {data.view === "daily" && data.targetDate < data.calendarToday && (
                         <Button
                           variant="secondary"
+                          disabled={busy}
                           onClick={() => setParam("recompute", "1")}
                         >
                           この日を再取得（古い保存を使わない）
@@ -1212,6 +1423,7 @@ export default function SalesSummaryAdminPage() {
                       {data.view === "period" && data.showChannels && (
                         <Button
                           variant="secondary"
+                          disabled={busy}
                           onClick={() => setParam("recomputeChannelMonth", "1")}
                         >
                           この月のチャネルだけ保存を消してやり直す
@@ -1224,25 +1436,35 @@ export default function SalesSummaryAdminPage() {
                   </BlockStack>
                 </Card>
               </Layout.Section>
-              <Layout.Section>
-                <Card>
-                  {tableRows.length === 0 ? (
-                    <Text tone="subdued" as="p">表示対象データがありません。</Text>
-                  ) : (
-                    <Box overflowX="scroll" maxWidth="100%">
-                      <DataTable
-                        columnContentTypes={
-                          data.view === "daily"
-                            ? (["text", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric"] as const)
-                            : (["text", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric"] as const)
-                        }
-                        headings={data.view === "daily" ? dailyHeadings : periodHeadings}
-                        rows={tableRows}
+              <Suspense
+                key={searchParams.toString()}
+                fallback={
+                  cachePreview ? (
+                    <>
+                      {/* 主役は「集計しています。」。保存済みの数字は時点を付けた参考として薄く出す（T 2026-11-23） */}
+                      <ReportLoading view={data.view} locationCount={locationCount} />
+                      <ReportBody
+                        report={{ ...data, ...cachePreview, loadError: null, loadWarning: null, recomputeDailyApplied: false, recomputeChannelMonthApplied: false, recomputeDebug: null } as unknown as SalesSummaryReport}
+                        searchParams={searchParams}
+                        setSearchParams={setSearchParams}
+                        provisionalAsOf={cachePreview.asOf}
                       />
-                    </Box>
+                    </>
+                  ) : (
+                    <ReportLoading view={data.view} locationCount={locationCount} />
+                  )
+                }
+              >
+                <Await resolve={reportSource} errorElement={<ReportFailed />}>
+                  {(report) => (
+                    <ReportBody
+                      report={report as SalesSummaryReport}
+                      searchParams={searchParams}
+                      setSearchParams={setSearchParams}
+                    />
                   )}
-                </Card>
-              </Layout.Section>
+                </Await>
+              </Suspense>
             </>
           )}
         </Layout>
@@ -1250,4 +1472,3 @@ export default function SalesSummaryAdminPage() {
     </PolarisPageWrapper>
   );
 }
-

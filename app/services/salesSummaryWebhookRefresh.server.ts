@@ -22,6 +22,8 @@ import {
   type SalesSummarySettings,
 } from "../utils/appSettings.server";
 import { runBackgroundDailySlices } from "./salesSummaryBackgroundSlice.server";
+import { datesStillNeedingRefresh, markRefreshCompleted } from "./salesSummaryRefreshCoalesce.server";
+import { runAsSettlementBackground } from "../lib/shopifyGraphqlThrottle.server";
 
 export type WebhookRefreshAdmin = {
   graphql: (query: string, opts?: object) => Promise<{ json: () => Promise<unknown> }>;
@@ -148,11 +150,20 @@ export async function executeSalesSummaryOrderWebhookJob(
   admin: WebhookRefreshAdmin,
   shopId: string,
   payload: unknown,
-): Promise<{ targetDates: string[]; errors: string[] }> {
+  opts: { jobCreatedAt?: Date | null } = {},
+): Promise<{ targetDates: string[]; errors: string[]; skipped?: boolean }> {
   const tz = await getShopTimezoneForDaily(admin, shopId);
   const lookback = parseLookbackDays();
-  const targetDates = collectOrderRelatedCalendarDates(payload, tz, lookback);
-  const { errors } = await refreshSalesSummaryCachesForTargetDates(admin, shopId, targetDates);
+  const allTargetDates = collectOrderRelatedCalendarDates(payload, tz, lookback);
+  // ジョブが積まれたあとに始まった再計算で済んでいる日は、数え直さない（数字は同じ）
+  const targetDates = datesStillNeedingRefresh(shopId, allTargetDates, opts.jobCreatedAt);
+  if (targetDates.length === 0) {
+    return { targetDates: allTargetDates, errors: [], skipped: true };
+  }
+  const startedAt = new Date();
+  const { errors } = await runAsSettlementBackground(() =>
+    refreshSalesSummaryCachesForTargetDates(admin, shopId, targetDates),
+  );
 
   const shopToday = getCalendarDateStringInTimeZone(new Date(), tz);
   const locations = await prisma.location.findMany({
@@ -171,6 +182,19 @@ export async function executeSalesSummaryOrderWebhookJob(
     );
   } catch (e) {
     console.error("[sales-summary] rollup sync after webhook:", e);
+  }
+
+  const failedDates = new Set(
+    errors.map((e) => /\b(\d{4}-\d{2}-\d{2})\b/.exec(e)?.[1]).filter((d): d is string => Boolean(d)),
+  );
+  // 失敗を含む日は覚えない（どの日か読めない失敗があれば、どの日も覚えない）
+  const unknownFailure = errors.some((e) => !/\b\d{4}-\d{2}-\d{2}\b/.test(e));
+  if (!unknownFailure) {
+    markRefreshCompleted(
+      shopId,
+      targetDates.filter((d) => !failedDates.has(d)),
+      startedAt,
+    );
   }
 
   return { targetDates, errors };
