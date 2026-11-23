@@ -89,6 +89,7 @@ export function formatPosBadges(item, badgeMode) {
  * @param {"all" | "refunded" | "voucher_change"} [props.initialSegment] - 開いたときの絞り込み（タイルごとに変える）
  * @param {{ value: string, label: string, noun: string }[]} [props.segments] - 出す絞り込み（既定は全部）
  * @param {string} [props.listNote] - 一覧の上に出す案内（1 行）
+ * @param {{ label: string, onClick: () => void } | null} [props.listAction] - 一覧の上に出すボタン（1 つ）
  * @param {(params: object) => Promise<{ items: object[], nextCursor?: string|null, todayLocalDate?: string, fetchedAtTime?: string }>} [props.fetchList]
  *   一覧の読み込み（既定は注文の検索）。領収書の発行履歴は発行の記録を読む
  * @param {(item: object, todayKey: string) => { key: string, title: string, amountLabel: string, dateTimeLabel: string, badges: object[], selectId?: string }} [props.toRow]
@@ -108,6 +109,7 @@ export function OrderDayListScreen({
   initialSegment = "all",
   segments = LIST_SEGMENTS,
   listNote = "",
+  listAction = null,
   fetchList = searchOrders,
   toRow = null,
   itemNoun = "取引",
@@ -542,6 +544,11 @@ export function OrderDayListScreen({
           <s-box padding="base">
             <s-stack gap="base">
               {listNote ? <s-text color="subdued">{listNote}</s-text> : null}
+              {listAction ? (
+                <s-button variant="secondary" onClick={listAction.onClick}>
+                  {listAction.label}
+                </s-button>
+              ) : null}
               {noticeError ? (
                 <s-stack gap="small-300">
                   <s-banner tone="critical" heading={storeFacingNotice(noticeError)} />
