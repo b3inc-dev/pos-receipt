@@ -57,8 +57,7 @@ export const SETTLEMENT_TABS: TabItem[] = [
 
 /** 3. 店舗 */
 export const STORE_TABS: TabItem[] = [
-  { path: "/app/settings", label: "ロケーション" },
-  { path: "/app/location-profiles", label: "設定軸・一括反映" },
+  { path: "/app/settings", label: "店舗" },
   { path: "/app/payment-methods", label: "支払方法マスタ" },
 ];
 

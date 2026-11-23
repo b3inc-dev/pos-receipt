@@ -27,15 +27,18 @@ test("「プラン（表示用）」「有効機能 JSON（表示用）」も is
   }
 });
 
-/** 「システム診断」の枠（見出し〜閉じ）が {isDevStore && ( … )} の中にあるか */
+/** 「システム診断」の枠（見出し〜閉じ）が {isDevStore && ( … )} または {isDevStore ? ( … ) : null} の中にあるか */
 function diagnosticsBoxIsGuarded(src) {
   const title = src.indexOf('title="システム診断"');
   assert.ok(title > 0, "システム診断の枠が見つからない");
-  const guard = src.lastIndexOf("{isDevStore && (", title);
+  // 店舗の画面（AdminBlock）と、ホーム（Polaris の Layout.AnnotatedSection）の 2 つの書き方
+  const close = src.lastIndexOf("<AdminBlock", title) > src.lastIndexOf("<Layout.AnnotatedSection", title) ? "</AdminBlock>" : "</Layout.AnnotatedSection>";
+  const guard = Math.max(src.lastIndexOf("{isDevStore && (", title), src.lastIndexOf("{isDevStore ? (", title));
   assert.ok(guard > 0, "システム診断の前に isDevStore の分かれ目がない");
-  assert.ok(!src.slice(guard, title).includes("</Layout.AnnotatedSection>"), "分かれ目が枠の前で閉じている");
-  const end = src.indexOf("</Layout.AnnotatedSection>", title);
-  assert.ok(src.slice(end, end + 80).includes(")}"), "枠のすぐあとで分かれ目を閉じていない");
+  assert.ok(!src.slice(guard, title).includes(close), "分かれ目が枠の前で閉じている");
+  const end = src.indexOf(close, title);
+  const after = src.slice(end, end + 80);
+  assert.ok(after.includes(")}") || after.includes(") : null}"), "枠のすぐあとで分かれ目を閉じていない");
 }
 
 test("店舗設定とホームの「システム診断」の枠は開発ストアだけ", () => {
