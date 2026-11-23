@@ -13,6 +13,7 @@ import {
 } from "../services/orderDetail.server";
 import { graphqlWithCustomerFallback } from "../utils/protectedCustomerData";
 import { isOrderEligibleForRedoDraft } from "../services/orderRedoDraft.server";
+import { resolveOrderRedoOptions } from "../services/orderRedoCartPlan";
 import { getPaymentMethodVoucherInfo, loadEnabledPaymentMasters } from "../utils/paymentMethod.server";
 import {
   getAppSetting,
@@ -86,7 +87,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return corsJson({
       ...result,
       estimatedVoucherChange: hasVoucherChange,
-      canRedoAsDraft: srSettings.enableOrderRedoDraft && eligible,
+      ...resolveOrderRedoOptions(srSettings, eligible),
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
