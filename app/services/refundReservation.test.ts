@@ -194,7 +194,7 @@ test("予約の額が返金額より大きいときは作らずに要確認", as
   assert.equal(r.review, 1);
   assert.equal(createCalls.length, 0);
   assert.equal(reservations[0].status, "needs_review");
-  assert.match(reservations[0].reviewReason, /返金の一覧から返金方法を変更して/);
+  assert.match(reservations[0].reviewReason, /「返金方法変更」タイルの一覧から返金方法を変更して/);
 });
 
 test("付け替えが残りの決まりで断られたら、要確認にして作った行を残す", async () => {
