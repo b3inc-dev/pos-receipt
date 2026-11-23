@@ -81,6 +81,38 @@ export const REFUND_CREATE_MUTATION = `#graphql
   }
 `;
 
+type RefundCreateJson = {
+  data?: {
+    refundCreate?: {
+      refund?: { id?: string };
+      userErrors?: { field?: string[] | null; message: string }[];
+    };
+  };
+  errors?: { message?: string; extensions?: { code?: string } }[];
+};
+
+type GraphqlErrorLike = { message?: string; extensions?: { code?: string } };
+
+/**
+ * @shopify/shopify-api の GraphqlQueryError（body.errors.graphQLErrors）や、
+ * body.errors が配列の形の例外から GraphQL の errors を取り出す。取り出せなければ null。
+ */
+export function graphqlErrorsFromThrown(err: unknown): GraphqlErrorLike[] | null {
+  if (!err || typeof err !== "object") return null;
+  const body = (err as { body?: { errors?: unknown } }).body;
+  const errors = body?.errors as unknown;
+  const list = Array.isArray(errors)
+    ? errors
+    : errors && typeof errors === "object" && Array.isArray((errors as { graphQLErrors?: unknown }).graphQLErrors)
+      ? ((errors as { graphQLErrors: unknown[] }).graphQLErrors)
+      : null;
+  if (!list || list.length === 0) return null;
+  return list.map((e) => {
+    const o = (e ?? {}) as GraphqlErrorLike;
+    return { message: String(o.message ?? ""), extensions: { code: o.extensions?.code } };
+  });
+}
+
 type OrderTx = {
   id: string;
   kind?: string;
@@ -274,15 +306,9 @@ export async function executeShopifyRefundForEvent(
     params.note?.trim() || "",
   ].filter(Boolean);
 
-  const refundJson = await adminGraphqlWithRetry<{
-    data?: {
-      refundCreate?: {
-        refund?: { id?: string };
-        userErrors?: { field?: string[] | null; message: string }[];
-      };
-    };
-    errors?: { message?: string; extensions?: { code?: string } }[];
-  }>(admin, REFUND_CREATE_MUTATION, {
+  let refundJson: RefundCreateJson;
+  try {
+    refundJson = await adminGraphqlWithRetry<RefundCreateJson>(admin, REFUND_CREATE_MUTATION, {
     variables: {
       idempotencyKey: params.idempotencyKey,
       input: {
@@ -292,7 +318,15 @@ export async function executeShopifyRefundForEvent(
         transactions: refundTxs,
       },
     },
-  });
+    });
+  } catch (err) {
+    // 本物の admin.graphql は応答に errors があると JSON で返さず GraphqlQueryError を投げる。
+    // 投げられた errors も応答の errors と同じく分類する（同じキーの実行中は retryable）。
+    // errors を持たない例外（通信の失敗など）は今までどおりそのまま上げる（pending のまま残る）。
+    const thrown = graphqlErrorsFromThrown(err);
+    if (!thrown) throw err;
+    refundJson = { errors: thrown };
+  }
 
   if (refundJson.errors?.length) {
     const error = refundJson.errors.map((e) => e.message).join("; ");
