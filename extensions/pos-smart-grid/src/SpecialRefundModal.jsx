@@ -45,6 +45,7 @@ import {
   originalMethodChoices,
   defaultOriginalMethod,
 } from "../../common/orderTenderLines.js";
+import { REFUND_MODES, refundEventTypeFor } from "../../common/refundModes.js";
 import {
   paymentMethodsWithOrderGateway,
   primarySaleTransaction,
@@ -106,12 +107,6 @@ function tryDismissModal() {
 }
 
 // 特殊返金の event_type 選択肢（voucher_change_adjustment は商品券調整フォームで別途扱う）
-const REFUND_EVENT_TYPES = [
-  { value: "cash_refund", label: "現金返金（他手段→現金）" },
-  { value: "payment_method_override", label: "返金手段変更" },
-  { value: "receipt_cash_adjustment", label: "レシート現金調整" },
-];
-
 const FALLBACK_PAYMENT_METHODS = [
   { value: "cash", label: "現金" },
   { value: "manual", label: "手動決済" },
@@ -305,6 +300,8 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
   const [orderEntryLoading, setOrderEntryLoading] = useState(false);
   const [submitNotice, setSubmitNotice] = useState(null);
   const [orderCorrectionContext, setOrderCorrectionContext] = useState(null);
+  // 店の特殊返金設定で使える種別（サーバーの一覧の応答から。読めないときは null＝全部）
+  const [allowedEventTypes, setAllowedEventTypes] = useState(null);
 
   // 取引詳細: 「特殊返金」または「商品券調整」から起動
   useEffect(() => {
@@ -324,6 +321,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
         setSelectedOrder(order);
         const res = await listSpecialRefunds(order.orderId ?? preId);
         setEvents(res.items ?? []);
+        setAllowedEventTypes(Array.isArray(res.allowedEventTypes) ? res.allowedEventTypes : null);
         setOrderCorrectionContext(res.orderCorrectionContext ?? null);
         // 取引詳細メニューからは一覧を挟まず、各処理のフォームへ直行
         setStep(voucherShortcut ? "form_voucher" : "form_refund");
@@ -341,6 +339,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
       setSelectedOrder(order);
       const res = await listSpecialRefunds(order.orderId ?? orderId);
       setEvents(res.items ?? []);
+        setAllowedEventTypes(Array.isArray(res.allowedEventTypes) ? res.allowedEventTypes : null);
       setOrderCorrectionContext(res.orderCorrectionContext ?? null);
       setFromOrderEntry(false);
       setStep("order_detail");
@@ -356,6 +355,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
     try {
       const res = await listSpecialRefunds(selectedOrder.orderId);
       setEvents(res.items ?? []);
+        setAllowedEventTypes(Array.isArray(res.allowedEventTypes) ? res.allowedEventTypes : null);
       setOrderCorrectionContext(res.orderCorrectionContext ?? null);
     } catch {
       // silent
@@ -604,6 +604,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
       <SpecialRefundForm
         order={selectedOrder}
         orderCorrectionContext={orderCorrectionContext}
+        allowedEventTypes={allowedEventTypes}
         loading={loading}
         error={error}
         setLoading={setLoading}
@@ -1075,6 +1076,7 @@ function OrderTenderPanel({ order, lines, onFill, fillLabel = "全額反映", di
 function SpecialRefundForm({
   order,
   orderCorrectionContext,
+  allowedEventTypes = null,
   loading,
   error,
   setLoading,
@@ -1092,7 +1094,7 @@ function SpecialRefundForm({
   // 注文の支払いを読めなかったときだけ、前のとおりマスタの候補から選ぶ
   const orderMethodChoices = originalMethodChoices(tenderLines);
   const originalFromOrder = orderMethodChoices.length > 0;
-  const [eventType, setEventType] = useState("cash_refund");
+  const [mode, setMode] = useState("method");
   const [amount, setAmount] = useState("");
   const [paymentMethods, setPaymentMethods] = useState(originalFromOrder ? orderMethodChoices : fallbackPaymentMethods);
   // 実際の返金手段は支払方法マスタ（特殊返金で選べるもの）からだけ選ぶ。注文の決済手段や既定の候補は足さない
@@ -1117,7 +1119,7 @@ function SpecialRefundForm({
   useEffect(() => {
     // 内容を変えた操作は別intent。同じキーを再利用するとpayload mismatchになる。
     setIdempotencyKey(null);
-  }, [eventType, amount, originalPaymentMethod, actualRefundMethod, adjustKind, note]);
+  }, [mode, amount, originalPaymentMethod, actualRefundMethod, adjustKind, note]);
 
   useEffect(() => {
     listSelectablePaymentMethods({ sync: true })
@@ -1154,6 +1156,12 @@ function SpecialRefundForm({
       });
   }, [order?.orderId]);
 
+  const methodAllowed =
+    !allowedEventTypes || allowedEventTypes.includes("cash_refund") || allowedEventTypes.includes("payment_method_override");
+  const receiptAllowed = !allowedEventTypes || allowedEventTypes.includes("receipt_cash_adjustment");
+  const modes = REFUND_MODES.filter((m) => (m.value === "method" ? methodAllowed : receiptAllowed));
+  const currentMode = modes.some((m) => m.value === mode) ? mode : modes[0]?.value ?? "method";
+  const eventType = refundEventTypeFor(currentMode, actualRefundMethod, refundMethods, allowedEventTypes);
   const showPaymentFields =
     eventType === "cash_refund" || eventType === "payment_method_override";
   const showAdjustKind = eventType === "receipt_cash_adjustment";
@@ -1214,7 +1222,7 @@ function SpecialRefundForm({
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <Row label="取引" value={order?.orderName ?? "-"} />
-                  <Row label="種別" value={REFUND_EVENT_TYPES.find((t) => t.value === eventType)?.label ?? eventType} />
+                  <Row label="内容" value={REFUND_MODES.find((m) => m.value === currentMode)?.label ?? ""} />
                   <Row label="金額" value={`¥${Number(amount).toLocaleString()}`} />
                   {showPaymentFields ? (
                     <>
@@ -1254,13 +1262,18 @@ function SpecialRefundForm({
 
             <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
 
-            {/* 種別選択 */}
-            <PosChoiceField
-              label="返金種別"
-              value={eventType}
-              options={REFUND_EVENT_TYPES}
-              onChange={setEventType}
-            />
+            {/* 何をするか（2 つ）。種別は返金手段から決める */}
+            {modes.length > 1 ? (
+              <PosChoiceField
+                label="何をしますか"
+                value={currentMode}
+                options={modes.map((m) => ({ value: m.value, label: m.label }))}
+                onChange={setMode}
+              />
+            ) : (
+              <s-text fontWeight="bold">{modes[0]?.label ?? ""}</s-text>
+            )}
+            <s-text tone="subdued" fontSize="small">{modes.find((m) => m.value === currentMode)?.help ?? ""}</s-text>
 
             {/* 金額 */}
             <s-text-field
