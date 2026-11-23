@@ -1,6 +1,7 @@
 /**
  * GET /api/print/sales/:orderId
  * 販売レシート HTML（Shopify Printing API の src）
+ * 通常の Shopify 販売注文そのものは作らない。帳票 HTML のみ。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
@@ -21,6 +22,13 @@ import {
   SALES_RECEIPT_ORDER_QUERY,
   buildSalesReceiptHtml,
 } from "../services/salesReceiptPrint.server";
+import { GIFT_LAYOUT_KEY, type GiftLayout } from "../utils/salesReceiptSettings";
+import { GIFT_ORDER_QUERY, giftOrderHtml } from "../services/giftOrderReceipt";
+import { getPrintLayout, PRINT_CSP } from "../services/receiptLayoutPrint.server";
+import { layoutOrderHtml } from "../services/receiptLayoutOrderPrint.server";
+import { insertPrintMarkAtTop, printMarksFor } from "../services/printMarks";
+import { getPrintMarkSettings, wasPrinted } from "../services/printMarks.server";
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
@@ -61,6 +69,46 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     const gid = orderId.startsWith("gid://") ? orderId : `gid://shopify/Order/${orderId}`;
+    const copy = new URL(request.url).searchParams.get("copy");
+    if (copy !== null && copy !== "gift") {
+      return corsErrorJson(request, { ok: false, error: "帳票種別が無効です。" }, 400);
+    }
+    const paperWidthMm = settings.paperWidthMm === 58 ? 58 : 80;
+
+    // 管理画面のレイアウト（#69）を「印字に使う」にしているときだけ。作れなければ今までの印字
+    const layoutKind = copy === "gift" ? "gift" : "sales";
+    // 再印字の印（印字設定でオンにした店だけ）。販売とギフトは別々に数える
+    const markSettings = await getPrintMarkSettings(shop.id);
+    const isReprint = markSettings.salesReprint ? await wasPrinted(shop.id, layoutKind, gid) : false;
+    const printMarks = printMarksFor(layoutKind, { isReprint }, markSettings);
+    const layout = await getPrintLayout(shop.id, layoutKind);
+    if (layout) {
+      const result = await layoutOrderHtml(admin, shop.id, gid, layout, {
+        kind: layoutKind,
+        paperWidthMm,
+        shopName: settings.headerTitle || undefined,
+        printMarks,
+        isReprint,
+      });
+      if (result.status === "not_found") {
+        return corsErrorJson(request, { ok: false, error: "注文が見つかりません。" }, 404);
+      }
+      if (result.status === "ok") {
+        return corsHtml(request, result.html, { headers: { "Content-Security-Policy": PRINT_CSP } });
+      }
+    }
+
+    if (copy === "gift") {
+      const giftLayout = await getAppSetting<GiftLayout>(shop.id, GIFT_LAYOUT_KEY);
+      const html = await giftOrderHtml(async (after) => {
+        const response = await admin.graphql(GIFT_ORDER_QUERY, { variables: { id: gid, after } });
+        const result = await response.json();
+        if (!response.ok || result.errors?.length) throw new Error("ギフトレシートの明細を取得できませんでした。");
+        return result.data?.order ?? null;
+      }, settings.paperWidthMm === 58 ? 58 : 80, giftLayout ?? undefined);
+      if (html === null) return corsErrorJson(request, { ok: false, error: "注文が見つかりません。" }, 404);
+      return corsHtml(request, insertPrintMarkAtTop(html, printMarks));
+    }
     const response = await admin.graphql(SALES_RECEIPT_ORDER_QUERY, { variables: { id: gid } });
     const json = (await response.json()) as {
       errors?: unknown[];
@@ -79,7 +127,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       timezone,
       shopName: settings.headerTitle || undefined,
     });
-    return corsHtml(request, html);
+    return corsHtml(request, insertPrintMarkAtTop(html, printMarks));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);

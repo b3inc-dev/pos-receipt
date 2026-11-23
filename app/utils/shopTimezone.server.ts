@@ -26,14 +26,66 @@ export async function getShopTimezoneForDaily(
   admin: AdminClient,
   shopId: string
 ): Promise<string> {
+  // Issue #20: 1 リクエスト（= 1 つの admin クライアント）の中では 1 回だけ読む。
+  // 確定 1 回で 4 回読んでいた（一般設定の DB 読み＋ shop.ianaTimezone）。
+  const memo = readTimezoneMemo(admin, shopId);
+  if (memo) return memo;
+
   const general = await getAppSetting<Partial<GeneralSettings>>(shopId, GENERAL_SETTINGS_KEY);
   const appTz = general?.defaultTimezone?.trim();
-  if (appTz) return appTz;
+  if (appTz) {
+    writeTimezoneMemo(admin, shopId, appTz);
+    return appTz;
+  }
 
   const fromShop = await getShopIanaTimezone(admin);
-  if (fromShop) return fromShop;
+  if (fromShop) {
+    writeTimezoneMemo(admin, shopId, fromShop);
+    return fromShop;
+  }
 
+  // 取得に失敗したときの既定値は覚えない（次の呼び出しで取り直す。従来どおり）
   return FALLBACK_TIMEZONE;
+}
+
+/**
+ * タイムゾーンの短い覚え書き。admin クライアントはリクエスト（またはキューの 1 ジョブ）ごとに
+ * 作られるので、それをキーにして同じリクエストの中だけで使い回す。WeakMap なので
+ * リクエストが終われば消える。念のため TIMEZONE_MEMO_TTL_MS を過ぎたら読み直す
+ * （同じ admin を長く持つ処理があっても、一般設定の変更が遅れて効くだけにする）。
+ */
+const TIMEZONE_MEMO_TTL_MS = 60_000;
+const timezoneMemo = new WeakMap<object, Map<string, { tz: string; at: number }>>();
+
+function readTimezoneMemo(admin: AdminClient, shopId: string): string | null {
+  if (!admin || typeof admin !== "object") return null;
+  const hit = timezoneMemo.get(admin)?.get(shopId);
+  if (!hit) return null;
+  if (Date.now() - hit.at > TIMEZONE_MEMO_TTL_MS) return null;
+  return hit.tz;
+}
+
+function writeTimezoneMemo(admin: AdminClient, shopId: string, tz: string): void {
+  if (!admin || typeof admin !== "object") return;
+  let byShop = timezoneMemo.get(admin);
+  if (!byShop) {
+    byShop = new Map();
+    timezoneMemo.set(admin, byShop);
+  }
+  byShop.set(shopId, { tz, at: Date.now() });
+}
+
+/**
+ * 店のタイムゾーンでの「今日」（YYYY-MM-DD）。
+ * `new Date().toISOString().slice(0, 10)` は UTC の日付なので、日本時間 0:00〜8:59 は前日になる。日次の「今日」にはこちらを使う。
+ */
+export async function getShopCalendarToday(
+  admin: AdminClient,
+  shopId: string,
+  now: Date = new Date(),
+): Promise<string> {
+  const tz = await getShopTimezoneForDaily(admin, shopId);
+  return getCalendarDateStringInTimeZone(now, tz);
 }
 
 /**
@@ -128,20 +180,20 @@ export function getDayRangeInUtc(dateStr: string, ianaTimezone: string): DayRang
 }
 
 /**
- * Shopify Admin の orders 検索（GraphQL query の created_at / updated_at）向け境界文字列。
- * UTC の Z 表記だけだと境界解釈がずれ前後日の注文が混ざる事例があるため、
- * 日本店舗（Asia/Tokyo）は GAS / REST と同じ「現地日付 + +09:00」を使う。
+ * Shopify Admin の orders 検索（GraphQL query の created_at / processed_at など）向け境界文字列。
+ * 範囲は店舗タイムゾーンの 0:00:00.000〜23:59:59.999（日本の店は日本時間の 0 時〜23:59）。
+ *
+ * 書き方はどのタイムゾーンでも UTC の Z 表記（getDayRangeInUtc と同じ）にする。
+ * 以前は Asia/Tokyo だけ「YYYY-MM-DDT00:00:00+09:00」を渡していたが、
+ * 開発ストア（2026-11-23）で created_at:>=2026-11-23T00:00:00+09:00 が同日 18:14 JST の注文を
+ * 返さず、同じ瞬間を Z 表記（2026-11-22T15:00:00Z）にすると返した。
+ * Shopify 側でオフセット付きの値がどう読まれているかは未確認（「+」が空白になる等は推測）。
+ * 精算のメイン検索・売上サマリー・POS の取引一覧はすでに Z 表記。
  */
 export function getDayRangeShopifySearchIso(
   dateStr: string,
   ianaTimezone: string,
 ): { start: string; end: string } {
-  if (ianaTimezone === "Asia/Tokyo") {
-    return {
-      start: `${dateStr}T00:00:00+09:00`,
-      end: `${dateStr}T23:59:59.999+09:00`,
-    };
-  }
   const { startUtcIso, endUtcIso } = getDayRangeInUtc(dateStr, ianaTimezone);
   return { start: startUtcIso, end: endUtcIso };
 }

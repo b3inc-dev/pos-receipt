@@ -2,8 +2,13 @@
  * 注文詳細の GraphQL 取得・POS 向け JSON 整形
  */
 import { formatTimeHmInTimeZone } from "../utils/shopTimezone.server";
+import {
+  matchPaymentMethodMaster,
+  PAYMENT_METHOD_FALLBACK_LABELS,
+  type PaymentMethodMatchInput,
+} from "../utils/paymentMethodMatch.server";
 
-export const ORDER_DETAIL_QUERY = `#graphql
+const ORDER_DETAIL_QUERY_TEMPLATE = `#graphql
   query OrderDetail($id: ID!) {
     order(id: $id) {
       id
@@ -21,8 +26,7 @@ export const ORDER_DETAIL_QUERY = `#graphql
       currentTotalPriceSet { shopMoney { amount currencyCode } }
       customer {
         id
-        displayName
-        email
+        __CUSTOMER_PII__
       }
       retailLocation {
         id
@@ -87,6 +91,10 @@ export const ORDER_DETAIL_QUERY = `#graphql
   }
 `;
 
+export const ORDER_DETAIL_QUERY = ORDER_DETAIL_QUERY_TEMPLATE.replace("__CUSTOMER_PII__", "displayName\n        email");
+/** 顧客の名前・メールを読まない版（保護された顧客データの許可が無いアプリ用。POS の注文詳細だけで使う） */
+export const ORDER_DETAIL_QUERY_NO_CUSTOMER_PII = ORDER_DETAIL_QUERY_TEMPLATE.replace("__CUSTOMER_PII__", "");
+
 type MoneyBag = { shopMoney?: { amount?: string; currencyCode?: string } };
 
 function moneyAmount(m?: MoneyBag | null): string {
@@ -98,6 +106,49 @@ function moneyCurrency(m?: MoneyBag | null): string {
 }
 
 /** POS / Shopify に記録された決済名をそのまま表示 */
+/**
+ * 店の人に見せる支払方法の名前。
+ * 支払方法マスタの表示名 → 既定の日本語（cash → 現金 など）→ Shopify の名前 の順に使う。
+ * 名前を変えるだけで、gateway（数えるときに使う値）はそのまま。
+ */
+export function paymentDisplayLabel(
+  gateway: string | null | undefined,
+  formattedGateway: string | null | undefined,
+  masters: PaymentMethodMatchInput[],
+): string {
+  const gw = String(gateway ?? "").trim();
+  const fmt = String(formattedGateway ?? "").trim();
+  const matched =
+    (gw ? matchPaymentMethodMaster(gw, masters) : null) ??
+    (fmt ? matchPaymentMethodMaster(fmt, masters) : null);
+  if (matched?.displayLabel) return matched.displayLabel;
+  const fallback = PAYMENT_METHOD_FALLBACK_LABELS[gw.toLowerCase()];
+  if (gw && fallback) return fallback;
+  return transactionDisplayName(gw, fmt);
+}
+
+type DetailTx = { gateway?: unknown; formattedGateway?: unknown; displayName?: unknown };
+
+/** serializeOrderDetail の結果の支払い・返金の displayName を、店の人向けの名前に置き換える */
+export function applyPaymentDisplayLabels<T extends Record<string, unknown>>(
+  detail: T,
+  masters: PaymentMethodMatchInput[],
+): T {
+  const relabel = (tx: DetailTx) => ({
+    ...tx,
+    displayName: paymentDisplayLabel(
+      tx.gateway as string | null | undefined,
+      tx.formattedGateway as string | null | undefined,
+      masters,
+    ),
+  });
+  const transactions = ((detail.transactions as DetailTx[] | undefined) ?? []).map(relabel);
+  const refunds = ((detail.refunds as (Record<string, unknown> & { transactions?: DetailTx[] })[] | undefined) ?? []).map(
+    (r) => ({ ...r, transactions: (r.transactions ?? []).map(relabel) }),
+  );
+  return { ...detail, transactions, refunds };
+}
+
 export function transactionDisplayName(gateway?: string | null, formattedGateway?: string | null): string {
   const fmt = String(formattedGateway ?? "").trim();
   if (fmt) return fmt;
@@ -188,6 +239,16 @@ export function serializeOrderDetail(
   const refunds = refundList.map((r) => ({
     id: r.id,
     createdAt: r.createdAt,
+    // 店のタイムゾーンの「11/23 18:31」（画面は UTC の時刻を出さない）
+    createdAtLabel: r.createdAt
+      ? new Intl.DateTimeFormat("ja-JP", {
+          timeZone: tz,
+          month: "numeric",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(new Date(String(r.createdAt)))
+      : "",
     totalRefunded: moneyAmount(r.totalRefundedSet as MoneyBag),
     currency: moneyCurrency(r.totalRefundedSet as MoneyBag),
     transactions: (

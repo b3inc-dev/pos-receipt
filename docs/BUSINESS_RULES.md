@@ -50,12 +50,12 @@
 
 1. 当日対象 TX: `tx.createdAt` が当日、または当日 refund オブジェクトにリンクする REFUND
 2. `SALE` / `CAPTURE` → sale、`REFUND` → refund（計上ロケーション一致時のみ）
-3. 集計バケットキーは `gasNormalizeGatewayLabel` で日本語ラベル化（現金・クレジット・QR・交通系 IC・商品券系・PayPal・それ以外）
+3. 集計バケットキーは「精算の数え方」の「支払方法の分け方」で決める。初めの値は `gasNormalizeGatewayLabel` で日本語ラベル化（現金・クレジット・QR・交通系 IC・商品券系・PayPal・それ以外）。「支払方法マスタで分ける」店は、当たったマスタの表示名がキー（当たらない取引は `gasNormalizeGatewayLabel`。`docs/SETTLEMENT_CALC_SETTINGS.md`）
 4. 表示ラベルは `resolvePaymentSectionLabel`（`paymentMethodMatch.server.ts`）で `PaymentMethodMaster` を参照。raw / formatted / displayLabel のいずれかに一致すれば `displayLabel` に差し替え（英数字キーに限らない）
-5. 現金は **cash cap**: `effectiveCashSale = min(生現金, max(0, 注文合計 − 非現金))`
+5. 現金は **cash cap**: `effectiveCashSale = min(生現金, max(0, 注文合計 − 非現金))`。現金の行は、決まった分け方では「現金」、マスタで分ける店では種類が現金のマスタの行
 6. REFUND TX が無く refund オブジェクト金額のみある場合 → バケット `"未分類"` に加算
 
-カスタム決済: マスタ未一致時は `formattedGateway` または raw gateway、それも無ければ未分類ラベル。集計キー自体のハードコード日本語は残る（表示のみマスタ単一化）。
+カスタム決済: マスタ未一致時は `formattedGateway` または raw gateway、それも無ければ未分類ラベル。初めの値（決まった分け方）では集計キー自体のハードコード日本語は残る（表示のみマスタ単一化）。「支払方法マスタで分ける」を選んだ店は、集計キーも表示もマスタの表示名に一本化される。
 
 ---
 
@@ -90,7 +90,13 @@
 3. POS ロケーションなし（管理画面返金等）→ `nonPosRefundAttributionEnabled` 先があればそこ
 4. なければ fallback: exclude なら null（精算に載せない）／さもなくば retailLocation
 
-精算集計では、解決 GID が精算対象ロケーションと一致しない返金は **件数・金額とも加算しない**。  
+精算集計で使う計上先（`decideRefundAttributionForSettlement`）:
+
+- 注文基準（`order_transaction`・既定）: 上の解決順の結果だけを使う。注文の metafield `pos.refund_aggregation_location_gid` は不一致のログ（`refundAttributionMismatchCount`）にだけ使う。別の店で登録した特殊返金が metafield を書き換えても、通常の返品の計上先は変わらない
+- 返金基準（`refund_transaction_pos_location`）: 当日の返金 TX の POS ロケーション → metafield → 上の解決順
+  - 別の店で売った注文の、この店での返金も拾う（`mergeCrossLocationRefundOrders`）。ただし **この店の注文取得（`location_id`）にすでに入っている注文は足さない**。足すと、売上を持った元の注文が返金だけの入力で上書きされ、その日の売上が消える（#11 の見直し P1-1。合成データで 9,000 円が −1,000 円）。元の注文は返金 TX ごとに店を見て数えるので、それで足りる
+
+精算集計では、計上先が精算対象ロケーションと一致しない返金は **件数・金額とも加算しない**。  
 照合は `locationGidMatches` で **数値ロケーション ID 同士**（GID / 数値 / 末尾パスの表記ゆれを吸収）。
 
 ---
@@ -137,7 +143,8 @@ Location Stock の POS Lite 配送では、送料が注文の配送料でなく 
 - 注文詳細 API は lineItems の `staffMember` を読まない（`read_users` が要り、無い店では注文の取得ごと 500 になるため。`read_users` は足さない）。`staffMemberName` は今は空で返し、POS 詳細 UI の「販売: …」は出ない
 - 帰属スタッフはアプリの記録（orders/create・orders/updated の `attributed_staffs`）から入れる形を #84 で別に進めている
 - 精算集計・精算レシート文言・領収書金額計算には **未使用**
-- `ReceiptIssue.createdBy` は API で受け取れるが、POS `receiptApi.js` は送っていない
+- 領収書の発行者（T さん決定・2026-11-23 4:20）: 「領収書を発行した人 1 人」で、販売担当（帰属スタッフ）とは別。POS `receiptApi.js` が `currentSession.staffMemberId`（ピン留め中のスタッフ。無ければ `userId`）を `staffMemberId` として送り、サーバーが数字だけにそろえて `ReceiptIssue.createdByStaffId` に保存する。名前は管理画面「スタッフ名」の登録（AppSetting `staff_display_names_v1`）があれば発行時に `createdBy` に残す。POS からの自由入力の名前は受けない。`staffMember` は `read_users` が要るので読まない
+- 管理画面「領収書発行履歴」の「発行者」列は いまの登録名 → 発行時の名前 → `スタッフ ID n` → `—`（`app/utils/receiptIssuer.ts`）。印字に出すかは #69 のレイアウト編集で扱う
 
 ---
 
@@ -151,24 +158,132 @@ Location Stock の POS Lite 配送では、送料が注文の配送料でなく 
 
 ## 10. 特殊返金の精算反映
 
+記録の置き場所（D25）: 特殊返金・商品券調整は、店の設定（特殊返金設定「注文への記録」、初めはオフ）がオンなら注文メタフィールド `pos.adjustments` にも残す（`docs/ORDER_ADJUSTMENTS_METAFIELD.md`）。精算はいつもアプリの記録でその日・その店の有効な行を数え、注文の値が違えば書き直す。数える日は行の `countDate`（店のタイムゾーン）で、前からの行（`countDate` なし）は登録した日。商品券のお釣りは注文の日。直すときは「変更」（前の行を無効にして置き換えの行を足す。Shopify の返金はしない）。
+
 `SpecialRefundEvent`（当日・同一ロケーション・status=active）を設定フラグに従い反映:
 
 | eventType | 反映内容（概略） |
 |-----------|------------------|
 | `cash_refund` | 返金額を支払セクション／refundTotal 等へ（設定 `reflectCashRefundToSettlement`） |
-| `receipt_cash_adjustment` | undo/extra に応じ増減（設定依存） |
+| `receipt_cash_adjustment` | 記録だけ（Shopify では返金しない。T 決定 2026-11-23）。`undo`＝返金を取り消して売上に戻す（返金の合計と支払方法の行の返金から引く）、`extra`＝現金を売上に足す |
 | `payment_method_override` | 実際の返金手段側へ寄せる（設定依存） |
 | `voucher_change_adjustment` | `voucherChangeAmount` に加算（設定依存） |
 
 反映後に税・net の再計算ロジックあり（エンジン後半）。
 
+「POS 登録時に Shopify で実返金」の店でも、元の支払いが決済会社の支払い（Shopify Payments など）で、実際に返した手段が違う（例: カード払いを現金で返した）ときは Shopify では返金せず記録だけにする（`skipped`。D26）。Shopify Payments の返金は元のカードにしか戻らず、現金も渡すと二重に返すため。
+
+Shopify 返金の状態（`shopifyRefundStatus`）による扱い:
+
+| 状態 | 精算での扱い |
+|------|--------------|
+| `success` | Shopify の REFUND TX が正本。金額は足さず、元の手段から実際の手段へ振り替えるだけ |
+| `pending` | Shopify 返金を実行したが成否が分からない（タイムアウト等で再試行待ち）。**上乗せも振替もせず、精算・点検・売上サマリーの日次を確定しない**（`SpecialRefundPendingError`、API は 409）。店の人は Shopify 管理画面で返金の有無を確かめてから、POS の特殊返金の登録の「Shopify 返金を確かめる」を押す（同じ冪等キーで API を呼び直す。サーバーは返金ノートの印を探し、無ければ同じキーの `refundCreate` を呼ぶので 2 回にならない）。POS の日別一覧には「返金未確認」のバッジが出る。**前からある登録（ID が `pos_sr_` で始まらない）** も同じボタンが出るが、こちらは `POST /api/special-refunds/:id/recheck` で Shopify の注文の返金を読み直すだけで、**返金は実行しない**（main のときの返金には冪等キーも印も無く、もう一度実行すると 2 回返金になりうるため）。印・「特殊返金」のノート・種別・金額が合う返金が 1 件だけなら `success`、無いか迷うときは店の人が候補から選ぶか「Shopify に返金はありません」（`failed`。この登録らしい返金があるときは受けない）を選ぶ。どちらも決める直前に Shopify を読み直す。無効化や登録し直しは、二重返金・二重計上になりうるので案内しない。反映の設定がオフの種別は止めない |
+| `failed` / `skipped` / `none` | Shopify 返金は無い前提で、上の表どおりアプリの金額を足す |
+
+**POS 純正の返金の付け替え（D27）**: 純正で返金した注文では、純正の返金を選んで金額はそのまま手段だけ付け替える（分割は何行でも・最後の行は残額）。登録は `refundSource=native`・`shopifyRefundStatus=success`・`shopifyRefundId`＝純正の返金なので、上の表の `success` のとおり元の手段から実際の手段へ移すだけ。数える日は純正で返金した日。Shopify では返金しない。返金の残りを超える登録は断る。
+
+実際の返金手段（`cash_refund`・`payment_method_override`）は **支払方法マスタ（有効・「特殊返金で選べる」）からだけ選べる**（T 決定 2026-11-22）。POS の選択肢はマスタだけ（注文の決済手段や既定の候補は足さない）で、マスタが空・読めないときは登録できない。`POST /api/special-refunds` も新しい登録ではマスタの値（`rawGatewayPattern`、大文字小文字・空白の違いは同じ）以外を 400（`REFUND_METHOD_NOT_IN_MASTER`）で断る。同じ冪等キーの呼び直し（「Shopify 返金を確かめる」）は、あとでマスタを変えても止めない。元の支払手段は注文の決済手段のままでよい。
+
+前からある登録で返金方法がマスタに無いとき（マスタから消した、上の決まりより前の登録）の精算の受け皿:
+
+| 場面 | 精算での扱い |
+|------|--------------|
+| `cash_refund`・`payment_method_override` の返金方法がその日の支払方法の行に無く、マスタ（`enabled`）にも既定の名前（`cash` など）にも無い | 「未分類」の行に載せる（その日に Shopify の未分類の行があれば同じ行）。**合計・返金合計は変わらず、精算は確定できる**。POS の精算画面に警告、精算履歴に「未分類あり」のバッジを出す |
+| 返金方法がマスタにあり、その日の行が無い | マスタの表示名で行を作る（前は手段のコードがそのまま行名になっていた） |
+| `success` で元の支払方法の行がその日に無い | 二重に引かないよう付け替えはしない（前と同じ）。警告だけ出す |
+| `receipt_cash_adjustment` の支払方法の行がその日に無い | 金額の扱いは前と同じ。警告だけ出す |
+
+マスタに登録して「更新」すれば、次の集計から正しい行に入る。確定済みの精算の行は変わらない。
+
+「マスタで分かる」の決め方は、登録と精算で違う（わざと）:
+
+- 登録（POS・`POST /api/special-refunds`）: 有効で「特殊返金で選べる」のマスタだけ（値 `rawGatewayPattern` の一致）
+- 精算の受け皿（`isKnownRefundMethod`）: 有効なマスタ全部（`rawGatewayPattern`・`formattedGatewayPattern`・表示名の一致、集計キーに寄せた名前でも）と既定の名前（`cash`・`shopify_payments`・`manual` など）。前の登録をなるべく正しい行に入れ、どこにも当たらないものだけを「未分類」にするため
+
+精算履歴の「未分類あり」は、保存した `paymentSectionsJson` の「未分類」の行（金額が 0 でない）で出す。前の形（行の配列）と #22 の形（`{ format, snapshot, sections }`）のどちらも読む。
+
+`pending` を止める理由: 数えると Shopify 側で返金ができていたとき二重（監査の合成データで 1,000 円が 2,000 円）、数えないとできていなかったとき抜ける。Shopify 側の返金ノートには `[POS_RECEIPT_EVENT:<イベントID>]` が入るが、精算の注文取得は返金ノートを読んでいないため、精算の中では成否を確かめていない。
+
+**自動の確定（D23・T 2026-11-23 4:25）**: 最後に返金を試してから 5 分たっても `pending` の登録は、アプリが自動で Shopify の注文の返金を読み直して決める。**読むだけで、返金は作らない**。
+
+| 登録 | Shopify に印 `[POS_RECEIPT_EVENT:<ID>]` の返金がある | 無い |
+|------|------|------|
+| `pos_sr_`（冪等キーあり） | `success`（その返金に紐づける） | `failed`（「自動確認: … Shopify にこの登録の返金はありません」） |
+| 前から（`pos_sr_` 以外） | `success` | 「特殊返金」のノート・種別・金額が合う返金がちょうど 1 件なら `success`。それ以外は `pending` のまま（店の人が「Shopify 返金を確かめる」で選ぶ） |
+
+- いつ: 精算プレビュー・点検・確定の集計の最初（その日・その店の登録）、POS の特殊返金の一覧を開いたとき（その注文の登録）、5 分ごとの見回り（`pos_sr_` の登録・全店。pg-boss。売上サマリーのキューが無効のときは動かない）。
+- Shopify の注文を読めなかったときは `pending` のまま（次に回す）。
+- 決めたあとは、POS で決めたときと同じく返金の計上ロケーションのメタフィールドを書き、売上サマリーの日次を作り直す（精算の集計の中から決めたときは、その集計の結果を使うので作り直さない）。
+- 自動で `failed` にした登録（エラーが「自動確認:」で始まる）は、POS の「もう一度実行」で同じキー・同じ内容が送られたら `pending` に戻し、同じ冪等キーで Shopify の返金をやり直す（返金は 1 回だけ）。無効化済みの登録や、ほかの理由の `failed` はやり直さない。
+- 環境変数: 自動の確定は**既定でオフ**。`SPECIAL_REFUND_AUTO_RESOLVE=1`（true / on）のときだけ動く（開発ストアで確かめてから T さんがオンにする）。`SPECIAL_REFUND_AUTO_RESOLVE_AFTER_MINUTES` で何分後に決めるかを変える（既定 5、2〜1440）。
+
+### 付け替えの管理者の承認（設定でオンのときだけ）
+
+特殊返金設定「管理者の承認」（`requireApprovalForPaymentMethodOverride`）は**初めはオフ**で、オフの店は今までどおり登録した時点で精算に入る。オンの店では、付け替え＝返金手段変更（`payment_method_override`）と現金返金（`cash_refund`）を承認待ち（`approvalStatus=pending`）で登録する。純正の返金の付け替え（#106）・返金の予約（#108）は、返した手段が現金だと現金返金になるので両方を対象にした（T の決定 2026-11-23 16:02）。レシート現金調整・商品券調整は対象外（`none`）。対象の金額・手段で絞る設定、承認できる人を絞る設定は無い（管理画面を開ける人ならだれでも承認できる）。
+
+| 承認の状態 | 精算・点検・売上サマリー |
+|------------|--------------------------|
+| `none`（対象外・前からの登録）・`approved`（承認済み） | 上の表どおりに数える |
+| `pending`（承認待ち） | 数えない。精算画面（POS）と点検に「承認待ちが N 件」の警告を出す。精算は確定できる |
+| `rejected`（却下） | 数えない。警告も出さない |
+
+- 承認・却下は管理画面「特殊返金・商品券調整 履歴」の行のボタンから（確認の窓のあと）。承認待ちのときだけ書き換える（二人が同時に押すと後の人は断る）。却下から承認には戻せない。決めたら登録日の売上サマリーのキャッシュを計算し直す。登録日の精算がもう確定していれば、確定した金額は変わらないので POS の精算で再確定する（D21）。
+- Shopify には書かない。「POS 登録時に Shopify で実返金」の店は、登録した時点で今までどおり Shopify の返金を実行する。承認待ち・却下のあいだは、その返金は Shopify の返金の行（元の支払方法）に数えられたままで、付け替え（元の手段から実際の手段へ）だけをしない。記録のみの店は、承認待ち・却下のあいだその返金の金額は精算に入らない。
+- 承認待ちでも Shopify 返金の成否が分からない（`shopifyRefundStatus=pending`）ものは、上の `pending` の決まりどおり精算の確定を止める（Shopify 側に返金がありうるため）。
+- 決めた人は DB（`approvalDecidedBy`）にだけ残し、履歴の画面に決めた日時と一緒に出す（T の決定 2026-11-23 16:20）。このアプリは管理画面をオフラインのセッションで動かすので、ふつうは App Bridge のセッショントークンの `sub`（Shopify のユーザー ID）を `shopify_user:<ID>` で残し、画面には「ユーザー ID <ID>」と出す（名前を読むには `read_users` が要るので読まない）。オンラインのセッションなら名前（無ければメール）。どちらも取れないとき（埋め込みでない開き方など）は空のまま。注文に書く値（`pos.adjustments`）には入れない。
+- 無効化（POS）は承認の状態に関係なくできる。
+
+### 返金の予約（設定でオンのときだけ）
+
+特殊返金設定「返金の予約」（`refundReservationEnabled`）は**初めはオフ**。オンの店では、POS 純正で返金する前に、返金する金額と実際に返す手段（分割可）を注文に予約できる。予約した日のうちにできた純正の返金で、返金額が予約の金額と同じときだけ、純正の返金の付け替え（金額固定・Shopify では返金しない）を自動で作る。違うとき・返金が複数の支払方法に分かれたときは作らずに「要確認」にし、返金タイルの一覧から付け替える。詳しくは `docs/REFUND_RESERVATION.md`（D29）。
+
+### 10.1 会計やり直し（キャンセル・返金済み注文）
+
+特殊返金設定の `enableOrderRedoDraft`（会計やり直しを使う）と `orderRedoMethod` で、POS の注文の詳細に出すボタンが決まる。対象はキャンセル・返金済みの注文だけ（`isOrderEligibleForRedoDraft`）。
+
+| `orderRedoMethod` | POS に出るボタン |
+|---|---|
+| `both`（既定。値が無い昔の保存値もこれ） | 「カートに入れる」と「下書き注文を作成」 |
+| `cart` | 「カートに入れる」だけ |
+| `draft` | 「下書き注文を作成」だけ（昔の動き） |
+
+- 下書き: `POST /api/orders/:id/redo-draft` が `draftOrderCreate`（決済はしない）。
+- カートに入れる: `GET /api/orders/:id/redo-cart`（読み取りのみ）が中身を組み立て（`orderRedoCartPlan.ts`）、POS 拡張が Cart API（`shopify.cart`、`extensions/common/redoToCart.js`）で入れる。
+  - 商品は今のバリアントで入れる。単価は書き換えられないので、元の割引と「今の値段 − 元の単価」の差を 1 個あたりの定額割引で入れ、割り切れない端数はカート全体の定額割引（「元の注文の割引（端数）」）にする。合計は元の注文の割引後の額に合う。
+  - 今の値段のほうが安い商品は今の値段で入れて知らせる（値段を上げる手段が無い）。
+  - 削除された商品は同じ名前・元の単価のカスタム商品（在庫は動かない）。
+  - 同じバリアントの行は 1 行にまとめる（POS が同じ商品をまとめるため）。
+  - カートに商品があるときは止める（`clearCart` は元に戻せないので使わない）。お客様を設定し、カート属性 `_pos_receipt_redo_from` に元の注文番号を付ける。
+  - 拡張の `api_version` を 2026-10 以上に上げるときは、Cart API の書き込みが「POS が確認できないと reject」に変わるため、reject の扱いを見直す。
+
 ---
 
 ## 11. 商品券・レガシー Gift Card
 
+- 会計の前に商品券の額面を入れる（D28・`docs/VOUCHER_CART_ENTRY.md`）: 商品券設定「会計の前に額面を入れる」（初めはオフ）の店だけ。注文の日のうち・その日の精算が確定する前に、後から登録したのと同じ商品券釣銭登録を 1 件作る（その注文に商品券調整が一度でもあれば作らない、額面が商品券で払った額より小さければ作らない）。手の登録も、同じ注文に有効な商品券調整があれば 2 つ目を断る（409）。
+
 - ゲートウェイ正規化で商品券／釣有り／釣無しを分類
 - 注文ノートの「商品券 N円」から額面観測（キャンセル除外）
-- `legacyGiftCardAggregationEnabled` が true のとき Gift Cards API 発行分を加算（POS union に含まれる order は二重加算回避）。失敗時は加算せず続行
+- 精算の「商品券釣有り差額」＝自動判定（現金の預かり超過・注文メモの額面の大きい方、注文ごと）＋ POS「商品券調整」の手入力。管理画面「商品券設定」（`voucher_settings`）が効く（`voucherChangePure.server.ts`、DECISIONS D30）:
+  - 商品券機能オフ・「精算に商品券おつりを反映する」オフ → 0
+  - 自動判定オフ → 自動の分を数えない（現金は会計に必要な分だけに抑えるのはそのまま）
+  - 手動調整オフ → 手入力を数えず、POS からの登録も 403（`VOUCHER_ADJUSTMENT_DISABLED`）。特殊返金設定「商品券調整を精算に反映」オフでも手入力を数えない
+  - 「注文メモから額面を読み取る」・読取用正規表現（1 番目のかっこが金額。空なら `<言葉>\s*([0-9]+)\s*(?:円|えん)?`）・商品券とみなす言葉（初め「商品券」）
+  - 判定優先順位: 同じ注文（同じ日・同じ店の精算の中）に自動と手入力の両方があれば片方だけ。手動優先（初め）は手入力の額、自動優先は自動の額
+  - 版の無い設定（新しい画面でまだ保存していない店）は全部初めの値として読み、今までの式（自動＋手入力を両方足す・POS の登録は止めない）のまま。画面で一度保存すると `settingsVersion: 2` が付いて上の決まりが効く。main に入れた時点ではどの店の数も変わらず、店ごと（Ciara から）に切り替える
+  - 判定優先順位で外した額は精算プレビューの `voucherChangeBreakdown` に出し、POS の精算画面にも行として出す
+  - 読取用正規表現は 100 文字まで
+  - 納金金額（現金）: 「納金金額から商品券の釣銭を引く」（初めオン・版のある設定だけ）なら、数えた釣銭のうち現金の上限でまだ引いていない分（注文ごとに 釣銭 − 現金の預かり超過）を `voucherChangeBreakdown.cashDepositDeduction` として出し、POS の納金金額から引く。支払方法別の現金・総売上は変えない
+- `legacyGiftCardAggregationEnabled` が **true のときのみ** Gift Cards API 発行分を加算（**既定 OFF**。POS union に含まれる order は二重加算回避）。取得が途中で失敗したとき（GraphQL errors・ページ情報の欠け・例外）は途中までの額で続けず `UpstreamAggregationError` で止め、精算・売上サマリーを確定しない（注文の取得と同じ考え方）。主クエリが errors のときだけ、新しい順の全件走査で最初から数え直す
+
+---
+
+## 11.1 税・純売上（正と診断）
+
+- **正（印字・精算プレビューの `tax` / `netSales`）**: 支払ネット合計を精算設定の `taxRatePercent`（既定 10）で税込逆算（`splitTaxInclusiveToNetAndTax`）
+- **診断（`taxShopify`）**: 注文税 × keepRatio。印字・精算の主値には使わない
+- 税・決済ラベルの全面再設計は別 workstream（本節は現行の正を固定するのみ）
 
 ---
 
@@ -186,7 +301,7 @@ Location Stock の POS Lite 配送では、送料が注文の配送料でなく 
 
 `buildSettlementReceiptText` は日本語固定ラベルで total / net / tax / 割引 / 返金 / 件数 / 点数 / 支払別を出力。精算設定の項目名カスタムは **このテキストビルダでは未使用**。
 
-order_based の Shopify 注文ノート／metafields は `settlementOrderGas` が別途構築。
+Shopify 精算注文ノート／metafields は印字経路では新規作成しない（`settlementOrderGas` は未使用）。
 
 ---
 
@@ -209,14 +324,20 @@ order_based の Shopify 注文ノート／metafields は `settlementOrderGas` �
 
 | 操作 | ルール |
 |------|--------|
-| 精算 create | `idempotencyKey = shopId:locationId:targetDate:printMode`。既存なら新規 Settlement を作らず返す。order_based 時は Shopify 再同期しうる |
-| 点検 | 冪等キー対象外 |
+| 精算 create | `idempotencyKey = shopId:locationId:targetDate`（旧 printMode 付きキーも検索）。既存なら新規 Settlement を作らず、**集計し直さずに DB の確定値を返す**（応答 `confirmed: true`）。売上サマリーのキャッシュは書き換えない。Shopify 精算注文は作らない（D21・#22） |
+| 精算 再確定 | create に `reconfirm: true`。集計し直し、数が同じなら何も変えない（`reconfirmed: false`）。変わっていれば新しい行を確定値にし、前の行は `superseded`（履歴に「再確定前」）。POS は「更新」で数が変わったと分かった日に「今の数で再確定する」を出す（D21） |
+| 点検 | 冪等キー対象外。1 日に何回でも発行でき、発行ごとに Settlement を 1 行作り、その時点の金額・件数・支払方法別内訳を残す（T 決定 2026-11-22）。返金処理中の特殊返金があっても警告つきで出す（D21）。点検の行はその日の精算（確定）として扱わない（POS の月別一覧は点検の回数だけ出す。照合 CSV は除外） |
 | 同時実行 | `SettlementOperationLock` |
 | 領収書 | クライアント UUID `idempotencyKey` |
-| 精算 recalculate | プレビュー再計算＋任意の Shopify 同期。履歴行の金額を常に書き換えるわけではない（API 実装参照） |
+| 特殊返金 | POS が `idempotencyKey` を送る → 登録の ID は `pos_sr_<キー>`、Shopify の `refundCreate @idempotent` にも同じ ID。**移行期間はキー無しも受ける**（古い POS の拡張。`console.warn` を残し、main と同じく登録ごとに新しい ID を作り、その ID を Shopify の冪等キーに使う）。不正な形のキーは 400。出す順番は `DEPLOY_PUBLIC_AND_INHOUSE.md` §4.1 |
+| 精算 recalculate | 確定前の日: プレビュー再計算＋任意の Shopify 同期（従来どおり）。**確定済みの日**（点検以外の Settlement が `completed` / `printed`）: `preview` は DB の確定値（`confirmed: true`）。比べるために 1 回集計し、違えば `changedSinceConfirm: true`・`changedFields`・`livePreview` を返す。Shopify の精算注文と Settlement 行は書き換えない（D21） |
 
 ---
 
 ## 16. タイムゾーン
 
 日次境界は Shopify `shop.ianaTimezone`（フォールバック: 一般設定 defaultTimezone）で UTC 範囲に変換（`shopTimezone.server`）。
+
+## 17. 精算の数え方（店ごとの設定）
+
+売上を数える日・点数に数えない商品・返金の支払方法の変更・ギフトカードの返金・支払方法ごとの取引件数・マイナスの日の合計は、管理画面「精算の数え方」で店ごとに選ぶ。初めの値は上の 1〜16 の動きのまま。詳しくは [SETTLEMENT_CALC_SETTINGS.md](SETTLEMENT_CALC_SETTINGS.md)。

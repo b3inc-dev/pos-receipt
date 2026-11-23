@@ -16,8 +16,8 @@ test("一般設定のデバッグ・診断の欄は isDevStore のときだけ�
   }
 });
 
-test("「プラン（表示用）」「有効機能 JSON（表示用）」も isDevStore のときだけ出す", () => {
-  for (const label of ["プラン（表示用）", "有効機能 JSON（表示用）"]) {
+test("「プラン（表示用）」「有効にする機能の一覧」も isDevStore のときだけ出す", () => {
+  for (const label of ["プラン（表示用）", "有効にする機能の一覧（表示用・開発ストアだけ）"]) {
     const at = page.indexOf(`label="${label}"`);
     const guard = page.lastIndexOf("{isDevStore && (", at);
     assert.ok(at > 0 && guard > 0, `${label} の前に isDevStore の分かれ目がない`);
@@ -27,15 +27,22 @@ test("「プラン（表示用）」「有効機能 JSON（表示用）」も is
   }
 });
 
-/** 「システム診断」の枠（見出し〜閉じ）が {isDevStore && ( … )} の中にあるか */
+/** 「システム診断」の枠（見出し〜閉じ）が {isDevStore && ( … )} または {isDevStore ? ( … ) : null} の中にあるか。
+ * 枠は AdminBlock（店舗の画面）・Layout.AnnotatedSection・HomeCard（ホーム。印字の一本化 #22 の作り）のどれでもよい */
+const BOX_CLOSERS = ["</AdminBlock>", "</Layout.AnnotatedSection>", "</HomeCard>"];
 function diagnosticsBoxIsGuarded(src) {
   const title = src.indexOf('title="システム診断"');
   assert.ok(title > 0, "システム診断の枠が見つからない");
-  const guard = src.lastIndexOf("{isDevStore && (", title);
+  const guard = Math.max(src.lastIndexOf("{isDevStore && (", title), src.lastIndexOf("{isDevStore ? (", title));
   assert.ok(guard > 0, "システム診断の前に isDevStore の分かれ目がない");
-  assert.ok(!src.slice(guard, title).includes("</Layout.AnnotatedSection>"), "分かれ目が枠の前で閉じている");
-  const end = src.indexOf("</Layout.AnnotatedSection>", title);
-  assert.ok(src.slice(end, end + 80).includes(")}"), "枠のすぐあとで分かれ目を閉じていない");
+  for (const closer of BOX_CLOSERS) {
+    assert.ok(!src.slice(guard, title).includes(closer), "分かれ目が枠の前で閉じている");
+  }
+  const ends = BOX_CLOSERS.map((c) => src.indexOf(c, title)).filter((i) => i > 0);
+  assert.ok(ends.length > 0, "システム診断の枠の閉じが見つからない");
+  const end = Math.min(...ends);
+  const after = src.slice(end, end + 80);
+  assert.ok(after.includes(")}") || after.includes(") : null}"), "枠のすぐあとで分かれ目を閉じていない");
 }
 
 test("店舗設定とホームの「システム診断」の枠は開発ストアだけ", () => {

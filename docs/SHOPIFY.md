@@ -15,11 +15,13 @@
 
 | 箇所 | バージョン |
 |------|------------|
-| Admin SDK（`app/shopify.server.ts`） | `ApiVersion.October25` |
-| Webhooks（`shopify.app.toml`） | `api_version = "2026-04"` |
-| POS Extension | `api_version = "2026-01"` |
+| Admin SDK（`app/shopify.server.ts`） | `ApiVersion.April26`（= `2026-04`） |
+| Webhooks（`shopify.app.toml` / `shopify.app.public.toml`） | `api_version = "2026-04"` |
+| POS Extension（`extensions/pos-smart-grid/shopify.extension.toml`） | `api_version = "2026-07"`（POS UI Extensions の版。Printing API に要る） |
 
-意図的差分の公式根拠は **未確認**。実装時は各エントリポイントの宣言を正とする。
+Admin SDK と Webhook は同じ版にそろえる。`app/utils/apiVersionAlignment.test.ts` が片方だけ変えたときに落ちる。Webhook の版を変えるのは HIGH RISK（届く payload の形が変わる）ので、上げるときは別 PR で T の承認を取る。
+
+POS 拡張の版は Admin API とは別の系列。POS の中から直接呼ぶ Admin GraphQL（`extensions/common/shopifyAdminGraphql.js` の `shopify:admin/api/graphql.json`）がどの Admin API の版で答えるかは、Shopify の公式文書で **未確認**（拡張の `api_version` に従うと見られるが、確かめていない）。
 
 ## 3. スコープ（自社用 toml 記載）
 
@@ -28,7 +30,7 @@ read_orders, read_locations, read_customers, read_gift_cards, read_products,
 write_customers, write_app_proxy, write_draft_orders, write_orders
 ```
 
-精算の order_based は draft orders + orders 更新（ノート・metafield）＋履行に依存。レガシー Gift Card 集計は `read_gift_cards`。
+印字一本化後、精算・点検で draft orders / 精算注文の更新・履行は呼ばない。`write_draft_orders` / `write_orders` は他機能や過去実装のために toml に残る可能性がある。レガシー Gift Card 集計は `read_gift_cards`。
 
 ## 4. 利用している Shopify データ（精算・レシート関連）
 
@@ -39,10 +41,12 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | Discount allocations / VIP- codes | 割引・VIP 集計 |
 | （staffMember on lineItems は読まない。`read_users` が要るため） | — |
 | customAttributes | 取得のみ（精算・領収書 UI では未使用） |
-| DraftOrder → Order（SETTLEMENT / INSPECTION） | order_based 印字用 |
+| DraftOrder → Order（SETTLEMENT / INSPECTION） | **印字経路では新規作成しない。** 既存履歴は削除しない |
 | Fulfillment create（V2→フォールバック） | 精算注文クローズ |
 | Gift Cards API（任意） | レガシー発行額加算 |
 | Location | 同期・表示・printMode |
+
+注文・ギフトカード検索（`query:`）の日時は、店舗タイムゾーンの 1 日（日本の店は日本時間 0:00〜23:59:59.999）を **UTC の Z 表記**にし、**値を二重引用符で囲んで**渡す（`app/utils/shopifySearchDate.ts` の `searchDateRange` / `searchDateCondition`。例: 2026-11-23 → `created_at:>="2026-11-22T15:00:00Z" created_at:<="2026-11-23T14:59:59.999Z"`）。開発ストア（2026-11-23）で、引用符なしの Z 表記は時刻が効かず範囲より前の注文が返り、引用符なしの `+09:00` は同日の注文を取りこぼした（Shopify 側の読み方は未確認）。精算・売上サマリー・販路は取ったあとに取引・返金・作成の時刻で正確な範囲に絞り直すので、検索が広すぎても数字は変わらない。
 | Shop.ianaTimezone / plan.partnerDevelopment | 日次境界・フルアクセス判定 |
 
 ## 5. Webhook
@@ -50,7 +54,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | Topic | URI | 処理（コード） |
 |-------|-----|----------------|
 | `app/uninstalled` | `/webhooks/app/uninstalled` | アンインストール処理 |
-| compliance（customers/data_request, customers/redact, shop/redact） | `/webhooks/compliance` | GDPR。`data_request` は DB 列挙＋根拠ログ後に 200（email/phone 非保存。開示は運用）。詳細は `gdprCustomerDataRequest.server.ts` |
+| compliance（customers/data_request, customers/redact, shop/redact） | `/webhooks/compliance` | GDPR。`data_request` は DB 列挙＋根拠ログ後に 200（email/phone 非保存。開示は運用）。`customers/redact` は領収書の宛名を列（`recipientName`）と発行時の紙面（`printSnapshotJson`）の両方から消し（`receiptRedact.server.ts`）、`SpecialRefundEvent.note` も `[redacted]` にする。詳細は `gdprCustomerDataRequest.server.ts` |
 | `orders/updated` | `/webhooks/orders/updated` | 売上サマリー更新キュー + 返金計上 metafield 同期 |
 
 ## 6. メタフィールド
@@ -66,8 +70,10 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 | key | 用途 |
 |-----|------|
 | `refund_aggregation_location_gid` | 返金の精算計上先 |
-| `special_refund_events` | 定義あり（JSON） |
-| `voucher_change_events` | 定義あり（JSON） |
+| `adjustments` | 特殊返金・商品券調整の記録（JSON・アプリが書く。精算と ciara-system が数える）。仕様は `docs/ORDER_ADJUSTMENTS_METAFIELD.md` |
+| `adjustments_summary` | 上を人が読むための 1 行（表示用） |
+| `special_refund_events` | 定義あり（JSON）。値は書かない（`adjustments` を使う） |
+| `voucher_change_events` | 定義あり（JSON）。値は書かない（`adjustments` を使う） |
 | `business_adjustments_version` | バージョン |
 
 定義 ensure: OAuth / `POST /api/admin/settlement-metafields/ensure`
@@ -90,41 +96,31 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 - `socialplus.line` は前と同じ動き（定義を確かめずに `metafields.socialplus.line:*` で全件を見る。その検索がエラーで、ほかの項目でも見つからなければ `API_ERROR`。既定の順では最後なので main と同じ答え）。
 - 未確認: 開発ストアで `line_crm.line_user_id` の定義の絞り込みがオン／オフのときに、全件の検索が何件返すか（オフなら全顧客が返り、上の打ち切りが働くはず）。定義の絞り込みは LINE CRM が定義を作るときにオンにする（line-crm 側の PR）。
 
-## 7. Printing（現状と移行候補の分離）
+## 7. Printing（shopify.printing 一本化）
 
 ### 7.1 現状フロー
 
 ```
-注文作成（Shopify 標準）
-  │
-  ├─ 領収書: アプリ DB 発行のみ（Printing API 不使用）
-  │
-  └─ 精算:
-       order_based → SETTLEMENT 注文を作り、人間が POS 標準レシート印字
-       cloudprnt_direct → アプリがテキスト payload を提供。プリンタ側ポーリング想定
+通常の Shopify 販売注文 … 本アプリの印字対象外（POS 標準レシートは残る）
+
+アプリ独自帳票（精算 / 点検 / 領収書 / 販売レシート）
+  → GET /api/print/{settlement|receipt|sales}/:id
+     （精算・点検は発行時の店舗表示名・帳票版・金額。用紙幅は再印刷時点の機器設定）
+  → shopify.printing.print(src, { printer })  ※ connected: true のみ
 ```
 
-**Shopify Printing API / printJob / device.print 等の呼び出しはリポジトリに存在しない。**
+旧 `order_based` / `cloudprnt_direct` / Printing API 切替フラグは保存されていても出力に使わない。
+`GET /api/settlements/:id/print-payload` は 410。
 
 ### 7.2 ギフトレシート
 
-- 要件・コードともに Shopify Gift Receipt 連携は **未実装**
-- 本アプリの「レシート」は精算レシートと領収書を指す
+- 金額なしのギフトレシートは、本アプリの販売レシートの印字（`GET /api/print/sales/:orderId`）で出す。見出し・末尾文・注文番号の表示は管理画面「販売レイアウト編集」で変える（`docs/POS_PRINTING_OPERATOR.md`）
+- Shopify 標準の Gift Receipt との連携は **未実装**
+- 本アプリの「レシート」は精算レシート・点検・領収書・販売レシート帳票を指す
 
-### 7.3 Printing API 等へ移行できそうな部分（調査のみ・実装しない）
+### 7.3 機種・未確認
 
-| 現状 | 移行検討候補（アイデアレベル） | 制約・未確認 |
-|------|--------------------------------|--------------|
-| order_based で SETTLEMENT 注文を作り POS 標準印字 | Printing API で精算レイアウトを直接印字できれば、精算注文作成を省略できる可能性 | Printing API の POS 対応範囲・店舗プリンタ要件は未確認 |
-| cloudprnt_direct のテキスト payload | 同じペイロード生成を維持したまま送信経路だけ Printing API / 他プロトコルに差し替える可能性 | 現行はポーリング URL 提供のみ。送信アダプタなし |
-| 領収書の画面表示のみ | Printing API または CloudPRNT への出力を追加する余地 | `receiptPrintMode` 設定はあるが issue 経路で未使用 |
-| 点検レシート | 精算と同レイアウト経路を共有しているため、印字経路変更の影響を精算と同時に受ける | DoneView 文言と order_based 同期の不一致あり（DECISIONS） |
-
-**移行しない／分離して残る可能性が高い部分**
-
-- 集計エンジン・特殊返金 DB・冪等キー・メタフィールドへの数値保存
-- PaymentMethodMaster と GAS 正規化ロジック
-- 返金計上ロケーション解決
+`docs/PRINT_DEVICE_COMPAT.md`。mPOP の紙面確認はこの環境では未実施（ユーザー報告）。
 
 ## 8. POS Extension ターゲット
 
@@ -145,6 +141,7 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 
 ## 10. 未確認
 
-- Printing API の店舗導入前提（ハードウェア・POS バージョン）
+- mPOP / mC-Print3 の紙面確認（この環境では未実施）
+- Shopify POS Lite vs Pro が Printing API に与える差（コードでは未検出）
 - 各ストアで有効なカスタム決済の gateway 実文字列の完全一覧（マスタで吸収する設計）
 - Webhook 再送時の売上サマリーキューの完全な idempotency 保証範囲

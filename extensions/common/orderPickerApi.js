@@ -2,7 +2,7 @@
  * 注文検索・注文詳細をバックエンド API で取得する共通モジュール
  * 要件書 21.2 対応
  */
-import { toUserMessage } from "./errorMessage.js";
+import { toUserMessage, withStatus } from "./errorMessage.js";
 
 const session = globalThis?.shopify?.session;
 
@@ -29,7 +29,7 @@ async function apiGet(path, params = {}) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = toUserMessage(json.error || `HTTP ${res.status}`);
-    throw new Error(msg + (res.status ? ` (HTTP ${res.status})` : ""));
+    throw withStatus(new Error(msg), res.status);
   }
   return json;
 }
@@ -49,7 +49,7 @@ async function apiPost(path, body = {}) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = toUserMessage(json.error || `HTTP ${res.status}`);
-    throw new Error(msg + (res.status ? ` (HTTP ${res.status})` : ""));
+    throw withStatus(new Error(msg), res.status);
   }
   return json;
 }
@@ -57,7 +57,7 @@ async function apiPost(path, body = {}) {
 /**
  * GET /api/orders/search
  * @param {Object} opts - q, locationId, dateFrom, dateTo, cursor, limit
- * @returns {{ items: Array, nextCursor: string|null }}
+ * @returns {{ items: Array, nextCursor: string|null, todayLocalDate: string, fetchedAtTime: string }}
  */
 export async function searchOrders(opts = {}) {
   const { q, locationId, dateFrom, dateTo, cursor, limit } = opts;
@@ -69,7 +69,13 @@ export async function searchOrders(opts = {}) {
     cursor: cursor ?? undefined,
     limit: limit ?? 20,
   });
-  return { items: data.items ?? [], nextCursor: data.nextCursor ?? null };
+  return {
+    items: data.items ?? [],
+    nextCursor: data.nextCursor ?? null,
+    // 店のタイムゾーンの「今日」と取得した時刻（一覧の「今日 18:14」「18:14 に更新」用）
+    todayLocalDate: data.todayLocalDate ?? "",
+    fetchedAtTime: data.fetchedAtTime ?? "",
+  };
 }
 
 /**
@@ -92,4 +98,15 @@ export async function createRedoDraft(orderId) {
   if (!orderId) throw new Error("orderId required");
   const id = String(orderId).replace(/^gid:\/\/shopify\/Order\//, "");
   return apiPost(`/api/orders/${id}/redo-draft`, {});
+}
+
+/**
+ * GET /api/orders/:orderId/redo-cart
+ * 会計やり直しで POS のカートに入れる中身を取得（サーバーは読み取りのみ）
+ * @param {string} orderId
+ */
+export async function getRedoCartPlan(orderId) {
+  if (!orderId) throw new Error("orderId required");
+  const id = String(orderId).replace(/^gid:\/\/shopify\/Order\//, "");
+  return apiGet(`/api/orders/${id}/redo-cart`);
 }

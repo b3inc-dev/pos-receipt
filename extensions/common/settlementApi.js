@@ -3,7 +3,7 @@
  * 要件書 §21.3
  */
 import { getAppUrl } from "./appUrl.js";
-import { toUserMessage } from "./errorMessage.js";
+import { toUserMessage, withStatus } from "./errorMessage.js";
 
 async function getToken() {
   const session = globalThis?.shopify?.session;
@@ -34,8 +34,8 @@ async function apiFetch(path, options = {}) {
       const j = await res.json();
       msg = j?.error ?? j?.message ?? msg;
     } catch {}
-    const statusSuffix = res.status ? ` (HTTP ${res.status})` : "";
-    throw new Error(toUserMessage(msg) + statusSuffix);
+    // 画面の文に「(HTTP 500)」は出さない（店の人には関係ない）。番号は err.status に残す
+    throw withStatus(new Error(toUserMessage(msg)), res.status);
   }
   return res.json();
 }
@@ -54,10 +54,10 @@ export async function previewSettlement({ locationId, locationName, targetDate }
 }
 
 /** 精算実行・保存 */
-export async function createSettlement({ locationId, locationName, targetDate, printMode, isInspection = false }) {
+export async function createSettlement({ locationId, locationName, targetDate, printMode, isInspection = false, reconfirm = false }) {
   return apiFetch("/api/settlements/create", {
     method: "POST",
-    body: JSON.stringify({ locationId, locationName, targetDate, printMode, isInspection }),
+    body: JSON.stringify({ locationId, locationName, targetDate, printMode, isInspection, ...(reconfirm ? { reconfirm: true } : {}) }),
   });
 }
 

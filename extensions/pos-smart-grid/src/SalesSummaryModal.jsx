@@ -17,13 +17,18 @@ import {
   getDailySummary,
   getPeriodSummary,
   getSalesMonthDaily,
+  newSalesSummaryLoadId,
   reportFootfall,
 } from "../../common/salesSummaryApi.js";
 import { getAvailableMonths } from "../../common/settlementApi.js";
 import { getLocationsFromShopify } from "../../common/shopifyAdminGraphql.js";
 import { useSessionLocation } from "../../common/sessionLocation.js";
 import { toUserMessage } from "../../common/errorMessage.js";
-import { formatYmdSlash } from "../../common/dateDisplay.js";
+import { formatYmdSlash, formatJstHm } from "../../common/dateDisplay.js";
+import { MetricCard } from "./SummaryTable.jsx";
+import { LoadingNotice } from "./LoadingNotice.jsx";
+import { INLINE_LOADING_TEXT } from "../../common/loadingNotice.js";
+import { formatYmdWithWeekday } from "../../common/summaryTableLayout.js";
 
 export default async () => {
   render(<SalesSummaryModal />, document.body);
@@ -124,16 +129,11 @@ function isTodayDate(ymd, shopCalendarToday) {
   return ymd === cap;
 }
 
+/** 「21:05 更新」（日本時間。端末の時刻帯によらない） */
 function formatUpdatedTimeLabel(dateObj) {
   if (!dateObj) return "";
-  const hh = pad2(dateObj.getHours());
-  const mm = pad2(dateObj.getMinutes());
-  return `${hh}:${mm}更新`;
-}
-
-function UpdatedAtBadge({ dateObj }) {
-  if (!dateObj) return null;
-  return <s-badge tone="info">{formatUpdatedTimeLabel(dateObj)}</s-badge>;
+  const hm = formatJstHm(dateObj);
+  return hm ? `${hm} 更新` : "";
 }
 
 function fmtNum(n, dec = 0) {
@@ -152,6 +152,13 @@ function fmtPct(n) {
 function fmtAmount(n) {
   if (n === null || n === undefined) return "—";
   return `¥${fmtNum(n)}`;
+}
+
+/** 「15:42時点」形式（端末の時刻。店舗の端末は日本時間）。時刻が無ければ「保存済み」 */
+function cachedAsOfLabel(cached) {
+  const d = cached?.at;
+  if (!d || Number.isNaN(d.getTime())) return "保存済み";
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}時点`;
 }
 
 /** サマリー行の locationId と POS セッション GID を照合（数値のみ / GID 形式の差を吸収） */
@@ -255,7 +262,7 @@ function FootfallReportModalHost({
       <s-box padding="base">
         <s-stack gap="base">
           {dateLine ? (
-            <s-text tone="subdued" size="small">
+            <s-text type="small" color="subdued">
               {dateLine}
             </s-text>
           ) : null}
@@ -266,7 +273,7 @@ function FootfallReportModalHost({
             onChange={(e) => onChange(e.detail?.value ?? e.target?.value ?? value)}
           />
           {footfallErr ? (
-            <s-text tone="critical" size="small">
+            <s-text type="small" tone="critical">
               {footfallErr}
             </s-text>
           ) : null}
@@ -287,53 +294,6 @@ function FootfallReportModalHost({
   );
 }
 
-// ── Summary 1行（精算プレビューと同型）──────────────────────────────────────────
-
-function SummaryRow({ label, value, valueBold = false, labelBold = false, divider = true }) {
-  return (
-    <s-stack gap="none">
-      <s-box padding="small">
-        <s-stack
-          direction="inline"
-          justifyContent="space-between"
-          alignItems="center"
-          gap="small"
-          style={{ width: "100%" }}
-        >
-          <s-box style={{ flex: "1 1 0", minInlineSize: 0, paddingInlineEnd: "small" }}>
-            <s-text tone="subdued" size="small" fontWeight={labelBold ? "bold" : undefined}>
-              {label}
-            </s-text>
-          </s-box>
-          <s-box style={{ flex: "0 1 auto", minInlineSize: 0, textAlign: "end" }}>
-            <s-text fontWeight={valueBold ? "bold" : undefined} size="small">
-              {value}
-            </s-text>
-          </s-box>
-        </s-stack>
-      </s-box>
-      {divider ? <s-divider /> : null}
-    </s-stack>
-  );
-}
-
-function MetricBlock({ title, children }) {
-  return (
-    <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
-      <s-box padding="small" paddingBlockEnd="none">
-        {typeof title === "string" ? (
-          <s-text emphasis="bold" size="small">
-            {title}
-          </s-text>
-        ) : (
-          title
-        )}
-      </s-box>
-      <s-stack gap="none">{children}</s-stack>
-    </s-box>
-  );
-}
-
 // ── 日次・月次の行データ ─────────────────────────────────────────────────────
 
 function dailyKpiRows(row, o) {
@@ -345,6 +305,7 @@ function dailyKpiRows(row, o) {
     rows.push({
       label: "予算比",
       value: fmtPct(row.budgetRatio),
+      ratio: row.budgetRatio,
       tone: row.budgetRatio >= 1 ? "success" : "critical",
     });
   }
@@ -355,24 +316,14 @@ function dailyKpiRows(row, o) {
   if (o.showAtv && row.atv !== null) rows.push({ label: "客単価", value: fmtAmount(row.atv) });
   if (o.showSetRate && row.setRate !== null)
     rows.push({ label: "セット率", value: fmtNum(row.setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   if (o.showUnitPrice && row.unit !== null) rows.push({ label: "一品単価", value: fmtAmount(row.unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   return rows;
 }
 
-/** tone は SummaryRow が未対応のため value に含めずそのまま表示 */
-function DailyMetricRows({ row, o, periodRow }) {
-  const base = dailyKpiRows(row, o);
-  const items = mergeDailyRowsWithMonthKpi(base, periodRow, o);
-  return items.map((r, i) => (
-    <SummaryRow
-      key={`${r.label}-${i}`}
-      label={r.label}
-      value={r.value}
-      valueBold={r.valueBold}
-      divider={i < items.length - 1}
-    />
-  ));
+/** 日次の店（またはチャネル）の行。月の数を出す設定なら日の数の後ろに足す */
+function dailyMetricItems(row, o, periodRow) {
+  return mergeDailyRowsWithMonthKpi(dailyKpiRows(row, o), periodRow, o);
 }
 
 function periodKpiRows(row, o) {
@@ -384,6 +335,7 @@ function periodKpiRows(row, o) {
     rows.push({
       label: "達成率",
       value: fmtPct(row.achievementRate),
+      ratio: row.achievementRate,
     });
   }
   if (row.progressBudgetToday > 0 && o.showProgressToday) {
@@ -401,22 +353,9 @@ function periodKpiRows(row, o) {
   if (o.showAtv && row.atv !== null) rows.push({ label: "客単価", value: fmtAmount(row.atv) });
   if (o.showSetRate && row.setRate !== null)
     rows.push({ label: "セット率", value: fmtNum(row.setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   if (o.showUnitPrice && row.unit !== null) rows.push({ label: "一品単価", value: fmtAmount(row.unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   return rows;
-}
-
-function PeriodMetricRows({ row, o }) {
-  const items = periodKpiRows(row, o);
-  return items.map((r, i) => (
-    <SummaryRow
-      key={`${r.label}-${i}`}
-      label={r.label}
-      value={r.value}
-      valueBold={r.valueBold}
-      divider={i < items.length - 1}
-    />
-  ));
 }
 
 function totalsDailyRows(totals, o) {
@@ -426,7 +365,7 @@ function totalsDailyRows(totals, o) {
   const budgetRatio =
     totals.budget != null && totals.budget > 0 ? totals.actual / totals.budget : null;
   if (o.showBudgetRatio && budgetRatio !== null) {
-    rows.push({ label: "予算比", value: fmtPct(budgetRatio) });
+    rows.push({ label: "予算比", value: fmtPct(budgetRatio), ratio: budgetRatio });
   }
   if (o.showOrders) rows.push({ label: "件数", value: `${fmtNum(totals.orders)}件` });
   if (o.showVisitors && totals.visitors !== null)
@@ -438,9 +377,9 @@ function totalsDailyRows(totals, o) {
   if (o.showAtv && atv !== null) rows.push({ label: "客単価", value: fmtAmount(atv) });
   const setRate = totals.orders > 0 ? totals.items / totals.orders : null;
   if (o.showSetRate && setRate !== null) rows.push({ label: "セット率", value: fmtNum(setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   const unit = totals.items > 0 ? totals.actual / totals.items : null;
   if (o.showUnitPrice && unit !== null) rows.push({ label: "一品単価", value: fmtAmount(unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   return rows;
 }
 
@@ -467,7 +406,7 @@ function totalsToPseudoPeriodRow(totals, locationRows = []) {
   };
 }
 
-/** 月予算→月実績→達成率→遂行…（日次で一品単価の直後に挿入） */
+/** 月予算→月実績→達成率→遂行…（日次では日の数の後ろに足し、「今月」の見出しの下に出す） */
 function monthKpiRowsOrderedFromPeriodRow(row, o) {
   const items = [];
   if (!row) return items;
@@ -479,6 +418,7 @@ function monthKpiRowsOrderedFromPeriodRow(row, o) {
     items.push({
       label: "達成率",
       value: fmtPct(row.achievementRate),
+      ratio: row.achievementRate,
     });
   }
   if (row.progressBudgetToday > 0 && o.showProgressToday) {
@@ -489,7 +429,8 @@ function monthKpiRowsOrderedFromPeriodRow(row, o) {
     items.push({ label: "遂行予算(前日)", value: fmtAmount(row.progressBudgetPrev) });
     items.push({ label: "遂行率(前日)", value: fmtPct(row.progressRatePrev) });
   }
-  return items;
+  // 日次のカードでは「今月」の見出しの下にまとめて出す（日の数と混ざらないように）
+  return items.map((it) => ({ ...it, group: "month" }));
 }
 
 function mergeDailyRowsWithMonthKpi(baseItems, periodRow, o) {
@@ -503,9 +444,8 @@ function mergeDailyRowsWithMonthKpi(baseItems, periodRow, o) {
   if (!wantMonth) return baseItems;
   const extra = monthKpiRowsOrderedFromPeriodRow(periodRow, o);
   if (extra.length === 0) return baseItems;
-  const idx = baseItems.findIndex((r) => r.label === "一品単価");
-  if (idx === -1) return [...baseItems, ...extra];
-  return [...baseItems.slice(0, idx + 1), ...extra, ...baseItems.slice(idx + 1)];
+  // 月の数はカードの「今月」の見出しの下にまとめて出すので、日の数の後ろに足す
+  return [...baseItems, ...extra];
 }
 
 /** 日次の1行（店舗 or チャネル）に対応する期間API行 */
@@ -531,6 +471,7 @@ function totalsPeriodRows(totals, o, locationRows = []) {
     rows.push({
       label: "達成率",
       value: fmtPct(actualTotal / totals.budgetTotal),
+      ratio: actualTotal / totals.budgetTotal,
     });
   }
   const progressBudgetToday =
@@ -556,8 +497,8 @@ function totalsPeriodRows(totals, o, locationRows = []) {
   if (o.showAtv && totals.atv !== null) rows.push({ label: "客単価", value: fmtAmount(totals.atv) });
   if (o.showSetRate && totals.setRate !== null)
     rows.push({ label: "セット率", value: fmtNum(totals.setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   if (o.showUnitPrice && totals.unit !== null) rows.push({ label: "一品単価", value: fmtAmount(totals.unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   return rows;
 }
 
@@ -578,13 +519,13 @@ function DailyListThreeColCell({ widthPct, label, valueAlignEnd = false, padInli
       minInlineSize="0"
       maxInlineSize={widthPct}
     >
-      <s-stack gap="extraSmall" inlineSize="100%">
+      <s-stack gap="small-300" inlineSize="100%">
         {label != null && label !== "" ? (
-          <s-text tone="subdued" size="small">
+          <s-text type="small" color="subdued">
             {label}
           </s-text>
         ) : (
-          <s-text size="small">{nbsp}</s-text>
+          <s-text type="small">{nbsp}</s-text>
         )}
         <s-stack direction="block" alignItems={valueAlignEnd ? "end" : "start"} inlineSize="100%">
           {children}
@@ -627,24 +568,22 @@ function DailyListDayRowGrid({ row, o }) {
   const W = DAILY_LIST_COL_W;
 
   return (
-    <s-stack gap="extraSmall">
+    <s-stack gap="small-300">
       <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
         <DailyListThreeColCell widthPct={W.c1} label="日付" valueAlignEnd={false} padInlineEnd>
-          <s-text emphasis="bold" size="small">
+          <s-text type="strong">
             {formatYmdSlash(row.targetDate)}
           </s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c2} label="" padInlineEnd>
-          <s-text size="small" tone="subdued">
+          <s-text type="small" color="subdued">
             {"\u00a0"}
           </s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c3} label="" valueAlignEnd padInlineEnd={false}>
           <s-stack direction="inline" gap="small" justifyContent="end" alignItems="center" inlineSize="100%">
             <s-badge tone="neutral">予算比</s-badge>
-            <s-text
-              size="small"
-              fontWeight="bold"
+            <s-text type="strong"
               tone={o.showBudgetRatio !== false ? budgetRatioTone : undefined}
             >
               {o.showBudgetRatio !== false ? budgetRatioText : "—"}
@@ -655,39 +594,39 @@ function DailyListDayRowGrid({ row, o }) {
 
       <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
         <DailyListThreeColCell widthPct={W.c1} label="予算" valueAlignEnd padInlineEnd>
-          <s-text size="small">{budget}</s-text>
+          <s-text type="small">{budget}</s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c2} label="純売上" valueAlignEnd padInlineEnd>
-          <s-text size="small" fontWeight="bold">
+          <s-text type="strong">
             {net}
           </s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c3} label="点数" valueAlignEnd padInlineEnd={false}>
-          <s-text size="small">{itemsVal}</s-text>
+          <s-text type="small">{itemsVal}</s-text>
         </DailyListThreeColCell>
       </s-stack>
 
       <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
         <DailyListThreeColCell widthPct={W.c1} label="客数" valueAlignEnd padInlineEnd>
-          <s-text size="small">{orders}</s-text>
+          <s-text type="small">{orders}</s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c2} label="入店数" valueAlignEnd padInlineEnd>
-          <s-text size="small">{visitors}</s-text>
+          <s-text type="small">{visitors}</s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c3} label="購買率" valueAlignEnd padInlineEnd={false}>
-          <s-text size="small">{conv}</s-text>
+          <s-text type="small">{conv}</s-text>
         </DailyListThreeColCell>
       </s-stack>
 
       <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
         <DailyListThreeColCell widthPct={W.c1} label="客単価" valueAlignEnd padInlineEnd>
-          <s-text size="small">{atv}</s-text>
+          <s-text type="small">{atv}</s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c2} label="セット率" valueAlignEnd padInlineEnd>
-          <s-text size="small">{setRate}</s-text>
+          <s-text type="small">{setRate}</s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c3} label="一品単価" valueAlignEnd padInlineEnd={false}>
-          <s-text size="small">{unit}</s-text>
+          <s-text type="small">{unit}</s-text>
         </DailyListThreeColCell>
       </s-stack>
     </s-stack>
@@ -716,6 +655,8 @@ function DailyListView({
   const [listDisplayOpts, setListDisplayOpts] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  /** 「再読み込み」で数を増やして読み直す */
+  const [reloadKey, setReloadKey] = useState(0);
 
   const listO = useMemo(() => ({ ...defaultDisplayOptions(), ...(listDisplayOpts ?? {}) }), [listDisplayOpts]);
 
@@ -783,9 +724,9 @@ function DailyListView({
     return () => {
       cancelled = true;
     };
-  }, [locationGid, listYear, listMonth]);
+  }, [locationGid, listYear, listMonth, reloadKey]);
 
-  const displayName = locationName?.trim() || "ロケーション";
+  const displayName = locationName?.trim() || "店舗";
 
   return (
     <s-page heading="日別一覧">
@@ -809,14 +750,14 @@ function DailyListView({
           <s-stack gap="small">
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
               <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <s-text type="strong" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {displayName}
                 </s-text>
               </s-box>
               <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
                 <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
                   <s-button
-                    kind="secondary"
+                    variant="secondary"
                     style={{ width: "100%", maxInlineSize: "100%" }}
                     onClick={() => {
                       setMonthMenuOpen(false);
@@ -828,7 +769,7 @@ function DailyListView({
                 </s-box>
                 <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
                   <s-button
-                    kind="secondary"
+                    variant="secondary"
                     style={{ width: "100%", maxInlineSize: "100%" }}
                     onClick={() => {
                       setYearMenuOpen(false);
@@ -848,14 +789,14 @@ function DailyListView({
                   style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
                 >
                   {listAvailableYears.length === 0 ? (
-                    <s-text tone="subdued" fontSize="small">
+                    <s-text type="small" color="subdued">
                       選べる年がありません
                     </s-text>
                   ) : (
                     listAvailableYears.map((y) => (
                       <s-button
                         key={`dl-year-${y}`}
-                        kind={y === listYear ? "primary" : "secondary"}
+                        variant={y === listYear ? "primary" : "secondary"}
                         style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                         onClick={() => {
                           setListYear(y);
@@ -877,18 +818,18 @@ function DailyListView({
                   style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
                 >
                   {monthsLoading ? (
-                    <s-text tone="subdued" fontSize="small">
-                      月一覧を読み込み中…
+                    <s-text type="small" color="subdued">
+                      {INLINE_LOADING_TEXT}
                     </s-text>
                   ) : listAvailableMonthsForYear.length === 0 ? (
-                    <s-text tone="subdued" fontSize="small">
+                    <s-text type="small" color="subdued">
                       選べる月がありません
                     </s-text>
                   ) : (
                     listAvailableMonthsForYear.map((m) => (
                       <s-button
                         key={`dl-month-${m}`}
-                        kind={m === listMonth ? "primary" : "secondary"}
+                        variant={m === listMonth ? "primary" : "secondary"}
                         style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                         onClick={() => {
                           setListMonth(m);
@@ -910,16 +851,10 @@ function DailyListView({
         <s-scroll-box blockSize="auto" maxBlockSize="100%" minBlockSize="0" style={{ flex: "1 1 0", minHeight: 0 }}>
           <s-box padding="base">
             <s-stack gap="base">
-              {loading ? (
-                <s-text tone="subdued" size="small">
-                  読み込み中…
-                </s-text>
-              ) : err ? (
-                <s-stack gap="small">
-                  <s-text tone="critical">{err}</s-text>
-                </s-stack>
-              ) : rows.length === 0 ? (
-                <s-text tone="subdued" size="small">
+              {/* 読み込み中・失敗の案内は全画面共通（見出しのすぐ下・青い帯ひとつ。T 2026-11-24） */}
+              <LoadingNotice loading={loading} error={err} onRetry={() => setReloadKey((n) => n + 1)} />
+              {loading || err ? null : rows.length === 0 ? (
+                <s-text type="small" color="subdued">
                   表示できる日がありません
                 </s-text>
               ) : (
@@ -951,7 +886,7 @@ function DailyListView({
           }}
         >
           <s-stack direction="inline" justifyContent="start" alignItems="center" gap="base">
-            <s-button kind="secondary" onClick={onBack}>
+            <s-button variant="secondary" onClick={onBack}>
               戻る
             </s-button>
           </s-stack>
@@ -1004,7 +939,7 @@ function HistoryDailyDetailView({
       if (scope === "single" && !sessionGid) {
         setData(null);
         setLoadedHistoryParamsKey(null);
-        setError("ロケーションを取得できませんでした。POSで店舗を選択してから開き直してください。");
+        setError("POS の店舗が分かりません。店舗を選び直してから開き直してください。");
         return;
       }
       const result = await getDailySummary({ targetDate: viewDate, locationIds: locationIdsForApi });
@@ -1138,21 +1073,21 @@ function HistoryDailyDetailView({
           >
             <s-stack gap="small">
               {locLoadErr ? (
-                <s-text tone="critical" size="small">
+                <s-text type="small" tone="critical">
                   {locLoadErr}
                 </s-text>
               ) : null}
               <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" inlineSize="100%">
                 <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                  <s-stack gap="extraSmall">
-                    <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {sessionLocationName || "店舗名を取得中…"}
+                  <s-stack gap="small-300">
+                    <s-text type="strong" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {sessionLocationName || INLINE_LOADING_TEXT}
                     </s-text>
-                    <s-text tone="subdued" size="small">
+                    <s-text type="small" color="subdued">
                       日次（履歴） {formatYmdSlash(viewDate)}
                     </s-text>
                     {scope === "all" ? (
-                      <s-text tone="subdued" size="small">
+                      <s-text type="small" color="subdued">
                         表示: 全店舗
                       </s-text>
                     ) : null}
@@ -1169,13 +1104,11 @@ function HistoryDailyDetailView({
               </s-stack>
 
               <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
-                <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setViewDate(addDays(viewDate, -1))}>
+                <s-button variant="secondary" disabled={!canPrevDay} onClick={() => setViewDate(addDays(viewDate, -1))}>
                   前日
                 </s-button>
-                <s-text emphasis="bold" size="small">
-                  {formatYmdSlash(viewDate)}
-                </s-text>
-                <s-button kind="secondary" disabled={!canNextDay} onClick={() => setViewDate(addDays(viewDate, 1))}>
+                <s-text type="strong">{formatYmdWithWeekday(viewDate)}</s-text>
+                <s-button variant="secondary" disabled={!canNextDay} onClick={() => setViewDate(addDays(viewDate, 1))}>
                   翌日
                 </s-button>
               </s-stack>
@@ -1192,82 +1125,44 @@ function HistoryDailyDetailView({
           >
             <s-box padding="base">
               <s-stack gap="base">
-                {historyShowLoading ? (
-                  <s-text tone="subdued" size="small">
-                    読み込み中…
-                  </s-text>
-                ) : null}
-                {error ? (
-                  <s-banner status="critical">{error}</s-banner>
-                ) : null}
+                {/* 読み込み中・失敗の案内は全画面共通（見出しのすぐ下・青い帯ひとつ。T 2026-11-24） */}
+                <LoadingNotice loading={historyShowLoading} error={error} onRetry={loadData} />
 
                 {kpiHidden ? (
-                  <s-banner status="info">
-                    表示する数字の項目がすべてOFFです。管理画面の売上サマリー設定で、実績や件数などをONにしてください。
-                  </s-banner>
+                  <s-banner tone="info" heading="出す数字がひとつもありません。管理画面の「売上サマリー設定」で、実績・注文数などをオンにしてください。" />
                 ) : null}
 
                 {layoutEmpty ? (
-                  <s-banner status="info">
-                    店舗ごとの一覧と店舗合計の両方が非表示です。管理画面で「ロケーション行を表示」または「店舗合計を表示」をONにしてください。
-                  </s-banner>
+                  <s-banner tone="info" heading="店ごとの行と店舗の合計が、どちらも出ない設定です。管理画面の「売上サマリー設定」で「店ごとの行を出す」か「店舗の合計を出す」をオンにしてください。" />
                 ) : null}
 
                 {!loading && data && historyDataFresh && (
                   <>
                     {rows.length === 0 && channelRowsForUi.length === 0 ? (
-                      <s-text tone="subdued" size="small">
-                        売上サマリーが有効な店舗がありません。管理画面でロケーション設定を確認してください。
+                      <s-text type="small" color="subdued">
+                        売上サマリーを出す店舗がありません。管理画面の店舗の設定を確かめてください。
                       </s-text>
                     ) : (
                       <>
                         {showTotalsSection ? (
-                          <MetricBlock title="全店合計">
-                            {totalsDaily.map((r, i, arr) => (
-                              <SummaryRow
-                                key={r.label}
-                                label={r.label}
-                                value={r.value}
-                                valueBold={r.valueBold}
-                                divider={i < arr.length - 1}
-                              />
-                            ))}
-                          </MetricBlock>
+                          <MetricCard title="全店合計" items={totalsDaily} />
                         ) : null}
 
                         {rowsForUi.map((row) => (
                           <s-stack key={row.locationId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-stack
-                                  direction="inline"
-                                  justifyContent="space-between"
-                                  alignItems="center"
-                                  gap="small"
-                                  style={{ width: "100%" }}
-                                >
-                                  <s-text emphasis="bold" size="small">
-                                    {row.locationName ?? row.locationId}
-                                  </s-text>
-                                  {showUpdatedBadge ? <UpdatedAtBadge dateObj={lastLoadedAt} /> : null}
-                                </s-stack>
-                              }
-                            >
-                              <DailyMetricRows row={row} o={o} />
-                            </MetricBlock>
+                            <MetricCard
+                              title={row.locationName ?? row.locationId}
+                              items={dailyMetricItems(row, o)}
+                              updatedLabel={showUpdatedBadge ? formatUpdatedTimeLabel(lastLoadedAt) : ""}
+                            />
                           </s-stack>
                         ))}
                         {channelRowsForUi.map((row) => (
                           <s-stack key={row.channelId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-text emphasis="bold" size="small">
-                                  [{row.channelName ?? row.channelId}]
-                                </s-text>
-                              }
-                            >
-                              <DailyMetricRows row={row} o={o} />
-                            </MetricBlock>
+                            <MetricCard
+                              title={`[${row.channelName ?? row.channelId}]`}
+                              items={dailyMetricItems(row, o)}
+                            />
                           </s-stack>
                         ))}
                       </>
@@ -1292,14 +1187,15 @@ function HistoryDailyDetailView({
           >
             {/* POS Stock: FixedFooterNavBar centerAlignWithButtons と同型（space-between 3 子） */}
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
-              <s-button kind="secondary" onClick={loadData} disabled={loading}>
-                {loading ? "更新中.." : "更新"}
+              {/* 日別一覧から開いた日: 左下は一覧へ戻る「戻る」（T のルール: 一覧へ戻るボタンは左下の「戻る」） */}
+              <s-button variant="secondary" onClick={onNavigateToDailyList}>
+                戻る
               </s-button>
               {scope === "single" && sessionRow?.footfallReportingEnabled ? (
                 <s-box style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
-                  <s-stack gap="extraSmall" alignItems="center">
+                  <s-stack gap="small-300" alignItems="center">
                     <s-button
-                      kind="secondary"
+                      variant="secondary"
                       command="--show"
                       commandFor={FOOTFALL_MODAL_ID_HISTORY}
                       onClick={() => setFootfallErr("")}
@@ -1309,7 +1205,7 @@ function HistoryDailyDetailView({
                         : "入店数報告"}
                     </s-button>
                     {footfallErr ? (
-                      <s-text tone="critical" size="small">
+                      <s-text type="small" tone="critical">
                         {footfallErr}
                       </s-text>
                     ) : null}
@@ -1318,8 +1214,8 @@ function HistoryDailyDetailView({
               ) : (
                 <s-box />
               )}
-              <s-button kind="secondary" onClick={onNavigateToDailyList}>
-                日別一覧
+              <s-button variant="secondary" onClick={loadData} disabled={loading}>
+                更新
               </s-button>
             </s-stack>
           </s-box>
@@ -1510,24 +1406,79 @@ function SalesSummaryModal() {
     ],
   );
   const [loadedSummaryParamsKey, setLoadedSummaryParamsKey] = useState(null);
+  /** 全店・今日で保存済みの数字を出しているとき { at: 保存時刻 | null }（最新に差し替えたら null） */
+  const [cachedAsOf, setCachedAsOf] = useState(null);
+  /** 保存済みを出したあと、裏で数え直している途中か */
+  const [refreshing, setRefreshing] = useState(false);
+  /** 保存済みを出したあと、数え直しに失敗したか */
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const loadSeqRef = useRef(0);
+  // loadData の依存に入れると、読み込みのたびに読み込み直しが起きるので ref で読む
+  const shopCalendarDayRef = useRef(shopCalendarDay);
+  shopCalendarDayRef.current = shopCalendarDay;
 
   const loadData = useCallback(async () => {
     const keyForRequest = summaryParamsKey;
+    const seq = ++loadSeqRef.current;
+    /** 後から始まった読み込みがあれば、この読み込みの結果は捨てる */
+    const stale = () => seq !== loadSeqRef.current;
+    let shownCached = false;
     setLoading(true);
     setError("");
+    setCachedAsOf(null);
+    setRefreshing(false);
+    setRefreshFailed(false);
     try {
       if (scope === "single" && !sessionGid) {
         setData(null);
         setDailyMonthPeriod(null);
         setLoadedSummaryParamsKey(null);
-        setError("ロケーションを取得できませんでした。POSで店舗を選択してから開き直してください。");
+        setError("POS の店舗が分かりません。店舗を選び直してから開き直してください。");
         return;
       }
       let result;
       if (grain === "daily") {
         const mr = monthRangeForTargetDate(targetDate);
+
+        // 全店・今日: 保存済みの数字（○時○分時点）を先に出し、裏で数え直して差し替える
+        if (scope === "all" && isTodayDate(targetDate, shopCalendarDayRef.current)) {
+          try {
+            const [cachedDaily, cachedMonth] = await Promise.all([
+              getDailySummary({ targetDate, locationIds: locationIdsForApi, cachedOnly: true }),
+              mr
+                ? getPeriodSummary({
+                    dateFrom: mr.dateFrom,
+                    dateTo: mr.dateTo,
+                    budgetDateTo: mr.budgetDateTo,
+                    progressAsOfDate: targetDate,
+                    locationIds: locationIdsForApi,
+                    cachedOnly: true,
+                  })
+                : Promise.resolve(null),
+            ]);
+            if (stale()) return;
+            if (cachedDaily?.cacheComplete === true && (!mr || cachedMonth?.cacheComplete === true)) {
+              const asOf = cachedDaily.cachedAsOf ? new Date(cachedDaily.cachedAsOf) : null;
+              setData(cachedDaily);
+              setDailyMonthPeriod(cachedMonth?.rows ? cachedMonth : null);
+              setLoadedSummaryParamsKey(keyForRequest);
+              setLastLoadedAt(asOf);
+              setCachedAsOf({ at: asOf });
+              if (cachedDaily.calendarToday) setShopCalendarDay(cachedDaily.calendarToday);
+              setFooterFootfallInput("");
+              setLoading(false);
+              setRefreshing(true);
+              shownCached = true;
+            }
+          } catch {
+            // 保存済みが読めなくても、数え直しの結果を待てばよい
+          }
+        }
+
+        // 日次と当月の期間で同じ「今日・その店」を数えるので、同じ loadId を付けて 1 回にまとめる
+        const loadId = newSalesSummaryLoadId();
         const [dailySettled, monthSettled] = await Promise.allSettled([
-          getDailySummary({ targetDate, locationIds: locationIdsForApi }),
+          getDailySummary({ targetDate, locationIds: locationIdsForApi, loadId }),
           mr
             ? getPeriodSummary({
                 dateFrom: mr.dateFrom,
@@ -1535,9 +1486,11 @@ function SalesSummaryModal() {
                 budgetDateTo: mr.budgetDateTo,
                 progressAsOfDate: targetDate,
                 locationIds: locationIdsForApi,
+                loadId,
               })
             : Promise.resolve(null),
         ]);
+        if (stale()) return;
         if (dailySettled.status === "rejected") {
           const reason = dailySettled.reason;
           throw reason instanceof Error ? reason : new Error(String(reason));
@@ -1557,6 +1510,7 @@ function SalesSummaryModal() {
           budgetDateTo,
           locationIds: locationIdsForApi,
         });
+        if (stale()) return;
       } else {
         setDailyMonthPeriod(null);
         const dateFrom = periodAppliedFrom;
@@ -1569,8 +1523,10 @@ function SalesSummaryModal() {
           return;
         }
         result = await getPeriodSummary({ dateFrom, dateTo, locationIds: locationIdsForApi });
+        if (stale()) return;
       }
       setData(result);
+      setCachedAsOf(null);
       setLoadedSummaryParamsKey(keyForRequest);
       setLastLoadedAt(new Date());
       if (grain === "daily" && result?.calendarToday) {
@@ -1587,12 +1543,21 @@ function SalesSummaryModal() {
         setFooterFootfallInput("");
       }
     } catch (err) {
-      setError(toUserMessage(err?.message));
-      setData(null);
-      setDailyMonthPeriod(null);
-      setLoadedSummaryParamsKey(null);
+      if (stale()) return;
+      if (shownCached) {
+        // 保存済みの数字は出したまま、最新にできなかったことだけ知らせる
+        setRefreshFailed(true);
+      } else {
+        setError(toUserMessage(err?.message));
+        setData(null);
+        setDailyMonthPeriod(null);
+        setLoadedSummaryParamsKey(null);
+      }
     } finally {
-      setLoading(false);
+      if (!stale()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [summaryParamsKey, scope, sessionGid, grain, targetDate, selectedYear, selectedMonth, periodAppliedFrom, periodAppliedTo, locationIdsForApi]);
 
@@ -1639,8 +1604,8 @@ function SalesSummaryModal() {
   else rowsForUi = [];
 
   const summaryDataFresh = loadedSummaryParamsKey === summaryParamsKey;
-  const summaryShowLoading =
-    loading || (sessionReady && !summaryDataFresh && !error);
+  // 店の確認 → 数の読み込み のどの段階でも同じ帯ひとつにする（T 2026-11-24）
+  const summaryShowLoading = loading || (!summaryDataFresh && !error);
 
   const kpiHidden =
     !loading &&
@@ -1822,18 +1787,18 @@ function SalesSummaryModal() {
           >
             <s-stack gap="small">
               {locLoadErr ? (
-                <s-text tone="critical" size="small">
+                <s-text type="small" tone="critical">
                   {locLoadErr}
                 </s-text>
               ) : null}
               <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" inlineSize="100%">
                 <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                  <s-stack gap="extraSmall">
-                    <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {sessionLocationName || "店舗名を取得中…"}
+                  <s-stack gap="small-300">
+                    <s-text type="strong" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {sessionLocationName || INLINE_LOADING_TEXT}
                     </s-text>
                     {scope === "all" ? (
-                      <s-text tone="subdued" size="small">
+                      <s-text type="small" color="subdued">
                         表示: 全店舗
                       </s-text>
                     ) : null}
@@ -1902,13 +1867,11 @@ function SalesSummaryModal() {
 
               {grain === "daily" ? (
                 <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
-                  <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setTargetDate(addDays(targetDate, -1))}>
+                  <s-button variant="secondary" disabled={!canPrevDay} onClick={() => setTargetDate(addDays(targetDate, -1))}>
                     前日
                   </s-button>
-                  <s-text emphasis="bold" size="small">
-                    {formatYmdSlash(targetDate)}
-                  </s-text>
-                  <s-button kind="secondary" disabled={!canNextDay} onClick={() => setTargetDate(addDays(targetDate, 1))}>
+                  <s-text type="strong">{formatYmdWithWeekday(targetDate)}</s-text>
+                  <s-button variant="secondary" disabled={!canNextDay} onClick={() => setTargetDate(addDays(targetDate, 1))}>
                     翌日
                   </s-button>
                 </s-stack>
@@ -1916,14 +1879,14 @@ function SalesSummaryModal() {
                 <s-stack gap="small">
                   <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
                     <s-box style={{ flex: "0 0 auto" }}>
-                      <s-text tone="subdued" size="small">
+                      <s-text type="small" color="subdued">
                         対象月
                       </s-text>
                     </s-box>
                     <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
                       <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setMonthMenuOpen(false);
@@ -1935,7 +1898,7 @@ function SalesSummaryModal() {
                       </s-box>
                       <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setYearMenuOpen(false);
@@ -1957,7 +1920,7 @@ function SalesSummaryModal() {
                         {availableYears.map((y) => (
                           <s-button
                             key={`y-${y}`}
-                            kind={y === selectedYear ? "primary" : "secondary"}
+                            variant={y === selectedYear ? "primary" : "secondary"}
                             style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               setSelectedYear(y);
@@ -1978,14 +1941,14 @@ function SalesSummaryModal() {
                         style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
                       >
                         {monthsLoading ? (
-                          <s-text tone="subdued" size="small">
-                            月一覧を読み込み中…
+                          <s-text type="small" color="subdued">
+                            {INLINE_LOADING_TEXT}
                           </s-text>
                         ) : (
                           availableMonthsForYear.map((m) => (
                             <s-button
                               key={`m-${m}`}
-                              kind={m === selectedMonth ? "primary" : "secondary"}
+                              variant={m === selectedMonth ? "primary" : "secondary"}
                               style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                               onClick={() => {
                                 setSelectedMonth(m);
@@ -2004,14 +1967,14 @@ function SalesSummaryModal() {
                 <s-stack gap="small">
                   <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
                     <s-box style={{ flex: "0 0 auto" }}>
-                      <s-text tone="subdued" size="small">
+                      <s-text type="small" color="subdued">
                         開始日
                       </s-text>
                     </s-box>
                     <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
                       <s-box style={{ inlineSize: "4.75rem", flex: "0 0 4.75rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodStartMonthMenuOpen(false);
@@ -2027,7 +1990,7 @@ function SalesSummaryModal() {
                       </s-box>
                       <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodStartYearMenuOpen(false);
@@ -2043,7 +2006,7 @@ function SalesSummaryModal() {
                       </s-box>
                       <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodStartYearMenuOpen(false);
@@ -2065,7 +2028,7 @@ function SalesSummaryModal() {
                         {availableYears.map((y) => (
                           <s-button
                             key={`ps-y-${y}`}
-                            kind={y === periodStartYear ? "primary" : "secondary"}
+                            variant={y === periodStartYear ? "primary" : "secondary"}
                             style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               setPeriodStartYear(y);
@@ -2082,14 +2045,14 @@ function SalesSummaryModal() {
                     <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                       <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
                         {monthsLoading ? (
-                          <s-text tone="subdued" size="small">
-                            月一覧を読み込み中…
+                          <s-text type="small" color="subdued">
+                            {INLINE_LOADING_TEXT}
                           </s-text>
                         ) : (
                           Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                             <s-button
                               key={`ps-m-${m}`}
-                              kind={m === periodStartMonth ? "primary" : "secondary"}
+                              variant={m === periodStartMonth ? "primary" : "secondary"}
                               style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                               onClick={() => {
                                 setPeriodStartMonth(m);
@@ -2109,7 +2072,7 @@ function SalesSummaryModal() {
                         {Array.from({ length: daysInMonth(periodStartYear, periodStartMonth) }, (_, i) => i + 1).map((d) => (
                           <s-button
                             key={`ps-d-${d}`}
-                            kind={d === periodStartDay ? "primary" : "secondary"}
+                            variant={d === periodStartDay ? "primary" : "secondary"}
                             style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               setPeriodStartDay(d);
@@ -2125,14 +2088,14 @@ function SalesSummaryModal() {
 
                   <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
                     <s-box style={{ flex: "0 0 auto" }}>
-                      <s-text tone="subdued" size="small">
+                      <s-text type="small" color="subdued">
                         終了日
                       </s-text>
                     </s-box>
                     <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
                       <s-box style={{ inlineSize: "4.75rem", flex: "0 0 4.75rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodEndMonthMenuOpen(false);
@@ -2148,7 +2111,7 @@ function SalesSummaryModal() {
                       </s-box>
                       <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodEndYearMenuOpen(false);
@@ -2164,7 +2127,7 @@ function SalesSummaryModal() {
                       </s-box>
                       <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodEndYearMenuOpen(false);
@@ -2186,7 +2149,7 @@ function SalesSummaryModal() {
                         {availableYears.map((y) => (
                           <s-button
                             key={`pe-y-${y}`}
-                            kind={y === periodEndYear ? "primary" : "secondary"}
+                            variant={y === periodEndYear ? "primary" : "secondary"}
                             style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               setPeriodEndYear(y);
@@ -2203,14 +2166,14 @@ function SalesSummaryModal() {
                     <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                       <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
                         {monthsLoading ? (
-                          <s-text tone="subdued" size="small">
-                            月一覧を読み込み中…
+                          <s-text type="small" color="subdued">
+                            {INLINE_LOADING_TEXT}
                           </s-text>
                         ) : (
                           Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                             <s-button
                               key={`pe-m-${m}`}
-                              kind={m === periodEndMonth ? "primary" : "secondary"}
+                              variant={m === periodEndMonth ? "primary" : "secondary"}
                               style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                               onClick={() => {
                                 setPeriodEndMonth(m);
@@ -2230,7 +2193,7 @@ function SalesSummaryModal() {
                         {Array.from({ length: daysInMonth(periodEndYear, periodEndMonth) }, (_, i) => i + 1).map((d) => (
                           <s-button
                             key={`pe-d-${d}`}
-                            kind={d === periodEndDay ? "primary" : "secondary"}
+                            variant={d === periodEndDay ? "primary" : "secondary"}
                             style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               setPeriodEndDay(d);
@@ -2245,21 +2208,21 @@ function SalesSummaryModal() {
                   ) : null}
                   <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%", flexWrap: "wrap" }}>
                     <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap" }}>
-                      <s-button kind="secondary" onClick={() => applyPeriodPreset("thisWeek")}>
+                      <s-button variant="secondary" onClick={() => applyPeriodPreset("thisWeek")}>
                         今週
                       </s-button>
-                      <s-button kind="secondary" onClick={() => applyPeriodPreset("lastWeek")}>
+                      <s-button variant="secondary" onClick={() => applyPeriodPreset("lastWeek")}>
                         先週
                       </s-button>
-                      <s-button kind="secondary" onClick={() => applyPeriodPreset("thisMonth")}>
+                      <s-button variant="secondary" onClick={() => applyPeriodPreset("thisMonth")}>
                         今月
                       </s-button>
-                      <s-button kind="secondary" onClick={() => applyPeriodPreset("lastMonth")}>
+                      <s-button variant="secondary" onClick={() => applyPeriodPreset("lastMonth")}>
                         先月
                       </s-button>
                     </s-stack>
                     <s-button
-                      kind="primary"
+                      variant="primary"
                       disabled={!periodDirty || periodRangeInvalid}
                       onClick={() => {
                         setPeriodAppliedFrom(periodDateFrom);
@@ -2284,114 +2247,71 @@ function SalesSummaryModal() {
           >
             <s-box padding="base">
               <s-stack gap="base">
-                {summaryShowLoading ? (
-                  <s-text tone="subdued" size="small">
-                    読み込み中…
-                  </s-text>
-                ) : null}
-                {error ? (
-                  <s-banner status="critical">{error}</s-banner>
+                {/*
+                  読み込み中・失敗の案内は全画面共通（見出しのすぐ下・青い帯ひとつ。T 2026-11-24）。
+                  前に取った数を出したまま最新を取りに行っているあいだ（refreshing）も同じ帯にする。
+                */}
+                <LoadingNotice
+                  loading={summaryShowLoading || (Boolean(cachedAsOf) && refreshing)}
+                  error={error}
+                  onRetry={loadData}
+                />
+                {!summaryShowLoading && cachedAsOf && refreshFailed ? (
+                  <s-banner
+                    tone="warning"
+                    heading={`最新の数字を取れませんでした。${cachedAsOfLabel(cachedAsOf)}の数字を表示しています。「更新」でもう一度試せます。`}
+                  />
                 ) : null}
                 {grain === "period" && periodRangeInvalid ? (
-                  <s-banner status="critical">開始日が終了日より後になっています。日付を見直してください。</s-banner>
+                  <s-banner tone="critical" heading="開始日が終了日より後になっています。日付を見直してください。" />
                 ) : null}
 
                 {kpiHidden ? (
-                  <s-banner status="info">
-                    表示する数字の項目がすべてOFFです。管理画面の売上サマリー設定で、実績や件数などをONにしてください。
-                  </s-banner>
+                  <s-banner tone="info" heading="出す数字がひとつもありません。管理画面の「売上サマリー設定」で、実績・注文数などをオンにしてください。" />
                 ) : null}
 
                 {layoutEmpty ? (
-                  <s-banner status="info">
-                    店舗ごとの一覧と店舗合計の両方が非表示です。管理画面で「ロケーション行を表示」または「店舗合計を表示」をONにしてください。
-                  </s-banner>
+                  <s-banner tone="info" heading="店ごとの行と店舗の合計が、どちらも出ない設定です。管理画面の「売上サマリー設定」で「店ごとの行を出す」か「店舗の合計を出す」をオンにしてください。" />
                 ) : null}
 
                 {!loading && data && summaryDataFresh && (
                   <>
                     {rows.length === 0 && channelRowsForUi.length === 0 ? (
-                      <s-text tone="subdued" size="small">
-                        売上サマリーが有効な店舗がありません。管理画面でロケーション設定を確認してください。
+                      <s-text type="small" color="subdued">
+                        売上サマリーを出す店舗がありません。管理画面の店舗の設定を確かめてください。
                       </s-text>
                     ) : (
                       <>
                         {showTotalsSectionDaily ? (
-                          <MetricBlock title="全店合計">
-                            {totalsDaily.map((r, i, arr) => (
-                              <SummaryRow
-                                key={r.label}
-                                label={r.label}
-                                value={r.value}
-                                valueBold={r.valueBold}
-                                divider={i < arr.length - 1}
-                              />
-                            ))}
-                          </MetricBlock>
+                          <MetricCard title="全店合計" items={totalsDaily} />
                         ) : null}
                         {showTotalsSectionMonthly ? (
-                          <MetricBlock title="全店合計">
-                            {totalsPeriod.map((r, i, arr) => (
-                              <SummaryRow
-                                key={r.label}
-                                label={r.label}
-                                value={r.value}
-                                valueBold={r.valueBold}
-                                divider={i < arr.length - 1}
-                              />
-                            ))}
-                          </MetricBlock>
+                          <MetricCard title="全店合計" items={totalsPeriod} />
                         ) : null}
 
                         {rowsForUi.map((row) => (
                           <s-stack key={row.locationId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-stack
-                                  direction="inline"
-                                  justifyContent="space-between"
-                                  alignItems="center"
-                                  gap="small"
-                                  style={{ width: "100%" }}
-                                >
-                                  <s-text emphasis="bold" size="small">
-                                    {row.locationName ?? row.locationId}
-                                  </s-text>
-                                  {showUpdatedBadge ? <UpdatedAtBadge dateObj={lastLoadedAt} /> : null}
-                                </s-stack>
+                            <MetricCard
+                              title={row.locationName ?? row.locationId}
+                              items={
+                                grain === "daily"
+                                  ? dailyMetricItems(row, o, pickPeriodRowForDailyLine(dailyMonthPeriod, row))
+                                  : periodKpiRows(row, o)
                               }
-                            >
-                              {grain === "daily" ? (
-                                <DailyMetricRows
-                                  row={row}
-                                  o={o}
-                                  periodRow={pickPeriodRowForDailyLine(dailyMonthPeriod, row)}
-                                />
-                              ) : (
-                                <PeriodMetricRows row={row} o={o} />
-                              )}
-                            </MetricBlock>
+                              updatedLabel={showUpdatedBadge ? formatUpdatedTimeLabel(lastLoadedAt) : ""}
+                            />
                           </s-stack>
                         ))}
                         {channelRowsForUi.map((row) => (
                           <s-stack key={row.channelId} gap="small">
-                            <MetricBlock
-                              title={
-                                <s-text emphasis="bold" size="small">
-                                  [{row.channelName ?? row.channelId}]
-                                </s-text>
+                            <MetricCard
+                              title={`[${row.channelName ?? row.channelId}]`}
+                              items={
+                                grain === "daily"
+                                  ? dailyMetricItems(row, o, pickPeriodRowForDailyLine(dailyMonthPeriod, row))
+                                  : periodKpiRows(row, o)
                               }
-                            >
-                              {grain === "daily" ? (
-                                <DailyMetricRows
-                                  row={row}
-                                  o={o}
-                                  periodRow={pickPeriodRowForDailyLine(dailyMonthPeriod, row)}
-                                />
-                              ) : (
-                                <PeriodMetricRows row={row} o={o} />
-                              )}
-                            </MetricBlock>
+                            />
                           </s-stack>
                         ))}
                       </>
@@ -2416,14 +2336,14 @@ function SalesSummaryModal() {
           >
             {/* POS Stock: FixedFooterNavBar centerAlignWithButtons と同型（space-between 3 子） */}
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
-              <s-button kind="secondary" onClick={loadData} disabled={loading}>
-                {loading ? "更新中.." : "更新"}
+              <s-button variant="secondary" onClick={loadData} disabled={loading || refreshing}>
+                更新
               </s-button>
               {showFooterFootfallButton ? (
                 <s-box style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
-                  <s-stack gap="extraSmall" alignItems="center">
+                  <s-stack gap="small-300" alignItems="center">
                     <s-button
-                      kind="secondary"
+                      variant="secondary"
                       command="--show"
                       commandFor={FOOTFALL_MODAL_ID_MAIN}
                       onClick={() => setFootfallErr("")}
@@ -2433,7 +2353,7 @@ function SalesSummaryModal() {
                         : "入店数報告"}
                     </s-button>
                     {footfallErr ? (
-                      <s-text tone="critical" size="small">
+                      <s-text type="small" tone="critical">
                         {footfallErr}
                       </s-text>
                     ) : null}
@@ -2442,7 +2362,7 @@ function SalesSummaryModal() {
               ) : (
                 <s-box />
               )}
-              <s-button kind="secondary" disabled={!sessionGid} onClick={openDailyList}>
+              <s-button variant="secondary" disabled={!sessionGid} onClick={openDailyList}>
                 日別一覧
               </s-button>
             </s-stack>

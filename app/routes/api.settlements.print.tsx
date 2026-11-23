@@ -6,6 +6,8 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import { SUPERSEDED_SETTLEMENT_STATUS } from "../services/settlementConfirmedPure.server";
+import { paymentSectionsForApi } from "../services/settlementPrintSnapshot.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -65,7 +67,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const updated = await prisma.settlement.update({
       where: { id: settlementId },
-      data: { status: "printed", printedAt: new Date() },
+      // 再確定で置き換わった前の確定値は、印字しても superseded のまま（確定済みに戻さない）
+      data:
+        existing.status === SUPERSEDED_SETTLEMENT_STATUS
+          ? { printedAt: new Date() }
+          : { status: "printed", printedAt: new Date() },
     });
 
     return corsJson({ ok: true, settlement: serializeSettlement(updated) });
@@ -94,7 +100,7 @@ function serializeSettlement(s: NonNullable<SettlementRecord>) {
     refundCount: s.refundCount,
     itemCount: s.itemCount,
     voucherChangeAmount: s.voucherChangeAmount.toString(),
-    paymentSections: s.paymentSectionsJson ? JSON.parse(s.paymentSectionsJson) : [],
+    paymentSections: paymentSectionsForApi(s.paymentSectionsJson),
     printMode: s.printMode,
     status: s.status,
     printedAt: s.printedAt?.toISOString() ?? null,

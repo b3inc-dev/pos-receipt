@@ -1,11 +1,26 @@
 /**
  * GET /api/receipts/history
  * 要件書 §21.5: 領収書発行履歴
- * Query: orderId?, dateFrom?, dateTo?, limit?
+ * Query: orderId?, dateFrom?, dateTo?, limit?, locationId?, q?
+ *
+ * POS の発行履歴の一覧（注文一覧と同じ見た目）用に、2026-11-23 から次を足した:
+ * - dateFrom/dateTo は店のタイムゾーンの 0 時〜23:59 で区切る（前は UTC の 0 時で、0〜9 時の発行が前の日に出ていた）
+ * - locationId: 指定した店で発行したものだけ（POS の今の店）
+ * - q: 注文番号・宛名の一部で探す（日付は使わない）
+ * - 行の localDate / transactionTime と、todayLocalDate / fetchedAtTime（店のタイムゾーン）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import {
+  formatTimeHmInTimeZone,
+  getCalendarDateStringInTimeZone,
+  getDayRangeInUtc,
+  getShopTimezoneForDaily,
+} from "../utils/shopTimezone.server";
+import { normalizeLocationIdForQuery } from "../utils/orderSearchQuery";
+import { getAppSetting } from "../utils/appSettings.server";
+import { formatReceiptIssuer, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -22,14 +37,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const where: Parameters<typeof prisma.receiptIssue.findMany>[0]["where"] = {
       shopId: shop.id,
     };
-    if (orderId) (where as Record<string, unknown>).orderId = orderId;
-    if (dateFrom || dateTo) {
-      const createdAt: Record<string, Date> = {};
-      if (dateFrom) createdAt.gte = new Date(`${dateFrom}T00:00:00.000Z`);
-      if (dateTo) createdAt.lte = new Date(`${dateTo}T23:59:59.999Z`);
-      (where as Record<string, unknown>).createdAt = createdAt;
-    }
+    const timezone = await getShopTimezoneForDaily(admin, shop.id);
+    const q = url.searchParams.get("q")?.trim() ?? "";
+    const locRaw = normalizeLocationIdForQuery(url.searchParams.get("locationId"));
 
+    const w = where as Record<string, unknown>;
+    const and: Record<string, unknown>[] = [];
+    if (orderId) w.orderId = orderId;
+    if (locRaw) {
+      // 発行の記録には注文の retailLocation の GID が入っている（数字だけのときも拾う）
+      w.locationId = { in: [`gid://shopify/Location/${locRaw}`, locRaw] };
+    }
+    if (q) {
+      const term = q.replace(/^#/, "");
+      and.push({
+        OR: [
+          { orderName: { contains: term, mode: "insensitive" } },
+          { recipientName: { contains: q, mode: "insensitive" } },
+        ],
+      });
+    } else if (dateFrom || dateTo) {
+      // 店のタイムゾーンの暦日で区切る
+      const createdAt: Record<string, Date> = {};
+      if (dateFrom) createdAt.gte = getDayRangeInUtc(dateFrom, timezone).startUtc;
+      if (dateTo) createdAt.lte = getDayRangeInUtc(dateTo, timezone).endUtc;
+      w.createdAt = createdAt;
+    }
+    if (and.length) w.AND = and;
+
+    const staffNames = parseStaffNameMap(await getAppSetting(shop.id, STAFF_DISPLAY_NAMES_SETTING_KEY).catch(() => null));
     const items = await prisma.receiptIssue.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -49,8 +85,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isReissue: r.isReissue,
         templateVersion: r.templateVersion,
         createdBy: r.createdBy,
+        createdByStaffId: r.createdByStaffId,
+        issuerLabel: formatReceiptIssuer(r.createdBy, r.createdByStaffId, staffNames),
         createdAt: r.createdAt.toISOString(),
+        // 一覧の「今日 18:14」「11月20日 19:04」用（店のタイムゾーン）
+        localDate: getCalendarDateStringInTimeZone(r.createdAt, timezone),
+        transactionTime: formatTimeHmInTimeZone(r.createdAt.toISOString(), timezone),
       })),
+      timezone,
+      todayLocalDate: getCalendarDateStringInTimeZone(new Date(), timezone),
+      fetchedAtTime: formatTimeHmInTimeZone(new Date().toISOString(), timezone),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

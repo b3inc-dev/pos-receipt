@@ -25,14 +25,22 @@ import {
   setAppSetting,
   PRINT_SETTINGS_KEY,
   DEFAULT_PRINT_SETTINGS,
+  SALES_RECEIPT_SETTINGS_KEY,
   type PrintSettings,
+  type SalesReceiptSettings,
 } from "../utils/appSettings.server";
+import {
+  resolvePrintPaperWidthMm,
+  syncPrintPaperWidthFields,
+} from "../utils/printPaperWidth";
 import {
   renderPrintReceiptHtml,
   settlementPreviewToPrintModel,
 } from "../services/printReceiptHtml";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
+import { PaperWidthCorrespondence } from "../components/PaperWidthCorrespondence";
+import { parseSalesPaperWidth } from "../utils/paperWidthCorrespondence";
 
 const PREVIEW_KEY = "settlement_print_layout_preview";
 
@@ -57,14 +65,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
   const saved =
     (await getAppSetting<Partial<SettlementPreviewPrefs>>(shop.id, PREVIEW_KEY)) ?? {};
-  const paperFromPrint =
-    printSettings.cloudprntPaperWidth === "58mm" ? (58 as const) : (80 as const);
+  const paperFromPrint = resolvePrintPaperWidthMm(printSettings);
   const prefs: SettlementPreviewPrefs = {
     ...DEFAULT_PREFS,
     paperWidthMm: paperFromPrint,
     ...saved,
   };
-  return { prefs, printSettings };
+  const sales = await getAppSetting<Partial<SalesReceiptSettings>>(
+    shop.id,
+    SALES_RECEIPT_SETTINGS_KEY,
+  );
+  return { prefs, printSettings, salesPaperWidthMm: parseSalesPaperWidth(sales?.paperWidthMm) };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -78,11 +89,11 @@ export async function action({ request }: ActionFunctionArgs) {
   };
   await setAppSetting(shop.id, PREVIEW_KEY, prefs);
 
-  // 用紙幅は印字設定にも反映（精算 HTML 経路が参照）
+  // 用紙幅は印字設定にも反映（paperWidthMm ↔ cloudprntPaperWidth 同期）
   const printSettings = {
     ...DEFAULT_PRINT_SETTINGS,
     ...((await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {}),
-    cloudprntPaperWidth: prefs.paperWidthMm === 58 ? "58mm" : "80mm",
+    ...syncPrintPaperWidthFields(prefs.paperWidthMm),
   };
   await setAppSetting(shop.id, PRINT_SETTINGS_KEY, printSettings);
   return Response.json({ ok: true });
@@ -115,7 +126,7 @@ function buildPreviewHtml(prefs: SettlementPreviewPrefs): string {
 }
 
 export default function SettlementPrintLayoutPage() {
-  const { prefs: initial } = useLoaderData<typeof loader>();
+  const { prefs: initial, salesPaperWidthMm } = useLoaderData<typeof loader>();
   const submit = useSubmit();
   const location = useLocation();
   const navigate = useNavigate();
@@ -147,14 +158,12 @@ export default function SettlementPrintLayoutPage() {
         <Layout>
           {saved ? (
             <Layout.Section>
-              <Banner tone="success">保存しました。プレビューは印字 HTML と同一レンダラです。</Banner>
+              <Banner tone="success">保存しました。</Banner>
             </Layout.Section>
           ) : null}
           <Layout.Section>
             <Banner tone="info">
-              `/api/print/settlement/:id` と同じ `renderPrintReceiptHtml` /
-              `settlementPreviewToPrintModel` を使います。用紙幅は印字設定にも反映されます。旧
-              order_based / cloudprnt 経路は変更しません。
+              右の見本は、POS で印刷する精算レシートと同じ見た目です。用紙幅は「印字設定」のレシート用紙幅を使います。
             </Banner>
           </Layout.Section>
           <Layout.Section variant="oneHalf">
@@ -174,7 +183,7 @@ export default function SettlementPrintLayoutPage() {
                   onChange={(v) => setForm((p) => ({ ...p, showVoucherChange: v }))}
                 />
                 <Select
-                  label="用紙幅（印字設定と同期）"
+                  label="用紙幅（精算・点検・領収書）"
                   options={[
                     { label: "80mm", value: "80" },
                     { label: "58mm", value: "58" },
@@ -183,6 +192,13 @@ export default function SettlementPrintLayoutPage() {
                   onChange={(v) =>
                     setForm((p) => ({ ...p, paperWidthMm: v === "58" ? 58 : 80 }))
                   }
+                  helpText="保存すると印字設定の用紙幅もこの値になります。販売レシートの用紙幅は販売レシート設定で変えます。"
+                />
+                <PaperWidthCorrespondence
+                  sharedWidthMm={form.paperWidthMm}
+                  salesWidthMm={salesPaperWidthMm}
+                  search={q}
+                  saveNote="この画面の保存は、印字設定の用紙幅を同じ値に更新します。"
                 />
                 <InlineStack align="end">
                   <Button variant="primary" onClick={handleSave}>
@@ -196,7 +212,7 @@ export default function SettlementPrintLayoutPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
-                  印字 HTML プレビュー
+                  印刷の見本
                 </Text>
                 <Box
                   padding="300"

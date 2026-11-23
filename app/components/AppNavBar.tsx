@@ -11,6 +11,7 @@ import { AdminStyle, AppNavBarView } from "./admin-ui";
 const GROUP_PATHS: Record<string, string[]> = {
   "/app/sales-receipt-layout": [
     "/app/sales-receipt-layout",
+    "/app/receipt-layouts",
     "/app/sales-receipt-settings",
     "/app/receipt-template",
     "/app/receipt-print-layout",
@@ -19,6 +20,7 @@ const GROUP_PATHS: Record<string, string[]> = {
   ],
   "/app/settlement-settings": [
     "/app/settlement-settings",
+    "/app/settlement-calc-settings",
     "/app/settlement-print-layout",
     "/app/settlement-history",
     "/app/special-refund-settings",
@@ -27,7 +29,7 @@ const GROUP_PATHS: Record<string, string[]> = {
   ],
   "/app/settings": [
     "/app/settings",
-    "/app/location-profiles",
+    "/app/location-profiles", // 前の「設定軸・一括反映」（店舗の一覧へ移す）
     "/app/payment-methods",
   ],
   "/app/sales-summary": [

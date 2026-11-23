@@ -1,10 +1,15 @@
 /**
  * 精算注文の Shopify 側処理（GAS docs/GAS_精算レシート.md 準拠）
+ *
+ * 印字一本化後、create / recalculate / 再印刷からは呼び出さない。
+ * 既存 SETTLEMENT / INSPECTION 注文は削除しない（履歴参照用に残置）。
+ *
  * - newSettlementFresh → createSettlementOrderAlways + upsertSettlement 相当
  * - uiCreateZeroInspection → createZeroInspectionOrder 相当
  * - fulfillAllForOrder（発送済み化）
  * - LOC:店名 / SETL- 一意タグ / 精算・点検用顧客
  */
+import { searchDateRange } from "../utils/shopifySearchDate";
 import type { SettlementPreviewDTO } from "./settlementEngine.server";
 import {
   getShopTimezoneForDaily,
@@ -361,7 +366,7 @@ function buildGasInspectionNote(
 }
 
 function buildSettlementSearchQuery(start: string, end: string): string {
-  return `tag:SETTLEMENT created_at:>=${start} created_at:<=${end}`;
+  return `tag:SETTLEMENT ${searchDateRange("created_at", start, end)}`;
 }
 
 type OrderHit = {

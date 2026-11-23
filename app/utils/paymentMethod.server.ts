@@ -6,10 +6,12 @@
  */
 import prisma from "../db.server";
 import {
+  isKnownRefundMethod,
   matchPaymentMethodMaster,
   resolvePaymentSectionLabel,
   type PaymentMethodMatchInput,
 } from "./paymentMethodMatch.server";
+import type { PaymentKeyMaster } from "../services/paymentKeyMasterPure.server";
 
 async function loadEnabledMasters(shopId: string): Promise<PaymentMethodMatchInput[]> {
   return prisma.paymentMethodMaster.findMany({
@@ -25,6 +27,11 @@ async function loadEnabledMasters(shopId: string): Promise<PaymentMethodMatchInp
       enabled: true,
     },
   });
+}
+
+/** 有効な支払方法マスタ（sortOrder の順）。注文詳細の支払いの名前に使う */
+export async function loadEnabledPaymentMasters(shopId: string): Promise<PaymentMethodMatchInput[]> {
+  return loadEnabledMasters(shopId);
 }
 
 /**
@@ -45,13 +52,33 @@ export async function getPaymentMethodDisplayLabel(
 export async function resolvePaymentSectionLabels(
   shopId: string,
   bucketKeys: string[],
+  opts?: { preferExactDisplayLabel?: boolean },
 ): Promise<Map<string, string>> {
   const masters = await loadEnabledMasters(shopId);
   const out = new Map<string, string>();
   for (const key of bucketKeys) {
-    out.set(key, resolvePaymentSectionLabel(key, masters));
+    out.set(key, resolvePaymentSectionLabel(key, masters, opts));
   }
   return out;
+}
+
+/**
+ * 「支払方法マスタで分ける」店の集計キーに使うマスタ（有効なものを sortOrder の順）。
+ */
+export async function loadPaymentKeyMasters(shopId: string): Promise<PaymentKeyMaster[]> {
+  return prisma.paymentMethodMaster.findMany({
+    where: { shopId, enabled: true },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    select: {
+      rawGatewayPattern: true,
+      formattedGatewayPattern: true,
+      matchType: true,
+      displayLabel: true,
+      category: true,
+      isVoucher: true,
+      enabled: true,
+    },
+  });
 }
 
 /**
@@ -71,4 +98,21 @@ export async function getPaymentMethodVoucherInfo(
     };
   }
   return { isVoucher: false, voucherChangeSupported: false };
+}
+
+/**
+ * 精算の特殊返金用: マスタを1回読み、返金方法がマスタで分かるかと表示名を返す。
+ */
+export async function loadRefundMethodResolver(
+  shopId: string,
+  normalize?: (method: string) => string,
+): Promise<{
+  isKnownMethod: (method: string) => boolean;
+  labelForMethod: (method: string) => string;
+}> {
+  const masters = await loadEnabledMasters(shopId);
+  return {
+    isKnownMethod: (method) => isKnownRefundMethod(method, masters, normalize),
+    labelForMethod: (method) => resolvePaymentSectionLabel(method, masters),
+  };
 }

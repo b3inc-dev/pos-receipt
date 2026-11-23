@@ -9,10 +9,12 @@
  * - 実績 actual は税込（注文 totalPriceSet − 当日返金）を精算設定の税率で税抜に換算（buildSettlementPreview の netSales と同一式）
  * - キャッシュは SalesChannelCacheDaily に保存
  */
+import { searchDateCondition, searchDateRange } from "../utils/shopifySearchDate";
 import prisma from "../db.server";
 import { getShopTimezoneForDaily, getDayRangeInUtc } from "../utils/shopTimezone.server";
 import { getAppSetting, setAppSetting, SETTLEMENT_SETTINGS_KEY } from "../utils/appSettings.server";
-import { splitTaxInclusiveToNetAndTax } from "./settlementEngine.server";
+import { splitTaxInclusiveToNetAndTax } from "./settlementTaxPure.server";
+import { readOrdersPageOrThrow } from "./settlementUpstreamPage.server";
 
 // ── 既知の source_name → 表示名マッピング ────────────────────────────────────
 
@@ -67,7 +69,7 @@ export async function autoDiscoverChannels(
 
   // 直近30日の注文から source_name を収集（POS・精算除外・最大500件）
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const shopifyQuery = `created_at:>=${since} -status:cancelled tag_not:settlement -source_name:pos -source_name:point_of_sale -source_name:shopify_pos`;
+  const shopifyQuery = `${searchDateCondition("created_at", ">=", since)} -status:cancelled tag_not:settlement -source_name:pos -source_name:point_of_sale -source_name:shopify_pos`;
 
   const sourceNameMap = new Map<string, string>(); // sourceName → channelName(hint)
   let cursor: string | null = null;
@@ -285,8 +287,7 @@ function buildChannelQuery(
   parts.push("-source_name:pos");
   parts.push("-source_name:point_of_sale");
   parts.push("-source_name:shopify_pos");
-  parts.push(`${dateField}:>=${startIso}`);
-  parts.push(`${dateField}:<=${endIso}`);
+  parts.push(searchDateRange(dateField, startIso, endIso));
   parts.push(...extraFilters);
   return parts.join(" ");
 }
@@ -341,10 +342,7 @@ async function fetchChannelOrders(
         };
       };
     };
-
-    if (json.errors?.length) {
-      throw new Error(`[salesChannelEngine] GraphQL error (query="${query}"): ${json.errors.map((e) => e.message).join(", ")}`);
-    }
+    readOrdersPageOrThrow(json, "channelOrders");
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
@@ -402,10 +400,7 @@ async function fetchChannelOrdersForRefundOverlay(
         };
       };
     };
-
-    if (json.errors?.length) {
-      throw new Error(`[salesChannelEngine] GraphQL error (refund overlay, query="${query}"): ${json.errors.map((e) => e.message).join(", ")}`);
-    }
+    readOrdersPageOrThrow(json, "channelRefunds");
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;

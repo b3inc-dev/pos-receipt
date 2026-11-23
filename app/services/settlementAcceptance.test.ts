@@ -5,8 +5,8 @@
  * 実店舗・実注文の値は使わない。DB / Shopify には触れない（純関数だけを呼ぶ）。
  *
  * - 対象: aggregateGasStyleForOrders / totalFromPayBuckets / resolveRefundAggregationLocationGid
- * - PR #11 で直る（main ではまだ満たさない）ケースは `it.skip` にしてある。
- *   #11 が main に入ったら skip を外す。モジュールは動的 import なので、外すまで main でも読み込みエラーにならない。
+ * - PR #11 で直るケース（見出しに [#11]）は、#11 を取り込んだ #54（→ #16）で skip を外した。
+ *   #11 → #16 の順で main に入る前提。モジュールは動的 import のまま。
  * - 再印刷・接続先・実紙面など、純関数で確かめられない条件は対象外（PR 本文に一覧）。
  */
 import assert from "node:assert/strict";
@@ -26,7 +26,7 @@ import {
 // 合成データの部品
 // ---------------------------------------------------------------------------
 
-/** PR #11 で入るモジュール。変数にしておき、main では skip のまま読み込まない */
+/** PR #11 で入るモジュール（動的 import） */
 const PR11_OVERLAY_MODULE = "./specialRefundOverlayPure.server";
 const PR11_AGGREGATE_MODULE = "./settlementAggregatePure.server";
 const PR11_IDEMPOTENCY_MODULE = "./specialRefundIdempotency.server";
@@ -314,7 +314,7 @@ describe("受け入れ #17-1 別店舗の返金", () => {
     }
   });
 
-  it.skip("[#11] 返金基準: B の注文取得に無い（A で売った）注文の B での返金を B の精算に足す", async () => {
+  it("[#11] 返金基準: B の注文取得に無い（A で売った）注文の B での返金を B の精算に足す", async () => {
     const mod = await import(PR11_AGGREGATE_MODULE);
     const merged = mod.mergeCrossLocationRefundOrders([], [o], inDay, STORE_B, "200", "refund_transaction_pos_location");
     const b = aggregateGasStyleForOrders(merged, inDay, attribution(STORE_B, { mode: "refund_transaction_pos_location" }));
@@ -323,7 +323,7 @@ describe("受け入れ #17-1 別店舗の返金", () => {
     assert.equal(totalFromPayBuckets(b.pay), -2000);
   });
 
-  it.skip("[#11] 返金基準: 同じ注文を同じ日に A と B で 1 回ずつ返金したら、それぞれの店に分ける", () => {
+  it("[#11] 返金基準: 同じ注文を同じ日に A と B で 1 回ずつ返金したら、それぞれの店に分ける", () => {
     const split = order({
       id: "4002",
       total: 3000,
@@ -462,7 +462,7 @@ function cardRefundedSections(): Section[] {
 }
 
 describe("受け入れ #17-2 特殊返金（#11）", () => {
-  it.skip("[#11] Shopify で返金済み（success）の例外返金は、返金総額も実返金も増やさず、カード→現金に振り替えるだけ", async () => {
+  it("[#11] Shopify で返金済み（success）の例外返金は、返金総額も実返金も増やさず、カード→現金に振り替えるだけ", async () => {
     const { applySpecialRefundEventsToTotals } = await import(PR11_OVERLAY_MODULE);
     const sections = cardRefundedSections();
     const totals = { total: 2000, refundTotal: 1000 };
@@ -484,7 +484,7 @@ describe("受け入れ #17-2 特殊返金（#11）", () => {
     assert.equal(sections.reduce((s, x) => s + x.refund, 0), 1000);
   });
 
-  it.skip("[#11] 決済手段変更（success）は元手段→実手段の振替のみで、返金総額を増やさない", async () => {
+  it("[#11] 決済手段変更（success）は元手段→実手段の振替のみで、返金総額を増やさない", async () => {
     const { applySpecialRefundEventsToTotals } = await import(PR11_OVERLAY_MODULE);
     const sections = cardRefundedSections();
     const totals = { total: 2000, refundTotal: 1000 };
@@ -502,7 +502,7 @@ describe("受け入れ #17-2 特殊返金（#11）", () => {
     assert.equal(sections.reduce((s, x) => s + x.refund, 0), 1000);
   });
 
-  it.skip("[#11] Shopify 返金の結果が分からない（pending）特殊返金は数えず、精算の確定を止める", async () => {
+  it("[#11] Shopify 返金の結果が分からない（pending）特殊返金は数えず、精算の確定を止める", async () => {
     const { applySpecialRefundEventsToTotals, assertNoPendingSpecialRefunds } = await import(PR11_OVERLAY_MODULE);
     const sections = cardRefundedSections();
     const totals = { total: 2000, refundTotal: 1000 };
@@ -520,7 +520,7 @@ describe("受け入れ #17-2 特殊返金（#11）", () => {
     assert.throws(() => assertNoPendingSpecialRefunds([ev]), /確定していません/);
   });
 
-  it.skip("[#11] Shopify で返金していない外部支払いの記録は、実返金とは別に上乗せとして数える", async () => {
+  it("[#11] Shopify で返金していない外部支払いの記録は、実返金とは別に上乗せとして数える", async () => {
     const { applySpecialRefundEventsToTotals } = await import(PR11_OVERLAY_MODULE);
     const sections = cardRefundedSections();
     const totals = { total: 2000, refundTotal: 1000 };
@@ -539,7 +539,7 @@ describe("受け入れ #17-2 特殊返金（#11）", () => {
     assert.equal(sections.find((s) => s.gateway === "cash")!.refund, 500);
   });
 
-  it.skip("[#11] 同じ冪等キーの再送は同じ登録になり、別内容でのキー再利用は一致しない", async () => {
+  it("[#11] 同じ冪等キーの再送は同じ登録になり、別内容でのキー再利用は一致しない", async () => {
     const mod = await import(PR11_IDEMPOTENCY_MODULE);
     const key = "abcdefghijklmnop1234";
     assert.equal(mod.specialRefundEventIdFromIdempotencyKey(key), mod.specialRefundEventIdFromIdempotencyKey(key));

@@ -34,6 +34,10 @@ import {
   DEFAULT_PRINT_SETTINGS,
   type PrintSettings,
 } from "../utils/appSettings.server";
+import {
+  resolvePrintPaperWidthMm,
+  syncPrintPaperWidthFields,
+} from "../utils/printPaperWidth";
 import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
@@ -52,7 +56,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...DEFAULT_PRINT_SETTINGS,
     ...((await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {}),
   };
-  const paperWidthMm = printSettings.cloudprntPaperWidth === "58mm" ? 58 : 80;
+  const paperWidthMm = resolvePrintPaperWidthMm(printSettings);
   return { template, paperWidthMm, templateId: tmpl?.id ?? null };
 }
 
@@ -108,11 +112,11 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
-  const paperWidthMm = str("paperWidthMm", "80") === "58" ? 58 : 80;
+  const paperWidthMm: 58 | 80 = str("paperWidthMm", "80") === "58" ? 58 : 80;
   const printSettings = {
     ...DEFAULT_PRINT_SETTINGS,
     ...((await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY)) ?? {}),
-    cloudprntPaperWidth: paperWidthMm === 58 ? "58mm" : "80mm",
+    ...syncPrintPaperWidthFields(paperWidthMm),
   };
   await setAppSetting(shop.id, PRINT_SETTINGS_KEY, printSettings);
   return Response.json({ ok: true });
@@ -193,8 +197,7 @@ export default function ReceiptPrintLayoutPage() {
           ) : null}
           <Layout.Section>
             <Banner tone="info">
-              詳細テンプレート編集は「領収書テンプレート」タブ。ここでは印字 HTML
-              に効く主要項目だけを触り、見た目の一致を確認できます。
+              くわしい編集は「領収書テンプレート」タブで行います。ここでは主な項目だけを変えて、印刷の見た目を確かめられます。
             </Banner>
           </Layout.Section>
           <Layout.Section variant="oneHalf">
@@ -269,7 +272,7 @@ export default function ReceiptPrintLayoutPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
-                  印字 HTML プレビュー
+                  印刷の見本
                 </Text>
                 <Box
                   padding="300"

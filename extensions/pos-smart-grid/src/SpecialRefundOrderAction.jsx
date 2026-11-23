@@ -23,5 +23,5 @@ function SpecialRefundOrderAction() {
     }
   };
 
-  return <s-button onClick={onClick}>特殊返金調整</s-button>;
+  return <s-button onClick={onClick}>返金方法変更</s-button>;
 }

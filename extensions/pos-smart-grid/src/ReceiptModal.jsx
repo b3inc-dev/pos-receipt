@@ -5,19 +5,24 @@
  * Steps:
  *   day_list → ロケーション・年月日ヘッダー＋その日の取引一覧（バッジ付き）
  *   form     → 宛名・但し書き入力
- *   preview  → 領収書プレビュー
- *   confirm  → 発行確認
- *   done     → 完了
+ *   preview  → 発行の確認（前のプレビューと発行確認を 1 画面にまとめた。T 2026-11-24 の UI ルール）
+ *   done     → 完了（ここから印刷）
  *   history  → 発行履歴
  */
 import { render } from "preact";
-import { useState, useCallback, useEffect } from "preact/hooks";
+import { useState, useCallback, useEffect, useRef } from "preact/hooks";
 import { getOrder } from "../../common/orderPickerApi.js";
 import { previewReceipt, issueReceipt, getReceiptHistory } from "../../common/receiptApi.js";
-import { printGiftReceipt, getPrintSettings } from "../../common/printApi.js";
+import { printGiftReceipt, printResultMessage, PRINT_OUTCOME } from "../../common/printApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
+import { LoadingPage } from "./LoadingNotice.jsx";
+import { fmtYen } from "./orderDisplayUtils.js";
+import { formatOrderDateTimeLabel } from "../../common/orderListLabels.js";
 import { PosToggleField } from "./PosChoiceField.jsx";
+import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
+import { customerLabel } from "../../common/orderDetailLayout.js";
+import { FormHeading, FormLine, FormHero, yen } from "./AdjustFormParts.jsx";
 
 const STORAGE_KEY = "pos_receipt_order_id";
 
@@ -84,7 +89,7 @@ function ReceiptModal() {
       setPreview(res.preview);
       setStep("preview");
     } catch (e) {
-      setError(toUserMessage(e?.message) || "プレビューの取得に失敗しました");
+      setError(toUserMessage(e?.message) || "内容を確かめられませんでした。もう一度押してください");
     } finally {
       setLoading(false);
     }
@@ -120,13 +125,7 @@ function ReceiptModal() {
   }, []);
 
   if (orderEntryLoading) {
-    return (
-      <s-page heading="領収書">
-        <s-box padding="base">
-          <s-text tone="subdued">取引を開いています…</s-text>
-        </s-box>
-      </s-page>
-    );
+    return <LoadingPage heading="領収書" />;
   }
 
   if (step === "day_list") {
@@ -136,9 +135,10 @@ function ReceiptModal() {
         badgeMode="receipt"
         onSelectOrderId={handleOrderSelect}
         noticeError={bootstrapError}
+        busy={loading}
         onDismissNotice={() => setBootstrapError("")}
-        headerTrailing={(
-          <s-button kind="secondary" onClick={() => setStep("history")}>
+        footerTrailing={(
+          <s-button variant="secondary" onClick={() => setStep("history")}>
             履歴
           </s-button>
         )}
@@ -167,43 +167,20 @@ function ReceiptModal() {
 
   if (step === "preview") {
     return (
-      <PreviewView
-        preview={preview}
-        isReissue={isReissue}
-        loading={loading}
-        error={error}
-        onConfirm={() => setStep("confirm")}
-        onEdit={() => setStep("form")}
-        onBack={() => setStep("form")}
-      />
-    );
-  }
-
-  if (step === "confirm") {
-    return (
       <ConfirmView
         preview={preview}
         isReissue={isReissue}
         loading={loading}
         error={error}
         onIssue={handleIssue}
-        onBack={() => setStep("preview")}
+        onBack={() => setStep("form")}
       />
     );
   }
 
   if (step === "done") {
     return (
-      <DoneView
-        receipt={issuedReceipt}
-        onClose={goBack}
-        onReissue={() => {
-          setIsReissue(true);
-          setIssuedReceipt(null);
-          setPreview(null);
-          setStep("form");
-        }}
-      />
+      <DoneView receipt={issuedReceipt} onClose={goBack} />
     );
   }
 
@@ -221,351 +198,342 @@ function FormView({
   setRecipientName, setProviso, setIsReissue, setError,
   onPreview, onBack,
 }) {
+  const orderSubLine = [
+    order?.transactionDateTime || "",
+    order?.location?.name || "",
+    customerLabel(order),
+  ]
+    .filter(Boolean)
+    .join(" ・ ");
+
   const handleNext = () => {
     setError("");
     onPreview();
   };
 
   return (
-    <s-page heading="領収書情報を入力">
-      <s-scroll-box>
-        <s-box padding="base">
-          <s-stack gap="base">
-            {/* 対象取引 */}
-            <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="extraSmall">
-                <s-text fontWeight="bold">{order?.orderName ?? "-"}</s-text>
-                <s-text tone="subdued">
-                  ¥{Number(order?.totalPrice?.amount ?? 0).toLocaleString()}
-                  {order?.location?.name ? ` | ${order.location.name}` : ""}
+    <s-page heading="領収書を発行">
+      <s-stack
+        gap="none"
+        blockSize="100%"
+        inlineSize="100%"
+        minBlockSize="0"
+        style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
+      >
+        <s-scroll-box
+          blockSize="auto"
+          maxBlockSize="100%"
+          minBlockSize="0"
+          style={{ flex: "1 1 0", minHeight: 0 }}
+        >
+          <s-box padding="base">
+            <s-stack gap="base">
+              {/* 対象取引（注文の詳細と同じ形: 灰色の見出し・左に項目・右に値） */}
+              <s-stack gap="none">
+                <FormHeading>取引</FormHeading>
+                <FormLine label={order?.orderName ?? "-"} value={yen(order?.totalPrice?.amount)} strong />
+                {orderSubLine ? <s-text type="small" color="subdued">{orderSubLine}</s-text> : null}
+              </s-stack>
+
+              <s-stack gap="small">
+                <s-text type="small" color="subdued">領収書に書く内容</s-text>
+                <s-text-field
+                  label="宛名"
+                  value={recipientName}
+                  onInput={(e) => setRecipientName(e?.currentTarget?.value ?? "")}
+                  placeholder="例: 株式会社○○ 御中"
+                />
+                <s-text-field
+                  label="但し書き"
+                  value={proviso}
+                  onInput={(e) => setProviso(e?.currentTarget?.value ?? "")}
+                  placeholder="例: お買上品代として"
+                />
+              </s-stack>
+
+              <s-stack gap="small-300">
+                <s-text type="small" color="subdued">再発行</s-text>
+                <PosToggleField label="再発行として記録する" checked={isReissue} onChange={setIsReissue} />
+                <s-text type="small" color="subdued">
+                  前に出した領収書を出し直すときだけ選びます。領収書に【再発行】と入ります。
                 </s-text>
               </s-stack>
-            </s-box>
 
-            {/* 宛名 */}
-            <s-text-field
-              label="宛名"
-              value={recipientName}
-              onInput={(e) => setRecipientName(e?.currentTarget?.value ?? "")}
-              placeholder="例: 株式会社○○ 御中"
-            />
-
-            {/* 但し書き */}
-            <s-text-field
-              label="但し書き"
-              value={proviso}
-              onInput={(e) => setProviso(e?.currentTarget?.value ?? "")}
-              placeholder="例: お買上品代として"
-            />
-
-            {/* 再発行フラグ */}
-            <PosToggleField label="再発行として記録する" checked={isReissue} onChange={setIsReissue} />
-
-            {error ? <s-text tone="critical">{error}</s-text> : null}
-
-            <s-stack gap="small">
-              <s-button kind="primary" onClick={handleNext} loading={loading}>プレビューを確認</s-button>
-              <s-button kind="plain" onClick={onBack} disabled={loading}>← 日付一覧に戻る</s-button>
+              {error ? <s-text tone="critical">{error}</s-text> : null}
             </s-stack>
-          </s-stack>
-        </s-box>
-      </s-scroll-box>
+          </s-box>
+        </s-scroll-box>
+
+        <s-divider />
+
+        {/* 下に固定: 左「戻る」・右に主ボタン 1 つ（ほかの入力画面と同じ「確認する」） */}
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={onBack}
+          leftDisabled={loading}
+          rightLabel="確認する"
+          onRight={handleNext}
+          rightLoading={loading}
+          rightDisabled={loading}
+        />
+      </s-stack>
     </s-page>
   );
 }
 
-// ── プレビュー ────────────────────────────────────────────────────────────────
-function PreviewView({ preview, isReissue, loading, error, onConfirm, onEdit, onBack }) {
-  if (!preview) return null;
-
-  return (
-    <s-page heading={isReissue ? "領収書プレビュー（再発行）" : "領収書プレビュー"}>
-      <s-scroll-box>
-        <s-box padding="base">
-          <s-stack gap="base">
-
-            {/* 領収書イメージ */}
-            <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="small">
-                <s-text fontWeight="bold" fontSize="large">領　収　書</s-text>
-                {isReissue ? <s-text tone="critical" fontSize="small">【再発行】</s-text> : null}
-
-                <s-stack direction="horizontal" align="space-between">
-                  <s-text>{preview.recipientName ? `${preview.recipientName} 様` : "　　　　　 様"}</s-text>
-                  {preview.showDate ? <s-text tone="subdued" fontSize="small">{preview.issueDate}</s-text> : null}
-                </s-stack>
-
-                <s-box paddingBlock="small" borderBlockStartWidth="base" borderColor="subdued">
-                  <s-stack direction="horizontal" align="space-between">
-                    <s-text>金額</s-text>
-                    <s-text fontWeight="bold" fontSize="large">¥{Number(preview.amount).toLocaleString()}</s-text>
-                  </s-stack>
-                </s-box>
-
-                <s-text tone="subdued" fontSize="small">但し {preview.proviso}</s-text>
-
-                {preview.showOrderNumber ? (
-                  <s-text tone="subdued" fontSize="small">注文番号: {preview.orderName}</s-text>
-                ) : null}
-
-                {preview.companyName ? (
-                  <s-box paddingBlockStart="small" borderBlockStartWidth="base" borderColor="subdued">
-                    <s-stack gap="extraSmall">
-                      <s-text fontWeight="bold">{preview.companyName}</s-text>
-                      {preview.address ? <s-text tone="subdued" fontSize="small">{preview.address}</s-text> : null}
-                      {preview.phone ? <s-text tone="subdued" fontSize="small">TEL: {preview.phone}</s-text> : null}
-                    </s-stack>
-                  </s-box>
-                ) : null}
-              </s-stack>
-            </s-box>
-
-            {error ? <s-text tone="critical">{error}</s-text> : null}
-
-            <s-stack gap="small">
-              <s-button kind="primary" onClick={onConfirm} disabled={loading}>
-                {isReissue ? "再発行する" : "発行する"}
-              </s-button>
-              <s-button kind="secondary" onClick={onEdit} disabled={loading}>内容を修正する</s-button>
-              <s-button kind="plain" onClick={onBack} disabled={loading}>← 戻る</s-button>
-            </s-stack>
-          </s-stack>
-        </s-box>
-      </s-scroll-box>
-    </s-page>
-  );
-}
-
-// ── 発行確認 ──────────────────────────────────────────────────────────────────
+// ── 確認（発行する前に内容を確かめる） ─────────────────────────────────────────
+/**
+ * 注文の詳細と同じ形（T 2026-11-24）: 本文 1 文 → 金額を大きく → 灰色の見出しで区切った「左に項目・右に値」の行。
+ * 下に固定で「戻る」（左）と「発行する」（右）。前は「プレビュー」と「発行確認」の 2 画面で同じ内容を
+ * 2 回見せていたので、1 画面にまとめた。
+ */
 function ConfirmView({ preview, isReissue, loading, error, onIssue, onBack }) {
+  if (!preview) return null;
+  const action = isReissue ? "再発行する" : "発行する";
   return (
-    <s-page heading="発行確認">
+    <s-page heading={isReissue ? "領収書を再発行" : "領収書を発行"}>
       <s-scroll-box>
         <s-box padding="base">
-          <s-stack gap="base">
-            <s-text fontWeight="bold">
-              {isReissue ? "領収書を再発行します" : "領収書を発行します"}
-            </s-text>
-
-            <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="small">
-                <Row label="宛名" value={preview?.recipientName || "（未入力）"} />
-                <Row label="金額" value={`¥${Number(preview?.amount ?? 0).toLocaleString()}`} bold />
-                <Row label="但し書き" value={preview?.proviso ?? ""} />
-                <Row label="注文番号" value={preview?.orderName ?? ""} />
-                <Row label="発行日" value={preview?.issueDate ?? ""} />
-                {isReissue ? <s-text tone="critical" fontSize="small">※ 再発行として記録されます</s-text> : null}
-              </s-stack>
+          <s-stack gap="none">
+            <s-text>{isReissue ? "この内容で領収書を再発行します。" : "この内容で領収書を発行します。"}</s-text>
+            <s-box paddingBlockStart="base">
+              <FormHero
+                label="金額"
+                value={yen(preview.amount)}
+                sub={preview.recipientName ? `${preview.recipientName} 様` : "宛名なし"}
+              />
             </s-box>
-
-            {error ? <s-text tone="critical">{error}</s-text> : null}
-
-            <s-stack gap="small">
-              <s-button kind="primary" onClick={onIssue} loading={loading}>発行する</s-button>
-              <s-button kind="secondary" onClick={onBack} disabled={loading}>戻る</s-button>
-            </s-stack>
+            <ReceiptLines receipt={preview} isReissue={isReissue} />
+            {error ? (
+              <s-box paddingBlockStart="base">
+                <s-text tone="critical">{error}</s-text>
+              </s-box>
+            ) : null}
           </s-stack>
         </s-box>
       </s-scroll-box>
+      <FixedFooterNavBar
+        centerAlignWithButtons
+        leftLabel="戻る"
+        onLeft={onBack}
+        leftDisabled={loading}
+        rightLabel={action}
+        onRight={onIssue}
+        rightDisabled={loading}
+        rightLoading={loading}
+      />
     </s-page>
   );
 }
 
-// ── 完了 ──────────────────────────────────────────────────────────────────────
-function DoneView({ receipt, onClose, onReissue }) {
-  const [printBusy, setPrintBusy] = useState(false);
-  const [printMsg, setPrintMsg] = useState("");
-  const [printFlags, setPrintFlags] = useState({
-    preferPrintingApi: false,
-    receiptPrintingApiEnabled: false,
-  });
-  const [flagsLoaded, setFlagsLoaded] = useState(false);
+/** 領収書の中身の行（確認・完了・再印刷で同じもの） */
+function ReceiptLines({ receipt, isReissue }) {
+  return (
+    <>
+      <FormHeading>領収書の内容</FormHeading>
+      <FormLine label="宛名" value={receipt?.recipientName ? `${receipt.recipientName} 様` : "（なし）"} />
+      <FormLine label="但し書き" value={receipt?.proviso || "（なし）"} />
+      {receipt?.issueDate ? <FormLine label="発行日" value={receipt.issueDate} /> : null}
+      {isReissue ? <FormLine label="種類" value="再発行" tone="critical" /> : null}
+      <FormHeading>取引</FormHeading>
+      <FormLine label="注文番号" value={receipt?.orderName || "—"} />
+      {receipt?.companyName ? <FormLine label="発行者" value={receipt.companyName} /> : null}
+    </>
+  );
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    getPrintSettings()
-      .then((s) => {
-        if (!cancelled) {
-          setPrintFlags({
-            preferPrintingApi: !!s.preferPrintingApi,
-            receiptPrintingApiEnabled: !!s.receiptPrintingApiEnabled,
-          });
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setFlagsLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+// ── 印刷 ──────────────────────────────────────────────────────────────────────
+/** 保存済みの領収書を印刷する（完了・再印刷の画面の右下の「印刷する」） */
+function useReceiptPrint(receiptIssueId) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [canDialog, setCanDialog] = useState(false);
+  const [outcome, setOutcome] = useState("");
 
-  const showPrintingApi =
-    flagsLoaded && !!printFlags.receiptPrintingApiEnabled && !!receipt?.receiptIssueId;
-  const preferNew = showPrintingApi && !!printFlags.preferPrintingApi;
-
-  const handlePrintingApi = async () => {
-    if (!receipt?.receiptIssueId) {
-      setPrintMsg("発行 ID が無いため Printing API を実行できません");
-      return;
-    }
-    setPrintBusy(true);
-    setPrintMsg("");
+  const run = async (allowDialog = false) => {
+    if (!receiptIssueId || busy) return;
+    setBusy(true);
+    setMsg("");
     try {
-      const res = await printGiftReceipt(receipt.receiptIssueId);
-      if (res.ok) {
-        setPrintMsg(res.usedDialog ? "印刷ダイアログを開きました" : "プリンタへ送信しました");
-      } else {
-        setPrintMsg(res.error || "印字に失敗しました");
-      }
+      const res = await printGiftReceipt(receiptIssueId, { allowDialog });
+      setOutcome(res.outcome || "");
+      setCanDialog(!!res.canUseDialog);
+      setMsg(printResultMessage(res));
     } catch (e) {
-      setPrintMsg(toUserMessage(e?.message) || "印字に失敗しました");
+      setOutcome(PRINT_OUTCOME.FAILED);
+      setMsg(toUserMessage(e?.message) || "印刷できませんでした");
     } finally {
-      setPrintBusy(false);
+      setBusy(false);
     }
   };
+  return { run, busy, msg, canDialog, outcome };
+}
 
-  const receiptSummary = (
-    <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+/** 印刷の結果（押したボタンの近く＝本文のいちばん下）。うまくいかなかったときだけ「ほかのプリンタ」を小さく出す */
+function PrintResult({ print, receiptIssueId }) {
+  if (!receiptIssueId) {
+    return (
+      <s-box paddingBlockStart="base">
+        <s-text tone="critical">領収書の記録が見つからないため印刷できません</s-text>
+      </s-box>
+    );
+  }
+  if (!print.msg) {
+    return (
+      <s-box paddingBlockStart="base">
+        <s-text type="small" color="subdued">印刷し直しても、売上・返金・精算の数は変わりません。</s-text>
+      </s-box>
+    );
+  }
+  const ok = print.outcome === PRINT_OUTCOME.DIRECT_ACCEPTED;
+  return (
+    <s-box paddingBlockStart="base">
       <s-stack gap="small">
-        <s-text fontWeight="bold" fontSize="large">領　収　書</s-text>
-        {receipt?.isReissue ? <s-text tone="critical" fontSize="small">【再発行】</s-text> : null}
-        <Row label="宛名" value={receipt?.recipientName || "（未入力）"} />
-        <Row label="金額" value={`¥${Number(receipt?.amount ?? 0).toLocaleString()}`} bold />
-        <Row label="但し書き" value={receipt?.proviso ?? ""} />
-        <Row label="注文番号" value={receipt?.orderName ?? ""} />
-        <Row label="発行日" value={receipt?.issueDate ?? ""} />
-        {receipt?.companyName ? <Row label="発行者" value={receipt.companyName} /> : null}
-        {!showPrintingApi ? (
-          <s-text tone="subdued" fontSize="small">
-            印字は店舗の従来導線（注文経由 / CloudPRNT 等）で行ってください。Printing API 案内は管理画面の印字設定で有効化できます。
-          </s-text>
+        <s-text tone={ok ? "success" : "caution"}>{print.msg}</s-text>
+        {print.canDialog ? (
+          <s-stack direction="inline" justifyContent="end">
+            <s-button variant="secondary" onClick={() => print.run(true)} disabled={print.busy}>
+              ほかのプリンタで印刷
+            </s-button>
+          </s-stack>
         ) : null}
       </s-stack>
     </s-box>
   );
+}
 
-  const printingApiBox = showPrintingApi ? (
-    <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
-      <s-stack gap="small">
-        <s-text fontWeight="bold">
-          {preferNew ? "Shopify Printing API（推奨）" : "Shopify Printing API（代替）"}
-        </s-text>
-        {!preferNew ? (
-          <s-text tone="caution" fontSize="small">
-            ※ 他の方法で印字済みの場合は押さないでください（二重印字になります）。
-          </s-text>
-        ) : (
-          <s-text tone="subdued" fontSize="small">
-            管理画面の印字設定で有効になっています。従来導線と両方印字しないでください。
-          </s-text>
-        )}
-        <s-button
-          variant={preferNew ? "primary" : "secondary"}
-          onClick={handlePrintingApi}
-          disabled={printBusy}
-        >
-          {printBusy ? "送信中…" : "Printing API で印字"}
-        </s-button>
-        {printMsg ? <s-text tone="subdued">{printMsg}</s-text> : null}
-      </s-stack>
-    </s-box>
-  ) : null;
-
+// ── 完了 ──────────────────────────────────────────────────────────────────────
+function DoneView({ receipt, onClose }) {
+  const print = useReceiptPrint(receipt?.receiptIssueId);
   return (
     <s-page heading="発行完了">
       <s-scroll-box>
         <s-box padding="base">
-          <s-stack gap="base">
-            <s-text fontWeight="bold">
-              {receipt?.isReissue ? "領収書を再発行しました" : "領収書を発行しました"}
-            </s-text>
-
-            {preferNew ? (
-              <>
-                {printingApiBox}
-                {receiptSummary}
-              </>
-            ) : (
-              <>
-                {receiptSummary}
-                {printingApiBox}
-              </>
-            )}
-
-            <s-text tone="subdued" fontSize="small">
-              発行ID: …{receipt?.receiptIssueId?.slice(-8) ?? ""}
-            </s-text>
-
-            <s-stack gap="small">
-              <s-button kind="secondary" onClick={onReissue}>同じ取引を再発行する</s-button>
-              <s-button kind="plain" onClick={onClose}>閉じる</s-button>
-            </s-stack>
+          <s-stack gap="none">
+            <s-banner tone="success" heading={receipt?.isReissue ? "領収書を再発行しました" : "領収書を発行しました"} />
+            <s-box paddingBlockStart="base">
+              <FormHero
+                label="金額"
+                value={yen(receipt?.amount)}
+                sub={receipt?.recipientName ? `${receipt.recipientName} 様` : "宛名なし"}
+              />
+            </s-box>
+            <ReceiptLines receipt={receipt} isReissue={Boolean(receipt?.isReissue)} />
+            <PrintResult print={print} receiptIssueId={receipt?.receiptIssueId} />
           </s-stack>
         </s-box>
       </s-scroll-box>
+      <FixedFooterNavBar
+        centerAlignWithButtons
+        leftLabel="閉じる"
+        onLeft={onClose}
+        leftDisabled={print.busy}
+        rightLabel="印刷する"
+        onRight={() => print.run(false)}
+        rightDisabled={print.busy || !receipt?.receiptIssueId}
+        rightLoading={print.busy}
+      />
     </s-page>
   );
 }
 
-// ── 発行履歴 ──────────────────────────────────────────────────────────────────
-function HistoryView({ onBack }) {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    getReceiptHistory({ limit: 20 })
-      .then((res) => setItems(res.items ?? []))
-      .catch((e) => setError(toUserMessage(e?.message) || "履歴の取得に失敗しました"))
-      .finally(() => setLoading(false));
-  }, []);
-
+/** 発行履歴の行を押したときの再印刷 */
+function ReprintView({ item, onBack }) {
+  const print = useReceiptPrint(item?.id);
+  const receipt = {
+    recipientName: String(item?.recipientName ?? "").trim(),
+    proviso: item?.proviso,
+    orderName: item?.orderName,
+  };
   return (
-    <s-page heading="領収書発行履歴">
+    <s-page heading="領収書を再印刷">
       <s-scroll-box>
         <s-box padding="base">
-          {loading ? (
-            <s-text tone="subdued">読み込み中…</s-text>
-          ) : error ? (
-            <s-text tone="critical">{error}</s-text>
-          ) : items.length === 0 ? (
-            <s-text tone="subdued">発行履歴がありません。</s-text>
-          ) : (
-            <s-stack gap="small">
-              {items.map((item) => (
-                <s-box key={item.id} padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-                  <s-stack gap="extraSmall">
-                    <s-stack direction="horizontal" align="space-between">
-                      <s-text fontWeight="bold">{item.orderName}</s-text>
-                      <s-text fontWeight="bold">¥{Number(item.amount).toLocaleString()}</s-text>
-                    </s-stack>
-                    <s-text tone="subdued" fontSize="small">
-                      宛名: {item.recipientName || "（未入力）"} {item.isReissue ? "【再発行】" : ""}
-                    </s-text>
-                    <s-text tone="subdued" fontSize="small">
-                      {item.createdAt?.slice(0, 16).replace("T", " ")}
-                    </s-text>
-                  </s-stack>
-                </s-box>
-              ))}
-            </s-stack>
-          )}
-        </s-box>
-        <s-box padding="base">
-          <s-button kind="plain" onClick={onBack}>← 戻る</s-button>
+          <s-stack gap="none">
+            <FormHero
+              label="金額"
+              value={yen(item?.amount)}
+              sub={receipt.recipientName ? `${receipt.recipientName} 様` : "宛名なし"}
+            />
+            <ReceiptLines receipt={receipt} isReissue={Boolean(item?.isReissue)} />
+            <PrintResult print={print} receiptIssueId={item?.id} />
+          </s-stack>
         </s-box>
       </s-scroll-box>
+      <FixedFooterNavBar
+        centerAlignWithButtons
+        leftLabel="戻る"
+        onLeft={onBack}
+        leftDisabled={print.busy}
+        rightLabel="印刷する"
+        onRight={() => print.run(false)}
+        rightDisabled={print.busy || !item?.id}
+        rightLoading={print.busy}
+      />
     </s-page>
   );
 }
 
-// ── ヘルパー ──────────────────────────────────────────────────────────────────
-function Row({ label, value, bold = false }) {
+
+// ── 発行履歴 ──────────────────────────────────────────────────────────────────
+/**
+ * 発行履歴も、取引を選ぶ一覧と同じ見た目・作りにする（T 2026-11-23）。
+ * 上に検索欄・年月日・「店名・時刻 に更新」を固定、行は「#1017 • 宛名 様」と金額、灰色の発行日時、再発行のバッジ。
+ * 出すのは POS の今の店で発行したものだけ。行は押せない（前と同じ）。
+ */
+async function fetchReceiptHistoryPage(params) {
+  const res = await getReceiptHistory({
+    locationId: params.locationId,
+    q: params.q,
+    dateFrom: params.dateFrom,
+    dateTo: params.dateTo,
+    limit: 50,
+  });
+  return {
+    items: res.items ?? [],
+    nextCursor: null,
+    todayLocalDate: res.todayLocalDate ?? "",
+    fetchedAtTime: res.fetchedAtTime ?? "",
+  };
+}
+
+function receiptHistoryRow(item, todayKey) {
+  const name = String(item.orderName ?? "").trim();
+  const recipient = String(item.recipientName ?? "").trim();
+  const when = formatOrderDateTimeLabel(item, todayKey);
+  return {
+    key: item.id,
+    title: recipient ? `${name} • ${recipient} 様` : name,
+    amountLabel: fmtYen(item.amount),
+    dateTimeLabel: when ? `${when} 発行` : "",
+    badges: item.isReissue ? [{ key: "reissue", label: "再発行", tone: "caution" }] : [],
+  };
+}
+
+function HistoryView({ onBack }) {
+  // 一覧の行を押すと、保存済みの領収書を再印刷する画面を開く（#53 の再印刷を一覧の形に合わせた）
+  const itemsById = useRef(new Map());
+  const [reprintItem, setReprintItem] = useState(null);
+
+  if (reprintItem) {
+    return <ReprintView item={reprintItem} onBack={() => setReprintItem(null)} />;
+  }
+
   return (
-    <s-stack direction="horizontal" align="space-between">
-      <s-text tone="subdued" fontSize="small">{label}</s-text>
-      <s-text fontWeight={bold ? "bold" : undefined}>{value}</s-text>
-    </s-stack>
+    <OrderDayListScreen
+      pageHeading="領収書発行履歴"
+      badgeMode="receipt"
+      fetchList={fetchReceiptHistoryPage}
+      toRow={(item, todayKey) => {
+        itemsById.current.set(item.id, item);
+        return { ...receiptHistoryRow(item, todayKey), selectId: item.id };
+      }}
+      onSelectOrderId={(id) => setReprintItem(itemsById.current.get(id) ?? null)}
+      itemNoun="発行"
+      searchPlaceholder="注文番号・宛名で検索"
+      searchHint="注文番号は数字だけでも探せます。宛名は 2 文字以上入れてください。"
+      onBack={onBack}
+    />
   );
 }

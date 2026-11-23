@@ -221,24 +221,32 @@ export interface VoucherSettings {
   voucherDefaultLabel: string;
   voucherAdjustmentPriority: "manual_first" | "auto_first";
   reflectVoucherChangeInSettlement: boolean;
+  /** 商品券のお釣りを現金で渡した分を、精算の納金金額（現金）から引く */
+  deductVoucherChangeFromCashDeposit: boolean;
   reflectVoucherChangeInReceiptDisplay: boolean;
   voucherChangeDisplayLabel: string;
+  /** 会計の前に商品券の額面を入れ、会計後に自動で登録する（docs/VOUCHER_CART_ENTRY.md）。初めはオフ（T の決定 2026-11-24） */
+  voucherCartEntryEnabled: boolean;
 }
 
 export const DEFAULT_VOUCHER_SETTINGS: VoucherSettings = {
   voucherFeatureEnabled: true,
   voucherAutoDetectionEnabled: true,
   voucherManualAdjustmentEnabled: true,
-  voucherNoteParseEnabled: false,
+  voucherNoteParseEnabled: true,
   voucherNoteParseRegex: "",
   voucherDefaultLabel: "商品券",
   voucherAdjustmentPriority: "manual_first",
   reflectVoucherChangeInSettlement: true,
+  deductVoucherChangeFromCashDeposit: true,
   reflectVoucherChangeInReceiptDisplay: true,
   voucherChangeDisplayLabel: "商品券おつり",
+  voucherCartEntryEnabled: false,
 };
 
 // ── 特殊返金設定（要件 §8） ───────────────────────────────────────────────────
+
+import type { OrderRedoMethod } from "../services/orderRedoCartPlan";
 
 export const SPECIAL_REFUND_SETTINGS_KEY = "special_refund_settings";
 
@@ -247,14 +255,19 @@ export type SpecialRefundProcessingMode = "record_only" | "shopify_execute";
 
 export interface SpecialRefundSettings {
   refundProcessingMode: SpecialRefundProcessingMode;
-  /** shopify_execute 時に API 返金する種別（商品券調整は常に記録のみ） */
+  /** shopify_execute 時に API 返金する種別（商品券釣銭登録は常に記録のみ） */
   shopifyExecuteCashRefund: boolean;
   shopifyExecutePaymentMethodOverride: boolean;
   shopifyExecuteReceiptCashAdjustment: boolean;
   /** 同一取引に無効化済みイベントがあるときの再登録は記録のみ（Shopify 実返金しない） */
   correctionUsesRecordOnly: boolean;
-  /** キャンセル・返金済み注文から会計やり直し用の下書きを作成 */
+  /** キャンセル・返金済み注文の「会計をやり直す」を使う（名前は昔の下書き専用のころのまま） */
   enableOrderRedoDraft: boolean;
+  /**
+   * 会計をやり直す方法。both = POS で「カートに入れる」と「下書き注文を作成」を選べる /
+   * cart = カートに入れるだけ / draft = 下書き注文だけ（昔の動き）
+   */
+  orderRedoMethod: OrderRedoMethod;
   enableCashRefund: boolean;
   enablePaymentMethodOverride: boolean;
   enableVoucherChangeAdjustment: boolean;
@@ -269,6 +282,22 @@ export interface SpecialRefundSettings {
   reflectPaymentOverrideToSettlement: boolean;
   reflectVoucherAdjustmentToSettlement: boolean;
   reflectReceiptCashAdjustmentToSettlement: boolean;
+  /**
+   * 支払方法の付け替え（payment_method_override）を管理者の承認制にする（初めはオフ = 今のまま承認なしで精算に入る）。
+   * オンのとき、付け替えは承認待ちで登録し、管理画面の特殊返金履歴で承認するまで精算・売上サマリーに数えない。
+   */
+  requireApprovalForPaymentMethodOverride: boolean;
+  /**
+   * 返金の予約（返金の前に実際の返金方法を決めておき、純正の返金ができたら自動で返金方法を変更する）。初めはオフ
+   * （T の決定 2026-11-24。まず Ciara だけオン）。docs/REFUND_RESERVATION.md
+   */
+  refundReservationEnabled: boolean;
+  /**
+   * 返金方法変更・商品券釣銭登録を注文メタフィールド pos.adjustments に書く（初めはオフ）。
+   * オフのときは注文に書かず・読まず、精算は今までどおりアプリの記録（DB）で数える。
+   * docs/ORDER_ADJUSTMENTS_METAFIELD.md
+   */
+  writeOrderAdjustmentsMetafield: boolean;
   specialRefundUiLabel: string;
   voucherAdjustmentUiLabel: string;
   cashRefundUiLabel: string;
@@ -276,16 +305,18 @@ export interface SpecialRefundSettings {
 }
 
 export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
-  refundProcessingMode: "shopify_execute",
+  refundProcessingMode: "record_only",
   shopifyExecuteCashRefund: true,
   shopifyExecutePaymentMethodOverride: true,
   shopifyExecuteReceiptCashAdjustment: true,
   correctionUsesRecordOnly: true,
   enableOrderRedoDraft: true,
+  orderRedoMethod: "both",
   enableCashRefund: true,
   enablePaymentMethodOverride: true,
   enableVoucherChangeAdjustment: true,
-  enableReceiptCashAdjustment: true,
+  // 初めはオフ（T の決定 2026-11-24: レジ誤差は店の負担で本部に報告するので、基本は使わない）
+  enableReceiptCashAdjustment: false,
   requireOriginalPaymentMethodForPaymentOverride: true,
   requireActualRefundMethodForPaymentOverride: true,
   requireNoteForCashRefund: false,
@@ -296,10 +327,13 @@ export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
   reflectPaymentOverrideToSettlement: true,
   reflectVoucherAdjustmentToSettlement: true,
   reflectReceiptCashAdjustmentToSettlement: true,
+  requireApprovalForPaymentMethodOverride: false,
+  refundReservationEnabled: false,
+  writeOrderAdjustmentsMetafield: false,
   specialRefundUiLabel: "特殊返金",
-  voucherAdjustmentUiLabel: "商品券調整",
+  voucherAdjustmentUiLabel: "商品券釣銭登録",
   cashRefundUiLabel: "現金返金",
-  paymentOverrideUiLabel: "返金手段変更",
+  paymentOverrideUiLabel: "返金方法変更",
 };
 
 // ── 一般設定（要件 §3） ───────────────────────────────────────────────────────
@@ -428,11 +462,11 @@ export const DEFAULT_SETTLEMENT_SETTINGS: SettlementSettings = {
   allowRecalculateLatestSettlement: true,
   allowReprintSettlement: true,
   allowManualTargetDate: true,
-  orderBasedCreateSettlementOrderEnabled: true,
-  orderBasedAttachMetafieldsEnabled: true,
-  orderBasedAttachNoteEnabled: true,
-  /** 検証用のためデフォルト ON（本番では管理画面で OFF にできる） */
-  legacyGiftCardAggregationEnabled: true,
+  orderBasedCreateSettlementOrderEnabled: false,
+  orderBasedAttachMetafieldsEnabled: false,
+  orderBasedAttachNoteEnabled: false,
+  /** レガシー Gift Card API 加算。本番既定 OFF（検証時のみ管理画面で ON） */
+  legacyGiftCardAggregationEnabled: false,
   refundAggregationLocationMode: "order_transaction",
   nonPosRefundFallbackMode: "order_retail_location",
 };
@@ -442,40 +476,47 @@ export const DEFAULT_SETTLEMENT_SETTINGS: SettlementSettings = {
 export const PRINT_SETTINGS_KEY = "print_settings";
 
 export interface PrintSettings {
-  defaultPrintMode: "cloudprnt_direct" | "order_based";
+  /** 実行時は常に shopify_printing。旧値は互換読み取りのみ */
+  defaultPrintMode: "shopify_printing" | "cloudprnt_direct" | "order_based";
   locationPrintModeOverrideEnabled: boolean;
   cloudprntProfileName: string;
+  /** レシート用紙幅（キー名は互換のため残す。CloudPRNT 出力には使わない。中立キーは `paperWidthMm`（同期エイリアス）） */
   cloudprntPaperWidth: string;
+  /** 用紙幅 mm（Printing / CloudPRNT 共用の中立キー。cloudprntPaperWidth と同期） */
+  paperWidthMm?: 58 | 80;
   cloudprntEnabled: boolean;
   createSettlementOrderWhenPrinting: boolean;
   attachSettlementNoteToOrder: boolean;
   attachSettlementMetafieldsToOrder: boolean;
   receiptPrintMode: string;
   receiptPreviewBeforePrintRequired: boolean;
-  /** Shopify Printing API を優先して試す（旧経路は残置） */
+  /** 旧フラグ。読み取りはするが出力ゲートには使わない */
   preferPrintingApi: boolean;
-  /** 精算完了後に shopify.printing を案内／実行 */
   settlementPrintingApiEnabled: boolean;
-  /** 領収書発行後に shopify.printing を案内／実行 */
   receiptPrintingApiEnabled: boolean;
 }
 
 export const DEFAULT_PRINT_SETTINGS: PrintSettings = {
-  defaultPrintMode: "order_based",
-  locationPrintModeOverrideEnabled: true,
+  defaultPrintMode: "shopify_printing",
+  locationPrintModeOverrideEnabled: false,
   cloudprntProfileName: "",
   cloudprntPaperWidth: "80mm",
+  paperWidthMm: 80,
   cloudprntEnabled: false,
-  createSettlementOrderWhenPrinting: true,
-  attachSettlementNoteToOrder: true,
-  attachSettlementMetafieldsToOrder: true,
-  receiptPrintMode: "order_based",
+  createSettlementOrderWhenPrinting: false,
+  attachSettlementNoteToOrder: false,
+  attachSettlementMetafieldsToOrder: false,
+  receiptPrintMode: "shopify_printing",
   receiptPreviewBeforePrintRequired: true,
-  /** Conditional-Go: Printing API を既定で試す（旧 order_based/cloudprnt は Location.printMode で残置） */
   preferPrintingApi: true,
   settlementPrintingApiEnabled: true,
   receiptPrintingApiEnabled: true,
 };
+
+export {
+  resolvePrintPaperWidthMm,
+  syncPrintPaperWidthFields,
+} from "./printPaperWidth";
 
 // ── 販売レシート設定 / ロケーション設定軸（共有モジュールを再エクスポート） ──
 export {

@@ -3,7 +3,7 @@
  * 要件書 §21.6
  */
 import { getAppUrl } from "./appUrl.js";
-import { toUserMessage } from "./errorMessage.js";
+import { toUserMessage, withStatus } from "./errorMessage.js";
 
 async function getToken() {
   const session = globalThis?.shopify?.session;
@@ -34,10 +34,18 @@ async function apiFetch(path, options = {}) {
       const j = await res.json();
       msg = j?.error ?? j?.message ?? msg;
     } catch {}
-    const statusSuffix = res.status ? ` (HTTP ${res.status})` : "";
-    throw new Error(toUserMessage(msg) + statusSuffix);
+    // 画面の文に「(HTTP 500)」は出さない（店の人には関係ない）。番号は err.status に残す
+    throw withStatus(new Error(toUserMessage(msg)), res.status);
   }
   return res.json();
+}
+
+/**
+ * 1 回の読み込みを表す ID。日次 API と当月の期間 API に同じ値を付けると、
+ * サーバーは「今日・その店」の計算を 1 回にまとめる（数え方は同じ）。
+ */
+export function newSalesSummaryLoadId() {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }
 
 /** 日次売上サマリー取得（算出・キャッシュ更新） */
@@ -45,9 +53,12 @@ export async function getDailySummary(options) {
   const targetDate = options?.targetDate;
   const locationIds = options?.locationIds ?? [];
   const recompute = options?.recompute === true;
+  const loadId = options?.loadId;
   const params = new URLSearchParams();
   if (targetDate) params.set("targetDate", targetDate);
   if (recompute) params.set("recompute", "1");
+  if (loadId) params.set("loadId", loadId);
+  if (options?.cachedOnly === true) params.set("cachedOnly", "1");
   for (const id of locationIds) params.append("locationIds[]", id);
   return apiFetch(`/api/sales-summary/daily?${params.toString()}`);
 }
@@ -59,7 +70,10 @@ export async function getPeriodSummary(options) {
   const budgetDateTo = options?.budgetDateTo;
   const progressAsOfDate = options?.progressAsOfDate;
   const locationIds = options?.locationIds ?? [];
+  const loadId = options?.loadId;
   const params = new URLSearchParams();
+  if (loadId) params.set("loadId", loadId);
+  if (options?.cachedOnly === true) params.set("cachedOnly", "1");
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
   if (budgetDateTo) params.set("budgetDateTo", budgetDateTo);

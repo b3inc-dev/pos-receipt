@@ -7,6 +7,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import { getShopCalendarToday } from "../utils/shopTimezone.server";
 import { computeAndCacheDailySummary } from "../services/salesSummaryEngine.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import {
@@ -17,12 +18,9 @@ import {
 } from "../utils/appSettings.server";
 import { getBudgetAmountsByDateForLocation } from "../utils/salesSummaryBudgetFromDb.server";
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function buildDaysInMonth(year: number, month: number): string[] {
-  const today = todayStr();
+// 「今日」は店のタイムゾーンの暦日（一般設定 → Shopify → Asia/Tokyo）。
+// 以前は UTC の日付だったため、日本時間 0:00〜8:59 は前日扱いになり、今日の行が出なかった（2026-11-23 実機）。
+function buildDaysInMonth(year: number, month: number, today: string): string[] {
   const lastDay = new Date(year, month, 0).getDate();
   const days: string[] = [];
   for (let d = 1; d <= lastDay; d++) {
@@ -99,7 +97,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return corsJson({ rows: [], displayOptions: merged, year, month });
     }
 
-    const today = todayStr();
+    const today = await getShopCalendarToday(admin, shop.id);
     const ym = `${year}-${String(month).padStart(2, "0")}`;
     const dateFrom = `${ym}-01`;
     const lastDay = new Date(year, month, 0).getDate();
@@ -160,7 +158,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       effectiveDateTo,
     );
 
-    const days = buildDaysInMonth(year, month);
+    const days = buildDaysInMonth(year, month, today);
     const rows = days
       .map((targetDate) => {
         const c = cacheByDate.get(targetDate);

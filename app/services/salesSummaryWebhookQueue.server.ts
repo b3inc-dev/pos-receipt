@@ -9,6 +9,7 @@ import { syncRefundAggregationFromWebhookPayload } from "./refundAggregation.ser
 import { syncRefundAggregationForQueuedWebhook } from "./refundAggregationWebhookSync.server";
 import PgBoss from "pg-boss";
 import { executeSalesSummaryOrderWebhookJob } from "./salesSummaryWebhookRefresh.server";
+import { backgroundRefreshNeedsRetry } from "./salesSummaryBackgroundSlice.server";
 
 export const SALES_SUMMARY_WEBHOOK_QUEUE_NAME = "pos-receipt-sales-summary-orders-updated";
 
@@ -60,6 +61,14 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
             console.warn(`[pg-boss] sales-summary: unknown shop ${shopDomain}`);
             continue;
           }
+          // 会計前の商品券・返金の予約の自動の調整（失敗はログだけ。docs/VOUCHER_CART_ENTRY.md）
+          try {
+            const { runOrderAutoAdjustmentsFromWebhook } = await import("./orderAutoAdjustments.server");
+            await runOrderAutoAdjustmentsFromWebhook(admin, dbShop.id, shopDomain, payload);
+          } catch (e) {
+            console.warn(`[pg-boss] order auto adjustments failed shop=${shopDomain}`, e);
+          }
+
           const disabled = process.env.SALES_SUMMARY_WEBHOOK_REFRESH_DISABLED;
           if (disabled === "1" || disabled === "true") continue;
 
@@ -79,11 +88,12 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
             dbShop.id,
             payload,
           );
-          if (errors.length > 0) {
+          if (backgroundRefreshNeedsRetry(errors)) {
             console.warn(
               `[pg-boss] sales-summary partial shop=${shopDomain} dates=${targetDates.join(",")}`,
               errors.slice(0, 6),
             );
+            throw new Error("sales-summary background incomplete");
           } else {
             console.log(
               `[pg-boss] sales-summary ok shop=${shopDomain} dates=${targetDates.join(",")}`,
@@ -96,6 +106,16 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
       }
     },
   );
+
+  // 返金処理中のまま数分たった特殊返金の見回り（5 分ごと）。失敗しても売上サマリーのキューは動かす
+  try {
+    const { registerSpecialRefundAutoResolveSweep } = await import(
+      "./specialRefundAutoResolveQueue.server"
+    );
+    await registerSpecialRefundAutoResolveSweep(boss);
+  } catch (e) {
+    console.error("[pg-boss] special-refund auto-resolve schedule failed:", e);
+  }
 
   const stop = () => {
     void boss.stop({ timeout: 20000 }).catch(() => {});

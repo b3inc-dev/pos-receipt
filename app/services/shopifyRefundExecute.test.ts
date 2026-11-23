@@ -1,0 +1,350 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import {
+  executeShopifyRefundForEvent,
+  graphqlErrorsFromThrown,
+  isRetryableRefundError,
+  pickParentTransactions,
+  refundEventMarker,
+  refundNoteMatchesEvent,
+  processorRefundMismatchReason,
+  shouldExecuteShopifyRefund,
+} from "./shopifyRefundExecute.server";
+import { DEFAULT_SPECIAL_REFUND_SETTINGS } from "../utils/appSettings.server";
+
+const sales = [
+  {
+    id: "cash-sale",
+    kind: "SALE",
+    status: "SUCCESS",
+    gateway: "cash",
+    amountSet: { shopMoney: { amount: "1000" } },
+  },
+  {
+    id: "card-sale",
+    kind: "SALE",
+    status: "SUCCESS",
+    gateway: "credit_card",
+    amountSet: { shopMoney: { amount: "3000" } },
+  },
+];
+
+describe("pickParentTransactions", () => {
+  it("元の支払手段に一致する Shopify 親取引だけを返す", () => {
+    const selected = pickParentTransactions(sales, "credit_card");
+    assert.deepEqual(selected.map((tx) => tx.id), ["card-sale"]);
+  });
+
+  it("指定手段が存在しない場合は別 gateway へ fallback しない", () => {
+    const selected = pickParentTransactions(sales, "unknown");
+    assert.deepEqual(selected, []);
+  });
+
+  it("元手段未指定の場合だけ全売上を金額順で返す", () => {
+    const selected = pickParentTransactions(sales, null);
+    assert.deepEqual(selected.map((tx) => tx.id), ["card-sale", "cash-sale"]);
+  });
+});
+
+describe("executeShopifyRefundForEvent", () => {
+  it("解析済み GraphQL JSON を使い、同じ冪等キーで refundCreate を呼ぶ", async () => {
+    const calls: Array<{ query: string; opts?: object }> = [];
+    const admin = {
+      graphql: async (query: string, opts?: object) => {
+        calls.push({ query, opts });
+        const payload = query.includes("OrderForRefund")
+          ? {
+              data: {
+                order: {
+                  id: "gid://shopify/Order/1",
+                  // 成功応答喪失後の再送では既に全額返金済みになり得る。
+                  refundable: false,
+                  refunds: [],
+                  transactions: [sales[1]],
+                },
+              },
+            }
+          : {
+              data: {
+                refundCreate: {
+                  refund: { id: "gid://shopify/Refund/9" },
+                  userErrors: [],
+                },
+              },
+            };
+        return { json: async () => payload };
+      },
+    };
+
+    const result = await executeShopifyRefundForEvent(admin, {
+      sourceOrderId: "1",
+      amount: 500,
+      eventType: "cash_refund",
+      originalPaymentMethod: "credit_card",
+      actualRefundMethod: "cash",
+      idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",
+    });
+
+    assert.deepEqual(result, {
+      status: "success",
+      refundId: "gid://shopify/Refund/9",
+    });
+    assert.equal(calls.length, 2);
+    assert.match(calls[1].query, /@idempotent\(key: \$idempotencyKey\)/);
+    assert.equal(
+      (calls[1].opts as { variables: { idempotencyKey: string } }).variables.idempotencyKey,
+      "123e4567-e89b-12d3-a456-426614174000",
+    );
+  });
+
+  it("24時間超の再送でも注文上のイベント印を照合し、返金を再作成しない", async () => {
+    let calls = 0;
+    const key = "123e4567-e89b-12d3-a456-426614174000";
+    const admin = {
+      graphql: async () => {
+        calls += 1;
+        return {
+          json: async () => ({
+            data: {
+              order: {
+                id: "gid://shopify/Order/1",
+                refundable: false,
+                refunds: [
+                  {
+                    id: "gid://shopify/Refund/9",
+                    note: `${refundEventMarker(key)} / 特殊返金 / cash_refund`,
+                  },
+                ],
+                transactions: [sales[1]],
+              },
+            },
+          }),
+        };
+      },
+    };
+
+    const result = await executeShopifyRefundForEvent(admin, {
+      sourceOrderId: "1",
+      amount: 500,
+      eventType: "cash_refund",
+      originalPaymentMethod: "credit_card",
+      actualRefundMethod: "cash",
+      idempotencyKey: key,
+    });
+
+    assert.deepEqual(result, {
+      status: "success",
+      refundId: "gid://shopify/Refund/9",
+    });
+    assert.equal(calls, 1);
+  });
+
+  it("Shopify の同時冪等要求エラーは同じキーで再開できる状態として返す", async () => {
+    const admin = {
+      graphql: async (query: string) => ({
+        json: async () =>
+          query.includes("OrderForRefund")
+            ? {
+                data: {
+                  order: {
+                    id: "gid://shopify/Order/1",
+                    refundable: true,
+                    refunds: [],
+                    transactions: [sales[1]],
+                  },
+                },
+              }
+            : {
+                errors: [
+                  {
+                    message: "A request with this idempotency key is still running",
+                    extensions: { code: "IDEMPOTENCY_CONCURRENT_REQUEST" },
+                  },
+                ],
+              },
+      }),
+    };
+
+    const result = await executeShopifyRefundForEvent(admin, {
+      sourceOrderId: "1",
+      amount: 500,
+      eventType: "cash_refund",
+      originalPaymentMethod: "credit_card",
+      actualRefundMethod: "cash",
+      idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",
+    });
+
+    assert.deepEqual(result, {
+      status: "retryable",
+      error: "A request with this idempotency key is still running",
+    });
+  });
+});
+
+describe("isRetryableRefundError", () => {
+  it("一時エラーだけを再試行可能に分類する", () => {
+    assert.equal(
+      isRetryableRefundError([
+        { code: "IDEMPOTENCY_CONCURRENT_REQUEST", message: "in progress" },
+      ]),
+      true,
+    );
+    assert.equal(
+      isRetryableRefundError([{ code: "TRANSACTION_AMOUNT_TOO_LARGE", message: "invalid" }]),
+      false,
+    );
+  });
+});
+
+describe("refundNoteMatchesEvent", () => {
+  it("キーの前方一致では別イベントを成功扱いにしない", () => {
+    const shorter = "abcdefghijklmnop";
+    const longer = "abcdefghijklmnopq";
+    const note = `${refundEventMarker(longer)} / 特殊返金 / cash_refund`;
+    assert.equal(refundNoteMatchesEvent(note, shorter), false);
+    assert.equal(refundNoteMatchesEvent(note, longer), true);
+  });
+});
+
+describe("レシート現金調整", () => {
+  it("設定が残っていても Shopify で返金しない（T の決定 2026-11-23: 記録だけ）", () => {
+    const s = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, refundProcessingMode: "shopify_execute" as const, shopifyExecuteReceiptCashAdjustment: true };
+    assert.equal(shouldExecuteShopifyRefund(s, "receipt_cash_adjustment", "undo"), false);
+    assert.equal(shouldExecuteShopifyRefund(s, "receipt_cash_adjustment", "extra"), false);
+    assert.equal(shouldExecuteShopifyRefund(s, "cash_refund"), true);
+  });
+});
+
+/** @shopify/shopify-api の GraphqlQueryError に似せたもの（body.errors.graphQLErrors に GraphQL の errors） */
+class FakeGraphqlQueryError extends Error {
+  body: unknown;
+  constructor(graphQLErrors: { message: string; extensions?: { code?: string } }[]) {
+    super(graphQLErrors[0]?.message ?? "GraphQL operation failed");
+    this.name = "GraphqlQueryError";
+    this.body = { errors: { message: "GraphQL Client: An error occurred", graphQLErrors } };
+  }
+}
+
+function adminThatThrowsOnRefundCreate(err: Error) {
+  return {
+    graphql: async (query: string) => {
+      if (!query.includes("OrderForRefund")) throw err;
+      return {
+        json: async () => ({
+          data: {
+            order: {
+              id: "gid://shopify/Order/1",
+              refundable: true,
+              refunds: [],
+              transactions: [sales[1]],
+            },
+          },
+        }),
+      };
+    },
+  };
+}
+
+const refundParams = {
+  sourceOrderId: "1",
+  amount: 500,
+  eventType: "cash_refund",
+  originalPaymentMethod: "credit_card",
+  actualRefundMethod: "cash",
+  idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",
+};
+
+describe("refundCreate が例外（GraphqlQueryError）で返ってきたとき", () => {
+  it("同じキーの実行中は、本物のクライアントのように投げられても retryable（pending のまま同じキーで再開）", async () => {
+    const admin = adminThatThrowsOnRefundCreate(
+      new FakeGraphqlQueryError([
+        {
+          message: "A request with this idempotency key is still running",
+          extensions: { code: "IDEMPOTENCY_CONCURRENT_REQUEST" },
+        },
+      ]),
+    );
+    const result = await executeShopifyRefundForEvent(admin, refundParams);
+    assert.deepEqual(result, {
+      status: "retryable",
+      error: "A request with this idempotency key is still running",
+    });
+  });
+
+  it("検証のエラー（mutation が走っていない）は failed とエラー文を返す", async () => {
+    const admin = adminThatThrowsOnRefundCreate(
+      new FakeGraphqlQueryError([
+        { message: "Field 'code' doesn't exist on type 'UserError'", extensions: { code: "undefinedField" } },
+      ]),
+    );
+    const result = await executeShopifyRefundForEvent(admin, refundParams);
+    assert.deepEqual(result, {
+      status: "failed",
+      error: "Field 'code' doesn't exist on type 'UserError'",
+    });
+  });
+
+  it("errors を持たない例外（通信の失敗など）はそのまま上げる（成否が分からないので pending のまま）", async () => {
+    const admin = adminThatThrowsOnRefundCreate(new Error("socket hang up"));
+    await assert.rejects(() => executeShopifyRefundForEvent(admin, refundParams), /socket hang up/);
+  });
+});
+
+describe("graphqlErrorsFromThrown", () => {
+  it("GraphqlQueryError の body.errors.graphQLErrors と、body.errors が配列の形の両方を読む", () => {
+    assert.deepEqual(
+      graphqlErrorsFromThrown(new FakeGraphqlQueryError([{ message: "x", extensions: { code: "THROTTLED" } }])),
+      [{ message: "x", extensions: { code: "THROTTLED" } }],
+    );
+    assert.deepEqual(graphqlErrorsFromThrown({ body: { errors: [{ message: "y" }] } }), [
+      { message: "y", extensions: { code: undefined } },
+    ]);
+  });
+  it("errors が無いものは null", () => {
+    assert.equal(graphqlErrorsFromThrown(new Error("z")), null);
+    assert.equal(graphqlErrorsFromThrown({ body: { errors: { message: "HTTP 500" } } }), null);
+    assert.equal(graphqlErrorsFromThrown(null), null);
+  });
+});
+
+/**
+ * 決済会社の支払いを別の手段で返したとき、Shopify では返金しない（二重に返さない）判定の試験
+ */
+
+const card = { id: "t1", kind: "SALE", status: "SUCCESS", gateway: "shopify_payments", manualPaymentGateway: false };
+const cash = { id: "t2", kind: "SALE", status: "SUCCESS", gateway: "cash", manualPaymentGateway: true };
+const points = { id: "t3", kind: "SALE", status: "SUCCESS", gateway: "施設ポイント", manualPaymentGateway: true };
+const otherProcessor = { id: "t4", kind: "SALE", status: "SUCCESS", gateway: "paypal", manualPaymentGateway: false };
+
+describe("processorRefundMismatchReason", () => {
+  it("カード払い（Shopify Payments）を現金で返したら止める", () => {
+    assert.ok(processorRefundMismatchReason([card], "payment_method_override", "cash"));
+  });
+  it("現金返金の種別で手段が空でも、カード払いなら止める", () => {
+    assert.ok(processorRefundMismatchReason([card], "cash_refund", null));
+  });
+  it("manualPaymentGateway が無くても名前が shopify_payments なら止める", () => {
+    const { manualPaymentGateway: _omit, ...noFlag } = card;
+    assert.ok(processorRefundMismatchReason([noFlag], "payment_method_override", "cash"));
+  });
+  it("ほかの決済会社（手動でない）も別の手段なら止める", () => {
+    assert.ok(processorRefundMismatchReason([otherProcessor], "payment_method_override", "cash"));
+  });
+  it("カード払いをカードで返すときは止めない", () => {
+    assert.equal(processorRefundMismatchReason([card], "payment_method_override", "shopify_payments"), null);
+  });
+  it("現金やカスタム決済の支払いは止めない（お金は動かない）", () => {
+    assert.equal(processorRefundMismatchReason([cash], "payment_method_override", "施設ポイント"), null);
+    assert.equal(processorRefundMismatchReason([points], "cash_refund", "cash"), null);
+    assert.equal(
+      processorRefundMismatchReason([{ ...cash, manualPaymentGateway: false }], "payment_method_override", "施設ポイント"),
+      null,
+    );
+  });
+  it("実際の手段が分からない付け替えは今までどおり（止めない）", () => {
+    assert.equal(processorRefundMismatchReason([card], "payment_method_override", ""), null);
+  });
+  it("返金先にカードが 1 つでも混ざり、手段が違えば止める", () => {
+    assert.ok(processorRefundMismatchReason([cash, card], "cash_refund", "cash"));
+  });
+});

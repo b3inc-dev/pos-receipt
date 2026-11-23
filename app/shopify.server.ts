@@ -10,7 +10,8 @@ const apiSecretKey = process.env.SHOPIFY_API_SECRET?.trim() ?? "";
 const shopify = shopifyApp({
   apiKey,
   apiSecretKey,
-  apiVersion: ApiVersion.October25,
+  // shopify.app*.toml と揃える。refundCreate の @idempotent は 2026-01 以降。
+  apiVersion: ApiVersion.April26,
   scopes: process.env.SCOPES?.split(",").map((s) => s.trim()).filter(Boolean),
   appUrl: process.env.SHOPIFY_APP_URL?.trim() ?? "",
   authPathPrefix: "/auth",
@@ -32,6 +33,10 @@ if (typeof queueMicrotask !== "undefined") {
   queueMicrotask(() => {
     import("./services/salesSummaryWebhookQueue.server")
       .then((m) => m.ensureSalesSummaryWebhookWorker())
+      .catch(() => {});
+    // ciara-system の予算の取り込み（自社用で鍵があるときだけ動く）
+    import("./services/ciaraBudgetSync.server")
+      .then((m) => m.ensureCiaraBudgetSyncScheduler())
       .catch(() => {});
   });
 }

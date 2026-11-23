@@ -29,6 +29,7 @@ import {
   tryLoadPeriodAggregatesFromRollup,
   syncRollupsMatchingPeriodRequest,
 } from "./salesSummaryPeriodRollup.server";
+import { shareWithinLoad } from "../utils/salesSummaryLoadShare.server";
 import type { Shop } from "@prisma/client";
 
 type SalesSummaryLocationRow = Awaited<ReturnType<typeof prisma.location.findMany>>[number];
@@ -67,6 +68,8 @@ export type PeriodSalesSummaryPayload = {
   displayOptions: ReturnType<typeof mergeAndNormalizeSalesSummarySettings>;
   periodCachePartial: boolean;
   pendingComputeEstimate: number;
+  /** cachedOnly のときだけ付く。false = 保存済みが足りず rows は空（画面は数え直しを待つ） */
+  cacheComplete?: boolean;
 };
 
 export type BuildPeriodSalesSummaryOptions = {
@@ -75,6 +78,15 @@ export type BuildPeriodSalesSummaryOptions = {
   budgetDateTo?: string | null;
   progressAsOfDate?: string | null;
   locationIdsParam?: string[];
+  /** POS の 1 回の読み込みを表す ID（日次 API と「今日」の計算を共有する）。未指定なら共有しない */
+  loadId?: string | null;
+  /** true のときチャネル行を数えない（POS の個店表示はチャネル行も合計も出さない） */
+  skipChannels?: boolean;
+  /**
+   * true のとき Shopify で数え直さず、保存済みの日次集計（今日の分も）だけで合計する。
+   * POS の全店表示で「○時○分時点」の月実績を先に出すため。足りない日があれば cacheComplete=false。
+   */
+  cachedOnly?: boolean;
 };
 
 export async function buildPeriodSalesSummaryPayload(
@@ -87,6 +99,9 @@ export async function buildPeriodSalesSummaryPayload(
   const budgetDateToParam = options.budgetDateTo ?? null;
   const progressAsOfParam = options.progressAsOfDate ?? null;
   const locationIdsParam = options.locationIdsParam ?? [];
+  const loadId = options.loadId ?? null;
+  const skipChannels = options.skipChannels === true;
+  const cachedOnly = options.cachedOnly === true;
 
   const settings = await getAppSetting<Partial<SalesSummarySettings>>(shop.id, SALES_SUMMARY_SETTINGS_KEY);
   const merged = mergeAndNormalizeSalesSummarySettings(settings ?? undefined);
@@ -155,8 +170,8 @@ export async function buildPeriodSalesSummaryPayload(
     return empty();
   }
 
-  await autoDiscoverChannels(admin, shop.id);
-  const enabledChannels = await getEnabledSalesChannels(shop.id);
+  if (!skipChannels && !cachedOnly) await autoDiscoverChannels(admin, shop.id);
+  const enabledChannels = skipChannels ? [] : await getEnabledSalesChannels(shop.id);
   const shopIanaTz = await getShopTimezoneForDaily(admin, shop.id);
   const shopCalendarToday = getCalendarDateStringInTimeZone(new Date(), shopIanaTz);
 
@@ -202,7 +217,10 @@ export async function buildPeriodSalesSummaryPayload(
     const locationWork: Array<{ day: string; loc: SalesSummaryLocationRow }> = [];
     for (const day of days) {
       for (const loc of targetLocations) {
-        if (!needsLocationDayCompute(day, loc.shopifyLocationGid, today, locationCacheSet)) continue;
+        if (cachedOnly) {
+          // 保存済みだけで返すときは、今日の分も保存済みがあれば使う
+          if (locationCacheSet.has(`${loc.shopifyLocationGid}|${day}`)) continue;
+        } else if (!needsLocationDayCompute(day, loc.shopifyLocationGid, today, locationCacheSet)) continue;
         locationWork.push({ day, loc });
       }
     }
@@ -226,7 +244,7 @@ export async function buildPeriodSalesSummaryPayload(
     type EnabledCh = (typeof enabledChannels)[number];
     const channelWork: Array<{ day: string; ch: EnabledCh }> = [];
     for (const day of days) {
-      const shouldRecompute = day >= today;
+      const shouldRecompute = day >= today && !cachedOnly;
       for (const ch of enabledChannels) {
         const hasCache = channelCachePresence.has(`${ch.id}|${day}`);
         if (!shouldRecompute && hasCache) continue;
@@ -237,7 +255,12 @@ export async function buildPeriodSalesSummaryPayload(
       (a, b) => a.day.localeCompare(b.day) || a.ch.displayName.localeCompare(b.ch.displayName),
     );
 
+    if (cachedOnly && (locationWork.length > 0 || channelWork.length > 0)) {
+      return { ...empty(), cacheComplete: false };
+    }
+
     if (
+      !cachedOnly &&
       locationWork.length === 0 &&
       channelWork.length === 0 &&
       useDbBudgetForPeriod &&
@@ -276,7 +299,9 @@ export async function buildPeriodSalesSummaryPayload(
       if (budget <= 0) break;
       locAttempts += 1;
       try {
-        await computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, day);
+        await shareWithinLoad(loadId, `loc|${shop.id}|${loc.shopifyLocationGid}|${day}`, () =>
+          computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, day),
+        );
       } catch {
         /* ignore */
       }
@@ -289,13 +314,15 @@ export async function buildPeriodSalesSummaryPayload(
       if (budget <= 0) break;
       chAttempts += 1;
       try {
-        await computeAndCacheChannelDailySummary(
-          admin,
-          shop.id,
-          ch.id,
-          ch.displayName,
-          ch.sourceNames,
-          day,
+        await shareWithinLoad(loadId, `ch|${shop.id}|${ch.id}|${day}`, () =>
+          computeAndCacheChannelDailySummary(
+            admin,
+            shop.id,
+            ch.id,
+            ch.displayName,
+            ch.sourceNames,
+            day,
+          ),
         );
       } catch {
         /* ignore */
@@ -522,7 +549,7 @@ export async function buildPeriodSalesSummaryPayload(
     unit: totalItems > 0 ? totalActual / totalItems : null,
   };
 
-  if (useDbBudgetForPeriod && dateFrom && dateTo && budgetRangeTo && !periodCachePartial) {
+  if (!cachedOnly && useDbBudgetForPeriod && dateFrom && dateTo && budgetRangeTo && !periodCachePartial) {
     void syncRollupsMatchingPeriodRequest(
       shop.id,
       dateFrom,
@@ -544,5 +571,6 @@ export async function buildPeriodSalesSummaryPayload(
     displayOptions: merged,
     periodCachePartial,
     pendingComputeEstimate,
+    ...(cachedOnly ? { cacheComplete: true } : {}),
   };
 }

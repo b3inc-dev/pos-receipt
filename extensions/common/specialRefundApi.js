@@ -1,8 +1,8 @@
 /**
- * 特殊返金・商品券調整 API クライアント
+ * 返金方法変更・商品券釣銭登録 API クライアント
  * 要件書 21.4 対応
  */
-import { toUserMessage } from "./errorMessage.js";
+import { toUserMessage, withStatus } from "./errorMessage.js";
 
 async function getToken() {
   const session = globalThis?.shopify?.session;
@@ -39,7 +39,7 @@ async function apiGet(path, params = {}) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = toUserMessage(json.error || `HTTP ${res.status}`);
-    throw new Error(msg + (res.status ? ` (HTTP ${res.status})` : ""));
+    throw withStatus(new Error(msg), res.status);
   }
   return json;
 }
@@ -55,7 +55,7 @@ async function apiPost(path, body) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = toUserMessage(json.error || `HTTP ${res.status}`);
-    throw new Error(msg + (res.status ? ` (HTTP ${res.status})` : ""));
+    throw withStatus(new Error(msg), res.status);
   }
   return json;
 }
@@ -80,7 +80,7 @@ export async function createSpecialRefund(data) {
 
 /**
  * POST /api/voucher-adjustments
- * @param {Object} data - sourceOrderId, voucherFaceValue, voucherAppliedAmount, voucherChangeAmount, 他
+ * @param {Object} data - sourceOrderId, voucherFaceValue（必須）, voucherAppliedAmount（任意。無ければ注文の取引から）, 他
  * @returns {Promise<{ ok: boolean, event: Object }>}
  */
 export async function createVoucherAdjustment(data) {
@@ -88,10 +88,79 @@ export async function createVoucherAdjustment(data) {
 }
 
 /**
+ * POST /api/voucher-adjustments/from-cart
+ * 会計後の画面から: 会計の前に入れた額面があれば商品券調整を 1 件登録する（何回呼んでも 1 件）
+ * @param {{ sourceOrderId: string, locationId?: string, createdBy?: string }} data
+ * @returns {Promise<{ ok: boolean, status: "created" | "already" | "no_face" | "no_voucher_payment" | "cancelled" | "disabled" | "order_unreadable", event?: Object, face?: number }>}
+ */
+export async function registerVoucherFromCart(data) {
+  return apiPost("/api/voucher-adjustments/from-cart", data);
+}
+
+/** GET /api/voucher-adjustments/from-cart → { enabled }（管理画面の「会計の前に額面を入れる」） */
+export async function getVoucherCartEntryEnabled() {
+  return apiGet("/api/voucher-adjustments/from-cart");
+}
+
+/**
+ * 返金の予約（docs/REFUND_RESERVATION.md）
+ * GET  /api/refund-reservations?sourceOrderId=  … 開くと、できた純正の返金へ当て直す
+ * POST /api/refund-reservations                  … { sourceOrderId, sourceOrderName, locationId, rows, note }
+ * POST /api/refund-reservations/:id/cancel
+ */
+export async function listRefundReservations(sourceOrderId) {
+  return apiGet("/api/refund-reservations", { sourceOrderId });
+}
+
+/** GET /api/refund-reservations（注文なし）→ { enabled }（管理画面の「返金の予約」がオンか） */
+export async function getRefundReservationEnabled() {
+  return apiGet("/api/refund-reservations");
+}
+
+export async function createRefundReservation(data) {
+  return apiPost("/api/refund-reservations", data);
+}
+
+export async function cancelRefundReservation(id) {
+  return apiPost(`/api/refund-reservations/${id}/cancel`, {});
+}
+
+/**
  * POST /api/special-refunds/:id/void
  * @param {string} id
  * @returns {Promise<{ ok: boolean, event: Object }>}
  */
-export async function voidSpecialRefund(id) {
-  return apiPost(`/api/special-refunds/${id}/void`, {});
+export async function voidSpecialRefund(id, body = {}) {
+  return apiPost(`/api/special-refunds/${id}/void`, body);
+}
+
+/**
+ * POST /api/special-refunds/:id/edit
+ * 「変更」: 前の登録を無効にし、直した内容の登録を足す（Shopify の返金はしない）。
+ * @param {string} id
+ * @param {{ reason: string, dateMode?: "original" | "today", amount?: number, actualRefundMethod?: string,
+ *   originalPaymentMethod?: string, adjustKind?: string, voucherFaceValue?: number, note?: string }} body
+ */
+export async function editSpecialRefund(id, body) {
+  return apiPost(`/api/special-refunds/${encodeURIComponent(id)}/edit`, body);
+}
+
+/**
+ * GET /api/voucher-adjustments?sourceOrderId=...
+ * その注文で商品券で払った額（注文の取引から）。読めなければ voucherAppliedAmount は null。
+ * @param {string} sourceOrderId
+ * @returns {Promise<{ ok: boolean, voucherAppliedAmount: number | null, appliedFromOrder: boolean }>}
+ */
+export async function getVoucherApplied(sourceOrderId) {
+  return apiGet("/api/voucher-adjustments", { sourceOrderId });
+}
+
+/**
+ * POST /api/special-refunds/:id/recheck
+ * 前からある pending の登録を、Shopify の返金を読み直して決める（返金は実行しない）。
+ * @param {string} id
+ * @param {{ resolution?: "link" | "no_refund", refundId?: string }} [body]
+ */
+export async function recheckLegacySpecialRefund(id, body = {}) {
+  return apiPost(`/api/special-refunds/${encodeURIComponent(id)}/recheck`, body);
 }

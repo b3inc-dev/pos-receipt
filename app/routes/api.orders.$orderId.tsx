@@ -5,9 +5,16 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
-import { ORDER_DETAIL_QUERY, serializeOrderDetail } from "../services/orderDetail.server";
+import {
+  applyPaymentDisplayLabels,
+  ORDER_DETAIL_QUERY,
+  ORDER_DETAIL_QUERY_NO_CUSTOMER_PII,
+  serializeOrderDetail,
+} from "../services/orderDetail.server";
+import { graphqlWithCustomerFallback } from "../utils/protectedCustomerData";
 import { isOrderEligibleForRedoDraft } from "../services/orderRedoDraft.server";
-import { getPaymentMethodVoucherInfo } from "../utils/paymentMethod.server";
+import { resolveOrderRedoOptions } from "../services/orderRedoCartPlan";
+import { getPaymentMethodVoucherInfo, loadEnabledPaymentMasters } from "../utils/paymentMethod.server";
 import {
   getAppSetting,
   SPECIAL_REFUND_SETTINGS_KEY,
@@ -27,11 +34,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const gid = orderId.startsWith("gid://") ? orderId : `gid://shopify/Order/${orderId}`;
 
-    const response = await admin.graphql(ORDER_DETAIL_QUERY, {
-      variables: { id: gid },
+    // 保護された顧客データ（名前・メール）の許可が無いアプリでは、名前なしで読み直す
+    const json = await graphqlWithCustomerFallback(admin, ORDER_DETAIL_QUERY, ORDER_DETAIL_QUERY_NO_CUSTOMER_PII, {
+      id: gid,
     });
-
-    const json = await response.json();
     if (json.errors?.length) {
       return corsJson(
         { ok: false, error: "GraphQL error", details: json.errors },
@@ -45,7 +51,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     const timezone = await getShopTimezoneForDaily(admin, shop.id);
-    const result = serializeOrderDetail(order as Record<string, unknown>, { timezone });
+    // 支払いの名前は支払方法マスタの表示名にする（Cash → 現金 など）。gateway はそのまま
+    const result = applyPaymentDisplayLabels(
+      serializeOrderDetail(order as Record<string, unknown>, { timezone }),
+      await loadEnabledPaymentMasters(shop.id),
+    );
 
     const gateways = ((result.transactions as { gateway?: string }[]) ?? []).map((t) => t.gateway ?? "");
     let hasVoucherChange = false;
@@ -77,7 +87,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return corsJson({
       ...result,
       estimatedVoucherChange: hasVoucherChange,
-      canRedoAsDraft: srSettings.enableOrderRedoDraft && eligible,
+      ...resolveOrderRedoOptions(srSettings, eligible),
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";

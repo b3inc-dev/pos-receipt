@@ -495,6 +495,10 @@ export const adminCss = `
     .Member-num-pending { grid-row: 2; }
     .Member-chevron { grid-column: 4; grid-row: 1 / 3; }
   }
+  /* POS Receipt で足したもの: Polaris の Page は 490px 未満で左右の余白が無くなり、カードの外の説明（AdminIntro）が画面の端に付く（11/22 画面確認） */
+  @media (max-width: 489.98px) {
+    .Polaris-Page .Admin-intro { padding: 0 16px; }
+  }
   @media (min-width: 768px) {
     .Admin-home-main { order: 1; }
     .Admin-home-side { order: 2; }
@@ -984,7 +988,8 @@ function notifyBars() {
   for (const listener of barListeners) listener();
 }
 
-async function confirmLeave(): Promise<boolean> {
+/** 未保存の入力があるとき、Shopify の「変更を破棄しますか」を出す（絞り込みの選択で画面を読み直すときなど） */
+export async function confirmLeave(): Promise<boolean> {
   if (dirtyForms.size === 0) return true;
   const shopify = typeof window === "undefined" ? undefined : (window as unknown as { shopify?: { saveBar?: { leaveConfirmation?: () => Promise<void> } } }).shopify;
   if (!shopify?.saveBar?.leaveConfirmation) return true;
@@ -1003,6 +1008,21 @@ export function GuardedLink({ to, className, children, ...rest }: { to: string; 
     void confirmLeave().then(() => navigate(to));
   };
   return <Link to={to} className={className} onClick={onClick} {...rest}>{children}</Link>;
+}
+
+/**
+ * POS Receipt で足したもの（Shop Point には無い）。Polaris の Page の「←」（backAction）やタブなど、
+ * リンクでなくボタンから移るときに使う。未保存の変更があれば Shopify の確認を出してから移る（GuardedLink と同じ）。
+ */
+export function useGuardedNavigate() {
+  const navigate = useNavigate();
+  return (to: string) => {
+    if (dirtyForms.size === 0) {
+      navigate(to);
+      return;
+    }
+    void confirmLeave().then(() => navigate(to));
+  };
 }
 
 export function PrimaryLink({ to, children, icon }: { to: string; children: ReactNode; icon?: string }) {

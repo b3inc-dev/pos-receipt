@@ -49,8 +49,10 @@ model Shop {
   paymentMethodMasters  PaymentMethodMaster[]
   settlements           Settlement[]
   specialRefundEvents SpecialRefundEvent[]
+  refundReservations RefundReservation[]
   receiptTemplates ReceiptTemplate[]
   receiptIssues    ReceiptIssue[]
+  printRecords     PrintRecord[]
   budgets          Budget[]
   footfallReports  FootfallReport[]
   salesSummaryCacheDaily   SalesSummaryCacheDaily[]
@@ -72,7 +74,7 @@ model Location {
   shortName                 String?  // 短縮表示名
   sortOrder                 Int      @default(0) // 並び順（小さいほど上）
   code                      String?
-  printMode                 String   @default("order_based") // cloudprnt_direct | order_based
+  printMode                 String   @default("order_based") // 保存互換。実行時は shopify_printing に正規化（DB行は自動変換しない）
   salesSummaryEnabled       Boolean  @default(false)
   footfallReportingEnabled  Boolean  @default(false)
   // §4.2.2 機能有効可否
@@ -161,10 +163,10 @@ model Settlement {
   itemCount            Int
   voucherChangeAmount  Decimal   @db.Decimal(18, 2)
   paymentSectionsJson  String    // 支払方法別内訳の JSON
-  printMode            String    // cloudprnt_direct | order_based
-  printedAt            DateTime?
+  printMode            String    // 新規は shopify_printing。旧 order_based / cloudprnt_direct は履歴互換
+  printedAt            DateTime? // 印字 API 受付時刻。紙の排出完了ではない
   status               String    @default("draft") // draft | completed | printed | failed
-  idempotencyKey       String?   @unique // locationId+targetDate+printMode のハッシュ。重複精算防止
+  idempotencyKey       String?   @unique // shopId:locationId:targetDate（旧キーは printMode 付きも検索）
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -206,12 +208,68 @@ model SpecialRefundEvent {
   shopifyRefundId         String?
   shopifyRefundError      String?
   shopifyRefundProcessedAt DateTime?
+  /// 管理者の承認（支払方法の付け替え・設定でオンのときだけ）: none | pending | approved | rejected
+  /// pending・rejected は精算・売上サマリーに数えない。status（active | voided）とは別に持つ
+  approvalStatus          String   @default("none")
+  approvalReviewedAt      DateTime?
+  /// 数える日（店のタイムゾーン、YYYY-MM-DD）。null は前からの行 = 登録した日（createdAt）で数える
+  countDate               String?
+  /// 「変更」で置き換えた前の行の id（前の行は voided にする）
+  replacesEventId         String?
+  /// どの返金の記録か: null = 今まで（アプリが返金した・記録だけ）| native = POS 純正の返金の付け替え（金額は純正の返金で決まる）
+  refundSource            String?
+  voidedAt                DateTime?
+  voidedBy                String?
+  /// 無効にしたわけ・直したわけ
+  voidReason              String?
+  /// 注文メタフィールド pos.adjustments に書けた時刻と、書けなかったときのエラー
+  metafieldSyncedAt       DateTime?
+  metafieldSyncError      String?
+  /// 承認・却下した管理画面の人（オンラインのセッションなら名前、なければ Shopify のユーザー ID「shopify_user:<ID>」）。取れないときは null。DB にだけ残す
+  approvalDecidedBy       String?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
   @@index([shopId, sourceOrderId])
   @@index([locationId, createdAt])
   @@index([eventType, createdAt])
+  @@index([shopId, approvalStatus])
+  @@index([shopId, sourceOrderId, refundSource])
+  @@index([shopId, locationId, countDate])
+}
+
+/// 返金の予約（T の決定 2026-11-23）: 純正で返金する前に「実際に返す手段」を決めておき、
+/// 予約のあとにできた最初の純正の返金に、付け替え（SpecialRefundEvent, refundSource=native）を自動で作る。
+/// docs/REFUND_RESERVATION.md
+model RefundReservation {
+  id               String    @id @default(cuid())
+  shopId           String
+  shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  /// 注文の id（数字だけ。POS・純正の返金の付け替えと同じ形）
+  sourceOrderId    String
+  sourceOrderName  String?
+  locationId       String
+  /// [{ actualRefundMethod, eventType, amount|null }]。最後の行は残り（amount null）
+  rowsJson         String
+  /// 返金する見込みの金額。純正の返金額がこれと同じときだけ自動で付け替える
+  expectedAmount   Decimal   @db.Decimal(12, 2)
+  note             String?
+  createdBy        String?
+  /// pending | applied | cancelled | expired | needs_review
+  status           String    @default("pending")
+  /// 予約した日（店のタイムゾーン、YYYY-MM-DD）。この日が終わると使わない（expired）
+  businessDate     String
+  /// 使った純正の返金（gid）と、作った付け替えの id
+  appliedRefundId  String?
+  appliedEventIds  String?
+  appliedAt        DateTime?
+  /// needs_review のわけ（店の人向けの文）
+  reviewReason     String?
+  cancelledAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([shopId, sourceOrderId, status])
 }
 
 // ========== 20.6 領収書テンプレート（MVP は 1 件のみ active） ==========
@@ -243,8 +301,10 @@ model ReceiptIssue {
   currency        String?
   templateId      String?
   templateVersion Int?
+  printSnapshotJson String? // 発行時の帳票設定と58/80mm HTML。再印字で現在設定・現行rendererを参照しない
   isReissue       Boolean  @default(false)
-  createdBy       String?
+  createdBy       String?  // 発行者の名前（発行した時点で「スタッフ名」に登録があれば）。POS からの自由入力は受けない
+  createdByStaffId String? // 発行者＝領収書を発行した人（POS でピン留め中のスタッフ、無ければログイン中のユーザー）の ID
   idempotencyKey  String?  @unique // クライアント生成UUID。同一キーは重複発行しない
   createdAt       DateTime @default(now())
 
@@ -426,4 +486,20 @@ model SalesChannelCacheDaily {
 
   @@unique([shopId, channelId, targetDate])
   @@index([shopId, targetDate])
+}
+
+// ========== レシートを印刷した記録（再印字の印のため） ==========
+// 領収書・販売レシート・ギフトレシートを POS が一度でも印刷を受け付けたか。
+// 精算・点検は Settlement.printedAt で見るのでここには入れない。金額・件数には使わない。
+model PrintRecord {
+  id             String   @id @default(cuid())
+  shopId         String
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  kind           String   // "receipt" | "sales" | "gift"
+  targetId       String   // 領収書は ReceiptIssue.id、販売・ギフトは注文の数字の id
+  printCount     Int      @default(1)
+  firstPrintedAt DateTime @default(now())
+  lastPrintedAt  DateTime @default(now())
+
+  @@unique([shopId, kind, targetId])
 }

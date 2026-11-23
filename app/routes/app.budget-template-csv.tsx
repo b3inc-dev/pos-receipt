@@ -54,14 +54,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (!templateMonth) {
     return Response.json(
-      { ok: false, error: "templateMonth が必要です" },
+      { ok: false, error: "対象月を選んでください" },
       { status: 400 }
     );
   }
   const dayCount = daysInMonthFromKey(templateMonth);
   if (dayCount <= 0) {
     return Response.json(
-      { ok: false, error: "templateMonth の形式が不正です（YYYY-MM）" },
+      { ok: false, error: "対象月が読めません。選び直してください" },
       { status: 400 }
     );
   }
@@ -108,7 +108,7 @@ export async function action({ request }: ActionFunctionArgs) {
       rows.push(
         [
           escapeCsvCell(locName),
-          escapeCsvCell(targetDate),
+          escapeCsvCell(targetDate.replace(/-/g, "/")),
           escapeCsvCell(amount),
         ].join(",")
       );

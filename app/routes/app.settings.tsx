@@ -1,640 +1,194 @@
 /**
- * /app/settings — 管理画面設定ページ
- * 要件書 §10: 管理画面
+ * /app/settings — 店舗（一覧）
  *
- * - プラン状態確認・アップグレード導線
- * - ロケーション別設定（印字方式・売上サマリー等。入店数報告は売上サマリー設定が正本）
- * - 領収書テンプレート設定リンク
+ * 1 店 1 行の一覧と「全店の決まり」。編集はそれぞれ別の画面で行う（Shop Point と同じ「要約の行＋編集」。T 11/23）。
+ * - 全店の決まり: /app/settings/defaults
+ * - 店ごとの編集: /app/settings/store/:id
+ * - 選んだ店をまとめて変更: /app/settings/bulk?ids=…
+ * 精算・売上サマリーが読む Location の列はそのまま（ここは読むだけ。あとから足された店に決まりを当てるときだけ書く）。
  */
-import { useMemo, useEffect, useRef, useState } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { isDevelopmentStore } from "../utils/devStore.server";
-import { useLoaderData, useFetcher, useRevalidator, useLocation, useNavigate } from "react-router";
-import {
-  Page,
-  Layout,
-  Card,
-  Text,
-  Badge,
-  Button,
-  BlockStack,
-  InlineStack,
-  Select,
-  Checkbox,
-  TextField,
-  Banner,
-  Divider,
-  Box,
-} from "@shopify/polaris";
+import { useMemo, useState } from "react";
+import type { LoaderFunctionArgs } from "react-router";
+import { useLoaderData, useLocation, useNavigate } from "react-router";
+import { Page } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { validateNonPosRefundAttributionLocations } from "../services/refundAggregation.server";
-import { planLabel, getFullAccess, isInhouseMode, PLAN_FEATURES } from "../utils/planFeatures.server";
+import { isDevelopmentStore } from "../utils/devStore.server";
+import { getFullAccess } from "../utils/planFeatures.server";
+import {
+  applyDefaultsToNewLocations,
+  currentDefaults,
+  getStoredDefaults,
+  loadStoreLocations,
+  lockedKeysForPlan,
+} from "../utils/locationDefaults.server";
+import { DEFAULTABLE_LABELS, DEFAULT_GROUPS, differingKeys, featureSummary, locationNumericId } from "../utils/locationDefaults";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
-
-const LOCATIONS_QUERY = `#graphql
-  query Locations {
-    locations(first: 50, includeLegacy: false) {
-      nodes { id name isActive }
-    }
-  }
-`;
+import { AdminBlock, AdminIntro, SecondaryLink, StateBadge, SummaryRows } from "../components/admin-ui";
+import { withSearch } from "../utils/withSearch";
+import { StoreBody } from "../components/StoreBody";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
-  // 「システム診断」の枠は開発ストアだけに出す（T さんの決定 2026-11-22。読めなければ出さない）
+  // 「システム診断」の入口は開発ストアだけに出す（T さんの決定 2026-11-22。読めなければ出さない）
   const isDevStore = await isDevelopmentStore(admin);
-
-  // Shopify ロケーション一覧取得
-  const locRes = await admin.graphql(LOCATIONS_QUERY);
-  const locJson = await locRes.json() as {
-    data?: {
-      locations?: {
-        nodes?: { id: string; name: string; isActive: boolean }[];
-      };
-    };
-  };
-  const shopifyLocations = (locJson.data?.locations?.nodes ?? []).filter((l) => l.isActive);
-
-  // DB ロケーション設定取得
-  const dbLocations = await prisma.location.findMany({ where: { shopId: shop.id } });
-  const dbMap = new Map(dbLocations.map((l) => [l.shopifyLocationGid, l]));
-
-  const locations = shopifyLocations.map((sl) => {
-    const db = dbMap.get(sl.id);
-    return {
-      id: sl.id,
-      name: sl.name,
-      displayName: db?.displayName ?? null,
-      shortName: db?.shortName ?? null,
-      sortOrder: db?.sortOrder ?? 0,
-      printMode: db?.printMode ?? "order_based",
-      salesSummaryEnabled: db?.salesSummaryEnabled ?? false,
-      settlementEnabled: db?.settlementEnabled ?? true,
-      receiptEnabled: db?.receiptEnabled ?? true,
-      specialRefundEnabled: db?.specialRefundEnabled ?? true,
-      voucherAdjustmentEnabled: db?.voucherAdjustmentEnabled ?? true,
-      inspectionReceiptEnabled: db?.inspectionReceiptEnabled ?? true,
-      includeInStoreTotals: (db as { includeInStoreTotals?: boolean } | undefined)?.includeInStoreTotals ?? true,
-      includeInOverallTotals: (db as { includeInOverallTotals?: boolean } | undefined)?.includeInOverallTotals ?? true,
-      visibleInSummaryDefault: (db as { visibleInSummaryDefault?: boolean } | undefined)?.visibleInSummaryDefault ?? true,
-      printerProfileId: (db as { printerProfileId?: string | null } | undefined)?.printerProfileId ?? null,
-      cloudprntEnabled: (db as { cloudprntEnabled?: boolean } | undefined)?.cloudprntEnabled ?? false,
-      summaryTargetGroup: (db as { summaryTargetGroup?: string | null } | undefined)?.summaryTargetGroup ?? null,
-      budgetTargetEnabled: (db as { budgetTargetEnabled?: boolean } | undefined)?.budgetTargetEnabled ?? false,
-      nonPosRefundAttributionEnabled:
-        (db as { nonPosRefundAttributionEnabled?: boolean } | undefined)?.nonPosRefundAttributionEnabled ??
-        false,
-    };
-  });
-  // sort_order で並べ替え（要件 §4.2.1）
-  locations.sort((a, b) => a.sortOrder - b.sortOrder);
-
   const fullAccess = await getFullAccess(admin, session);
+  const locked = lockedKeysForPlan(fullAccess, shop.planCode);
+  const stored = await getStoredDefaults(shop.id);
+  const locations = await applyDefaultsToNewLocations(shop.id, await loadStoreLocations(admin, shop.id), stored, locked);
+  const { defaults, saved } = currentDefaults(locations, stored);
   return {
-    shop: {
-      id: shop.id,
-      planCode: shop.planCode,
-      planLabel: fullAccess
-        ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
-        : planLabel(shop.planCode),
-    },
-    isInhouse: fullAccess,
-    locations,
-    proFeatures: PLAN_FEATURES.pro,
-    liteFeatures: PLAN_FEATURES.lite,
+    defaults,
+    saved,
     isDevStore,
+    locations: locations.map((loc) => ({
+      id: locationNumericId(loc.id),
+      name: loc.displayName || loc.name,
+      shopifyName: loc.name,
+      features: featureSummary(loc, "features"),
+      differing: differingKeys(loc, defaults).map((key) => ({ key, label: DEFAULTABLE_LABELS[key], on: loc[key] })),
+      nonPosRefund: loc.nonPosRefundAttributionEnabled,
+    })),
   };
 }
 
-/** 一括保存用。formData.locations に JSON 配列を渡す（要件 §4） */
-type LocationPayload = {
-  id: string;
-  name: string;
-  displayName?: string | null;
-  shortName?: string | null;
-  sortOrder?: number;
-  printMode?: string;
-  salesSummaryEnabled?: boolean;
-  settlementEnabled?: boolean;
-  receiptEnabled?: boolean;
-  specialRefundEnabled?: boolean;
-  voucherAdjustmentEnabled?: boolean;
-  inspectionReceiptEnabled?: boolean;
-  includeInStoreTotals?: boolean;
-  includeInOverallTotals?: boolean;
-  visibleInSummaryDefault?: boolean;
-  printerProfileId?: string | null;
-  cloudprntEnabled?: boolean;
-  summaryTargetGroup?: string | null;
-  budgetTargetEnabled?: boolean;
-  nonPosRefundAttributionEnabled?: boolean;
-};
+type Filter = "all" | "custom" | "same";
 
-export async function action({ request }: ActionFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
-  const shop = await resolveShop(session.shop, admin);
-
-  const formData = await request.formData();
-  const locationsJson = formData.get("locations");
-
-  if (typeof locationsJson === "string") {
-    try {
-      const locations = JSON.parse(locationsJson) as LocationPayload[];
-      const validationErr = validateNonPosRefundAttributionLocations(
-        locations.map((l) => ({
-          id: l.id,
-          nonPosRefundAttributionEnabled: l.nonPosRefundAttributionEnabled,
-        })),
-      );
-      if (validationErr) {
-        return Response.json({ ok: false, error: validationErr }, { status: 400 });
-      }
-      const nonPosTarget = locations.find((l) => l.nonPosRefundAttributionEnabled === true);
-      if (nonPosTarget?.id) {
-        await prisma.location.updateMany({
-          where: { shopId: shop.id, shopifyLocationGid: { not: nonPosTarget.id } },
-          data: { nonPosRefundAttributionEnabled: false },
-        });
-      }
-      for (const loc of locations) {
-        if (!loc?.id) continue;
-        await prisma.location.upsert({
-          where: { shopId_shopifyLocationGid: { shopId: shop.id, shopifyLocationGid: loc.id } },
-          update: {
-            displayName: loc.displayName ?? null,
-            shortName: loc.shortName ?? null,
-            sortOrder: loc.sortOrder ?? 0,
-            printMode: loc.printMode ?? "order_based",
-            salesSummaryEnabled: Boolean(loc.salesSummaryEnabled),
-            settlementEnabled: loc.settlementEnabled !== false,
-            receiptEnabled: loc.receiptEnabled !== false,
-            specialRefundEnabled: loc.specialRefundEnabled !== false,
-            voucherAdjustmentEnabled: loc.voucherAdjustmentEnabled !== false,
-            inspectionReceiptEnabled: loc.inspectionReceiptEnabled !== false,
-            includeInStoreTotals: loc.includeInStoreTotals !== false,
-            includeInOverallTotals: loc.includeInOverallTotals !== false,
-            visibleInSummaryDefault: loc.visibleInSummaryDefault !== false,
-            printerProfileId: loc.printerProfileId ?? null,
-            cloudprntEnabled: Boolean(loc.cloudprntEnabled),
-            summaryTargetGroup: loc.summaryTargetGroup ?? null,
-            budgetTargetEnabled: Boolean(loc.budgetTargetEnabled),
-            nonPosRefundAttributionEnabled: Boolean(loc.nonPosRefundAttributionEnabled),
-          },
-          create: {
-            shopId: shop.id,
-            shopifyLocationGid: loc.id,
-            name: loc.name ?? "",
-            displayName: loc.displayName ?? null,
-            shortName: loc.shortName ?? null,
-            sortOrder: loc.sortOrder ?? 0,
-            printMode: loc.printMode ?? "order_based",
-            salesSummaryEnabled: Boolean(loc.salesSummaryEnabled),
-            settlementEnabled: loc.settlementEnabled !== false,
-            receiptEnabled: loc.receiptEnabled !== false,
-            specialRefundEnabled: loc.specialRefundEnabled !== false,
-            voucherAdjustmentEnabled: loc.voucherAdjustmentEnabled !== false,
-            inspectionReceiptEnabled: loc.inspectionReceiptEnabled !== false,
-            includeInStoreTotals: loc.includeInStoreTotals !== false,
-            includeInOverallTotals: loc.includeInOverallTotals !== false,
-            visibleInSummaryDefault: loc.visibleInSummaryDefault !== false,
-            printerProfileId: loc.printerProfileId ?? null,
-            cloudprntEnabled: Boolean(loc.cloudprntEnabled),
-            summaryTargetGroup: loc.summaryTargetGroup ?? null,
-            budgetTargetEnabled: Boolean(loc.budgetTargetEnabled),
-            nonPosRefundAttributionEnabled: Boolean(loc.nonPosRefundAttributionEnabled),
-          },
-        });
-      }
-    } catch {
-      return Response.json({ ok: false, error: "Invalid locations data" }, { status: 400 });
-    }
-  }
-
-  return Response.json({ ok: true });
-}
-
-/** 設定用カードのスタイル（ADMIN_UI_DESIGN_RULES §7.1.2） */
-const SETTING_CARD_STYLE: React.CSSProperties = {
-  background: "#ffffff",
-  borderRadius: 12,
-  boxShadow: "0 0 0 1px #e1e3e5",
-  padding: 16,
-};
-
-export default function SettingsPage() {
-  const loaderData = useLoaderData<typeof loader>();
-  const { shop, isInhouse, locations: initialLocations, isDevStore } = loaderData;
-  const [locations, setLocations] = useState(initialLocations);
-  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
-  const revalidator = useRevalidator();
-  const location = useLocation();
+export default function StoresPage() {
+  const { defaults, saved, isDevStore, locations } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
-  const q = location.search || "";
-  const isPro = isInhouse || shop.planCode === "pro" || shop.planCode === "unlimited";
-  const to = (path: string) => () => navigate(path + q);
+  const q = useLocation().search || "";
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [selected, setSelected] = useState<string[]>([]);
 
-  const isDirty = useMemo(
-    () => JSON.stringify(locations) !== JSON.stringify(initialLocations),
-    [locations, initialLocations]
-  );
-  const saving = fetcher.state !== "idle";
-  const saveOk = fetcher.data?.ok === true;
-  const saveErr = fetcher.data?.ok === false ? fetcher.data.error : null;
-
-  useEffect(() => {
-    setLocations(loaderData.locations);
-  }, [loaderData.locations]);
-
-  const lastAppliedSaveRef = useRef<unknown>(null);
-  useEffect(() => {
-    const data = fetcher.data;
-    if (!data?.ok || lastAppliedSaveRef.current === data) return;
-    lastAppliedSaveRef.current = data;
-    revalidator.revalidate();
-  }, [fetcher.data, revalidator]);
-
-  const [showSavedFeedback, setShowSavedFeedback] = useState(false);
-  const lastShowSavedRef = useRef<unknown>(null);
-  useEffect(() => {
-    const data = fetcher.data;
-    if (!data?.ok || lastShowSavedRef.current === data) return;
-    lastShowSavedRef.current = data;
-    setShowSavedFeedback(true);
-    const t = setTimeout(() => setShowSavedFeedback(false), 3000);
-    return () => clearTimeout(t);
-  }, [fetcher.data]);
-
-  const handleLocationChange = (
-    locationId: string,
-    _locationName: string,
-    field: keyof (typeof locations)[0],
-    value: string | number | boolean | null
-  ) => {
-    setLocations((prev) =>
-      prev.map((loc) => {
-        if (loc.id !== locationId) {
-          if (field === "nonPosRefundAttributionEnabled" && value === true) {
-            return { ...loc, nonPosRefundAttributionEnabled: false };
-          }
-          return loc;
-        }
-        return { ...loc, [field]: value };
-      })
-    );
-  };
-
-  const handleSave = () => {
-    const fd = new FormData();
-    fd.set("locations", JSON.stringify(locations));
-    fetcher.submit(fd, { method: "post" });
-  };
-
-  const handleDiscard = () => {
-    setLocations(initialLocations);
-  };
-
-  const footerStatusText =
-    saving ? "保存中..." : isDirty ? "未保存の変更があります" : "";
-  const showFooter = isDirty || saving || showSavedFeedback;
+  const customCount = locations.filter((loc) => loc.differing.length > 0).length;
+  const shown = useMemo(() => {
+    const word = query.trim().toLowerCase();
+    return locations.filter((loc) => {
+      if (filter === "custom" && loc.differing.length === 0) return false;
+      if (filter === "same" && loc.differing.length > 0) return false;
+      if (!word) return true;
+      return loc.name.toLowerCase().includes(word) || loc.shopifyName.toLowerCase().includes(word);
+    });
+  }, [locations, query, filter]);
+  const allShownSelected = shown.length > 0 && shown.every((loc) => selected.includes(loc.id));
+  const toggle = (id: string) => setSelected((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]));
+  const toggleShown = () =>
+    setSelected((prev) => (allShownSelected ? prev.filter((id) => !shown.some((loc) => loc.id === id)) : [...new Set([...prev, ...shown.map((loc) => loc.id)])]));
+  const nonPos = locations.find((loc) => loc.nonPosRefund);
 
   return (
     <PolarisPageWrapper>
-    <Page
-      title="設定"
-      backAction={{ content: "ホーム", onAction: to("/app") }}
-    >
-      <Card padding="0">
+      <Page title="店舗" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
         <TabGroupBar tabs={STORE_TABS} />
-      </Card>
-      <Layout>
-        {saveErr && (
-          <Layout.Section>
-            <Banner tone="critical">保存エラー: {saveErr}</Banner>
-          </Layout.Section>
-        )}
-        {/* ── プラン状態 ── */}
-        <Layout.AnnotatedSection
-          title="プラン"
-          description="ご契約中のプランと利用できる機能を確認できます。プロプランでは売上サマリー・予算管理・入店数報告が利用可能です。"
+        <StoreBody>
+        <AdminIntro>
+          <p>全店の決まりを 1 つ決めると、どの店もその設定になります。違う店だけ、店ごとに変えられます。</p>
+        </AdminIntro>
+
+        <AdminBlock
+          title="全店の決まり"
+          description={saved ? "あとから Shopify に足した店も、この決まりで始まります。" : "まだ保存していません。今いちばん多い設定を出しています。"}
         >
-          <div style={SETTING_CARD_STYLE}>
-            <BlockStack gap="300">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text variant="headingMd" as="h2">現在のプラン</Text>
-                <Badge tone={isPro ? "success" : "info"}>
-                  {shop.planLabel}
-                </Badge>
-              </InlineStack>
+          <SummaryRows
+            rows={[
+              ...DEFAULT_GROUPS.map((group) => ({
+                key: group.key,
+                icon: group.key === "features" ? "apps" : "chart-vertical",
+                title: <>{group.title}{saved ? null : <StateBadge label="未設定" />}</>,
+                text: featureSummary(defaults, group.key),
+                to: withSearch("/app/settings/defaults", q),
+              })),
+              {
+                key: "non-pos-refund",
+                icon: "return",
+                title: "管理画面からの返金",
+                text: nonPos ? `${nonPos.name} の精算に入れます` : "どの店にも決めていません（精算設定の決まりに従います）",
+                to: nonPos ? withSearch(`/app/settings/store/${nonPos.id}`, q) : withSearch("/app/settlement-settings", q),
+                actionLabel: nonPos ? "編集" : "精算設定へ",
+              },
+            ]}
+          />
+        </AdminBlock>
 
-              {!isInhouse && !isPro && (
-                <Banner tone="info">
-                  <BlockStack gap="200">
-                    <Text as="p">
-                      プロプランにアップグレードすると売上サマリー・予算管理・入店数報告が利用できます。
-                    </Text>
-                    <Button onClick={to("/app/plan")} variant="primary">
-                      プロプランにアップグレード
-                    </Button>
-                  </BlockStack>
-                </Banner>
-              )}
-
-              {(isInhouse || isPro) && (
-                <Text tone="subdued" as="p">全機能が利用可能です。</Text>
-              )}
-
-              {!isInhouse && (
-                <Button onClick={to("/app/plan")} variant="plain">
-                  料金プラン
-                </Button>
-              )}
-            </BlockStack>
+        <AdminBlock
+          wide
+          title={`店舗の一覧（${locations.length} 店）`}
+          description={customCount > 0 ? `${customCount} 店が、全店の決まりと違う設定です。` : "どの店も全店の決まりと同じです。"}
+        >
+          <div className="Admin-filters" data-not-form-value>
+            <input
+              type="search"
+              className="Admin-input"
+              placeholder="店の名前で探す"
+              aria-label="店の名前で探す"
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+            />
+            <select className="Admin-select" aria-label="絞り込み" value={filter} onChange={(event) => setFilter(event.currentTarget.value as Filter)}>
+              <option value="all">すべての店</option>
+              <option value="custom">全店と違う店</option>
+              <option value="same">全店と同じ店</option>
+            </select>
           </div>
-        </Layout.AnnotatedSection>
 
-        {/* ── ロケーション設定（POS Stock 同様：設定用カードスタイル・固定フッターで保存） ── */}
-        <Layout.AnnotatedSection
-          title="ロケーション設定"
-          description="各店舗の印字方式と売上サマリー設定を管理します。売上サマリーはプロプランが必要です。入店数報告のON/OFFと対象店は「売上サマリー設定」でまとめて設定します。"
-        >
-          <div style={SETTING_CARD_STYLE}>
-            <BlockStack gap="400">
-              {isPro && (
-                <Banner tone="info">
-                  <Text as="p">
-                    入店数報告は、上部タブの「売上サマリー設定」内の「入店数報告」で制御します（ここでは設定しません）。
-                  </Text>
-                </Banner>
-              )}
-              {locations.length === 0 && (
-                <Text tone="subdued" as="p">ロケーションが見つかりません。</Text>
-              )}
+          <div className="Store-bulk" role="group" aria-label="まとめて変更">
+            <label className="Store-check">
+              <input type="checkbox" checked={allShownSelected} onChange={toggleShown} disabled={shown.length === 0} />
+              <span>表示中の店をすべて選ぶ</span>
+            </label>
+            <span className="Admin-note">{selected.length > 0 ? `${selected.length} 店を選択中` : "店を選ぶと、まとめて変更できます"}</span>
+            <button
+              type="button"
+              className="Admin-secondary Admin-button-sm"
+              disabled={selected.length === 0}
+              onClick={() => navigate(withSearch("/app/settings/bulk", q, { ids: selected.join(",") }))}
+            >
+              選んだ店をまとめて変更
+            </button>
+          </div>
 
-              {locations.map((loc, i) => (
-                <Box key={loc.id}>
-                  {i > 0 && <Divider />}
-                  <Box paddingBlockStart={i > 0 ? "400" : "0"}>
-                    <BlockStack gap="300">
-                      <Text variant="headingSm" as="h3">{loc.name}</Text>
-
-                      <InlineStack gap="300" blockAlign="start">
-                        <div style={{ flex: "1 1 200px" }}>
-                          <TextField
-                            label="表示名"
-                            value={loc.displayName ?? ""}
-                            onChange={(v) =>
-                              handleLocationChange(loc.id, loc.name, "displayName", v || null)
-                            }
-                            placeholder={loc.name}
-                            helpText="レシート・管理画面で使う名前（未入力はShopify名）"
-                            autoComplete="off"
-                          />
-                        </div>
-                        <div style={{ flex: "0 0 120px" }}>
-                          <TextField
-                            label="短縮名"
-                            value={loc.shortName ?? ""}
-                            onChange={(v) =>
-                              handleLocationChange(loc.id, loc.name, "shortName", v || null)
-                            }
-                            placeholder="例: 本店"
-                            autoComplete="off"
-                          />
-                        </div>
-                        <div style={{ flex: "0 0 80px" }}>
-                          <TextField
-                            label="並び順"
-                            type="number"
-                            value={String(loc.sortOrder)}
-                            onChange={(v) =>
-                              handleLocationChange(loc.id, loc.name, "sortOrder", parseInt(v, 10) || 0)
-                            }
-                            autoComplete="off"
-                          />
-                        </div>
-                      </InlineStack>
-
-                      <Select
-                        label="印字方式"
-                        options={[
-                          { label: "注文経由（CloudPRNT非対応）", value: "order_based" },
-                          { label: "CloudPRNT直印字", value: "cloudprnt_direct" },
-                        ]}
-                        value={loc.printMode}
-                        onChange={(v) => handleLocationChange(loc.id, loc.name, "printMode", v)}
-                      />
-
-                      <Text variant="bodySm" as="p" tone="subdued">機能有効（§4.2.2）</Text>
-                      <InlineStack gap="400" wrap>
-                        <Checkbox
-                          label="精算"
-                          checked={loc.settlementEnabled}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "settlementEnabled", v)
-                          }
-                        />
-                        <Checkbox
-                          label="領収書"
-                          checked={loc.receiptEnabled}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "receiptEnabled", v)
-                          }
-                        />
-                        <Checkbox
-                          label="特殊返金"
-                          checked={loc.specialRefundEnabled}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "specialRefundEnabled", v)
-                          }
-                        />
-                        <Checkbox
-                          label="商品券調整"
-                          checked={loc.voucherAdjustmentEnabled}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "voucherAdjustmentEnabled", v)
-                          }
-                        />
-                        <Checkbox
-                          label="点検レシート"
-                          checked={loc.inspectionReceiptEnabled}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "inspectionReceiptEnabled", v)
-                          }
-                        />
-                        <Checkbox
-                          label="売上サマリー"
-                          helpText="集計対象"
-                          checked={loc.salesSummaryEnabled}
-                          disabled={!isPro}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "salesSummaryEnabled", v)
-                          }
-                        />
-                      </InlineStack>
-
-                      <Text variant="bodySm" as="p" tone="subdued">返金の計上先</Text>
-                      <Checkbox
-                        label="POSロケーション以外の返金の計上先にする"
-                        helpText="管理画面返金など、返金にPOS店舗が付かない場合に、このロケーションの日次精算へ載せます。ショップ全体で1店舗のみ指定できます。"
-                        checked={loc.nonPosRefundAttributionEnabled ?? false}
-                        onChange={(v) =>
-                          handleLocationChange(loc.id, loc.name, "nonPosRefundAttributionEnabled", v)
-                        }
-                      />
-
-                      <Text variant="bodySm" as="p" tone="subdued">集計・表示対象（§4.2.3）</Text>
-                      <InlineStack gap="400" wrap>
-                        <Checkbox
-                          label="店舗合計に含める"
-                          checked={loc.includeInStoreTotals}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "includeInStoreTotals", v)
-                          }
-                        />
-                        <Checkbox
-                          label="全体合計に含める"
-                          checked={loc.includeInOverallTotals}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "includeInOverallTotals", v)
-                          }
-                        />
-                        <Checkbox
-                          label="サマリーでデフォルト表示"
-                          checked={loc.visibleInSummaryDefault}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "visibleInSummaryDefault", v)
-                          }
-                        />
-                      </InlineStack>
-
-                      <InlineStack gap="300" blockAlign="start">
-                        <TextField
-                          label="プリンタプロファイルID（§4.2.4）"
-                          value={loc.printerProfileId ?? ""}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "printerProfileId", v || null)
-                          }
-                          placeholder="任意"
-                          autoComplete="off"
-                        />
-                        <Checkbox
-                          label="CloudPRNT有効"
-                          checked={loc.cloudprntEnabled}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "cloudprntEnabled", v)
-                          }
-                        />
-                      </InlineStack>
-
-                      <Text variant="bodySm" as="p" tone="subdued">売上サマリー関連（§4.2.5）</Text>
-                      <InlineStack gap="400" wrap>
-                        <TextField
-                          label="サマリー対象グループ"
-                          value={loc.summaryTargetGroup ?? ""}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "summaryTargetGroup", v || null)
-                          }
-                          placeholder="任意"
-                          autoComplete="off"
-                        />
-                        <Checkbox
-                          label="予算対象"
-                          checked={loc.budgetTargetEnabled}
-                          onChange={(v) =>
-                            handleLocationChange(loc.id, loc.name, "budgetTargetEnabled", v)
-                          }
-                        />
-                      </InlineStack>
-                    </BlockStack>
-                  </Box>
-                </Box>
+          {shown.length === 0 ? (
+            <p className="Admin-note">{locations.length === 0 ? "Shopify に使っている店（ロケーション）がありません。" : "条件に合う店はありません。"}</p>
+          ) : (
+            <div data-summary-rows="true">
+              {shown.map((loc) => (
+                <div key={loc.id} className="Admin-sum-row">
+                  <input
+                    type="checkbox"
+                    className="Store-row-check"
+                    aria-label={`${loc.name} を選ぶ`}
+                    checked={selected.includes(loc.id)}
+                    onChange={() => toggle(loc.id)}
+                  />
+                  <div className="Admin-sum-body">
+                    <div className="Admin-sum-title">
+                      {loc.name}
+                      {loc.differing.length > 0 ? <StateBadge label={`全店と違う ${loc.differing.length} 項目`} tone="info" /> : <StateBadge label="全店と同じ" tone="success" />}
+                    </div>
+                    <div className="Admin-sum-text">
+                      使う機能: {loc.features}
+                      {loc.differing.length > 0 ? `　／　違う所: ${loc.differing.map((d) => `${d.label}（${d.on ? "する" : "しない"}）`).join("・")}` : ""}
+                    </div>
+                    {loc.shopifyName !== loc.name ? <div className="Admin-sum-text">Shopify の名前: {loc.shopifyName}</div> : null}
+                  </div>
+                  <SecondaryLink small to={withSearch(`/app/settings/store/${loc.id}`, q)}>編集</SecondaryLink>
+                </div>
               ))}
-            </BlockStack>
-          </div>
-        </Layout.AnnotatedSection>
+            </div>
+          )}
+        </AdminBlock>
 
-        {/* ── システム診断（開発ストアだけ） ── */}
-        {isDevStore && (
-        <Layout.AnnotatedSection
-          title="システム診断"
-          description="DB接続・テーブル件数・環境変数の設定状態を確認できます。"
-        >
-          <div style={SETTING_CARD_STYLE}>
-            <BlockStack gap="200">
-              <Text tone="subdued" as="p">
-                障害調査や本番環境の設定確認に利用してください。
-              </Text>
-              <Button onClick={to("/app/diagnostics")} variant="plain">診断ページを開く</Button>
-            </BlockStack>
-          </div>
-        </Layout.AnnotatedSection>
-        )}
-      </Layout>
-
-      {/* 固定フッター（POS Stock 同様：変更時のみ表示・破棄・保存） */}
-      {showFooter && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            background: "#fff",
-            borderTop: "1px solid #e1e3e5",
-            padding: "12px 24px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            boxShadow: "0 -2px 6px rgba(0,0,0,0.06)",
-            zIndex: 100,
-          }}
-        >
-          <span style={{ fontSize: 14, color: "#6d7175" }}>
-            {showSavedFeedback && !isDirty ? "保存しました" : saveErr ? `保存エラー: ${saveErr}` : footerStatusText}
-          </span>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button
-              type="button"
-              onClick={handleDiscard}
-              disabled={saving || (showSavedFeedback && !isDirty)}
-              style={{
-                padding: "8px 16px",
-                borderRadius: 6,
-                border: "1px solid #c9cccf",
-                background: "#fff",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: saving || (showSavedFeedback && !isDirty) ? "not-allowed" : "pointer",
-                color: "#202223",
-              }}
-            >
-              破棄
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving || (showSavedFeedback && !isDirty)}
-              style={{
-                padding: "8px 16px",
-                borderRadius: 6,
-                border: "none",
-                background: "#2c6ecb",
-                color: "#fff",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: saving || (showSavedFeedback && !isDirty) ? "not-allowed" : "pointer",
-              }}
-            >
-              {saving ? "保存中..." : "保存"}
-            </button>
-          </div>
-        </div>
-      )}
-    </Page>
+        {isDevStore ? (
+          <AdminBlock title="システム診断" description="開発ストアだけに出ています。DB の接続や件数を確かめます。">
+            <SecondaryLink to={withSearch("/app/diagnostics", q)}>診断を開く</SecondaryLink>
+          </AdminBlock>
+        ) : null}
+        </StoreBody>
+      </Page>
     </PolarisPageWrapper>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * 特殊返金・商品券調整タイル
+ * 返金タイル（返金方法変更）。商品券は「商品券釣銭登録」タイル（VoucherTile.jsx）に分けた（T の決定 2026-11-23）
  */
 import { render } from "preact";
 
@@ -10,8 +10,8 @@ export default async () => {
 function SpecialRefundTile() {
   return (
     <s-tile
-      heading="返金・商品券"
-      subheading="特殊返金・商品券調整"
+      heading="返金方法変更"
+      subheading="登録・履歴"
       onClick={() => shopify.action.presentModal()}
     />
   );

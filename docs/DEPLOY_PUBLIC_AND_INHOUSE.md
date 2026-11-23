@@ -129,6 +129,18 @@ npm run deploy:inhouse
 
 ---
 
+## 4.1 POS の拡張とサーバーの、出す順番（特殊返金の冪等キー）
+
+特殊返金の登録で POS が `idempotencyKey` を送るようになりました（#11）。**POS の拡張を先に、サーバーをあとに** 出します。
+
+1. POS の拡張を出す: `npm run deploy:public` と `npm run deploy:inhouse`（両方）。新しい拡張は古いサーバーでも動きます（増えた項目は無視されます）。ただし、前からある pending の登録の「Shopify 返金を確かめる」（`/api/special-refunds/:id/recheck`）はサーバーを出すまで使えません（お金は動かず、エラーが出るだけです）
+2. 店の POS がアプリを読み直したことを確かめる
+3. サーバーを出す（main へのマージ → Render）
+
+サーバーは移行期間のあいだ、キーの無い古い POS からの登録も受けます（`console.warn` に `idempotencyKey missing` と残ります）。このログが出なくなったら、キー無しを受ける扱いをやめる PR を別に出します（まだやめていません）。
+
+---
+
 ## 6. まとめ
 
 | やり方 | 公開アプリ | 自社用 |

@@ -10,8 +10,8 @@
 | Admin UI | Polaris + embedded app (`app/routes/app.*`) | |
 | API | `app/routes/api.*` | POS はセッショントークン認証（`posAuth.server`） |
 | DB | PostgreSQL + Prisma | `prisma/schema.prisma` |
-| POS Extension | UI Extension `api_version = "2026-01"` | `extensions/pos-smart-grid` |
-| Shopify Admin API | `ApiVersion.October25`（`app/shopify.server.ts`） | Webhook TOML は `2026-04` |
+| POS Extension | UI Extension `api_version = "2026-07"`（Printing API） | `extensions/pos-smart-grid` |
+| Shopify Admin API | `ApiVersion.April26`（`app/shopify.server.ts`。ロックの `@shopify/shopify-api` 12.3.0 に `April26 = '2026-04'` があることを確かめた） | Webhook TOML も `2026-04` |
 | ジョブ | pg-boss | `orders/updated` 経由の売上サマリー更新キュー |
 
 ## 2. コンポーネント境界
@@ -55,18 +55,15 @@ C. POS「精算」→ GET/POST preview（buildSettlementPreview）
       │  表示: SettlementModal プレビュー
       ▼
 D. POST /api/settlements/create
-      │  printMode = Location.printMode（body の printMode は決定に使わない）
-      │  冪等: shopId:locationId:targetDate:printMode（点検除く）
+      │  実行時 printMode = shopify_printing（保存済み Location.printMode は無視）
+      │  冪等: shopId:locationId:targetDate（旧 printMode 付きキーも検索。点検除く）
       │  ロック: SettlementOperationLock
-      ├─ order_based → Draft 精算/点検注文 → complete → note/metafields → fulfill
-      │                 Settlement 行に sourceOrderId 等を保存
-      └─ cloudprnt_direct → Settlement 保存 + printPayload テキスト（Shopify 精算注文なし）
+      │  Shopify SETTLEMENT / INSPECTION 注文は作らない
       ▼
 E. 印字
-      ├─ order_based: スタッフが POS 上で精算注文のレシートを印字（アプリはプリンタ API 未使用）
-      └─ cloudprnt_direct: プリンタが GET .../print-payload をポーリング（想定）。アプリ内に CloudPRNT 送信アダプタなし
+      └─ shopify.printing → GET /api/print/settlement/:id（保存済み表示内容・帳票版。用紙幅は機器）
       ▼
-F. POST /api/settlements/print → status=printed（DB マークのみ）
+F. POST /api/settlements/print → status=printed（API 受付の記録。紙面完了ではない）
 ```
 
 ### 各段階の整理
@@ -76,9 +73,9 @@ F. POST /api/settlements/print → status=printed（DB マークのみ）
 | 販売注文 | POS/Admin 操作 | Shopify 標準 | Shopify Order | POS / Admin |
 | 返金計上先 | Order + refund TX location + 設定 | `resolveRefundAggregationLocationGid` | `pos.refund_aggregation_location_gid` | 精算集計時に参照 |
 | 精算プレビュー | Orders + SpecialRefundEvent +（任意）Gift Cards API | `aggregateGasStyleForOrders` 等 | なし／サマリーキャッシュ | POS 精算 UI |
-| 精算確定 | プレビュー DTO | 永続化＋（任意）Shopify 同期 | `Settlement` / Shopify SETTLEMENT 注文 | Done 画面 |
-| 精算印字 | Settlement / 精算注文 | テキスト生成 or 人的 POS 印字 | `printedAt` | プリンタ／POS |
-| 領収書 | Order totalPriceSet | テンプレ合成 | `ReceiptIssue` | POS 完了画面（印字 API なし） |
+| 精算確定 | プレビュー DTO | 永続化のみ（Shopify 精算注文なし） | `Settlement` | Done 画面 |
+| 精算印字 | 保存済み Settlement（発行時の店名・金額・帳票版） | HTML + shopify.printing | `printedAt`（送信受付） | ペアリング済みプリンタ（用紙幅は機器設定） |
+| 領収書 | Order totalPriceSet | テンプレ合成 + Printing API | `ReceiptIssue` | POS 完了画面 |
 
 ## 4. 領収書フロー（ギフトレシートではない）
 
@@ -86,11 +83,12 @@ F. POST /api/settlements/print → status=printed（DB マークのみ）
 注文選択（検索 or 取引詳細）
   → preview（テンプレ + 宛名/但し書き + 金額）
   → issue（ReceiptIssue + idempotencyKey）
+  →（設定 ON 時）HTML `/api/print/receipt/:id` → shopify.printing
   → 履歴表示
 ```
 
-- Shopify Gift Receipt / Printing API への接続は **コード上なし**。
-- `receiptPrintMode` 設定キーは存在するが、issue/preview ルートでは未使用。
+- Shopify Gift Receipt 連携は未実装。領収書 HTML は `shopify.printing`。
+- 旧 `receiptPrintMode` は出力に使わない。
 
 ## 5. 特殊返金フロー（要約）
 
@@ -104,14 +102,20 @@ F. POST /api/settlements/print → status=printed（DB マークのみ）
 ## 6. モジュール配置
 
 ```
-app/services/settlementEngine.server.ts     … 集計の中核
-app/services/settlementOrderGas.server.ts   … SETTLEMENT/INSPECTION 注文
-app/services/settlementSyncSettings.server.ts … printMode × 設定で同期可否
+app/services/settlementEngine.server.ts     … 集計の中核（I/O）
+app/services/settlementAggregatePure.server.ts … 集計純関数
+app/services/settlementTaxPure.server.ts    … 税込逆算（印字・精算の主値）
+app/services/settlementOrderGas.server.ts   … 印字経路からは未使用（既存注文は削除しない）
+app/services/printUnification.server.ts     … 実行時 printMode 正規化・冪等キー
+app/services/settlementSyncSettings.server.ts … 常に createOrder: false
 app/services/settlementLock.server.ts       … 同時作成ロック
 app/services/refundAggregation.server.ts   … 返金ロケーション解決
 app/services/salesSummaryEngine.server.ts  … buildSettlementPreview 再利用
 app/services/salesChannelEngine.server.ts  … 非 POS チャネル集計
+app/services/printReceiptHtml.ts           … Printing 用 HTML
+extensions/common/printApi.js              … shopify.printing ラッパ
 app/routes/api.settlements.*               … 精算 API
+app/routes/api.print.*                     … Printing HTML
 app/routes/api.receipts.*                  … 領収書 API
 app/routes/api.special-refunds.*           … 特殊返金 API
 app/routes/webhooks.orders.updated.tsx     … キャッシュ・metafield
@@ -124,7 +128,7 @@ app/routes/webhooks.orders.updated.tsx     … キャッシュ・metafield
 | Shopify 拡張・アプリ設定 | `npm run deploy:public` / `deploy:inhouse`（APP_MODE 切替 + `shopify app deploy`） |
 | Backend | Render Build: `npm install && prisma generate && npm run build` / Pre-Deploy: migrate / Start: `npm run start` |
 | DB | Prisma migrate（`scripts/render-migrate.mjs` 等） |
-| GitHub → Render | docs 上は Auto-Deploy 言及あり。リポジトリ内 workflow はなし |
+| GitHub → Render | docs 上は Auto-Deploy 言及あり。CI: `.github/workflows/ci.yml`（test/build + toml↔APP_MODE 対応） |
 
 詳細: `docs/DEPLOY_PUBLIC_AND_INHOUSE.md`, `docs/RENDER_SETUP.md`
 
@@ -140,4 +144,4 @@ app/routes/webhooks.orders.updated.tsx     … キャッシュ・metafield
 
 - CloudPRNT 実機が payload URL をどう認証するか（アプリ側のプリンタ認証実装は見当たらない）
 - Render 以外の本番ホストの有無
-- Admin API バージョン（October25）と webhook TOML（2026-04）の運用上の意図的差分の公式根拠
+- POS 内から直接呼ぶ Admin GraphQL（`shopify:admin/api/graphql.json`）が答える Admin API の版（Admin SDK と Webhook は 2026-04 にそろえた）

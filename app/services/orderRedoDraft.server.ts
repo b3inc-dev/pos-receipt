@@ -136,13 +136,13 @@ export async function createRedoDraftFromOrder(
 ): Promise<CreateRedoDraftResult> {
   const gid = orderGid(sourceOrderId);
 
-  const res = await adminGraphqlWithRetry(admin, ORDER_DETAIL_QUERY, {
-    variables: { id: gid },
-  });
-  const json = (await res.json()) as {
+  // adminGraphqlWithRetry は JSON を読んだ結果を返す（Response ではない）
+  const json = await adminGraphqlWithRetry<{
     data?: { order?: Record<string, unknown> };
     errors?: { message?: string }[];
-  };
+  }>(admin, ORDER_DETAIL_QUERY, {
+    variables: { id: gid },
+  });
 
   if (json.errors?.length) {
     return { ok: false, error: json.errors.map((e) => e.message).join("; ") };
@@ -182,20 +182,7 @@ export async function createRedoDraftFromOrder(
 
   const sourceTag = orderName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
 
-  const draftRes = await adminGraphqlWithRetry(admin, DRAFT_ORDER_CREATE, {
-    variables: {
-      input: {
-        note: noteLines.join("\n").slice(0, 5000),
-        tags: ["pos-receipt-redo", `redo-from-${sourceTag}`],
-        ...(customer?.id ? { customerId: customer.id } : {}),
-        ...(customer?.email ? { email: customer.email } : {}),
-        lineItems,
-        useCustomerDefaultAddress: Boolean(customer?.id),
-      },
-    },
-  });
-
-  const draftJson = (await draftRes.json()) as {
+  type DraftCreateJson = {
     data?: {
       draftOrderCreate?: {
         draftOrder?: {
@@ -209,6 +196,18 @@ export async function createRedoDraftFromOrder(
     };
     errors?: { message?: string }[];
   };
+  const draftJson = await adminGraphqlWithRetry<DraftCreateJson>(admin, DRAFT_ORDER_CREATE, {
+    variables: {
+      input: {
+        note: noteLines.join("\n").slice(0, 5000),
+        tags: ["pos-receipt-redo", `redo-from-${sourceTag}`],
+        ...(customer?.id ? { customerId: customer.id } : {}),
+        ...(customer?.email ? { email: customer.email } : {}),
+        lineItems,
+        useCustomerDefaultAddress: Boolean(customer?.id),
+      },
+    },
+  });
 
   if (draftJson.errors?.length) {
     return { ok: false, error: draftJson.errors.map((e) => e.message).join("; ") };

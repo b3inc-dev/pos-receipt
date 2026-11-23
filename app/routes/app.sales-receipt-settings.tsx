@@ -2,8 +2,9 @@
  * /app/sales-receipt-settings — 販売レシート ON/OFF（注文まとめて／商品別属性）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
-import { SuccessToast, AdminIntro } from "../components/admin-ui";
+import { useActionData, useLoaderData, useSubmit, useLocation } from "react-router";
+import { SuccessToast, AdminIntro, useGuardedNavigate } from "../components/admin-ui";
+import { StateSaveForm } from "../components/StateSaveForm";
 import {
   Page,
   Layout,
@@ -77,7 +78,8 @@ export default function SalesReceiptSettingsPage() {
   const submit = useSubmit();
   const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
-  const navigate = useNavigate();
+  // 「←」とタブは、未保存の変更があれば Shopify の確認を出してから移る（UI ルール v1.1 7章）
+  const navigate = useGuardedNavigate();
   const q = location.search || "";
   const [form, setForm] = useState(initial);
 
@@ -100,78 +102,80 @@ export default function SalesReceiptSettingsPage() {
       <Page
         title="販売レシート設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
-        primaryAction={{ content: "保存", onAction: handleSave }}
       >
         <Card padding="0">
           <TabGroupBar tabs={RECEIPT_TABS} />
         </Card>
-        <Layout>
-          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
-          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
-          <Layout.Section>
-            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-            <AdminIntro><p>Lite プラン以上で利用できます。注文まとめて（order customAttributes）／商品別（line properties）の末尾印字を個別に ON/OFF できます。</p></AdminIntro>
-          </Layout.Section>
-          <Layout.AnnotatedSection title="有効化" description="POS の販売レシート印字">
-            <Card>
-              <BlockStack gap="400">
-                <Checkbox
-                  label="販売レシート印字を有効にする"
-                  checked={form.enabled}
-                  onChange={(v) => setForm((p) => ({ ...p, enabled: v }))}
-                />
-                <Select
-                  label="用紙幅"
-                  options={[
-                    { label: "80mm", value: "80" },
-                    { label: "58mm", value: "58" },
-                  ]}
-                  value={String(form.paperWidthMm)}
-                  onChange={(v) =>
-                    setForm((p) => ({ ...p, paperWidthMm: v === "58" ? 58 : 80 }))
-                  }
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-          <Layout.AnnotatedSection
-            title="属性末尾印字"
-            description="注文まとめて／商品別の ON/OFF"
-          >
-            <Card>
-              <BlockStack gap="400">
-                <Checkbox
-                  label="注文属性を末尾に印字（注文まとめて）"
-                  checked={form.printOrderAttributes}
-                  onChange={(v) => setForm((p) => ({ ...p, printOrderAttributes: v }))}
-                />
-                <Checkbox
-                  label="商品属性を各行末尾に印字（商品別）"
-                  checked={form.printLineAttributes}
-                  onChange={(v) => setForm((p) => ({ ...p, printLineAttributes: v }))}
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-          <Layout.AnnotatedSection title="ヘッダ・フッタ" description="印字文言">
-            <Card>
-              <BlockStack gap="400">
-                <TextField
-                  label="ヘッダタイトル"
-                  value={form.headerTitle}
-                  onChange={(v) => setForm((p) => ({ ...p, headerTitle: v }))}
-                  autoComplete="off"
-                />
-                <TextField
-                  label="フッタ文言"
-                  value={form.footerNote}
-                  onChange={(v) => setForm((p) => ({ ...p, footerNote: v }))}
-                  autoComplete="off"
-                />
-              </BlockStack>
-            </Card>
-          </Layout.AnnotatedSection>
-        </Layout>
+        {/* 保存は Shopify の保存の帯（値が保存したときと違うときだけ「破棄」「保存」）。画面の中に保存ボタンを置かない（UI ルール v1.1 7章） */}
+        <StateSaveForm values={form} onSave={handleSave} onDiscard={(saved) => setForm(saved)} result={actionData}>
+          <Layout>
+            {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+            <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
+            <Layout.Section>
+              {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+              <AdminIntro><p>Lite プラン以上で使えます。POS で入れた追加の項目を、注文ごとにレシートの最後へ、商品ごとに各商品の下へ印字するかを選べます。</p></AdminIntro>
+            </Layout.Section>
+            <Layout.AnnotatedSection title="有効化" description="POS の販売レシート印字">
+              <Card>
+                <BlockStack gap="400">
+                  <Checkbox
+                    label="販売レシート印字を有効にする"
+                    checked={form.enabled}
+                    onChange={(v) => setForm((p) => ({ ...p, enabled: v }))}
+                  />
+                  <Select
+                    label="用紙幅"
+                    options={[
+                      { label: "80mm", value: "80" },
+                      { label: "58mm", value: "58" },
+                    ]}
+                    value={String(form.paperWidthMm)}
+                    onChange={(v) =>
+                      setForm((p) => ({ ...p, paperWidthMm: v === "58" ? 58 : 80 }))
+                    }
+                  />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
+            <Layout.AnnotatedSection
+              title="POS で入れた追加の項目"
+              description="レシートに印字するかを、注文ごと・商品ごとに選びます"
+            >
+              <Card>
+                <BlockStack gap="400">
+                  <Checkbox
+                    label="注文ごとの追加の項目をレシートの最後に印字する"
+                    checked={form.printOrderAttributes}
+                    onChange={(v) => setForm((p) => ({ ...p, printOrderAttributes: v }))}
+                  />
+                  <Checkbox
+                    label="商品ごとの追加の項目を各商品の下に印字する"
+                    checked={form.printLineAttributes}
+                    onChange={(v) => setForm((p) => ({ ...p, printLineAttributes: v }))}
+                  />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
+            <Layout.AnnotatedSection title="ヘッダ・フッタ" description="印字文言">
+              <Card>
+                <BlockStack gap="400">
+                  <TextField
+                    label="ヘッダタイトル"
+                    value={form.headerTitle}
+                    onChange={(v) => setForm((p) => ({ ...p, headerTitle: v }))}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="フッタ文言"
+                    value={form.footerNote}
+                    onChange={(v) => setForm((p) => ({ ...p, footerNote: v }))}
+                    autoComplete="off"
+                  />
+                </BlockStack>
+              </Card>
+            </Layout.AnnotatedSection>
+          </Layout>
+        </StateSaveForm>
       </Page>
     </PolarisPageWrapper>
   );

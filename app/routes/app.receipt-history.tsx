@@ -13,7 +13,6 @@ import {
   Button,
   BlockStack,
   InlineStack,
-  IndexTable,
   EmptyState,
   TextField,
   Box,
@@ -23,6 +22,9 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
+import { DateFilter } from "../components/DateFilter";
+import { getAppSetting } from "../utils/appSettings.server";
+import { formatReceiptIssuer, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
 
 const PAGE_SIZE = 30;
 
@@ -53,7 +55,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : {}),
   };
 
-  const [total, items] = await Promise.all([
+  const [total, items, staffNameSetting] = await Promise.all([
     prisma.receiptIssue.count({ where: whereClean }),
     prisma.receiptIssue.findMany({
       where: whereClean,
@@ -72,10 +74,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
         templateVersion: true,
         isReissue: true,
         createdBy: true,
+        createdByStaffId: true,
         createdAt: true,
       },
     }),
+    getAppSetting(shop.id, STAFF_DISPLAY_NAMES_SETTING_KEY).catch(() => null),
   ]);
+  const staffNames = parseStaffNameMap(staffNameSetting);
 
   return {
     items: items.map((r) => ({
@@ -89,7 +94,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       currency: r.currency ?? "JPY",
       templateVersion: r.templateVersion,
       isReissue: r.isReissue,
-      createdBy: r.createdBy,
+      issuerLabel: formatReceiptIssuer(r.createdBy, r.createdByStaffId, staffNames),
       createdAt: r.createdAt.toISOString(),
     })),
     total,
@@ -129,8 +134,6 @@ export default function ReceiptHistoryPage() {
     setSearchParams(params);
   };
 
-  const resourceName = { singular: "領収書", plural: "領収書" };
-
   return (
     <PolarisPageWrapper>
       <Page
@@ -156,24 +159,9 @@ export default function ReceiptHistoryPage() {
                       autoComplete="off"
                     />
                   </Box>
-                  <Box minWidth="160px">
-                    <TextField
-                      label="開始日"
-                      type="date"
-                      value={dateFrom}
-                      onChange={(v) => handleFilter("dateFrom", v)}
-                      autoComplete="off"
-                    />
-                  </Box>
-                  <Box minWidth="160px">
-                    <TextField
-                      label="終了日"
-                      type="date"
-                      value={dateTo}
-                      onChange={(v) => handleFilter("dateTo", v)}
-                      autoComplete="off"
-                    />
-                  </Box>
+                  {/* 日付欄は共通の CSS（Admin-input）で枠からはみ出さないようにする（UI ルール v1.1 6章・13章） */}
+                  <DateFilter id="receipt-history-from" label="開始日" value={dateFrom} onChange={(v) => handleFilter("dateFrom", v)} />
+                  <DateFilter id="receipt-history-to" label="終了日" value={dateTo} onChange={(v) => handleFilter("dateTo", v)} />
                 </InlineStack>
               </BlockStack>
             </Card>
@@ -182,67 +170,66 @@ export default function ReceiptHistoryPage() {
           {/* テーブル */}
           <Layout.Section>
             <Card padding="0">
-              <IndexTable
-                resourceName={resourceName}
-                itemCount={items.length}
-                headings={[
-                  { title: "取引" },
-                  { title: "宛名" },
-                  { title: "但し書き" },
-                  { title: "金額" },
-                  { title: "種別" },
-                  { title: "担当" },
-                  { title: "発行日時" },
-                ]}
-                selectable={false}
-                emptyState={
-                  <EmptyState
-                    heading="領収書発行履歴がありません"
-                    image=""
-                  >
-                    <Text as="p" tone="subdued">
-                      POSの領収書タイルから領収書を発行すると、ここに履歴が表示されます。
-                    </Text>
-                  </EmptyState>
-                }
-              >
-                {items.map((item, idx) => (
-                  <IndexTable.Row id={item.id} key={item.id} position={idx}>
-                    <IndexTable.Cell>
-                      <Text as="span" variant="bodyMd" fontWeight="semibold">
-                        {item.orderName ?? item.orderId}
-                      </Text>
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>
-                      {item.recipientName ?? "—"}
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>
-                      <Text as="span" variant="bodySm" tone="subdued">
-                        {item.proviso ?? "—"}
-                      </Text>
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>{fmtYen(item.amount)}</IndexTable.Cell>
-                    <IndexTable.Cell>
-                      {item.isReissue
-                        ? <Badge tone="attention">再発行</Badge>
-                        : <Badge tone="success">新規発行</Badge>}
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>
-                      <Text as="span" variant="bodySm" tone="subdued">
-                        {item.createdBy ?? "—"}
-                      </Text>
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>
-                      <Text as="span" variant="bodySm" tone="subdued">
-                        {new Date(item.createdAt).toLocaleString("ja-JP", {
-                          year: "numeric", month: "2-digit", day: "2-digit",
-                          hour: "2-digit", minute: "2-digit",
-                        })}
-                      </Text>
-                    </IndexTable.Cell>
-                  </IndexTable.Row>
-                ))}
-              </IndexTable>
+              {items.length === 0 ? (
+                <EmptyState heading="領収書発行履歴がありません" image="">
+                  <Text as="p" tone="subdued">
+                    POSの領収書タイルから領収書を発行すると、ここに履歴が表示されます。
+                  </Text>
+                </EmptyState>
+              ) : (
+                // スマホでは横スクロールさせず 1 件 1 枚のカードにする（data-label が各行の見出し。UI ルール v1.1 8章）
+                <div className="History-scroll">
+                  <table className="History-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">取引</th>
+                        <th scope="col">宛名</th>
+                        <th scope="col">但し書き</th>
+                        <th scope="col" className="History-num">金額</th>
+                        <th scope="col">種別</th>
+                        <th scope="col">発行者</th>
+                        <th scope="col">発行日時</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item) => (
+                        <tr key={item.id}>
+                          <td data-label="取引" className="History-id">
+                            <Text as="span" variant="bodyMd" fontWeight="semibold">
+                              {item.orderName ?? item.orderId}
+                            </Text>
+                          </td>
+                          <td data-label="宛名" className="History-text">{item.recipientName ?? "—"}</td>
+                          <td data-label="但し書き" className="History-text">
+                            <Text as="span" variant="bodySm" tone="subdued">
+                              {item.proviso ?? "—"}
+                            </Text>
+                          </td>
+                          <td data-label="金額" className="History-num">{fmtYen(item.amount)}</td>
+                          <td data-label="種別" className="History-keep">
+                            {item.isReissue
+                              ? <Badge tone="attention">再発行</Badge>
+                              : <Badge tone="success">新規発行</Badge>}
+                          </td>
+                          <td data-label="発行者">
+                            <Text as="span" variant="bodySm" tone="subdued">
+                              {item.issuerLabel}
+                            </Text>
+                          </td>
+                          <td data-label="発行日時" className="History-keep">
+                            <Text as="span" variant="bodySm" tone="subdued">
+                              {new Date(item.createdAt).toLocaleString("ja-JP", {
+                                year: "numeric", month: "2-digit", day: "2-digit",
+                                hour: "2-digit", minute: "2-digit",
+                              })}
+                            </Text>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </Card>
           </Layout.Section>
 

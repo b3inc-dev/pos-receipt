@@ -12,13 +12,13 @@ import {
   corsPreflightResponse,
 } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import { SUPERSEDED_SETTLEMENT_STATUS } from "../services/settlementConfirmedPure.server";
+import { splitDailySettlementsAndInspections } from "../utils/settlementHistoryQuery";
+import { getShopCalendarToday } from "../utils/shopTimezone.server";
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function buildDaysInMonth(year: number, month: number): string[] {
-  const today = todayStr();
+// 「今日」は店のタイムゾーンの暦日（一般設定 → Shopify → Asia/Tokyo）。
+// 以前は UTC の日付だったため、日本時間 0:00〜8:59 は前日扱いになり、今日の行が出なかった（2026-11-23 実機）。
+function buildDaysInMonth(year: number, month: number, today: string): string[] {
   const lastDay = new Date(year, month, 0).getDate();
   const days: string[] = [];
   for (let d = 1; d <= lastDay; d++) {
@@ -33,7 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
-    const { shop, corsJson } = authResult;
+    const { admin, shop, corsJson } = authResult;
 
     const url = new URL(request.url);
     const locationId = url.searchParams.get("locationId");
@@ -53,7 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const locIdRaw = locationGid.replace("gid://shopify/Location/", "");
     const locationIds = [locationGid, locIdRaw];
 
-    const today = todayStr();
+    const today = await getShopCalendarToday(admin, shop.id);
     const ym = `${year}-${String(month).padStart(2, "0")}`;
     const dateFrom = `${ym}-01`;
     const lastDay = new Date(year, month, 0).getDate();
@@ -93,14 +93,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    // 日付別マップ（同日複数精算は最新を採用）
-    const settlementByDate = new Map<string, typeof settlements[number]>();
-    for (const s of settlements) {
-      const prev = settlementByDate.get(s.targetDate);
-      if (!prev || s.createdAt > prev.createdAt) {
-        settlementByDate.set(s.targetDate, s);
-      }
-    }
+    // 日付別マップ（同日複数精算は最新を採用。点検は精算の確定として扱わず、回数だけ返す）。
+    // 再確定で置き換わった前の確定値（superseded）はその日の精算として扱わない。
+    const { settlementByDate, inspectionsByDate } = splitDailySettlementsAndInspections(
+      settlements.filter((s) => s.status !== SUPERSEDED_SETTLEMENT_STATUS),
+    );
 
     const cacheByDate = new Map<string, number>();
     for (const c of cacheRows) {
@@ -110,11 +107,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     // 日別行を組み立て（新しい日付順）
-    const days = buildDaysInMonth(year, month);
+    const days = buildDaysInMonth(year, month, today);
     const rows = days
       .map((targetDate) => {
         const settlement = settlementByDate.get(targetDate) ?? null;
         const cached = cacheByDate.get(targetDate) ?? null;
+        const inspections = inspectionsByDate.get(targetDate) ?? null;
         // netSales優先順: 精算確定値 > キャッシュ > 0
         const netSales = settlement
           ? Number(settlement.netSales)
@@ -123,6 +121,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         return {
           targetDate,
           netSales,
+          inspectionCount: inspections?.count ?? 0,
+          lastInspectionAt: inspections?.lastAt.toISOString() ?? null,
           settlement: settlement
             ? {
                 id: settlement.id,
@@ -137,7 +137,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
                 status: settlement.status,
                 sourceOrderName: settlement.sourceOrderName,
                 createdAt: settlement.createdAt.toISOString(),
-                isInspection: settlement.periodLabel?.startsWith("点検_") ?? false,
+                isInspection: false,
               }
             : null,
         };

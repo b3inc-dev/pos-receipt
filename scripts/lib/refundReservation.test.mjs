@@ -1,0 +1,30 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+test("返金の予約: 行の読み方と文言", async () => {
+  const m = await import("../../extensions/common/refundReservation.js");
+  const ok = m.reservationRowsFromInput([{ amount: "1000", method: "cash" }, { amount: "", method: "gift" }]);
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.rows, [{ actualRefundMethod: "cash", amount: 1000 }, { actualRefundMethod: "gift", amount: null }]);
+  assert.equal(m.reservationRowsFromInput([{ amount: "", method: "" }]).ok, false);
+  assert.equal(m.reservationRowsFromInput([{ amount: "0", method: "cash" }, { method: "gift" }]).ok, false);
+  assert.equal(m.reservationRowText({ actualRefundLabel: "現金", amount: 1000 }), "現金 ¥1,000");
+  assert.equal(m.reservationRowText({ actualRefundLabel: "施設ポイント", amount: null }), "施設ポイント 残り");
+  for (const s of ["pending", "applied", "needs_review", "cancelled", "expired"]) assert.ok(m.reservationStatusLabel(s));
+});
+
+test("返金の予約: 返金する金額は要る・分けた額の合計より大きく", async () => {
+  const m = await import("../../extensions/common/refundReservation.js");
+  const rows = [{ actualRefundMethod: "cash", amount: 1000 }, { actualRefundMethod: "gift", amount: null }];
+  assert.equal(m.reservationExpectedAmountFromInput("2500", rows).ok, true);
+  assert.equal(m.reservationExpectedAmountFromInput("2500", rows).amount, 2500);
+  assert.equal(m.reservationExpectedAmountFromInput("", rows).ok, false);
+  assert.equal(m.reservationExpectedAmountFromInput("1000", rows).ok, false);
+});
+
+test("返金の予約: 分割しないときは金額が要らない", async () => {
+  const m = await import("../../extensions/common/refundReservation.js");
+  const one = [{ actualRefundMethod: "cash", amount: null }];
+  assert.deepEqual(m.reservationExpectedAmountFromInput("", one), { ok: true, error: "", amount: null });
+  assert.equal(m.reservationRowText({ actualRefundLabel: "現金", amount: null }, { only: true }), "現金 返金した額の全部");
+});

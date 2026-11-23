@@ -4,7 +4,8 @@
  * 設定項目は削らず再配置のみ。
  */
 import { Tabs } from "@shopify/polaris";
-import { useNavigate, useLocation } from "react-router";
+import { useLocation } from "react-router";
+import { useGuardedNavigate } from "./admin-ui";
 import { useMemo } from "react";
 
 export interface TabItem {
@@ -17,12 +18,14 @@ interface TabGroupBarProps {
 }
 
 export function TabGroupBar({ tabs }: TabGroupBarProps) {
-  const navigate = useNavigate();
+  // 未保存の変更があるときは、移る前に Shopify の確認を出す（UI ルール v1.1 7章）
+  const navigate = useGuardedNavigate();
   const location = useLocation();
   const search = location.search || "";
 
   const selected = useMemo(() => {
-    const idx = tabs.findIndex((t) => t.path === location.pathname);
+    // 下の階層（/app/receipt-layouts/sales など）でもそのタブを選択中にする
+    const idx = tabs.findIndex((t) => t.path === location.pathname || location.pathname.startsWith(`${t.path}/`));
     return idx >= 0 ? idx : 0;
   }, [tabs, location.pathname]);
 
@@ -38,6 +41,7 @@ export function TabGroupBar({ tabs }: TabGroupBarProps) {
 /** 1. レシート */
 export const RECEIPT_TABS: TabItem[] = [
   { path: "/app/sales-receipt-layout", label: "販売レイアウト" },
+  { path: "/app/receipt-layouts", label: "レイアウト編集" },
   { path: "/app/sales-receipt-settings", label: "販売レシート設定" },
   { path: "/app/receipt-template", label: "領収書テンプレート" },
   { path: "/app/receipt-print-layout", label: "領収書印字プレビュー" },
@@ -48,6 +52,7 @@ export const RECEIPT_TABS: TabItem[] = [
 /** 2. 精算 */
 export const SETTLEMENT_TABS: TabItem[] = [
   { path: "/app/settlement-settings", label: "精算設定" },
+  { path: "/app/settlement-calc-settings", label: "精算の数え方" },
   { path: "/app/settlement-print-layout", label: "精算印字プレビュー" },
   { path: "/app/settlement-history", label: "精算履歴" },
   { path: "/app/special-refund-settings", label: "特殊返金設定" },
@@ -57,8 +62,7 @@ export const SETTLEMENT_TABS: TabItem[] = [
 
 /** 3. 店舗 */
 export const STORE_TABS: TabItem[] = [
-  { path: "/app/settings", label: "ロケーション" },
-  { path: "/app/location-profiles", label: "設定軸・一括反映" },
+  { path: "/app/settings", label: "店舗" },
   { path: "/app/payment-methods", label: "支払方法マスタ" },
 ];
 
@@ -80,7 +84,7 @@ export function buildSystemTabs(memberCardEnabled: boolean): TabItem[] {
     { path: "/app/loyalty-settings", label: "ポイント/会員施策" },
   ];
   if (memberCardEnabled) {
-    tabs.push({ path: "/app/member-card-admin", label: "会員証（LIFF）" });
+    tabs.push({ path: "/app/member-card-admin", label: "会員証" });
   }
   return tabs;
 }

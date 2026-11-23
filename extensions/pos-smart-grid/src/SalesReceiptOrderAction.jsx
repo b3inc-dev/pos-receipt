@@ -26,5 +26,5 @@ function SalesReceiptOrderAction() {
     }
   };
 
-  return <s-button onClick={onClick}>販売レシートを印字</s-button>;
+  return <s-button onClick={onClick}>レシートを印刷する</s-button>;
 }

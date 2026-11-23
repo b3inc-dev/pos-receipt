@@ -10,6 +10,8 @@ import prisma from "../db.server";
 import { runSalesSummaryRefreshFromOrderWebhook } from "../services/salesSummaryWebhookRefresh.server";
 import { enqueueSalesSummaryOrdersUpdatedJob } from "../services/salesSummaryWebhookQueue.server";
 import { syncRefundAggregationFromWebhookPayload } from "../services/refundAggregation.server";
+import { backgroundRefreshNeedsRetry } from "../services/salesSummaryBackgroundSlice.server";
+import { runOrderAutoAdjustmentsFromWebhook } from "../services/orderAutoAdjustments.server";
 
 export const loader = async (_: LoaderFunctionArgs) => {
   return new Response("Method Not Allowed", { status: 405 });
@@ -51,14 +53,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const disabled = process.env.SALES_SUMMARY_WEBHOOK_REFRESH_DISABLED;
     if (disabled === "1" || disabled === "true") {
+      // 売上サマリーを止めていても、商品券・返金の予約の自動の調整は動かす
+      await runOrderAutoAdjustmentsFromWebhook(admin, dbShop.id, shop, payload);
       return new Response("OK", { status: 200 });
     }
 
+    // キューに積めたときは、自動の調整もキューの中で動く（salesSummaryWebhookQueue.server.ts）
     const queued = await enqueueSalesSummaryOrdersUpdatedJob(shop, payload);
     if (queued) {
       console.log(`[orders/updated][pos-receipt] sales-summary queued shop=${shop}`);
       return new Response("OK", { status: 200 });
     }
+
+    await runOrderAutoAdjustmentsFromWebhook(admin, dbShop.id, shop, payload);
 
     const { targetDates, errors } = await runSalesSummaryRefreshFromOrderWebhook(
       admin,
@@ -72,11 +79,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       console.warn(`[orders/updated][pos-receipt] refund aggregation metafield sync failed shop=${shop}`, e);
     }
 
-    if (errors.length > 0) {
+    if (backgroundRefreshNeedsRetry(errors)) {
       console.warn(
         `[orders/updated][pos-receipt] partial errors shop=${shop} dates=${targetDates.join(",")} count=${errors.length}`,
         errors.slice(0, 8),
       );
+      return new Response("Sales summary incomplete", { status: 500 });
     } else {
       console.log(
         `[orders/updated][pos-receipt] sales summary refreshed (sync) shop=${shop} dates=${targetDates.join(",")}`,

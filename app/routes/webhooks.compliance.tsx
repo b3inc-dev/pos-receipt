@@ -19,6 +19,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { redactReceiptIssuesForOrders } from "../services/receiptRedact.server";
 import {
   buildCustomerDataInventory,
   expandOrderIdVariants,
@@ -102,7 +103,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (topicStr === "customers/redact") {
       // 顧客データの削除要求。
-      // 指定注文 ID に紐づく領収書発行履歴の宛名を匿名化する。
+      // 指定注文 ID の領収書の宛名（列と発行時の紙面の両方）、特殊返金のメモ・わけ、返金の予約のメモを匿名化（data_request と対称）
       const body = payload as {
         shop_domain?: string;
         orders_to_redact?: number[];
@@ -113,10 +114,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (orderIds.length > 0) {
         const dbShop = await prisma.shop.findFirst({ where: { shopDomain } });
         if (dbShop) {
-          await prisma.receiptIssue.updateMany({
-            where: { shopId: dbShop.id, orderId: { in: orderIds } },
-            data: { recipientName: "[redacted]" },
-          });
+          await Promise.all([
+            // 宛名は列と、発行時の紙面（printSnapshotJson の HTML）の両方から消す（刷り直しで宛名が出ないように）
+            redactReceiptIssuesForOrders(prisma, dbShop.id, orderIds),
+            prisma.specialRefundEvent.updateMany({
+              where: { shopId: dbShop.id, sourceOrderId: { in: orderIds } },
+              data: { note: "[redacted]" },
+            }),
+            // 「変更」「無効化」のわけ（自由に書ける文）も消す。注文メタフィールド pos.adjustments には
+            // わけ・登録した人・メモを入れていない（DB だけ）ので、注文の値は書き直さなくてよい
+            prisma.specialRefundEvent.updateMany({
+              where: { shopId: dbShop.id, sourceOrderId: { in: orderIds }, voidReason: { not: null } },
+              data: { voidReason: "[redacted]" },
+            }),
+            // 返金の予約のメモ（自由に書ける文）も消す
+            prisma.refundReservation.updateMany({
+              where: { shopId: dbShop.id, sourceOrderId: { in: orderIds }, note: { not: null } },
+              data: { note: "[redacted]" },
+            }),
+          ]);
         }
       }
       return new Response(null, { status: 200 });
