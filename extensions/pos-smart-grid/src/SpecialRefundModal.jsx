@@ -1,18 +1,18 @@
 /**
- * 特殊返金・商品券調整モーダル
+ * 返金方法変更・商品券釣銭登録モーダル
  * 要件書 §7, §23.2
  *
  * Steps:
  *   day_list     → ロケーション・年月日＋その日の取引一覧（バッジ）
- *   order_detail → 取引サマリー＋イベント一覧＋固定フッターで特殊返金／商品券調整を選択
+ *   order_detail → 取引サマリー＋イベント一覧＋固定フッターで特殊返金／商品券釣銭登録を選択
  *   form_refund  → 特殊返金フォーム
- *   form_voucher → 商品券調整フォーム（額面だけ入れる。使った額は注文の取引から）
+ *   form_voucher → 商品券釣銭登録フォーム（額面だけ入れる。使った額は注文の取引から）
  *   form_edit    → 登録の「変更」（前の登録を無効にし、直した内容の登録を足す。Shopify の返金はしない）
  *
  * タイルごとに一覧の最初の絞り込みを変える: 「返金・商品券」タイルは返金・キャンセル、「商品券」タイルは商品券釣有り
  * （VoucherModal.jsx が initialListSegment="voucher_change" で開く）
  *
- * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券調整」→ form_voucher へ直行
+ * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券釣銭登録」→ form_voucher へ直行
  */
 import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
@@ -116,7 +116,7 @@ function tryDismissModal() {
   return false;
 }
 
-// 特殊返金の event_type 選択肢（voucher_change_adjustment は商品券調整フォームで別途扱う）
+// 特殊返金の event_type 選択肢（voucher_change_adjustment は商品券釣銭登録フォームで別途扱う）
 const FALLBACK_PAYMENT_METHODS = [
   { value: "cash", label: "現金" },
   { value: "manual", label: "手動決済" },
@@ -274,7 +274,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
   // 純正で返金した注文で「レシートの現金を直す」を選んだとき
   const [refundFormOther, setRefundFormOther] = useState(false);
 
-  // 取引詳細: 「特殊返金」または「商品券調整」から起動
+  // 取引詳細: 「特殊返金」または「商品券釣銭登録」から起動
   useEffect(() => {
     const vid = sessionStorage.getItem(STORAGE_KEY_VOUCHER);
     const rid = sessionStorage.getItem(STORAGE_KEY_REFUND);
@@ -1406,7 +1406,7 @@ function SpecialRefundForm({
 }
 
 // ──────────────────────────────────────────────
-// 商品券調整フォーム
+// 商品券釣銭登録フォーム
 // ──────────────────────────────────────────────
 function VoucherAdjustmentForm({
   order,

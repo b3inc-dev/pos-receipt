@@ -247,7 +247,7 @@ export type SpecialRefundProcessingMode = "record_only" | "shopify_execute";
 
 export interface SpecialRefundSettings {
   refundProcessingMode: SpecialRefundProcessingMode;
-  /** shopify_execute 時に API 返金する種別（商品券調整は常に記録のみ） */
+  /** shopify_execute 時に API 返金する種別（商品券釣銭登録は常に記録のみ） */
   shopifyExecuteCashRefund: boolean;
   shopifyExecutePaymentMethodOverride: boolean;
   shopifyExecuteReceiptCashAdjustment: boolean;
@@ -275,7 +275,7 @@ export interface SpecialRefundSettings {
    */
   requireApprovalForPaymentMethodOverride: boolean;
   /**
-   * 特殊返金・商品券調整を注文メタフィールド pos.adjustments に書く（初めはオフ）。
+   * 返金方法変更・商品券釣銭登録を注文メタフィールド pos.adjustments に書く（初めはオフ）。
    * オフのときは注文に書かず・読まず、精算は今までどおりアプリの記録（DB）で数える。
    * docs/ORDER_ADJUSTMENTS_METAFIELD.md
    */
@@ -310,7 +310,7 @@ export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
   requireApprovalForPaymentMethodOverride: false,
   writeOrderAdjustmentsMetafield: false,
   specialRefundUiLabel: "特殊返金",
-  voucherAdjustmentUiLabel: "商品券調整",
+  voucherAdjustmentUiLabel: "商品券釣銭登録",
   cashRefundUiLabel: "現金返金",
   paymentOverrideUiLabel: "返金方法変更",
 };

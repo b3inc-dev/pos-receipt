@@ -1,6 +1,6 @@
 /**
  * GET /api/admin/order-adjustments?orderId=… — 注文ページのブロック（extensions/order-adjustments-block）用。
- * その注文の特殊返金・商品券調整（アプリの記録から作った pos.adjustments の値）と、注文に書いてある値と同じかを返す。
+ * その注文の返金方法変更・商品券釣銭登録（アプリの記録から作った pos.adjustments の値）と、注文に書いてある値と同じかを返す。
  * 読むだけ。直すのはアプリの画面（/app/order-adjustments）で行う。
  * 形: docs/ORDER_ADJUSTMENTS_METAFIELD.md
  */

@@ -42,7 +42,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     locationId,
     locationName,
     targetDate,
-    // 調べるだけ。注文の特殊返金・商品券調整は書き直さない
+    // 調べるだけ。注文の返金方法変更・商品券釣銭登録は書き直さない
     { debug: true, resyncOrderAdjustments: false },
   );
 
@@ -86,7 +86,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // ── 支払セクション（GAS の paymentData 相当） ──────────────────
     paymentSections: paymentMap,
 
-    // ── 特殊返金・商品券調整（pos-receipt 独自） ───────────────────
+    // ── 返金方法変更・商品券釣銭登録（pos-receipt 独自） ───────────────────
     appliedSpecialRefundEvents: preview.appliedSpecialRefundEvents,
     appliedVoucherAdjustments: preview.appliedVoucherAdjustments,
 

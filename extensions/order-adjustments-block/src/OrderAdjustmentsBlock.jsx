@@ -1,5 +1,5 @@
 /**
- * 注文ページ（Shopify 管理画面）のブロック: この注文の特殊返金・商品券調整
+ * 注文ページ（Shopify 管理画面）のブロック: この注文の返金方法変更・商品券釣銭登録
  * - 記録はアプリが注文メタフィールド pos.adjustments に書く（docs/ORDER_ADJUSTMENTS_METAFIELD.md）
  * - ここは読むだけ。「変更」でアプリの注文ごとの記録の画面を開く（前の行は無効にして残す）
  */
@@ -89,14 +89,14 @@ function OrderAdjustmentsBlock() {
 
   if (state.loading) {
     return (
-      <s-admin-block heading="特殊返金・商品券調整">
+      <s-admin-block heading="返金方法変更・商品券釣銭登録">
         <s-text color="subdued">読み込み中…</s-text>
       </s-admin-block>
     );
   }
   if (state.error) {
     return (
-      <s-admin-block heading="特殊返金・商品券調整">
+      <s-admin-block heading="返金方法変更・商品券釣銭登録">
         <s-banner tone="critical">{state.error}</s-banner>
       </s-admin-block>
     );
@@ -108,7 +108,7 @@ function OrderAdjustmentsBlock() {
   const notice = STATE_NOTICES[state.data?.metafieldState];
 
   return (
-    <s-admin-block heading="特殊返金・商品券調整">
+    <s-admin-block heading="返金方法変更・商品券釣銭登録">
       <s-stack gap="base">
         {notice ? <s-banner tone="warning">{notice}</s-banner> : null}
         {shown.length === 0 ? (

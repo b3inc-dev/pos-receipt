@@ -25,7 +25,7 @@ export function normalizeApprovalStatus(v: unknown): SpecialRefundApprovalStatus
 /**
  * 承認が要る種別: 支払方法の付け替え（返金方法変更）と、現金への付け替え（現金返金）。
  * 純正の返金の返金方法変更（#106）・返金の予約（#108）は、返金方法が現金だと現金返金になるため、両方を対象にする
- * （T の決定 2026-11-23 16:02: 現金への付け替えも対象）。レシート現金調整・商品券調整は対象外。
+ * （T の決定 2026-11-23 16:02: 現金への付け替えも対象）。レシート現金調整・商品券釣銭登録は対象外。
  */
 export const APPROVAL_EVENT_TYPES: readonly string[] = ["payment_method_override", "cash_refund"];
 
