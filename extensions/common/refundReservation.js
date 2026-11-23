@@ -67,3 +67,31 @@ export function reservationRowText(row) {
   const label = row?.actualRefundLabel || row?.actualRefundMethod || "-";
   return row?.amount == null ? `${label} 残り` : `${label} ¥${money(row.amount).toLocaleString()}`;
 }
+
+/**
+ * 返品・交換が終わった画面に出す一行。予約が無い注文・前の日の予約だけの注文では何も出さない（null）。
+ * items は GET /api/refund-reservations の items（新しい順）
+ * @returns {{ tone: "success" | "warning" | "neutral", text: string } | null}
+ */
+export function postReturnMessage(items, now = Date.now()) {
+  const list = Array.isArray(items) ? items : [];
+  const recent = list.find((r) => {
+    const at = Date.parse(r?.appliedAt ?? r?.createdAt ?? "");
+    return Number.isFinite(at) && now - at <= 12 * 60 * 60 * 1000;
+  });
+  if (!recent) return null;
+  if (recent.status === "applied") {
+    const rows = (recent.rows ?? []).map((row) => reservationRowText(row)).join("・");
+    return { tone: "success", text: `返金の予約どおり返金方法を変更しました（${rows}）` };
+  }
+  if (recent.status === "needs_review") {
+    return { tone: "warning", text: recent.reviewReason || "返金の予約は自動では返金方法を変更していません。「返金方法変更」タイルで確かめてください" };
+  }
+  if (recent.status === "pending") {
+    return { tone: "neutral", text: "返金の予約はまだ使っていません。少したってから「返金方法変更」タイルで確かめてください" };
+  }
+  if (recent.status === "expired") {
+    return { tone: "warning", text: "返金の予約は期限が切れていたので使っていません。「返金方法変更」タイルから返金方法を変更してください" };
+  }
+  return null;
+}
