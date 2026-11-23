@@ -1,7 +1,7 @@
 /**
  * Order メタフィールド定義を Shopify に作成する。
  * - namespace `settlement`: 精算結果の書き込み（精算注文）用
- * - namespace `pos`: 特殊返金・商品券調整・返金集計ロケーション等の業務入力用（集計時参照）
+ * - namespace `pos`: 返金方法変更・商品券釣銭登録・返金集計ロケーション等の業務入力用（集計時参照）
  * metafieldDefinitionCreate — 既に存在するキーは userErrors をスキップ扱いにして冪等にする。
  */
 type AdminClient = {
@@ -154,15 +154,15 @@ export const SETTLEMENT_ORDER_METAFIELD_SPECS: SettlementMetafieldDefSpec[] = [
 /** namespace はすべて `pos`。値の書き込み・集計ロジックは別実装で pos.* と整合させる */
 export const POS_ORDER_BUSINESS_METAFIELD_SPECS: SettlementMetafieldDefSpec[] = [
   {
-    name: "POS 特殊返金・商品券調整",
+    name: "POS 返金方法変更・商品券釣銭登録",
     namespace: "pos",
     key: "adjustments",
     description:
-      "特殊返金と商品券調整の記録（JSON・行を足すだけ）。アプリが書く。直すときはアプリの「変更」から。仕様は docs/ORDER_ADJUSTMENTS_METAFIELD.md",
+      "返金方法変更と商品券釣銭登録の記録（JSON・行を足すだけ）。アプリが書く。直すときはアプリの「変更」から。仕様は docs/ORDER_ADJUSTMENTS_METAFIELD.md",
     type: "json",
   },
   {
-    name: "POS 特殊返金・商品券調整（一行）",
+    name: "POS 返金方法変更・商品券釣銭登録（一行）",
     namespace: "pos",
     key: "adjustments_summary",
     description: "pos.adjustments を人が読むための一行。表示用（数えるときは pos.adjustments を読む）",

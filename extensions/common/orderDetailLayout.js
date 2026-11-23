@@ -78,7 +78,10 @@ export function customerLabel(order) {
  */
 export function adjustmentBadges(event) {
   const out = [];
-  switch (event?.shopifyRefundStatus) {
+  // 純正の返金の付け替え: Shopify の返金は純正の返金（このアプリでは返金していない）
+  if (event?.refundSource === "native") {
+    out.push({ key: "refund", label: "純正返金", tone: "success" });
+  } else switch (event?.shopifyRefundStatus) {
     case "pending":
       out.push({ key: "refund", label: "返金処理中", tone: "critical" });
       break;
@@ -115,6 +118,16 @@ function shortDate(isoDate) {
   return m ? `${Number(m[2])}/${Number(m[3])}` : String(isoDate ?? "");
 }
 
+/** 元の手段と実際の手段が同じか（分割の残額の行など、手段が変わらない調整） */
+export function sameRefundMethod(event) {
+  const k = (v) => String(v ?? "").trim().toLowerCase();
+  const from = k(event?.originalPaymentMethod);
+  const to = k(event?.actualRefundMethod);
+  if (from && to && from === to) return true;
+  const fl = k(event?.originalPaymentLabel);
+  return fl !== "" && fl === k(event?.actualRefundLabel);
+}
+
 /**
  * 調整履歴の 1 件の灰色の小さい字の行（手段・内訳・いつの精算・登録日時）。
  * @param {Record<string, any>} event
@@ -129,7 +142,8 @@ export function adjustmentSubLines(event) {
   }
   const from = event?.originalPaymentMethod ? event.originalPaymentLabel || event.originalPaymentMethod : "";
   const to = event?.actualRefundMethod ? event.actualRefundLabel || event.actualRefundMethod : "";
-  if (from && to) lines.push(`${from} → ${to} で返金`);
+  if (from && to && sameRefundMethod(event)) lines.push(`${to}のまま（返金方法の変更なし）`);
+  else if (from && to) lines.push(`${from} → ${to} で返金`);
   else if (from) lines.push(`元の支払い ${from}`);
   else if (to) lines.push(`${to} で返金`);
   const when = [
@@ -139,4 +153,52 @@ export function adjustmentSubLines(event) {
   if (when.length) lines.push(when.join(" ・ "));
   if (event?.note) lines.push(`メモ ${event.note}`);
   return lines;
+}
+
+/** 調整履歴の種類の名前。返金の付け替え 2 種は、手段を変えても名前がずれないよう 1 つの名前にする */
+export function adjustmentKindLabel(event) {
+  switch (event?.eventType) {
+    case "cash_refund":
+    case "payment_method_override":
+      // 純正の返金の付け替えも同じ名前。違いはバッジ「純正返金の付け替え」で分かる
+      return "返金方法変更";
+    case "receipt_cash_adjustment":
+      return "レシート現金調整";
+    case "voucher_change_adjustment":
+      return "商品券釣銭登録";
+    default:
+      return String(event?.eventType ?? "");
+  }
+}
+
+/**
+ * 一番上の「返金 ・ 現金」の下に出す、付け替えの内訳（灰色の小さい字）。
+ * 上の行は Shopify の返金の取引のまま。精算・売上サマリーはこの付け替えのあとの手段で数える。
+ *   うち ¥500 はクレジットカードで返金（付け替え）
+ * @param {Record<string, any>[]} events
+ * @returns {{ key: string, text: string }[]}
+ */
+export function reassignmentSummaryLines(events) {
+  const byTo = new Map();
+  for (const e of events ?? []) {
+    if (e?.status && e.status !== "active") continue;
+    if (e?.eventType !== "cash_refund" && e?.eventType !== "payment_method_override") continue;
+    if (String(e?.approvalStatus ?? "") === "rejected") continue;
+    const from = String(e?.originalPaymentMethod ?? "").trim().toLowerCase();
+    const to = String(e?.actualRefundMethod ?? "").trim();
+    if (!to || to.toLowerCase() === from) continue;
+    const fromLabel = e.originalPaymentLabel || e.originalPaymentMethod || "";
+    const toLabel = e.actualRefundLabel || to;
+    const k = `${from}→${to.toLowerCase()}`;
+    const cur = byTo.get(k) ?? { fromLabel, toLabel, amount: 0, pending: false };
+    cur.amount = roundMoney(cur.amount + (Number(e.amount) || 0));
+    if (String(e?.approvalStatus ?? "") === "pending") cur.pending = true;
+    byTo.set(k, cur);
+  }
+  return [...byTo.entries()]
+    .filter(([, v]) => v.amount > 0)
+    .map(([k, v]) => ({
+      key: `reassign-${k}`,
+      text: `うち ${yen(v.amount)} は${v.toLabel}で返金（${v.fromLabel ? `${v.fromLabel}から` : ""}返金方法変更${v.pending ? "・承認待ち" : ""}）`,
+    }));
 }

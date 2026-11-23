@@ -1,5 +1,5 @@
 /**
- * /app/special-refund-history — 特殊返金・商品券調整 履歴
+ * /app/special-refund-history — 返金方法変更・商品券釣銭登録 履歴
  * 要件書 §19.3: 管理画面 - 特殊返金履歴一覧・取引別確認
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
@@ -37,16 +37,16 @@ const PAGE_SIZE = 30;
 const EVENT_TYPE_OPTIONS = [
   { label: "すべて", value: "" },
   { label: "現金返金", value: "cash_refund" },
-  { label: "返金手段変更", value: "payment_method_override" },
-  { label: "商品券調整", value: "voucher_change_adjustment" },
+  { label: "返金方法変更", value: "payment_method_override" },
+  { label: "商品券釣銭登録", value: "voucher_change_adjustment" },
   { label: "レシート現金調整", value: "receipt_cash_adjustment" },
 ];
 
 function eventTypeLabel(t: string) {
   const map: Record<string, string> = {
     cash_refund: "現金返金",
-    payment_method_override: "返金手段変更",
-    voucher_change_adjustment: "商品券調整",
+    payment_method_override: "返金方法変更",
+    voucher_change_adjustment: "商品券釣銭登録",
     receipt_cash_adjustment: "レシート現金調整",
   };
   return map[t] ?? t;
@@ -190,7 +190,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-/** 付け替え（返金手段変更・現金返金）の承認／却下（設定「管理者の承認」がオンのときに承認待ちになったもの）。Shopify には何も書かない */
+/** 付け替え（返金方法変更・現金返金）の承認／却下（設定「管理者の承認」がオンのときに承認待ちになったもの）。Shopify には何も書かない */
 export async function action({ request }: ActionFunctionArgs) {
   const auth = await authenticate.admin(request);
   const { admin, session } = auth;
@@ -263,7 +263,7 @@ export default function SpecialRefundHistoryPage() {
   return (
     <PolarisPageWrapper>
       <Page
-        title="特殊返金・商品券調整 履歴"
+        title="返金方法変更・商品券釣銭登録 履歴"
         backAction={{ content: "戻る", onAction: to("/app") }}
       >
         <Card padding="0">
@@ -294,7 +294,7 @@ export default function SpecialRefundHistoryPage() {
             if (pendingApprovalCount > 0 && approval !== "pending") {
               return (
                 <Layout.Section>
-                  <StatusBanner tone="info" heading={`承認待ちの付け替えが ${pendingApprovalCount} 件あります`}>
+                  <StatusBanner tone="info" heading={`承認待ちの返金方法変更が ${pendingApprovalCount} 件あります`}>
                     承認するまで精算・売上サマリーに入りません。「承認」で絞り込むと一覧で確かめられます。
                   </StatusBanner>
                 </Layout.Section>
@@ -357,7 +357,7 @@ export default function SpecialRefundHistoryPage() {
                   { title: "取引" },
                   { title: "種別" },
                   { title: "金額" },
-                  { title: "返金手段変更" },
+                  { title: "返金方法変更" },
                   { title: "備考" },
                   { title: "ステータス" },
                   { title: "Shopify返金" },

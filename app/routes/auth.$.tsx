@@ -6,7 +6,7 @@ import { ensureAllOrderMetafieldDefinitions } from "../services/settlementMetafi
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
-  // インストール直後: settlement.*（精算結果）と pos.*（特殊返金・商品券調整等）の Order メタ定義を自動作成（失敗しても OAuth は完了させる）
+  // インストール直後: settlement.*（精算結果）と pos.*（返金方法変更・商品券釣銭登録等）の Order メタ定義を自動作成（失敗しても OAuth は完了させる）
   try {
     await ensureAllOrderMetafieldDefinitions(admin);
   } catch (e) {

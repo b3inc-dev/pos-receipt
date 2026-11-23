@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import { financialStatusTone, orderPaymentSummaryLines } from "../../extensions/common/orderDetailLayout.js";
+import { describe, it, test } from "node:test";
+import { adjustmentKindLabel, adjustmentSubLines, financialStatusTone, orderPaymentSummaryLines, reassignmentSummaryLines } from "../../extensions/common/orderDetailLayout.js";
 
 describe("orderPaymentSummaryLines", () => {
   it("支払いと返金を支払方法ごとに出し、返金は赤のマイナス", () => {
@@ -73,7 +73,7 @@ describe("調整履歴の行", async () => {
         countDate: "2026-11-23",
         createdAtLabel: "11/23 18:21",
       }),
-      ["現金 → 現金 で返金", "11/23 の精算 ・ 登録 11/23 18:21"],
+      ["現金のまま（返金方法の変更なし）", "11/23 の精算 ・ 登録 11/23 18:21"],
     );
   });
   it("商品券は額面・払った額・お釣りを出す", () => {
@@ -85,4 +85,30 @@ describe("調整履歴の行", async () => {
     });
     assert.equal(lines[0], "額面 ¥1,000 ・ 商品券で払った額 ¥800 ・ お釣り ¥200");
   });
+});
+
+test("reassignmentSummaryLines: 付け替えた手段ごとの内訳（同じ手段・無効・却下は出さない）", () => {
+  const lines = reassignmentSummaryLines([
+    { status: "active", eventType: "cash_refund", amount: "500", originalPaymentMethod: "cash", originalPaymentLabel: "現金", actualRefundMethod: "credit", actualRefundLabel: "クレジットカード" },
+    { status: "active", eventType: "payment_method_override", amount: 100, originalPaymentMethod: "Cash", actualRefundMethod: "credit", actualRefundLabel: "クレジットカード", originalPaymentLabel: "現金", approvalStatus: "pending" },
+    { status: "active", eventType: "cash_refund", amount: 300, originalPaymentMethod: "cash", actualRefundMethod: "cash" },
+    { status: "voided", eventType: "cash_refund", amount: 900, originalPaymentMethod: "cash", actualRefundMethod: "wespo" },
+    { status: "active", eventType: "cash_refund", amount: 900, originalPaymentMethod: "cash", actualRefundMethod: "wespo", approvalStatus: "rejected" },
+    { status: "active", eventType: "receipt_cash_adjustment", amount: 50 },
+  ]);
+  assert.deepEqual(lines.map((l) => l.text), ["うち ¥600 はクレジットカードで返金（現金から返金方法変更・承認待ち）"]);
+});
+
+test("adjustmentKindLabel: 返金の付け替えは手段を変えても同じ名前", () => {
+  assert.equal(adjustmentKindLabel({ eventType: "cash_refund" }), "返金方法変更");
+  assert.equal(adjustmentKindLabel({ eventType: "payment_method_override" }), "返金方法変更");
+  assert.equal(adjustmentKindLabel({ eventType: "cash_refund", refundSource: "native" }), "返金方法変更");
+  assert.equal(adjustmentKindLabel({ eventType: "voucher_change_adjustment" }), "商品券釣銭登録");
+});
+
+test("adjustmentSubLines: 手段が変わらない行は「のまま（返金方法の変更なし）」", () => {
+  const lines = adjustmentSubLines({ eventType: "cash_refund", originalPaymentMethod: "cash", originalPaymentLabel: "現金", actualRefundMethod: "Cash", actualRefundLabel: "現金" });
+  assert.equal(lines[0], "現金のまま（返金方法の変更なし）");
+  const moved = adjustmentSubLines({ eventType: "payment_method_override", originalPaymentMethod: "cash", originalPaymentLabel: "現金", actualRefundMethod: "credit", actualRefundLabel: "クレジットカード" });
+  assert.equal(moved[0], "現金 → クレジットカード で返金");
 });

@@ -1,5 +1,5 @@
 /**
- * 特殊返金（③）と商品券調整（④）を注文に残すメタフィールド `pos.adjustments` の形と数え方（純関数）。
+ * 特殊返金（③）と商品券釣銭登録（④）を注文に残すメタフィールド `pos.adjustments` の形と数え方（純関数）。
  * 仕様の正本は docs/ORDER_ADJUSTMENTS_METAFIELD.md。ciara-system も同じ決まりで読む。
  *
  * - 注文 1 件に JSON 1 つ。行（entry）は消さない。直すときは前の行を "voided" にして、replaces 付きの行を足す。
@@ -78,6 +78,8 @@ export interface AdjustmentEventRow {
   shopifyRefundId?: string | null;
   approvalStatus?: string | null;
   countDate?: string | null;
+  /** native = POS 純正の返金の返金方法変更（金額は純正の返金で決まる） */
+  refundSource?: string | null;
   replacesEventId?: string | null;
   voidedAt?: Date | null;
   voidReason?: string | null;
@@ -478,7 +480,7 @@ export function groupAdjustmentRowsByOrder(rows: AdjustmentEventRow[]): Map<stri
 }
 
 /**
- * その日・その店で数える特殊返金・商品券調整を決める（T の決定 2026-11-23: 違うときはアプリの記録）。
+ * その日・その店で数える返金方法変更・商品券釣銭登録を決める（T の決定 2026-11-23: 違うときはアプリの記録）。
  * - 数えるのはいつもアプリの記録（DB）。書くのは pos-receipt だけなので、違うときは DB が新しいか、注文の値が外で書き換えられたか
  * - 比べるのは、注文に書く設定にしてから書いた注文だけ（isOrderWrittenSinceSwitch）。前からの登録はここでは書かない
  * - 注文の値が DB と違う・無い・読めない注文は needsResync に入れる（呼び出し側が注文を書き直し、書けなければ警告にする）
@@ -629,6 +631,7 @@ export type AdjustmentEditPlan =
         approvalStatus: string;
         countDate: string;
         replacesEventId: string;
+        refundSource: string | null;
       };
       /** Shopify で返金済みの行を直した（Shopify の返金は直していない） */
       shopifyRefundKept: boolean;
@@ -687,11 +690,21 @@ export function planAdjustmentEdit(
   } else if (!(amount > 0)) {
     return { ok: false, code: "INVALID_AMOUNT", message: "金額は 0 より大きくしてください。" };
   }
+  // 純正の返金の返金方法変更は金額を変えられない（返金額と合わなくなる）。手段・メモだけ直す
+  if (String(old.refundSource ?? "") === "native" && money(old.amount) !== amount) {
+    return {
+      ok: false,
+      code: "NATIVE_REFUND_AMOUNT_FIXED",
+      message: "純正の返金の返金方法変更は金額を変えられません。返金方法だけ直せます。分け方を変えるときは、無効にしてから登録し直してください。",
+    };
+  }
   const shopifyRefundKept = String(old.shopifyRefundStatus ?? "") === "success";
   const keepRefundRecord = shopifyRefundKept;
   const today = calendarDateInTimeZone(ctx.now, ctx.timeZone);
   // 商品券は注文の日で数える（T の決定 2026-11-23）ので「今日の分にする」は使わない
-  const countDate = input.dateMode === "today" && !isVoucher ? today : countDateOf(old, ctx.timeZone);
+  // 純正の返金の返金方法変更も、純正で返金した日のまま（その日の返金の行から移すため）
+  const isNative = String(old.refundSource ?? "") === "native";
+  const countDate = input.dateMode === "today" && !isVoucher && !isNative ? today : countDateOf(old, ctx.timeZone);
   const pick = <T,>(v: T | null | undefined, fallback: T | null): T | null => (v === undefined ? fallback : v);
   const create = {
     sourceOrderId: old.sourceOrderId,
@@ -716,9 +729,12 @@ export function planAdjustmentEdit(
     approvalStatus: ctx.approvalStatusForNew,
     countDate,
     replacesEventId: old.id,
+    refundSource: old.refundSource ?? null,
   };
   let warning: string | null = null;
-  if (shopifyRefundKept && money(old.amount) !== amount) {
+  if (String(old.refundSource ?? "") === "native") {
+    warning = "純正の返金はそのままです。返金方法だけを直しました。";
+  } else if (shopifyRefundKept && money(old.amount) !== amount) {
     warning =
       "Shopify の返金の金額は変わりません。金額を直した分は、Shopify の管理画面で返金を直してください（アプリの記録は直しました）。";
   } else if (shopifyRefundKept) {

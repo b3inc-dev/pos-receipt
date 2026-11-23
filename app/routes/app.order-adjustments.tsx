@@ -1,5 +1,5 @@
 /**
- * /app/order-adjustments?orderId=… — 1 件の注文の特殊返金・商品券調整（③④）を見て、「変更」「無効化」「書き直す」
+ * /app/order-adjustments?orderId=… — 1 件の注文の返金方法変更・商品券釣銭登録（③④）を見て、「変更」「無効化」「書き直す」
  * 特殊返金履歴の行の「変更」と、Shopify の注文ページのブロック（order-adjustments-block）の「変更」から開く。
  * 記録は注文メタフィールド pos.adjustments（docs/ORDER_ADJUSTMENTS_METAFIELD.md）。直すと前の行は無効にして残す。
  */
@@ -35,7 +35,7 @@ import { normalizeApprovalStatus } from "../utils/specialRefundApproval";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   cash_refund: "現金返金",
-  payment_method_override: "返金手段の付け替え",
+  payment_method_override: "返金方法変更",
   voucher_change_adjustment: "商品券",
   receipt_cash_adjustment: "レシート現金調整",
 };
@@ -220,7 +220,7 @@ function EditPanel({ item, refundMethods, busy, onCancel }: {
             />
           )}
           {needsMethod ? (
-            <s-select label="実際の返金手段" name="actualRefundMethod" value={item.actualRefundMethod ?? ""}>
+            <s-select label="返金方法" name="actualRefundMethod" value={item.actualRefundMethod ?? ""}>
               {refundMethods.map((m) => (
                 <s-option key={m.value} value={m.value}>{m.label}</s-option>
               ))}
@@ -239,7 +239,7 @@ function EditPanel({ item, refundMethods, busy, onCancel }: {
               <s-choice value="today">今日の分にする</s-choice>
             </s-choice-list>
           )}
-          <s-text-field label="直したわけ" name="reason" required placeholder="例: 返金手段の選び間違い" />
+          <s-text-field label="直したわけ" name="reason" required placeholder="例: 返金方法の選び間違い" />
           {item.shopifyRefundStatus === "success" ? (
             <Text as="p" variant="bodySm" tone="caution">
               この登録は Shopify でも返金済みです。Shopify の返金は直りません（アプリの記録だけを直します）。
@@ -268,7 +268,7 @@ export default function OrderAdjustmentsPage() {
   if (!data.ok) {
     return (
       <PolarisPageWrapper>
-        <Page title="特殊返金・商品券調整" backAction={{ content: "特殊返金履歴", onAction: back }}>
+        <Page title="返金方法変更・商品券釣銭登録" backAction={{ content: "特殊返金履歴", onAction: back }}>
           <StatusBanner tone="critical" heading="注文を開けませんでした">{data.message}</StatusBanner>
         </Page>
       </PolarisPageWrapper>
@@ -316,7 +316,7 @@ export default function OrderAdjustmentsPage() {
   return (
     <PolarisPageWrapper>
       <Page
-        title={`${data.orderName} の特殊返金・商品券調整`}
+        title={`${data.orderName} の返金方法変更・商品券釣銭登録`}
         backAction={{ content: "特殊返金履歴", onAction: back }}
       >
         <SuccessToast message={actionData?.ok ? actionData.message : null} trigger={actionData} />

@@ -1,5 +1,5 @@
 /**
- * 特殊返金・商品券調整の「変更」と「無効化」（POS・管理画面・注文ページで同じ処理を使う）。
+ * 返金方法変更・商品券釣銭登録の「変更」と「無効化」（POS・管理画面・注文ページで同じ処理を使う）。
  * - 変更: 前の行を無効（voided）にして、replaces 付きの新しい行を足す。Shopify の返金はしない。
  * - どちらも、書いたあとに注文メタフィールド pos.adjustments を書き直し、数える日の売上サマリーを計算し直す。
  * 決まりの中身は orderAdjustmentsPure.server.ts の planAdjustmentEdit。
@@ -215,7 +215,9 @@ export async function voidAdjustmentEvent(
   const confirmed = await isSettlementConfirmedFor(shopId, existing.locationId, date);
 
   let warning: string;
-  if (existing.shopifyRefundStatus === "success") {
+  if (existing.refundSource === "native") {
+    warning = "返金方法変更を無効にしました。純正の返金はそのままで、元の支払方法の返金に戻ります。必要なら、もう一度返金方法を変更してください。";
+  } else if (existing.shopifyRefundStatus === "success") {
     warning =
       "Shopify 上の返金は自動では取り消されません。必要な場合は Shopify 管理画面で手動対応してください。直すときは「変更」を使うと、Shopify の返金を引き継いだまま記録だけ直せます。";
   } else if (existing.shopifyRefundStatus === "failed") {

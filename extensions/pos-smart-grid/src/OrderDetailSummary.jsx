@@ -18,7 +18,7 @@
  * 見せ方だけで、数え方・登録の動きは変えない。
  */
 import { fmtYen } from "./orderDisplayUtils.js";
-import { customerLabel, orderPaymentSummaryLines } from "../../common/orderDetailLayout.js";
+import { customerLabel, orderPaymentSummaryLines, reassignmentSummaryLines } from "../../common/orderDetailLayout.js";
 
 /** 灰色の小さい見出し（商品・金額の内訳・取引情報） */
 function Heading({ children }) {
@@ -88,9 +88,9 @@ function LineItem({ li }) {
 }
 
 /**
- * @param {{ order: Record<string, unknown> | null }} props
+ * @param {{ order: Record<string, unknown> | null, events?: Record<string, any>[] }} props
  */
-export function OrderDetailSummary({ order }) {
+export function OrderDetailSummary({ order, events = [] }) {
   if (!order) {
     return <s-text color="subdued">取引情報を読み込めませんでした。</s-text>;
   }
@@ -98,6 +98,8 @@ export function OrderDetailSummary({ order }) {
   const lineItems = order.lineItems ?? [];
   const taxesIncluded = Boolean(order.taxesIncluded);
   const moneyLines = orderPaymentSummaryLines(order);
+  // 上の「返金」は Shopify の返金の取引のまま。精算は付け替えのあとの手段で数えるので、その内訳を添える
+  const reassignLines = reassignmentSummaryLines(events);
   const discount = Number(order.totalDiscounts?.amount || 0);
 
   return (
@@ -113,11 +115,16 @@ export function OrderDetailSummary({ order }) {
             ) : (
               <s-text type="small" color="subdued">支払いの記録を読めませんでした。</s-text>
             )}
+            {reassignLines.map((l) => (
+              <s-text key={l.key} type="small" color="subdued">
+                {l.text}
+              </s-text>
+            ))}
           </s-box>
           {order.estimatedVoucherChange ? (
             <s-text type="small" color="subdued">商品券釣有りの可能性があります</s-text>
           ) : (order.transactions ?? []).length > 0 ? (
-            <s-text type="small" color="subdued">商品券釣有りの支払いが無いため、商品券釣銭調整はできません</s-text>
+            <s-text type="small" color="subdued">商品券釣有りの支払いが無いため、商品券釣銭の登録はできません</s-text>
           ) : null}
         </s-stack>
       </s-section>

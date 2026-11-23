@@ -1080,7 +1080,7 @@ function PreviewView({
                 </s-box>
               ) : null}
 
-              {/* 適用済み特殊返金・商品券調整 */}
+              {/* 適用済み返金方法変更・商品券釣銭登録 */}
               {eventRows.length > 0 ? (
                 <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
                   <s-stack gap="none">
@@ -1103,7 +1103,7 @@ function PreviewView({
               {preview.awaitingApprovalSpecialRefunds?.length ? (
                 <s-text tone="caution">
                   {preview.awaitingApprovalWarning ??
-                    `管理者の承認待ちの付け替えが ${preview.awaitingApprovalSpecialRefunds.length} 件あります。承認されるまで上の金額に入っていません。`}
+                    `管理者の承認待ちの返金方法変更が ${preview.awaitingApprovalSpecialRefunds.length} 件あります。承認されるまで上の金額に入っていません。`}
                 </s-text>
               ) : null}
               {preview.pendingSpecialRefundOrderLabels?.length ? (

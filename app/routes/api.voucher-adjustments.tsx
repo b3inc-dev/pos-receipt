@@ -1,7 +1,7 @@
 /**
  * GET  /api/voucher-adjustments?sourceOrderId=...  → その注文で商品券で払った額（使った額）
  * POST /api/voucher-adjustments
- * 要件書 21.4: 商品券調整イベント登録（eventType = voucher_change_adjustment）
+ * 要件書 21.4: 商品券釣銭登録イベント登録（eventType = voucher_change_adjustment）
  *
  * 額面（voucherFaceValue）だけ送ればよい。使った額は注文の取引から出し、お釣り = 額面 − 使った額。
  * 使った額を送ったときはそれを使う（取引が読めないときの手入力・前の POS 拡張）。
@@ -150,7 +150,7 @@ export async function action({ request }: ActionFunctionArgs) {
         settlementAlreadyConfirmed,
         shopifyRefund: {
           status: "skipped",
-          reason: "商品券調整は記録のみ（Shopify自動返金なし）",
+          reason: "商品券釣銭登録は記録のみ（Shopify自動返金なし）",
         },
       },
       { status: 201 }

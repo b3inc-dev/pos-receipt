@@ -214,6 +214,8 @@ model SpecialRefundEvent {
   countDate               String?
   /// 「変更」で置き換えた前の行の id（前の行は voided にする）
   replacesEventId         String?
+  /// どの返金の記録か: null = 今まで（アプリが返金した・記録だけ）| native = POS 純正の返金の付け替え（金額は純正の返金で決まる）
+  refundSource            String?
   voidedAt                DateTime?
   voidedBy                String?
   /// 無効にしたわけ・直したわけ
@@ -230,6 +232,7 @@ model SpecialRefundEvent {
   @@index([locationId, createdAt])
   @@index([eventType, createdAt])
   @@index([shopId, approvalStatus])
+  @@index([shopId, sourceOrderId, refundSource])
   @@index([shopId, locationId, countDate])
 }
 
