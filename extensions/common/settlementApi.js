@@ -54,10 +54,10 @@ export async function previewSettlement({ locationId, locationName, targetDate }
 }
 
 /** 精算実行・保存 */
-export async function createSettlement({ locationId, locationName, targetDate, printMode, isInspection = false }) {
+export async function createSettlement({ locationId, locationName, targetDate, printMode, isInspection = false, reconfirm = false }) {
   return apiFetch("/api/settlements/create", {
     method: "POST",
-    body: JSON.stringify({ locationId, locationName, targetDate, printMode, isInspection }),
+    body: JSON.stringify({ locationId, locationName, targetDate, printMode, isInspection, ...(reconfirm ? { reconfirm: true } : {}) }),
   });
 }
 

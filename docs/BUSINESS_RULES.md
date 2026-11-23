@@ -225,12 +225,13 @@ order_based の Shopify 注文ノート／metafields は `settlementOrderGas` �
 
 | 操作 | ルール |
 |------|--------|
-| 精算 create | `idempotencyKey = shopId:locationId:targetDate:printMode`。既存なら新規 Settlement を作らず返す。order_based 時は Shopify 再同期しうる |
-| 点検 | 冪等キー対象外 |
+| 精算 create | `idempotencyKey = shopId:locationId:targetDate:printMode`。既存なら新規 Settlement を作らず、**集計し直さずに DB の確定値を返す**（応答 `confirmed: true`）。Shopify の精算注文・売上サマリーのキャッシュは書き換えない（D21） |
+| 精算 再確定 | create に `reconfirm: true`。集計し直し、数が同じなら何も変えない（`reconfirmed: false`）。変わっていれば新しい行を確定値にし、前の行は `superseded`（履歴に「再確定前」）。order_based は精算注文も直す。POS は「更新」で数が変わったと分かった日に「今の数で再確定する」を出す（D21） |
+| 点検 | 冪等キー対象外。発行ごとにその時点の金額と支払方法別内訳を保存する。返金処理中の特殊返金があっても警告つきで出す（D21）。月別一覧ではその日の精算として扱わない |
 | 同時実行 | `SettlementOperationLock` |
 | 領収書 | クライアント UUID `idempotencyKey` |
 | 特殊返金 | POS が `idempotencyKey` を送る → 登録の ID は `pos_sr_<キー>`、Shopify の `refundCreate @idempotent` にも同じ ID。**移行期間はキー無しも受ける**（古い POS の拡張。`console.warn` を残し、main と同じく登録ごとに新しい ID を作り、その ID を Shopify の冪等キーに使う）。不正な形のキーは 400。出す順番は `DEPLOY_PUBLIC_AND_INHOUSE.md` §4.1 |
-| 精算 recalculate | プレビュー再計算＋任意の Shopify 同期。履歴行の金額を常に書き換えるわけではない（API 実装参照） |
+| 精算 recalculate | 確定前の日: プレビュー再計算＋任意の Shopify 同期（従来どおり）。**確定済みの日**（点検以外の Settlement が `completed` / `printed`）: `preview` は DB の確定値（`confirmed: true`）。比べるために 1 回集計し、違えば `changedSinceConfirm: true`・`changedFields`・`livePreview` を返す。Shopify の精算注文と Settlement 行は書き換えない（D21） |
 
 ---
 

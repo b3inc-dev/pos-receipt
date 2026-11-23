@@ -45,6 +45,7 @@ import { extractLocationNumericId } from "./refundAggregationPure.server";
 import {
   applySpecialRefundEventsToTotals,
   assertNoPendingSpecialRefunds,
+  SpecialRefundPendingError,
 } from "./specialRefundOverlayPure.server";
 
 export type { GasAggregateAttributionOpts } from "./settlementAggregatePure.server";
@@ -117,6 +118,20 @@ export interface SettlementPreviewDTO {
    */
   legacyGiftCardsAddedAmount?: number;
   legacyGiftCardsAddedCount?: number;
+  /**
+   * allowPendingSpecialRefunds のときだけ。Shopify 返金の成否が分からない特殊返金の注文。
+   * この金額は上乗せも振替もしていない（数に入っていない）。
+   */
+  pendingSpecialRefundOrderLabels?: string[];
+}
+
+export interface SettlementPreviewOptions {
+  debug?: boolean;
+  /**
+   * true のとき、pending の特殊返金があっても止めずに pendingSpecialRefundOrderLabels を返す。
+   * 確定しない読み方（プレビュー・点検）だけで使う。精算の確定・再確定・再集計では使わない（D18）。
+   */
+  allowPendingSpecialRefunds?: boolean;
 }
 
 export interface SettlementPreviewDebugDTO {
@@ -580,7 +595,7 @@ export async function buildSettlementPreview(
   locationId: string,
   locationName: string,
   targetDate: string,
-  opts?: { debug?: boolean },
+  opts?: SettlementPreviewOptions,
 ): Promise<SettlementPreviewDTO> {
   return runSettlementGraphqlSerial(shopId, () =>
     buildSettlementPreviewImpl(admin, shopId, locationId, locationName, targetDate, opts),
@@ -593,7 +608,7 @@ async function buildSettlementPreviewImpl(
   locationId: string,
   locationName: string,
   targetDate: string,
-  opts?: { debug?: boolean },
+  opts?: SettlementPreviewOptions,
 ): Promise<SettlementPreviewDTO> {
   const debugEnabled = opts?.debug === true;
   const locIdRaw = extractLocationNumericId(locationId);
@@ -797,7 +812,19 @@ async function buildSettlementPreviewImpl(
   // 精算に入る特殊返金で Shopify 返金の成否が分からないもの（pending）があれば確定しない。
   // 数えると Shopify の返金と上乗せの二重、数えないと返金の抜けになりうるため（監査 P1-1）。
   // 反映の設定がオフの種別は上乗せしないので止めない。
-  assertNoPendingSpecialRefunds(otherEvents);
+  // 確定しない読み方（プレビュー・点検）は止めずに、注文の一覧を返して警告を出す
+  // （T の決定 2026-11-23 4:25「返金処理中の日の点検は警告つきで出す」）。pending は上乗せも振替もしない。
+  let pendingSpecialRefundOrderLabels: string[] | undefined;
+  if (opts?.allowPendingSpecialRefunds) {
+    try {
+      assertNoPendingSpecialRefunds(otherEvents);
+    } catch (err) {
+      if (!(err instanceof SpecialRefundPendingError)) throw err;
+      pendingSpecialRefundOrderLabels = err.orderLabels;
+    }
+  } else {
+    assertNoPendingSpecialRefunds(otherEvents);
+  }
 
   /** DB の手入力調整 + ノート観測（GAS _voucher_change_total と同系） */
   const voucherChangeAmount =
@@ -867,6 +894,7 @@ async function buildSettlementPreviewImpl(
     itemCount,
     voucherChangeAmount: roundInt(voucherChangeAmount),
     paymentSections,
+    ...(pendingSpecialRefundOrderLabels ? { pendingSpecialRefundOrderLabels } : {}),
     debug: debugEnabled
       ? {
           ordersRawCount,
