@@ -202,6 +202,8 @@ export function mergeCrossLocationRefundOrders<T extends GasStyleOrder>(
 
 export const GAS_UNKNOWN_GATEWAY = "未分類";
 export const GAS_GATEWAY_CASH = "現金";
+/** 決まった分け方の商品券のキー（おつりの観測で足す順） */
+const GAS_VOUCHER_KEYS_ORDER: readonly string[] = ["商品券釣有り", "商品券釣無し", "商品券"];
 
 export function ensurePayBucket(
   pay: Record<string, GasPayBucket>,
@@ -295,12 +297,38 @@ export function gasNormalizeGatewayLabel(
   return rawFmt || rawGw || GAS_UNKNOWN_GATEWAY;
 }
 
-function gasTxLabel(tx: {
-  gateway?: string;
-  formattedGateway?: string | null;
-}): string {
-  return gasNormalizeGatewayLabel(tx.gateway ?? "", tx.formattedGateway);
+/**
+ * 支払方法の集計キーの種類。精算の中で意味を持つものだけ分ける。
+ * - cash: 現金（注文ごとの現金の上限 = GAS cash cap の対象）
+ * - voucher: 商品券（ノートの額面と商品券の充当からおつりを見る対象）
+ * - other: それ以外
+ */
+export type PaymentKeyKind = "cash" | "voucher" | "other";
+
+export type PaymentKeyInfo = {
+  /** 精算の支払方法の行の名前（pay バケットのキー・payment section の gateway） */
+  key: string;
+  kind: PaymentKeyKind;
+};
+
+/** 取引の gateway / formattedGateway から集計キーを決める */
+export type PaymentKeyResolver = (
+  gateway: string,
+  formattedGateway?: string | null,
+) => PaymentKeyInfo;
+
+/** 決まった分け方（gasNormalizeGatewayLabel）のキーの種類。今の精算と同じ判定 */
+export function builtinPaymentKeyKind(key: string): PaymentKeyKind {
+  if (key === GAS_GATEWAY_CASH) return "cash";
+  if (/商品券/.test(key)) return "voucher";
+  return "other";
 }
+
+/** 決まった分け方（今の動き・初めの値） */
+export const builtinPaymentKeyResolver: PaymentKeyResolver = (gateway, formattedGateway) => {
+  const key = gasNormalizeGatewayLabel(gateway ?? "", formattedGateway);
+  return { key, kind: builtinPaymentKeyKind(key) };
+};
 
 /** GAS z2hDigits: 全角数字・読点を除いて半角化（商品券額面パース用） */
 function z2hDigitsForVoucherNote(input: string): string {
@@ -399,6 +427,11 @@ export type GasAggregateCalcOpts = {
   refundRemapRules: readonly RefundRemapRule[];
   /** 返金の付け替えの店の判定に使う、精算の店の数字の ID */
   locIdRaw: string;
+  /**
+   * 支払方法の集計キーの決め方。渡さなければ決まった分け方（builtinPaymentKeyResolver・今の動き）。
+   * 「精算の数え方」で「支払方法マスタで分ける」を選んだ店は paymentKeyMasterPure の resolver を渡す。
+   */
+  paymentKey?: PaymentKeyResolver;
 };
 
 export const DEFAULT_GAS_AGGREGATE_CALC_OPTS: GasAggregateCalcOpts = {
@@ -459,6 +492,7 @@ export function aggregateGasStyleForOrders(
   nonSalesFeeTotal: number;
 } {
   const pay: Record<string, GasPayBucket> = {};
+  const resolvePaymentKey = calcOpts.paymentKey ?? builtinPaymentKeyResolver;
   let refundsGross = 0;
   let discountsTotal = 0;
   let vipPointsUsed = 0;
@@ -545,11 +579,15 @@ export function aggregateGasStyleForOrders(
 
     let orderRefundToday = 0;
     const gwSaleMapToday: Record<string, number> = {};
+    /** この注文の売上の行のうち、現金・商品券として扱うキー */
+    const cashSaleKeys = new Set<string>();
+    const voucherSaleKeys = new Set<string>();
 
     for (const tx of todaysTx) {
       const amt = Number(tx.amountSet?.shopMoney?.amount ?? 0);
       const kind = String(tx.kind ?? "");
-      const baseGw = gasTxLabel(tx);
+      const keyInfo = resolvePaymentKey(tx.gateway ?? "", tx.formattedGateway);
+      const baseGw = keyInfo.key;
       const gw =
         kind === "REFUND"
           ? remapRefundLabel(baseGw, tx, calcOpts.refundRemapRules, calcOpts.locIdRaw)
@@ -558,6 +596,8 @@ export function aggregateGasStyleForOrders(
 
       if (kind === "SALE" || kind === "CAPTURE" || (byOrderDate && countsAsSaleTx(tx))) {
         gwSaleMapToday[gw] = (gwSaleMapToday[gw] || 0) + amt;
+        if (keyInfo.kind === "cash") cashSaleKeys.add(gw);
+        else if (keyInfo.kind === "voucher") voucherSaleKeys.add(gw);
         pay[gw].saleTx += 1;
       } else if (kind === "REFUND") {
         const txCountsForLocation =
@@ -573,9 +613,11 @@ export function aggregateGasStyleForOrders(
 
     // GAS cash cap: effectiveCashSale = min(rawCash, max(0, orderFinal - nonCash))
     // 返金有無に関わらず常に適用（GAS observeGenericCashChange と同式）
-    const rawCashSale = Number(gwSaleMapToday[GAS_GATEWAY_CASH] || 0);
+    // 現金の行は決まった分け方では「現金」1 つ。マスタで分ける店は現金の種類のマスタがいくつあってもよい
+    const cashEntries = Object.entries(gwSaleMapToday).filter(([k]) => cashSaleKeys.has(k));
+    const rawCashSale = cashEntries.reduce((acc, [, v]) => acc + Number(v || 0), 0);
     const nonCashSaleTotal = Object.entries(gwSaleMapToday)
-      .filter(([k]) => k !== GAS_GATEWAY_CASH)
+      .filter(([k]) => !cashSaleKeys.has(k))
       .reduce((acc, [, v]) => acc + Number(v || 0), 0);
     const orderFinal = Number(o.totalPriceSet?.shopMoney?.amount ?? 0);
     let effectiveCashSale = rawCashSale;
@@ -586,10 +628,21 @@ export function aggregateGasStyleForOrders(
       orderVoucherCashChange = Math.max(0, rawCashSale - effectiveCashSale);
     }
     const hasVoucherInNote = /商品券/.test(o.note ?? "");
-    const hasVoucherInGateway = Object.keys(gwSaleMapToday).some((k) => /商品券/.test(k));
+    const hasVoucherInGateway = Object.keys(gwSaleMapToday).some((k) => voucherSaleKeys.has(k));
+    // 現金の上限で削る額。現金の行が 2 つ以上なら、並んだ順に削る（1 つなら今と同じ式）
+    let cashCut = cashEntries.length > 1 ? rawCashSale - effectiveCashSale : 0;
     for (const [gw, amt] of Object.entries(gwSaleMapToday)) {
       ensurePayBucket(pay, gw);
-      pay[gw].sale += gw === GAS_GATEWAY_CASH ? effectiveCashSale : Number(amt);
+      if (!cashSaleKeys.has(gw)) {
+        pay[gw].sale += Number(amt);
+      } else if (cashEntries.length === 1) {
+        pay[gw].sale += effectiveCashSale;
+      } else {
+        const v = Number(amt || 0);
+        const cut = Math.min(v, Math.max(0, cashCut));
+        cashCut -= cut;
+        pay[gw].sale += v - cut;
+      }
     }
     const effectiveOrderSaleToday = nonCashSaleTotal + effectiveCashSale;
 
@@ -626,10 +679,15 @@ export function aggregateGasStyleForOrders(
     if (!isCancelled) {
       const face = parseVoucherFaceFromNote(o.note);
       if (face > 0) {
-        const giftAppliedToday =
-          Number(gwSaleMapToday["商品券釣有り"] || 0) +
-          Number(gwSaleMapToday["商品券釣無し"] || 0) +
-          Number(gwSaleMapToday["商品券"] || 0);
+        // 足す順は決まった分け方の 3 つを先に（今の式と同じ順。小数の通貨でも同じ値にする）
+        const voucherKeysInOrder = [
+          ...GAS_VOUCHER_KEYS_ORDER.filter((k) => voucherSaleKeys.has(k)),
+          ...[...voucherSaleKeys].filter((k) => !GAS_VOUCHER_KEYS_ORDER.includes(k)),
+        ];
+        const giftAppliedToday = voucherKeysInOrder.reduce(
+          (acc, k) => acc + Number(gwSaleMapToday[k] || 0),
+          0,
+        );
         const netToday = effectiveOrderSaleToday - orderRefundToday;
         if (netToday > 0) {
           orderVoucherFaceChange = Math.max(0, face - giftAppliedToday);

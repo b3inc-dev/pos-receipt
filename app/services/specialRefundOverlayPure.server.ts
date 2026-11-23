@@ -39,7 +39,15 @@ export interface SpecialRefundOverlayOpts {
   isKnownMethod?: (method: string) => boolean;
   /** 新しく行を作るときの表示名 */
   labelForMethod?: (method: string) => string;
+  /**
+   * 「支払方法マスタで分ける」店だけ渡す。特殊返金の手段（マスタの gateway の名前）を
+   * 精算の行の名前（マスタの表示名）に直してから探す。渡さなければ今の探し方。
+   */
+  resolveKey?: PaymentKeyOf;
 }
+
+/** gateway の名前（特殊返金の手段）→ 精算の行の名前（集計キー） */
+export type PaymentKeyOf = (gatewayOrLabel: string) => string;
 
 /**
  * 特殊返金のうち、支払方法の行にきちんと載せられなかったもの（精算画面に警告として出す）。
@@ -77,9 +85,19 @@ export function unmatchedRefundWarningMessage(w: UnmatchedRefundMethodWarning): 
 export function findPaymentSectionIndex(
   sections: OverlayPaymentSection[],
   gatewayOrLabel: string | null,
+  resolveKey?: PaymentKeyOf,
 ): number {
   if (!gatewayOrLabel) return -1;
   const raw = String(gatewayOrLabel).trim();
+  if (resolveKey) {
+    const key = String(resolveKey(raw) ?? "").trim().toLowerCase();
+    if (key) {
+      const exact = sections.findIndex(
+        (sec) => String(sec.gateway).trim().toLowerCase() === key,
+      );
+      if (exact >= 0) return exact;
+    }
+  }
   const aliases = new Set([
     raw.toLowerCase(),
     gasNormalizeGatewayLabel(raw).trim().toLowerCase(),
@@ -98,10 +116,12 @@ export function findPaymentSectionIndex(
 function ensureSection(
   sections: OverlayPaymentSection[],
   gatewayOrLabel: string,
+  resolveKey?: PaymentKeyOf,
 ): number {
-  let idx = findPaymentSectionIndex(sections, gatewayOrLabel);
+  let idx = findPaymentSectionIndex(sections, gatewayOrLabel, resolveKey);
   if (idx >= 0) return idx;
-  const key = String(gatewayOrLabel).trim() || "cash";
+  const rawKey = String(gatewayOrLabel).trim() || "cash";
+  const key = (resolveKey ? String(resolveKey(rawKey) ?? "").trim() : "") || rawKey;
   sections.push({
     gateway: key,
     label: key,
@@ -123,7 +143,7 @@ function ensureRefundSection(
   opts: SpecialRefundOverlayOpts | undefined,
   warn: (reason: UnmatchedRefundMethodReason, method: string) => void,
 ): number {
-  const idx = findPaymentSectionIndex(sections, method);
+  const idx = findPaymentSectionIndex(sections, method, opts?.resolveKey);
   if (idx >= 0) return idx;
   const key = String(method).trim() || "cash";
   if (opts?.isKnownMethod && !opts.isKnownMethod(key)) {
@@ -140,10 +160,12 @@ function ensureRefundSection(
     });
     return sections.length - 1;
   }
-  if (!opts?.labelForMethod) return ensureSection(sections, key);
+  if (!opts?.labelForMethod) return ensureSection(sections, key, opts?.resolveKey);
+  // マスタで分ける店は、行の名前（gateway）も表示名もマスタの表示名にそろえる
+  const resolved = opts.resolveKey ? String(opts.resolveKey(key) ?? "").trim() : "";
   sections.push({
-    gateway: key,
-    label: opts.labelForMethod(key) || key,
+    gateway: resolved || key,
+    label: resolved || opts.labelForMethod(key) || key,
     net: 0,
     refund: 0,
     txCount: 0,
@@ -166,7 +188,7 @@ function transferExecutedRefund(
 ): void {
   const originalKey = originalPaymentMethod ?? "cash";
   const actualKey = actualRefundMethod ?? "cash";
-  const originalIdx = findPaymentSectionIndex(sections, originalKey);
+  const originalIdx = findPaymentSectionIndex(sections, originalKey, opts?.resolveKey);
   if (originalIdx < 0) {
     warn("original_method_not_found", originalKey);
     return;
@@ -301,7 +323,7 @@ export function applySpecialRefundEventsToTotals(
         if (executed) break;
         const kind = (e.adjustKind ?? "undo").toLowerCase();
         const method = e.originalPaymentMethod ?? e.actualRefundMethod ?? "cash";
-        const idx = findPaymentSectionIndex(sections, method);
+        const idx = findPaymentSectionIndex(sections, method, opts?.resolveKey);
         if (idx < 0) warn("adjust_method_not_found", method);
         if (kind === "undo") {
           totals.refundTotal -= amount;

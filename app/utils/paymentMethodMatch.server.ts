@@ -69,8 +69,21 @@ export function matchPaymentMethodMaster<T extends PaymentMethodMatchInput>(
 export function resolvePaymentSectionLabel(
   bucketKey: string,
   masters: PaymentMethodMatchInput[],
+  opts?: {
+    /**
+     * 「支払方法マスタで分ける」店: キーがマスタの表示名そのものなら、そのまま表示名にする
+     * （ほかのマスタの contains のパターンに先に当たって、別の名前にならないように）。
+     */
+    preferExactDisplayLabel?: boolean;
+  },
 ): string {
   const key = String(bucketKey ?? "").trim();
+  if (opts?.preferExactDisplayLabel && key) {
+    const exact = masters.find(
+      (m) => m.enabled !== false && String(m.displayLabel ?? "").trim() === key,
+    );
+    if (exact) return key;
+  }
   const matched = matchPaymentMethodMaster(key, masters);
   if (matched?.displayLabel) return matched.displayLabel;
   return PAYMENT_METHOD_FALLBACK_LABELS[key] ?? (key || "その他");
