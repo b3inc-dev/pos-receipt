@@ -21,6 +21,7 @@ import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js"
 import { toUserMessage } from "../../common/errorMessage.js";
 import { refundEventTypeFor } from "../../common/refundModes.js";
 import { orderTenderLines, roundMoney } from "../../common/orderTenderLines.js";
+import { FormHeading, FormLine, yen } from "./AdjustFormParts.jsx";
 import {
   reservationExpectedAmountFromInput,
   reservationRowsFromInput,
@@ -64,28 +65,26 @@ function ReservationCard({ item, onCancel, loading }) {
   );
 }
 
-/** 取引の合計と、元の支払方法ごとの支払った額・返金した額（入力の目安） */
+/** 取引の合計と、元の支払方法ごとの支払った額・返金した額（入力の目安。注文の詳細と同じ「左に項目名・右に値」） */
 function OrderPaymentSummary({ order }) {
   const lines = orderTenderLines(order);
   const total = roundMoney(order?.totalPrice?.amount ?? 0);
   return (
-    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-      <s-stack gap="small">
-        <s-text type="strong">{`${order?.orderName ?? "この取引"}（合計 ¥${total.toLocaleString()}）`}</s-text>
-        {lines.length === 0 ? (
-          <s-text type="small" color="subdued">注文の支払いを読めませんでした。</s-text>
-        ) : (
-          lines.map((line) => (
-            <s-stack key={line.gateway || line.label} direction="inline" justifyContent="space-between" alignItems="center" gap="small">
-              <s-text>{line.label}</s-text>
-              <s-text type="small" color="subdued">
-                {`支払い ¥${line.paid.toLocaleString()}${line.refunded > 0 ? ` ／ 返金 ¥${line.refunded.toLocaleString()}` : ""}`}
-              </s-text>
-            </s-stack>
-          ))
-        )}
-      </s-stack>
-    </s-box>
+    <s-stack gap="none">
+      <FormHeading>取引</FormHeading>
+      <FormLine label={order?.orderName ?? "この取引"} value={`合計 ${yen(total)}`} strong />
+      {lines.length === 0 ? (
+        <s-text type="small" color="subdued">注文の支払いを読めませんでした。</s-text>
+      ) : (
+        lines.map((line) => (
+          <FormLine
+            key={line.gateway || line.label}
+            label={line.label}
+            value={line.refunded > 0 ? `${yen(line.paid)}（返金 ${yen(line.refunded)}）` : yen(line.paid)}
+          />
+        ))
+      )}
+    </s-stack>
   );
 }
 
@@ -133,6 +132,12 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
   }, [reload]);
 
   const open = items.find((r) => r.status === "pending" || r.status === "needs_review") ?? null;
+  const canReserve = !open && state === "ready";
+  const reloadClick = () => {
+    setError("");
+    setNotice("");
+    reload();
+  };
   const recent = items.filter((r) => r !== open).slice(0, 3);
   const split = rows.length > 1;
   const setRow = (i, patch) => setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -208,7 +213,6 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
-            {error ? <s-banner tone="critical">{error}</s-banner> : notice ? <s-banner tone="success">{notice}</s-banner> : null}
             <s-text tone="neutral">
               {`${order?.orderName ?? "この取引"} をこれから POS で返金するときに、実際の返金方法を先に決めておけます。返金が終わると、返金した額のまま自動で返金方法を変えます。Shopify では返金しません。`}
             </s-text>
@@ -220,7 +224,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
             {open ? (
               <ReservationCard item={open} onCancel={cancel} loading={loading} />
             ) : state === "ready" ? (
-              <s-section heading="実際の返金方法">
+              <s-section heading="返金方法">
                 <s-stack gap="small">
                   {/* 分割しないときは金額を入れない（純正で返金した額の全部を、選んだ返金方法に変える） */}
                   {split ? (
@@ -290,9 +294,6 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                     onInput={(e) => setNote(e?.currentTarget?.value ?? "")}
                     placeholder="補足説明など"
                   />
-                  <s-button variant="primary" onClick={submit} disabled={loading || methods.length === 0}>
-                    予約する
-                  </s-button>
                   <s-text tone="neutral">
                     {split
                       ? "予約はその日のうちの返金にだけ使います。返金した額が「返金する金額」と違うときは、自動では返金方法を変えません。"
@@ -325,17 +326,25 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
           </s-stack>
         </s-box>
       </s-scroll-box>
+      {/* 結果は押したボタンの近く（下の固定のすぐ上）に出す */}
+      {error || notice ? (
+        <s-box paddingInline="base" paddingBlockStart="small">
+          {error ? <s-banner tone="critical">{error}</s-banner> : <s-banner tone="success">{notice}</s-banner>}
+        </s-box>
+      ) : null}
+      {/* 下は固定: 左に「戻る」、右に「予約する」（予約があるときは「再読込」）。T 2026-11-24 */}
       <FixedFooterNavBar
+        centerAlignWithButtons
         leftLabel="戻る"
         onLeft={onBack}
-        rightLabel="再読込"
-        onRight={() => {
-          setError("");
-          setNotice("");
-          reload();
-        }}
-        rightDisabled={loading}
-        centerAlignWithButtons
+        leftDisabled={loading}
+        middleLabel={canReserve ? "再読込" : undefined}
+        onMiddle={reloadClick}
+        middleDisabled={loading}
+        rightLabel={canReserve ? "予約する" : "再読込"}
+        onRight={canReserve ? submit : reloadClick}
+        rightDisabled={loading || (canReserve && methods.length === 0)}
+        rightLoading={loading && canReserve}
       />
     </s-page>
   );
