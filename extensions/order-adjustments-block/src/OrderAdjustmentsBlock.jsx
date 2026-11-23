@@ -12,7 +12,7 @@ export default async () => {
 
 const KIND_LABELS = {
   cash_refund: "現金返金",
-  payment_method_override: "返金手段の付け替え",
+  payment_method_override: "返金方法変更",
   receipt_cash_adjustment: "レシート現金調整",
   voucher_change_adjustment: "商品券",
 };
