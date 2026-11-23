@@ -988,7 +988,8 @@ function notifyBars() {
   for (const listener of barListeners) listener();
 }
 
-async function confirmLeave(): Promise<boolean> {
+/** 未保存の入力があるとき、Shopify の「変更を破棄しますか」を出す（絞り込みの選択で画面を読み直すときなど） */
+export async function confirmLeave(): Promise<boolean> {
   if (dirtyForms.size === 0) return true;
   const shopify = typeof window === "undefined" ? undefined : (window as unknown as { shopify?: { saveBar?: { leaveConfirmation?: () => Promise<void> } } }).shopify;
   if (!shopify?.saveBar?.leaveConfirmation) return true;
