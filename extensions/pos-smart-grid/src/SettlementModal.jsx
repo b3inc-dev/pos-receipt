@@ -433,6 +433,8 @@ function SettlementModal() {
           setStep("main");
           setPreview(null);
           setSettlementResult(null);
+          // 精算済み・点検の回数を月別一覧へすぐ反映する
+          loadMonthRows(selectedLocation?.locationId, selectedYear, selectedMonth);
         }}
       />
     );
@@ -665,6 +667,7 @@ function MainView({
                             style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                           >
                             {formatYmdSlash(row.targetDate)}
+                            {Number(row.inspectionCount) > 0 ? `　点検 ${Number(row.inspectionCount)}回` : ""}
                           </s-text>
                           <s-text fontWeight="bold" size="small" style={{ whiteSpace: "nowrap" }}>
                             ¥{Number(row.netSales).toLocaleString()}
@@ -1094,7 +1097,7 @@ function SettlementIssueConfirmModals({ preview, loading, error, onExecute, onRe
   return (
     <>
       <s-modal id={SETTLEMENT_ISSUE_CONFIRM_INSPECTION_ID} heading="発行確認">
-        {body("点検レシートを発行します")}
+        {body("点検レシートを発行します（精算は確定しません。何回でも発行できます）")}
         <s-button
           slot="secondary-actions"
           kind="secondary"
@@ -1110,7 +1113,7 @@ function SettlementIssueConfirmModals({ preview, loading, error, onExecute, onRe
         </s-button>
       </s-modal>
       <s-modal id={SETTLEMENT_ISSUE_CONFIRM_SETTLE_ID} heading="発行確認">
-        {body("精算レシートを発行します")}
+        {body("精算レシートを発行します（この日の精算を確定します）")}
         <s-button
           slot="secondary-actions"
           kind="secondary"
@@ -1203,6 +1206,7 @@ function settlementStatusLabel(status) {
 function DoneView({ result, isInspection, targetDateYmd, onBack }) {
   const doneTargetDate = result?.preview?.targetDate ?? result?.targetDate ?? targetDateYmd ?? "-";
   const doneTotal = result?.preview?.total;
+  const kindLabel = isInspection ? "点検" : "精算";
 
   return (
     <s-page heading="発行完了">
@@ -1210,7 +1214,14 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
         <s-box padding="base">
           <s-stack gap="base">
             <s-text fontWeight="bold">
-              {isInspection ? "点検レシートを保存しました" : "精算レシートを保存しました"}
+              {isInspection ? "点検レシートを発行しました" : "精算レシートを発行しました"}
+            </s-text>
+            <s-text tone="subdued" fontSize="small">
+              {isInspection
+                ? "発行した時点の金額を履歴に残しました。精算（その日の確定）はまだです。点検は何回でも発行できます。"
+                : result?.idempotent
+                  ? "この日はすでに精算済みです。保存済みの精算レシートを表示しています。"
+                  : "この日の精算を確定し、履歴に残しました。"}
             </s-text>
 
             <SettlementPrintControls settlementId={result?.settlementId} />
@@ -1218,17 +1229,18 @@ function DoneView({ result, isInspection, targetDateYmd, onBack }) {
             <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
               <s-stack gap="none">
                 {[
+                  { label: "種別", value: kindLabel },
+                  { label: "対象日", value: formatYmdSlash(doneTargetDate) },
                   {
-                    label: "精算ID",
+                    label: "記録ID",
                     value: result?.settlementId ? `…${result.settlementId.slice(-8)}` : "-",
                   },
-                  { label: "対象日", value: formatYmdSlash(doneTargetDate) },
                   {
                     label: "総売上",
                     value:
                       doneTotal != null
                         ? `¥${Number(doneTotal).toLocaleString()}`
-                        : "（再表示時は履歴から確認）",
+                        : "（履歴から確認）",
                     valueBold: true,
                   },
                 ].map((row, i, arr) => (

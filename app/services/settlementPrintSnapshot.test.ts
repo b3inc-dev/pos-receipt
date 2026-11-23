@@ -57,21 +57,11 @@ function savedRow(opts: {
     locationName: opts.locationName,
     isInspection: opts.isInspection,
   });
+  // 点検も発行した時点の金額を残す（1 日に何回でも・毎回記録。T 決定 2026-11-22）
   return {
     ...amounts(),
-    total: opts.isInspection ? 0 : 12340,
-    netSales: opts.isInspection ? 0 : 11218,
-    tax: opts.isInspection ? 0 : 1122,
-    discounts: opts.isInspection ? 0 : 50,
-    refundTotal: opts.isInspection ? 0 : 200,
-    orderCount: opts.isInspection ? 0 : 4,
-    refundCount: opts.isInspection ? 0 : 1,
-    itemCount: opts.isInspection ? 0 : 7,
     periodLabel: opts.isInspection ? "点検_2026-11-12" : "2026-11-12",
-    paymentSectionsJson: encodePaymentSectionsJson(
-      opts.isInspection ? [] : [cashSection()],
-      snapshot,
-    ),
+    paymentSectionsJson: encodePaymentSectionsJson([cashSection()], snapshot),
   };
 }
 
@@ -138,6 +128,9 @@ describe("synthetic first print vs reprint after settings change", () => {
       currentLocationName: ISSUED_NAME,
       devicePaperWidthMm: 80,
     });
+    // 点検の再印刷も 0 円ではなく、発行した時点の金額・内訳を出す
+    assert.equal(first.model.total, 12340);
+    assert.equal(first.model.paymentSections[0].label, "現金");
     const afterRename = buildSettlementReprintView(row, {
       currentLocationName: RENAMED_NAME,
       devicePaperWidthMm: 58,
@@ -146,8 +139,8 @@ describe("synthetic first print vs reprint after settings change", () => {
     assert.match(first.html, /点検レシート/);
     assert.doesNotMatch(first.html, /精算レシート/);
     assert.equal(first.model.locationName, ISSUED_NAME);
-    assert.equal(first.model.total, 0);
-    assert.equal(first.model.paymentSections.length, 0);
+    assert.equal(afterRename.model.total, 12340);
+    assert.equal(afterRename.model.paymentSections.length, 1);
     assert.equal(afterRename.model.locationName, ISSUED_NAME);
     assert.equal(afterRename.model.title, first.model.title);
     assert.equal(afterRename.formVersion, SETTLEMENT_RECEIPT_FORM_VERSION);
@@ -254,5 +247,12 @@ describe("reprint does not create orders or settlements", () => {
     assert.match(createSrc, /encodePaymentSectionsJson/);
     assert.match(createSrc, /buildSettlementPrintSnapshot/);
     assert.doesNotMatch(createSrc, /settlementOrderGas/);
+  });
+
+  it("inspection create stores the issued amounts instead of zeros", () => {
+    const createSrc = readFileSync(join(root, "app/routes/api.settlements.create.tsx"), "utf8");
+    assert.doesNotMatch(createSrc, /inspection \? 0 :/);
+    assert.doesNotMatch(createSrc, /inspection \? \[\] :/);
+    assert.match(createSrc, /total: preview\.total/);
   });
 });

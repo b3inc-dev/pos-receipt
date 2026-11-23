@@ -12,6 +12,7 @@ import {
   corsPreflightResponse,
 } from "../utils/posAuth.server";
 import prisma from "../db.server";
+import { splitDailySettlementsAndInspections } from "../utils/settlementHistoryQuery";
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
@@ -93,14 +94,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    // 日付別マップ（同日複数精算は最新を採用）
-    const settlementByDate = new Map<string, typeof settlements[number]>();
-    for (const s of settlements) {
-      const prev = settlementByDate.get(s.targetDate);
-      if (!prev || s.createdAt > prev.createdAt) {
-        settlementByDate.set(s.targetDate, s);
-      }
-    }
+    // 日付別マップ（同日複数精算は最新を採用。点検は精算の確定として扱わず、回数だけ返す）
+    const { settlementByDate, inspectionsByDate } =
+      splitDailySettlementsAndInspections(settlements);
 
     const cacheByDate = new Map<string, number>();
     for (const c of cacheRows) {
@@ -115,6 +111,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .map((targetDate) => {
         const settlement = settlementByDate.get(targetDate) ?? null;
         const cached = cacheByDate.get(targetDate) ?? null;
+        const inspections = inspectionsByDate.get(targetDate) ?? null;
         // netSales優先順: 精算確定値 > キャッシュ > 0
         const netSales = settlement
           ? Number(settlement.netSales)
@@ -123,6 +120,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         return {
           targetDate,
           netSales,
+          inspectionCount: inspections?.count ?? 0,
+          lastInspectionAt: inspections?.lastAt.toISOString() ?? null,
           settlement: settlement
             ? {
                 id: settlement.id,
@@ -137,7 +136,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
                 status: settlement.status,
                 sourceOrderName: settlement.sourceOrderName,
                 createdAt: settlement.createdAt.toISOString(),
-                isInspection: settlement.periodLabel?.startsWith("点検_") ?? false,
+                isInspection: false,
               }
             : null,
         };

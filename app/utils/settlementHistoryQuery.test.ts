@@ -103,3 +103,20 @@ test("ロケーション絞り込みと表示名は数値 ID と GID の両方�
   assert.equal(settlementLocationLabel(found, "100").label, "渋谷");
   assert.equal(findSettlementLocation(locations, "gid://shopify/Location/999"), undefined);
 });
+
+test("月別一覧: 点検は精算済みにせず回数だけ数え、精算は同じ日の最新を採る", async () => {
+  const { splitDailySettlementsAndInspections } = await import("./settlementHistoryQuery");
+  const at = (h: number) => new Date(`2026-11-22T0${h}:00:00Z`);
+  const rows = [
+    { id: "s1", targetDate: "2026-11-22", periodLabel: "2026-11-22", createdAt: at(1) },
+    { id: "i1", targetDate: "2026-11-22", periodLabel: "点検_2026-11-22", createdAt: at(2) },
+    { id: "s2", targetDate: "2026-11-22", periodLabel: "2026-11-22", createdAt: at(3) },
+    { id: "i2", targetDate: "2026-11-22", periodLabel: "点検_2026-11-22", createdAt: at(4) },
+    { id: "i3", targetDate: "2026-11-21", periodLabel: "点検_2026-11-21", createdAt: at(5) },
+  ];
+  const { settlementByDate, inspectionsByDate } = splitDailySettlementsAndInspections(rows);
+  assert.equal(settlementByDate.get("2026-11-22")?.id, "s2");
+  assert.equal(settlementByDate.has("2026-11-21"), false);
+  assert.deepEqual(inspectionsByDate.get("2026-11-22"), { count: 2, lastAt: at(4) });
+  assert.deepEqual(inspectionsByDate.get("2026-11-21"), { count: 1, lastAt: at(5) });
+});
