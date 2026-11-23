@@ -1,9 +1,9 @@
 /**
- * 「商品券」タイルのモーダル。
+ * 「商品券釣銭調整」タイルのモーダル。
  * - カートに商品があり、管理画面の「会計の前に額面を入れる」がオンのとき: 会計の前に額面を入れる画面（VoucherCartScreen）を先に出す
  * - カートが空・取引詳細の「商品券釣銭調整」から開いたとき: 後から登録する一覧
  *   （特殊返金と同じ画面を、一覧の最初の絞り込みを「商品券釣有り」にして開く）
- * （「返金」タイルは SpecialRefundModal.jsx の既定で「返金・キャンセル」）
+ * （「返金方法変更」タイルは SpecialRefundModal.jsx の既定で「返金・キャンセル」）
  */
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -82,7 +82,7 @@ function VoucherModal() {
   }, [screen]);
   if (screen === "checking") {
     return (
-      <s-page heading="商品券">
+      <s-page heading="商品券釣銭調整">
         <s-box padding="base">
           <s-text color="subdued">読み込み中…</s-text>
         </s-box>
