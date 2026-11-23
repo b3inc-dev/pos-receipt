@@ -29,6 +29,7 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
+import { ciaraBudgetSyncAvailable } from "../services/ciaraBudgetSync.server";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 
 const PAGE_SIZE = 50;
@@ -189,6 +190,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     shopifyLocations,
     hasAccess: access.allowed,
     planMessage: access.message,
+    // ciara-system からの取り込み（Ciara のカスタムアプリだけ）
+    canCiaraSync: ciaraBudgetSyncAvailable(),
   };
 }
 
@@ -353,7 +356,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function BudgetManagementPage() {
   const {
     items, total, page, pageSize, month, locationId,
-    shopifyLocations, hasAccess, planMessage,
+    shopifyLocations, hasAccess, planMessage, canCiaraSync,
   } = useLoaderData<typeof loader>();
 
   const location = useLocation();
@@ -599,6 +602,20 @@ export default function BudgetManagementPage() {
                   >
                     日別一覧で入力
                   </Button>
+                </InlineStack>
+              </Card>
+            </Layout.Section>
+          )}
+
+          {hasAccess && canCiaraSync && (
+            <Layout.Section>
+              <Card>
+                <InlineStack align="space-between" blockAlign="center" gap="300" wrap>
+                  <BlockStack gap="100">
+                    <Text variant="headingSm" as="h2">ciara-system から取り込む</Text>
+                    <Text as="p" tone="subdued">ciara-system の日別予算を 1 時間ごとに取り込みます。取り込んだ店はここで入れた予算が上書きされます。</Text>
+                  </BlockStack>
+                  <Button onClick={() => navigate(`/app/budget-sync${location.search}`)}>取り込みの設定</Button>
                 </InlineStack>
               </Card>
             </Layout.Section>

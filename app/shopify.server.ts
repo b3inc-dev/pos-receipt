@@ -33,5 +33,9 @@ if (typeof queueMicrotask !== "undefined") {
     import("./services/salesSummaryWebhookQueue.server")
       .then((m) => m.ensureSalesSummaryWebhookWorker())
       .catch(() => {});
+    // ciara-system の予算の取り込み（自社用で鍵があるときだけ動く）
+    import("./services/ciaraBudgetSync.server")
+      .then((m) => m.ensureCiaraBudgetSyncScheduler())
+      .catch(() => {});
   });
 }
