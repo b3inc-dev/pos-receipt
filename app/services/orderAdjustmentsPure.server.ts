@@ -32,7 +32,7 @@ export interface OrderAdjustmentEntry {
   locationGid: string;
   /** 元の支払方法（支払方法マスタの gateway の名前） */
   fromMethod: string | null;
-  /** 実際に返した手段（支払方法マスタの gateway の名前） */
+  /** 実際に返金方法（支払方法マスタの gateway の名前） */
   toMethod: string | null;
   /** 支払方法マスタの表示名（読みやすさのため。数えるときは使わない） */
   fromLabel: string | null;
@@ -78,7 +78,7 @@ export interface AdjustmentEventRow {
   shopifyRefundId?: string | null;
   approvalStatus?: string | null;
   countDate?: string | null;
-  /** native = POS 純正の返金の付け替え（金額は純正の返金で決まる） */
+  /** native = POS 純正の返金の返金方法変更（金額は純正の返金で決まる） */
   refundSource?: string | null;
   replacesEventId?: string | null;
   voidedAt?: Date | null;
@@ -218,7 +218,7 @@ export function buildOrderAdjustmentsDoc(
 
 const KIND_LABEL: Record<string, string> = {
   cash_refund: "現金返金",
-  payment_method_override: "返金手段の付け替え",
+  payment_method_override: "返金方法変更",
   receipt_cash_adjustment: "レシート現金調整",
   voucher_change_adjustment: "商品券",
 };
@@ -227,7 +227,7 @@ function yen(n: number): string {
   return `¥${Math.round(n).toLocaleString("ja-JP")}`;
 }
 
-/** 人が読むための 1 行（有効・承認待ちの行だけ）。例: 「11/23 返金手段の付け替え クレジット→現金 ¥1,200 ／ 11/23 商品券 額面¥5,000 お釣り¥800」 */
+/** 人が読むための 1 行（有効・承認待ちの行だけ）。例: 「11/23 返金方法変更 クレジット→現金 ¥1,200 ／ 11/23 商品券 額面¥5,000 お釣り¥800」 */
 export function buildOrderAdjustmentsSummary(doc: OrderAdjustmentsDoc): string {
   const parts: string[] = [];
   for (const e of doc.entries) {
@@ -690,19 +690,19 @@ export function planAdjustmentEdit(
   } else if (!(amount > 0)) {
     return { ok: false, code: "INVALID_AMOUNT", message: "金額は 0 より大きくしてください。" };
   }
-  // 純正の返金の付け替えは金額を変えられない（返金額と合わなくなる）。手段・メモだけ直す
+  // 純正の返金の返金方法変更は金額を変えられない（返金額と合わなくなる）。手段・メモだけ直す
   if (String(old.refundSource ?? "") === "native" && money(old.amount) !== amount) {
     return {
       ok: false,
       code: "NATIVE_REFUND_AMOUNT_FIXED",
-      message: "純正の返金の付け替えは金額を変えられません。返した手段だけ直せます。分け方を変えるときは、無効にしてから登録し直してください。",
+      message: "純正の返金の返金方法変更は金額を変えられません。返金方法だけ直せます。分け方を変えるときは、無効にしてから登録し直してください。",
     };
   }
   const shopifyRefundKept = String(old.shopifyRefundStatus ?? "") === "success";
   const keepRefundRecord = shopifyRefundKept;
   const today = calendarDateInTimeZone(ctx.now, ctx.timeZone);
   // 商品券は注文の日で数える（T の決定 2026-11-23）ので「今日の分にする」は使わない
-  // 純正の返金の付け替えも、純正で返金した日のまま（その日の返金の行から移すため）
+  // 純正の返金の返金方法変更も、純正で返金した日のまま（その日の返金の行から移すため）
   const isNative = String(old.refundSource ?? "") === "native";
   const countDate = input.dateMode === "today" && !isVoucher && !isNative ? today : countDateOf(old, ctx.timeZone);
   const pick = <T,>(v: T | null | undefined, fallback: T | null): T | null => (v === undefined ? fallback : v);
@@ -733,12 +733,12 @@ export function planAdjustmentEdit(
   };
   let warning: string | null = null;
   if (String(old.refundSource ?? "") === "native") {
-    warning = "純正の返金はそのままです。返した手段だけを直しました。";
+    warning = "純正の返金はそのままです。返金方法だけを直しました。";
   } else if (shopifyRefundKept && money(old.amount) !== amount) {
     warning =
       "Shopify の返金の金額は変わりません。金額を直した分は、Shopify の管理画面で返金を直してください（アプリの記録は直しました）。";
   } else if (shopifyRefundKept) {
-    warning = "Shopify の返金はそのままです。アプリの記録（返した手段など）だけを直しました。";
+    warning = "Shopify の返金はそのままです。アプリの記録（返金方法など）だけを直しました。";
   }
   return { ok: true, create, shopifyRefundKept, warning };
 }

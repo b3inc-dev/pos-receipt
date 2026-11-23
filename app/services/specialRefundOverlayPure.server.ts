@@ -75,7 +75,7 @@ export function unmatchedRefundWarningMessage(w: UnmatchedRefundMethodWarning): 
     case "refund_method_not_in_master":
       return `${order}${yen}: 返金方法「${w.method}」が支払方法マスタに無いため「${UNMATCHED_REFUND_SECTION_KEY}」に入れました。支払方法マスタに登録してから更新してください。`;
     case "original_method_not_found":
-      return `${order}${yen}: 元の支払方法「${w.method}」の行がこの日に無いため、返金の付け替えをしていません。`;
+      return `${order}${yen}: 元の支払方法「${w.method}」の行がこの日に無いため、返金方法変更をしていません。`;
     case "adjust_method_not_found":
       return `${order}${yen}: レシート調整の支払方法「${w.method}」の行がこの日に無いため、支払方法別の金額には入っていません。`;
   }

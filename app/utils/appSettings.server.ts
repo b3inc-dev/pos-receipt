@@ -318,7 +318,7 @@ export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
   specialRefundUiLabel: "特殊返金",
   voucherAdjustmentUiLabel: "商品券調整",
   cashRefundUiLabel: "現金返金",
-  paymentOverrideUiLabel: "返金手段変更",
+  paymentOverrideUiLabel: "返金方法変更",
 };
 
 // ── 一般設定（要件 §3） ───────────────────────────────────────────────────────
