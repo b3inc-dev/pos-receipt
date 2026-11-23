@@ -1039,6 +1039,25 @@ function PreviewView({
                 </s-box>
               ) : null}
 
+              {/* 特殊返金の返金方法が支払方法マスタに無い等（精算は確定できる。合計は正しい） */}
+              {(preview.unmatchedRefundMethods ?? []).length > 0 ? (
+                <s-box padding="base" borderWidth="base" borderRadius="base" borderColor="subdued">
+                  <s-stack gap="small">
+                    <s-text fontWeight="bold" tone="caution">
+                      支払方法の行に入れられなかった特殊返金があります
+                    </s-text>
+                    {preview.unmatchedRefundMethods.map((w, i) => (
+                      <s-text key={`unmatched-${i}`} tone="caution" fontSize="small">
+                        {w.message}
+                      </s-text>
+                    ))}
+                    <s-text tone="subdued" fontSize="small">
+                      合計は正しいまま精算できます。管理画面の「支払方法」に登録すると、次の更新から正しい行に入ります。
+                    </s-text>
+                  </s-stack>
+                </s-box>
+              ) : null}
+
               {/* 支払方法別内訳：支払方法 / 件数 / 金額（返金は 方法[返金]） */}
               {paymentTripleRows.length > 0 ? (
                 <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">

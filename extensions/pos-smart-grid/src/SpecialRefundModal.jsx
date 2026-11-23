@@ -930,8 +930,11 @@ function SpecialRefundForm({
   const [eventType, setEventType] = useState("cash_refund");
   const [amount, setAmount] = useState("");
   const [paymentMethods, setPaymentMethods] = useState(fallbackPaymentMethods);
+  // 実際の返金手段は支払方法マスタ（特殊返金で選べるもの）からだけ選ぶ。注文の決済手段や既定の候補は足さない
+  const [refundMethods, setRefundMethods] = useState([]);
+  const [refundMethodsState, setRefundMethodsState] = useState("loading"); // loading | ready | empty | error
   const [originalPaymentMethod, setOriginalPaymentMethod] = useState(orderGateway || "cash");
-  const [actualRefundMethod, setActualRefundMethod] = useState("cash");
+  const [actualRefundMethod, setActualRefundMethod] = useState("");
   const [idempotencyKey, setIdempotencyKey] = useState(null);
   const [adjustKind, setAdjustKind] = useState("undo");
   const [note, setNote] = useState("");
@@ -945,7 +948,12 @@ function SpecialRefundForm({
   useEffect(() => {
     listSelectablePaymentMethods({ sync: true })
       .then((res) => {
-        const items = paymentMethodsWithOrderGateway(res.items ?? [], order);
+        const masterItems = res.items ?? [];
+        setRefundMethods(masterItems);
+        setRefundMethodsState(masterItems.length > 0 ? "ready" : "empty");
+        const masterCash = masterItems.find((m) => m.category === "cash" || m.value === "cash");
+        setActualRefundMethod(masterCash?.value ?? masterItems[0]?.value ?? "");
+        const items = paymentMethodsWithOrderGateway(masterItems, order);
         if (items.length > 0) {
           setPaymentMethods(items);
           const normalizedOrderGateway = orderGateway.toLowerCase();
@@ -958,17 +966,14 @@ function SpecialRefundForm({
             );
           });
           setOriginalPaymentMethod(orderMethod?.value || orderGateway || items[0].value);
-          const cash = items.find((m) => m.category === "cash" || m.value === "cash");
-          setActualRefundMethod(cash?.value ?? items[0].value);
         }
       })
       .catch(() => {
         setPaymentMethods(fallbackPaymentMethods);
         setOriginalPaymentMethod(orderGateway || fallbackPaymentMethods[0].value);
-        const cash = fallbackPaymentMethods.find(
-          (method) => method.category === "cash" || method.value === "cash",
-        );
-        setActualRefundMethod(cash?.value ?? fallbackPaymentMethods[0].value);
+        setRefundMethods([]);
+        setRefundMethodsState("error");
+        setActualRefundMethod("");
       });
   }, [order?.orderId]);
 
@@ -980,6 +985,10 @@ function SpecialRefundForm({
     setError("");
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
       setError("金額を正しく入力してください");
+      return;
+    }
+    if (showPaymentFields && !refundMethods.some((m) => m.value === actualRefundMethod)) {
+      setError(refundMethodsMessage(refundMethodsState) || "実際の返金手段を選んでください");
       return;
     }
     if (!idempotencyKey) {
@@ -1033,7 +1042,7 @@ function SpecialRefundForm({
                   {showPaymentFields ? (
                     <>
                       <Row label="元の手段" value={paymentLabel(originalPaymentMethod, paymentMethods)} />
-                      <Row label="返金手段" value={paymentLabel(actualRefundMethod, paymentMethods)} />
+                      <Row label="返金手段" value={paymentLabel(actualRefundMethod, refundMethods)} />
                     </>
                   ) : null}
                   {showAdjustKind ? (
@@ -1096,12 +1105,18 @@ function SpecialRefundForm({
                   options={paymentMethods}
                   onChange={setOriginalPaymentMethod}
                 />
-                <PosChoiceField
-                  label="実際の返金手段"
-                  value={actualRefundMethod}
-                  options={paymentMethods}
-                  onChange={setActualRefundMethod}
-                />
+                {refundMethods.length > 0 ? (
+                  <PosChoiceField
+                    label="実際の返金手段"
+                    value={actualRefundMethod}
+                    options={refundMethods}
+                    onChange={setActualRefundMethod}
+                  />
+                ) : (
+                  <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} fontSize="small">
+                    {refundMethodsMessage(refundMethodsState)}
+                  </s-text>
+                )}
               </>
             ) : null}
 
@@ -1318,6 +1333,14 @@ function Row({ label, value }) {
       <s-text>{value}</s-text>
     </s-stack>
   );
+}
+
+/** 実際の返金手段を選べないときの文（支払方法マスタからしか選べない） */
+function refundMethodsMessage(state) {
+  if (state === "loading") return "支払方法を読み込み中…";
+  if (state === "error") return "支払方法を読み込めませんでした。通信を確かめて、この画面を開き直してください。";
+  if (state === "empty") return "特殊返金で選べる支払方法がありません。管理画面の「支払方法」で登録してください。";
+  return "";
 }
 
 function paymentLabel(value, methods = FALLBACK_PAYMENT_METHODS) {

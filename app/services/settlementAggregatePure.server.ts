@@ -16,6 +16,11 @@ import {
   type PointRedemptionRules,
 } from "../utils/pointRedemptionRules";
 import {
+  remapRefundLabel,
+  skuKey,
+  type RefundRemapRule,
+} from "../utils/settlementCalcSettings";
+import {
   lineChargedAmount,
   lineTaxAmount,
   nonSalesFeeLineIds,
@@ -45,11 +50,16 @@ export interface GasStyleOrder {
   totalPriceSet: { shopMoney: { amount: string; currencyCode?: string } };
   currentTotalTaxSet?: { shopMoney: { amount: string } } | null;
   totalTaxSet?: { shopMoney: { amount: string } };
+  /** 「売上を数える日」を注文の日にするときに使う */
+  processedAt?: string | null;
   /** 税込価格の店か（売上に含めない手数料の明細の金額計算に使う。無ければ税込とみなす） */
   taxesIncluded?: boolean | null;
   lineItems?: {
     nodes: (Omit<FeeLineItemLike, "quantity" | "discountAllocations"> & {
       quantity: number;
+      /** 点数に数えない SKU の判定に使う */
+      sku?: string | null;
+      originalUnitPriceSet?: { shopMoney: { amount: string } } | null;
       discountAllocations?: {
         allocatedAmountSet: { shopMoney: { amount: string } };
         discountApplication?: {
@@ -64,6 +74,10 @@ export interface GasStyleOrder {
     id: string;
     createdAt?: string;
     kind: string;
+    /** SUCCESS / FAILURE / ERROR / PENDING など。「注文の日」でオーソリを売上に数えるかの判定に使う */
+    status?: string | null;
+    /** VOID がどのオーソリを取り消したか */
+    parentTransaction?: { id: string } | null;
     amountSet?: { shopMoney: { amount: string; currencyCode?: string } };
     gateway?: string;
     formattedGateway?: string | null;
@@ -71,7 +85,14 @@ export interface GasStyleOrder {
   }>;
   refunds?: Array<{
     createdAt?: string;
-    refundLineItems?: (Omit<FeeRefundLineItemLike, "quantity"> & { quantity: number })[];
+    refundLineItems?: (Omit<FeeRefundLineItemLike, "quantity" | "lineItem"> & {
+      quantity: number;
+      lineItem?: {
+        id?: string | null;
+        sku?: string | null;
+        originalUnitPriceSet?: { shopMoney: { amount: string } } | null;
+      } | null;
+    })[];
     transactions?: Array<{
       id: string;
       kind?: string;
@@ -367,6 +388,37 @@ export function decideRefundAttributionForSettlement(
   };
 }
 
+/**
+ * 精算の数え方の設定のうち、注文ごとの集計で使うもの（app/utils/settlementCalcSettings.ts）。
+ * 渡さなければ今の数え方（決済の時刻の日・付け替えなし・SKU で外さない）。
+ */
+export type GasAggregateCalcOpts = {
+  saleDateBasis: "transaction" | "order";
+  /** skuKey でそろえた SKU */
+  itemCountExcludedSkuKeys: ReadonlySet<string>;
+  refundRemapRules: readonly RefundRemapRule[];
+  /** 返金の付け替えの店の判定に使う、精算の店の数字の ID */
+  locIdRaw: string;
+};
+
+export const DEFAULT_GAS_AGGREGATE_CALC_OPTS: GasAggregateCalcOpts = {
+  saleDateBasis: "transaction",
+  itemCountExcludedSkuKeys: new Set(),
+  refundRemapRules: [],
+  locIdRaw: "",
+};
+
+/** 点数に数えない明細か（印の付いた SKU の 0 円の明細だけ。値段を付けて売った明細は数える） */
+export function isItemCountExcludedLine(
+  line: { sku?: string | null; originalUnitPriceSet?: { shopMoney: { amount: string } } | null } | null | undefined,
+  excluded: ReadonlySet<string>,
+): boolean {
+  if (!line || excluded.size === 0) return false;
+  const key = skuKey(line.sku ?? "");
+  if (!key || !excluded.has(key)) return false;
+  return Number(line.originalUnitPriceSet?.shopMoney?.amount ?? 0) === 0;
+}
+
 export function orderRefundsCountForSettlement(
   order: GasStyleOrder,
   inRange: (iso?: string) => boolean,
@@ -385,6 +437,8 @@ export function aggregateGasStyleForOrders(
   attributionOpts?: GasAggregateAttributionOpts,
   /** ポイント利用額に数える割引（保存した「ポイント/会員施策設定」。無ければ初めの値） */
   pointRules: PointRedemptionRules = DEFAULT_POINT_REDEMPTION_RULES,
+  /** 精算の数え方の設定（売上を数える日・返金の付け替え・点数に数えない SKU） */
+  calcOpts: GasAggregateCalcOpts = DEFAULT_GAS_AGGREGATE_CALC_OPTS,
 ): {
   pay: Record<string, GasPayBucket>;
   refundsGross: number;
@@ -460,7 +514,30 @@ export function aggregateGasStyleForOrders(
     }
 
     const txs = o.transactions ?? [];
+    // 「売上を数える日」が注文の日のとき: 売上の決済は注文の日（processedAt）で決める。
+    // 売上の決済（SALE / CAPTURE）がまだ無い注文は、オーソリを売上に数える（ciara-system と同じ）。
+    const byOrderDate = calcOpts.saleDateBasis === "order";
+    const hasSettledSaleTx = txs.some((tx) => isSettledSaleKind(tx.kind));
+    const orderOnThisDay = byOrderDate && inRange(o.processedAt ?? undefined);
+    // オーソリを売上に数えるのは、成功していて、取り消し（VOID）されていないものだけ。
+    // 失敗・期限切れ・VOID のオーソリは売上にも件数にも入れない。
+    const voidedAuthIds = new Set<string>();
+    let voidWithoutParent = false;
+    for (const tx of txs) {
+      if (normalizeTxKind(tx.kind) !== "VOID" || !isSuccessStatus(tx.status)) continue;
+      const parentId = tx.parentTransaction?.id;
+      if (parentId) voidedAuthIds.add(parentId);
+      else voidWithoutParent = true;
+    }
+    const isCountableAuthorization = (tx: (typeof txs)[number]) =>
+      normalizeTxKind(tx.kind) === "AUTHORIZATION" &&
+      isSuccessStatus(tx.status) &&
+      !voidWithoutParent &&
+      !voidedAuthIds.has(tx.id);
+    const countsAsSaleTx = (tx: (typeof txs)[number]) =>
+      isSettledSaleKind(tx.kind) || (byOrderDate && !hasSettledSaleTx && isCountableAuthorization(tx));
     const todaysTx = txs.filter((tx) => {
+      if (byOrderDate && countsAsSaleTx(tx)) return orderOnThisDay;
       const byTime = inRange(tx.createdAt);
       const byRefundLink = refundTxIdsInDay.has(tx.id);
       return byTime || (String(tx.kind) === "REFUND" && byRefundLink);
@@ -472,10 +549,14 @@ export function aggregateGasStyleForOrders(
     for (const tx of todaysTx) {
       const amt = Number(tx.amountSet?.shopMoney?.amount ?? 0);
       const kind = String(tx.kind ?? "");
-      const gw = gasTxLabel(tx);
+      const baseGw = gasTxLabel(tx);
+      const gw =
+        kind === "REFUND"
+          ? remapRefundLabel(baseGw, tx, calcOpts.refundRemapRules, calcOpts.locIdRaw)
+          : baseGw;
       ensurePayBucket(pay, gw);
 
-      if (kind === "SALE" || kind === "CAPTURE") {
+      if (kind === "SALE" || kind === "CAPTURE" || (byOrderDate && countsAsSaleTx(tx))) {
         gwSaleMapToday[gw] = (gwSaleMapToday[gw] || 0) + amt;
         pay[gw].saleTx += 1;
       } else if (kind === "REFUND") {
@@ -572,7 +653,10 @@ export function aggregateGasStyleForOrders(
     if (effectiveOrderSaleToday > 0) {
       const nodes = o.lineItems?.nodes ?? [];
       itemCount += nodes.reduce(
-        (s, n) => s + (n.id && feeLineIds.has(String(n.id)) ? 0 : Number(n.quantity ?? 0)),
+        (s, n) =>
+          (n.id && feeLineIds.has(String(n.id))) || isItemCountExcludedLine(n, calcOpts.itemCountExcludedSkuKeys)
+            ? s
+            : s + Number(n.quantity ?? 0),
         0,
       );
       if (feeLineIds.size > 0) {
@@ -595,6 +679,7 @@ export function aggregateGasStyleForOrders(
             orderFeeRefundedToday += refundLineChargedAmount(ri, o.taxesIncluded);
             continue;
           }
+          if (isItemCountExcludedLine(ri.lineItem, calcOpts.itemCountExcludedSkuKeys)) continue;
           itemCount -= Number(ri.quantity ?? 0);
         }
       }
@@ -650,6 +735,21 @@ export function aggregateGasStyleForOrders(
     refundAttributionMismatchCount,
     nonSalesFeeTotal: Math.round(nonSalesFeeTotal),
   };
+}
+
+function normalizeTxKind(kind: string | null | undefined): string {
+  return String(kind ?? "").trim().toUpperCase();
+}
+
+/** 決済が成功したか（status が無いときは成功と見なさない） */
+function isSuccessStatus(status: string | null | undefined): boolean {
+  return String(status ?? "").trim().toUpperCase() === "SUCCESS";
+}
+
+/** 確定した売上の決済（SALE / CAPTURE） */
+function isSettledSaleKind(kind: string | null | undefined): boolean {
+  const k = normalizeTxKind(kind);
+  return k === "SALE" || k === "CAPTURE";
 }
 
 export function totalFromPayBuckets(pay: Record<string, GasPayBucket>): number {

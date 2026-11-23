@@ -19,6 +19,7 @@ const GROUP_PATHS: Record<string, string[]> = {
   ],
   "/app/settlement-settings": [
     "/app/settlement-settings",
+    "/app/settlement-calc-settings",
     "/app/settlement-print-layout",
     "/app/settlement-history",
     "/app/special-refund-settings",

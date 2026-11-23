@@ -4,7 +4,7 @@
  * payment_method_override は親 gateway → 実手段への振替のみ行う。
  * pending（Shopify 返金の成否が分からない）は数えない。精算は assertNoPendingSpecialRefunds で確定を止める。
  */
-import { gasNormalizeGatewayLabel } from "./settlementAggregatePure.server";
+import { GAS_UNKNOWN_GATEWAY, gasNormalizeGatewayLabel } from "./settlementAggregatePure.server";
 
 export interface OverlayPaymentSection {
   gateway: string;
@@ -23,6 +23,54 @@ export interface SpecialRefundOverlayEvent {
   adjustKind: string | null;
   /** none | skipped | pending | success | failed */
   shopifyRefundStatus?: string | null;
+  /** 警告に出す注文番号（任意） */
+  sourceOrderName?: string | null;
+}
+
+/** 返金方法が支払方法マスタに無いときに載せる行（集計の「未分類」と同じ行にまとめる） */
+export const UNMATCHED_REFUND_SECTION_KEY = GAS_UNKNOWN_GATEWAY;
+
+/**
+ * 特殊返金を支払方法の行に載せるときの手がかり（精算エンジンが支払方法マスタから作る）。
+ * 渡さなければ今までどおり、見つからない手段はその名前で行を作る。
+ */
+export interface SpecialRefundOverlayOpts {
+  /** 支払方法マスタ（または既定の名前）で分かる手段か */
+  isKnownMethod?: (method: string) => boolean;
+  /** 新しく行を作るときの表示名 */
+  labelForMethod?: (method: string) => string;
+}
+
+/**
+ * 特殊返金のうち、支払方法の行にきちんと載せられなかったもの（精算画面に警告として出す）。
+ * - refund_method_not_in_master: 返金方法がマスタに無いので「未分類」の行に載せた（合計は変わらない）
+ * - original_method_not_found: Shopify 返金済みだが、元の支払方法の行がその日に無いので付け替えなかった
+ * - adjust_method_not_found: レシート調整の支払方法の行がその日に無い（行の金額は動かしていない）
+ */
+export type UnmatchedRefundMethodReason =
+  | "refund_method_not_in_master"
+  | "original_method_not_found"
+  | "adjust_method_not_found";
+
+export interface UnmatchedRefundMethodWarning {
+  reason: UnmatchedRefundMethodReason;
+  eventType: string;
+  amount: number;
+  method: string;
+  sourceOrderName: string | null;
+}
+
+export function unmatchedRefundWarningMessage(w: UnmatchedRefundMethodWarning): string {
+  const order = w.sourceOrderName ? `注文 ${w.sourceOrderName}・` : "";
+  const yen = `¥${Math.round(w.amount).toLocaleString("ja-JP")}`;
+  switch (w.reason) {
+    case "refund_method_not_in_master":
+      return `${order}${yen}: 返金方法「${w.method}」が支払方法マスタに無いため「${UNMATCHED_REFUND_SECTION_KEY}」に入れました。支払方法マスタに登録してから更新してください。`;
+    case "original_method_not_found":
+      return `${order}${yen}: 元の支払方法「${w.method}」の行がこの日に無いため、返金の付け替えをしていません。`;
+    case "adjust_method_not_found":
+      return `${order}${yen}: レシート調整の支払方法「${w.method}」の行がこの日に無いため、支払方法別の金額には入っていません。`;
+  }
 }
 
 /** payment sections から gateway または label で該当セクションのインデックスを返す */
@@ -66,21 +114,65 @@ function ensureSection(
 }
 
 /**
+ * 返金を載せる行。その日に行が無ければ作る。
+ * マスタで分からない手段は「未分類」の行に載せ、警告を残す（合計は変わらない）。
+ */
+function ensureRefundSection(
+  sections: OverlayPaymentSection[],
+  method: string,
+  opts: SpecialRefundOverlayOpts | undefined,
+  warn: (reason: UnmatchedRefundMethodReason, method: string) => void,
+): number {
+  const idx = findPaymentSectionIndex(sections, method);
+  if (idx >= 0) return idx;
+  const key = String(method).trim() || "cash";
+  if (opts?.isKnownMethod && !opts.isKnownMethod(key)) {
+    warn("refund_method_not_in_master", key);
+    const unknownIdx = findPaymentSectionIndex(sections, UNMATCHED_REFUND_SECTION_KEY);
+    if (unknownIdx >= 0) return unknownIdx;
+    sections.push({
+      gateway: UNMATCHED_REFUND_SECTION_KEY,
+      label: UNMATCHED_REFUND_SECTION_KEY,
+      net: 0,
+      refund: 0,
+      txCount: 0,
+      refundCount: 0,
+    });
+    return sections.length - 1;
+  }
+  if (!opts?.labelForMethod) return ensureSection(sections, key);
+  sections.push({
+    gateway: key,
+    label: opts.labelForMethod(key) || key,
+    net: 0,
+    refund: 0,
+    txCount: 0,
+    refundCount: 0,
+  });
+  return sections.length - 1;
+}
+
+/**
  * Shopify が計上した元手段から、店頭で実際に払い出した手段へ返金額を移す。
- * 元手段を特定できない場合は二重控除を避けるため何も追加しない。
+ * 元手段を特定できない場合は二重控除を避けるため何も追加しない（警告は残す）。
  */
 function transferExecutedRefund(
   sections: OverlayPaymentSection[],
   originalPaymentMethod: string | null,
   actualRefundMethod: string | null,
   amount: number,
+  opts: SpecialRefundOverlayOpts | undefined,
+  warn: (reason: UnmatchedRefundMethodReason, method: string) => void,
 ): void {
   const originalKey = originalPaymentMethod ?? "cash";
   const actualKey = actualRefundMethod ?? "cash";
   const originalIdx = findPaymentSectionIndex(sections, originalKey);
-  if (originalIdx < 0) return;
+  if (originalIdx < 0) {
+    warn("original_method_not_found", originalKey);
+    return;
+  }
 
-  const actualIdx = ensureSection(sections, actualKey);
+  const actualIdx = ensureRefundSection(sections, actualKey, opts, warn);
   if (originalIdx === actualIdx) return;
 
   const moved = Math.min(amount, Math.max(0, sections[originalIdx].refund));
@@ -161,15 +253,28 @@ export function isShopifyRefundSucceeded(
  * - receipt_cash_adjustment + success: Shopify TX が正本のためスキップ
  * - pending: 何もしない（Shopify 側の返金があればそれだけが数えられる。二重にしない）
  * - それ以外: 従来どおり純 overlay
+ * - opts.isKnownMethod を渡すと、マスタに無い返金方法は「未分類」の行に載せる
+ * 戻り値: 行にきちんと載せられなかった特殊返金（精算画面の警告用）
  */
 export function applySpecialRefundEventsToTotals(
   sections: OverlayPaymentSection[],
   otherEvents: SpecialRefundOverlayEvent[],
   totals: { total: number; refundTotal: number },
-): void {
+  opts?: SpecialRefundOverlayOpts,
+): UnmatchedRefundMethodWarning[] {
+  const warnings: UnmatchedRefundMethodWarning[] = [];
   for (const e of otherEvents) {
     const amount = Number(e.amount);
     if (!Number.isFinite(amount) || amount <= 0) continue;
+    const warn = (reason: UnmatchedRefundMethodReason, method: string) => {
+      warnings.push({
+        reason,
+        eventType: e.eventType,
+        amount,
+        method,
+        sourceOrderName: e.sourceOrderName ?? null,
+      });
+    };
     // 成否不明。上乗せも振替もしない（呼び出し側は assertNoPendingSpecialRefunds で確定を止める）
     if (isShopifyRefundPending(e.shopifyRefundStatus)) continue;
     const executed = isShopifyRefundSucceeded(e.shopifyRefundStatus);
@@ -182,11 +287,13 @@ export function applySpecialRefundEventsToTotals(
             e.originalPaymentMethod,
             e.actualRefundMethod,
             amount,
+            opts,
+            warn,
           );
           break;
         }
         totals.refundTotal += amount;
-        const idx = ensureSection(sections, e.actualRefundMethod ?? "cash");
+        const idx = ensureRefundSection(sections, e.actualRefundMethod ?? "cash", opts, warn);
         sections[idx].refund += amount;
         break;
       }
@@ -195,6 +302,7 @@ export function applySpecialRefundEventsToTotals(
         const kind = (e.adjustKind ?? "undo").toLowerCase();
         const method = e.originalPaymentMethod ?? e.actualRefundMethod ?? "cash";
         const idx = findPaymentSectionIndex(sections, method);
+        if (idx < 0) warn("adjust_method_not_found", method);
         if (kind === "undo") {
           totals.refundTotal -= amount;
           if (idx >= 0) sections[idx].refund = Math.max(0, sections[idx].refund - amount);
@@ -211,11 +319,13 @@ export function applySpecialRefundEventsToTotals(
             e.originalPaymentMethod,
             e.actualRefundMethod,
             amount,
+            opts,
+            warn,
           );
           break;
         }
         totals.refundTotal += amount;
-        const idx = ensureSection(sections, e.actualRefundMethod ?? "cash");
+        const idx = ensureRefundSection(sections, e.actualRefundMethod ?? "cash", opts, warn);
         sections[idx].refund += amount;
         break;
       }
@@ -223,4 +333,5 @@ export function applySpecialRefundEventsToTotals(
         break;
     }
   }
+  return warnings;
 }

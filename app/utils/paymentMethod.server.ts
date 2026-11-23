@@ -6,6 +6,7 @@
  */
 import prisma from "../db.server";
 import {
+  isKnownRefundMethod,
   matchPaymentMethodMaster,
   resolvePaymentSectionLabel,
   type PaymentMethodMatchInput,
@@ -71,4 +72,21 @@ export async function getPaymentMethodVoucherInfo(
     };
   }
   return { isVoucher: false, voucherChangeSupported: false };
+}
+
+/**
+ * 精算の特殊返金用: マスタを1回読み、返金方法がマスタで分かるかと表示名を返す。
+ */
+export async function loadRefundMethodResolver(
+  shopId: string,
+  normalize?: (method: string) => string,
+): Promise<{
+  isKnownMethod: (method: string) => boolean;
+  labelForMethod: (method: string) => string;
+}> {
+  const masters = await loadEnabledMasters(shopId);
+  return {
+    isKnownMethod: (method) => isKnownRefundMethod(method, masters, normalize),
+    labelForMethod: (method) => resolvePaymentSectionLabel(method, masters),
+  };
 }
