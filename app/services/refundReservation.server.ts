@@ -2,7 +2,7 @@
  * 返金の予約（DB・Shopify を読む）。決まりは refundReservationPure.ts、docs/REFUND_RESERVATION.md。
  *
  * - 予約: 注文 1 件に、使う前の予約は 1 つまで。予約した日（店のタイムゾーン）が終わると使わない
- * - 当てる: 予約のあとにできた、まだ付け替えていない最初の純正の返金に、createNativeRefundReassign で付け替えを作る
+ * - 当てる: 予約のあとにできた、まだ返金方法を変更していない最初の純正の返金に、createNativeRefundReassign で返金方法変更を作る
  *   （金額は返金額で固定・最後の行は残り・Shopify では返金しない・残りを超えない）
  * - 呼ぶところ: orders/updated の知らせ（その注文に予約があるときだけ）、POS で予約を開いたとき
  */
@@ -101,7 +101,7 @@ export async function createRefundReservation(
   if (!check.ok) return { ok: false, status: 400, code: "INVALID_ROWS", message: check.error };
   const amount = checkExpectedAmount(check.rows, input.expectedAmount);
   if (!amount.ok) return { ok: false, status: 400, code: "INVALID_AMOUNT", message: amount.error };
-  // 種類は特殊返金設定でオンのものだけ（返金 = 現金返金、付け替え = 支払方法の付け替え）
+  // 種類は特殊返金設定でオンのものだけ（返金 = 現金返金、付け替え = 返金方法変更）
   for (const r of check.rows) {
     const on = r.eventType === "cash_refund" ? settings.enableCashRefund : settings.enablePaymentMethodOverride;
     if (!on) {
@@ -354,7 +354,7 @@ export async function applyRefundReservationsForOrder(
           status: "needs_review",
           appliedRefundId: picked.refundId,
           appliedEventIds: JSON.stringify(createdIds),
-          reviewReason: `自動の付け替えが途中で止まりました（${failure}）。返金の一覧から残りを付け替えてください。`,
+          reviewReason: `自動の返金方法変更が途中で止まりました（${failure}）。返金の一覧から残りの返金方法を変更してください。`,
         },
       });
       result.review += 1;
