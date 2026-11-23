@@ -873,7 +873,7 @@ async function buildSettlementPreviewImpl(
     await getAppSetting<Partial<VoucherSettings> & { settingsVersion?: number }>(shopId, VOUCHER_SETTINGS_KEY),
     DEFAULT_VOUCHER_SETTINGS,
   );
-  // 精算の数え方（売上を数える日・返金の付け替え・点数に数えない SKU など）。保存していない店は今の数え方
+  // 精算の数え方（売上を数える日・返金の支払方法の変更・点数に数えない SKU など）。保存していない店は今の数え方
   const calcSettings = resolveSettlementCalcSettings(
     await getAppSetting<unknown>(shopId, SETTLEMENT_CALC_SETTINGS_KEY),
   );

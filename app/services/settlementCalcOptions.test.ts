@@ -102,7 +102,7 @@ describe("設定の読み取り", () => {
     assert.equal(ok.ok, true);
   });
 
-  it("付け替えの行の誤りは行の番号を出し、知らない店は断る。空の行は捨てる", () => {
+  it("変更の行の誤りは行の番号を出し、知らない店は断る。空の行は捨てる", () => {
     const missing = validateSettlementCalcSettings(
       { ...base, refundRemapRules: [{ match: "", toLabel: "", locationId: "" }, { match: "wespo", toLabel: "" }] },
       { legacyGiftCardAggregationEnabled: false },
@@ -259,10 +259,10 @@ describe("点数に数えない商品", () => {
   });
 });
 
-describe("返金の支払方法の付け替え", () => {
+describe("返金の支払方法の変更", () => {
   const rules = [{ match: "wespo", toLabel: "現金", locationId: "100" }];
 
-  it("決めた店の返金だけ付け替え、売上は元の支払方法のまま", () => {
+  it("決めた店の返金だけ変更、売上は元の支払方法のまま", () => {
     assert.equal(remapRefundLabel("wespo", { gateway: "wespo" }, rules, "100"), "現金");
     assert.equal(remapRefundLabel("wespo", { gateway: "wespo" }, rules, "200"), "wespo");
     assert.equal(remapRefundLabel("クレジットカード", { gateway: "credit_card" }, rules, "100"), "クレジットカード");

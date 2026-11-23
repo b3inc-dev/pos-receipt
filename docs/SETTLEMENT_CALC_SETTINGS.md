@@ -8,8 +8,8 @@ POS Receipt は販売するアプリなので、特定の店（Ciara）の運用
 |---|---|---|---|
 | 売上を数える日 | 決済した日（SALE / CAPTURE の時刻） | 注文の日（`processedAt`）。決済が確定していない注文はオーソリを売上に数える（成功したオーソリだけ。失敗・VOID したものは数えない） | `aggregateGasStyleForOrders` |
 | 点数に数えない商品 | なし | ノベルティの SKU を入れる。0 円の明細だけ外し、返品の点数でも外す | 同上 |
-| 返金の支払方法の付け替え | なし | 例: 店＝梅田エスト店・天王寺ミオ店、支払方法に含まれる文字＝wespo、付け替え先＝現金 | 同上（REFUND の取引だけ） |
-| ギフトカードの返金 | OFF | ON（付け替え先は 現金）。ギフトカードのメモの `REFUND_CASH` / `REFUND_GC` と `LOC:店の名前` で見分ける | `settlementGiftCardRefunds.server.ts` |
+| 返金の支払方法の変更 | なし | 例: 店＝梅田エスト店・天王寺ミオ店、支払方法に含まれる文字＝wespo、変更後＝現金 | 同上（REFUND の取引だけ） |
+| ギフトカードの返金 | OFF | ON（返金を載せる支払方法は 現金）。ギフトカードのメモの `REFUND_CASH` / `REFUND_GC` と `LOC:店の名前` で見分ける | `settlementGiftCardRefunds.server.ts` |
 | 支払方法ごとの取引件数 | 売上の取引の件数 | 売上の取引の件数から返金の件数を引く | `payBucketsToPaymentSections` |
 | 返金が売上より多い日 | 合計を 0 にする | 外す（合計・純売上・税をマイナスのまま出す） | `buildSettlementPreviewImpl` |
 | 支払方法の分け方 | 決まった分け方（`gasNormalizeGatewayLabel`。gateway の名前から 現金・クレジットカード・電子マネー・交通系 IC・商品券などに分ける） | どちらでもよい（ciara-system は GAS と同じ決まった分け方） | `aggregateGasStyleForOrders`（`paymentKey`）・`payBucketsToPaymentSections`・特殊返金の上乗せ |
