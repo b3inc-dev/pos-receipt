@@ -1,7 +1,7 @@
 /**
  * /app/settlement-calc-settings — 精算の数え方
  *
- * 店ごとに運用が違う所（売上を数える日・点数に数えない商品・返金の支払方法の付け替え・ギフトカードの返金など）を選ぶ。
+ * 店ごとに運用が違う所（売上を数える日・点数に数えない商品・返金の支払方法の変更・ギフトカードの返金など）を選ぶ。
  * 初めの値は今の数え方のまま。保存先は AppSetting の settlement_calc_settings（app/utils/settlementCalcSettings.ts）。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
@@ -87,7 +87,7 @@ export async function action({ request }: ActionFunctionArgs) {
     rules = JSON.parse(String(formData.get("refundRemapRules") ?? "[]"));
   } catch {
     return Response.json(
-      { ok: false, error: "「返金の支払方法の付け替え」を読み取れませんでした。画面を読み直してください。" },
+      { ok: false, error: "「返金の支払方法の変更」を読み取れませんでした。画面を読み直してください。" },
       { status: 400 },
     );
   }
@@ -224,13 +224,13 @@ export default function SettlementCalcSettingsPage() {
             </Layout.AnnotatedSection>
 
             <Layout.AnnotatedSection
-              title="返金の支払方法の付け替え"
+              title="返金の支払方法の変更"
               description="返金を元の支払方法と違う方法で払い出す店で、精算の返金を払い出した方法に載せます（例: ある店では wespo の返金を現金で返す）。"
             >
               <Card>
                 <BlockStack gap="300">
                   {rules.length === 0 ? (
-                    <Text as="p" tone="subdued">付け替えはありません。</Text>
+                    <Text as="p" tone="subdued">変更はありません。</Text>
                   ) : (
                     rules.map((rule, index) => (
                       <InlineStack key={index} gap="200" align="start" blockAlign="end" wrap>
@@ -244,7 +244,7 @@ export default function SettlementCalcSettingsPage() {
                         </div>
                         <div style={{ flex: "1 1 140px", minWidth: 0 }}>
                           <TextField
-                            label="付け替え先"
+                            label="変更後"
                             value={rule.toLabel}
                             onChange={(v) => setRule(index, { toLabel: v })}
                             placeholder="現金"
@@ -274,11 +274,11 @@ export default function SettlementCalcSettingsPage() {
                       disabled={rules.length >= REFUND_REMAP_RULES_MAX}
                       onClick={() => setRules((prev) => [...prev, { match: "", toLabel: "現金", locationId: "" }])}
                     >
-                      付け替えを追加
+                      変更を追加
                     </Button>
                   </InlineStack>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    上から順に見て、最初に当てはまった行を使います。返金だけを付け替え、売上は元の支払方法のままです。
+                    上から順に見て、最初に当てはまった行を使います。返金だけを変更し、売上は元の支払方法のままです。
                   </Text>
                 </BlockStack>
               </Card>

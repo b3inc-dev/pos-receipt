@@ -233,14 +233,14 @@ function parseVoucherFaceFromNote(note: string | null | undefined): number {
 
 /**
  * 精算の数え方の設定のうち、注文ごとの集計で使うもの（app/utils/settlementCalcSettings.ts）。
- * 渡さなければ今の数え方（決済の時刻の日・付け替えなし・SKU で外さない）。
+ * 渡さなければ今の数え方（決済の時刻の日・変更なし・SKU で外さない）。
  */
 export type GasAggregateCalcOpts = {
   saleDateBasis: "transaction" | "order";
   /** skuKey でそろえた SKU */
   itemCountExcludedSkuKeys: ReadonlySet<string>;
   refundRemapRules: readonly RefundRemapRule[];
-  /** 返金の付け替えの店の判定に使う、精算の店の数字の ID */
+  /** 返金の支払方法の変更の店の判定に使う、精算の店の数字の ID */
   locIdRaw: string;
 };
 
@@ -282,7 +282,7 @@ export function aggregateGasStyleForOrders(
   attributionOpts?: GasAggregateAttributionOpts,
   /** ポイント利用額に数える割引（保存した「ポイント/会員施策設定」。無ければ初めの値） */
   pointRules: PointRedemptionRules = DEFAULT_POINT_REDEMPTION_RULES,
-  /** 精算の数え方の設定（売上を数える日・返金の付け替え・点数に数えない SKU） */
+  /** 精算の数え方の設定（売上を数える日・返金の支払方法の変更・点数に数えない SKU） */
   calcOpts: GasAggregateCalcOpts = DEFAULT_GAS_AGGREGATE_CALC_OPTS,
 ): {
   pay: Record<string, GasPayBucket>;

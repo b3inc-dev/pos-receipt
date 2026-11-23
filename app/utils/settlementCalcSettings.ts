@@ -10,11 +10,11 @@
 
 export const SETTLEMENT_CALC_SETTINGS_KEY = "settlement_calc_settings";
 
-/** 返金の支払方法の付け替え（例: 特定の店で、wespo の返金を現金で払い出す運用） */
+/** 返金の支払方法の変更（例: 特定の店で、wespo の返金を現金で払い出す運用） */
 export type RefundRemapRule = {
   /** 支払方法の名前に含まれる文字（大文字と小文字は区別しない） */
   match: string;
-  /** 付け替え先の支払方法の名前（精算の支払方法の名前。例: 現金） */
+  /** 変更後の支払方法の名前（精算の支払方法の名前。例: 現金） */
   toLabel: string;
   /** 対象の店の Shopify ロケーションの数字の ID。空文字はすべての店 */
   locationId: string;
@@ -37,7 +37,7 @@ export type SettlementCalcSettings = {
   giftCardRefundLabel: string;
   /** 点数に数えない商品の SKU（0 円の明細だけ外す。ノベルティなど） */
   itemCountExcludedSkus: string[];
-  /** 返金の支払方法の付け替え（並べた順に見て、最初に当てはまったものを使う） */
+  /** 返金の支払方法の変更（並べた順に見て、最初に当てはまったものを使う） */
   refundRemapRules: RefundRemapRule[];
   /**
    * 支払方法ごとの取引件数。
@@ -174,7 +174,7 @@ export function validateSettlementCalcSettings(
 
   const rawRules = Array.isArray(input.refundRemapRules) ? input.refundRemapRules : [];
   if (rawRules.length > REFUND_REMAP_RULES_MAX) {
-    return { ok: false, error: `「返金の支払方法の付け替え」は ${REFUND_REMAP_RULES_MAX} 行までです。` };
+    return { ok: false, error: `「返金の支払方法の変更」は ${REFUND_REMAP_RULES_MAX} 行までです。` };
   }
   const rules: RefundRemapRule[] = [];
   for (let i = 0; i < rawRules.length; i++) {
@@ -184,16 +184,16 @@ export function validateSettlementCalcSettings(
     const locationId = locationNumericId(row.locationId);
     const rowNo = i + 1;
     if (!match && !toLabel) continue; // 空の行は捨てる
-    if (!match) return { ok: false, error: `「返金の支払方法の付け替え」の ${rowNo} 行目の「支払方法に含まれる文字」を入れてください。` };
-    if (!toLabel) return { ok: false, error: `「返金の支払方法の付け替え」の ${rowNo} 行目の「付け替え先」を入れてください。` };
+    if (!match) return { ok: false, error: `「返金の支払方法の変更」の ${rowNo} 行目の「支払方法に含まれる文字」を入れてください。` };
+    if (!toLabel) return { ok: false, error: `「返金の支払方法の変更」の ${rowNo} 行目の「変更後」を入れてください。` };
     if (match.length > LABEL_MAX_LENGTH || toLabel.length > LABEL_MAX_LENGTH) {
-      return { ok: false, error: `「返金の支払方法の付け替え」の ${rowNo} 行目は ${LABEL_MAX_LENGTH} 文字までです。` };
+      return { ok: false, error: `「返金の支払方法の変更」の ${rowNo} 行目は ${LABEL_MAX_LENGTH} 文字までです。` };
     }
     if (str(row.locationId) && !locationId) {
-      return { ok: false, error: `「返金の支払方法の付け替え」の ${rowNo} 行目の店が読み取れません。` };
+      return { ok: false, error: `「返金の支払方法の変更」の ${rowNo} 行目の店が読み取れません。` };
     }
     if (locationId && opts.knownLocationIds && !opts.knownLocationIds.has(locationId)) {
-      return { ok: false, error: `「返金の支払方法の付け替え」の ${rowNo} 行目の店が見つかりません。ロケーションを読み直してください。` };
+      return { ok: false, error: `「返金の支払方法の変更」の ${rowNo} 行目の店が見つかりません。ロケーションを読み直してください。` };
     }
     rules.push({ match, toLabel, locationId });
   }
@@ -213,7 +213,7 @@ export function validateSettlementCalcSettings(
 }
 
 /**
- * 返金の支払方法の名前を、付け替えの決まりで変える。当てはまらなければそのまま。
+ * 返金の支払方法の名前を、変更の行で変える。当てはまらなければそのまま。
  * @param label 精算の支払方法の名前（gasNormalizeGatewayLabel の結果）
  * @param raw 元の gateway・formattedGateway（名前に出ない文字でも当てられるように）
  */
