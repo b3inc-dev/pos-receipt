@@ -25,8 +25,8 @@ export function nativeRefundLineLabel(line) {
 export function nativeRefundLineStatus(line) {
   const remaining = money(line?.remaining);
   const reassigned = money(line?.reassigned);
-  if (remaining <= 0) return "付け替え済み";
-  if (reassigned > 0) return `一部付け替え済み（残り ¥${remaining.toLocaleString()}）`;
+  if (remaining <= 0) return "返金方法変更済み";
+  if (reassigned > 0) return `一部返金方法変更済み（残り ¥${remaining.toLocaleString()}）`;
   return "";
 }
 
@@ -38,7 +38,7 @@ export function splitAmounts(total, rows) {
   const t = money(total);
   const list = Array.isArray(rows) ? rows : [];
   if (list.length <= 1) {
-    return { amounts: [t], lastAmount: t, ok: t > 0, error: t > 0 ? "" : "付け替えられる金額がありません" };
+    return { amounts: [t], lastAmount: t, ok: t > 0, error: t > 0 ? "" : "返金方法を変更できる金額がありません" };
   }
   const head = list.slice(0, -1).map((r) => money(r?.amount));
   if (head.some((a) => !(a > 0))) {
