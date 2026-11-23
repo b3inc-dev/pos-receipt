@@ -76,6 +76,19 @@ function writeTimezoneMemo(admin: AdminClient, shopId: string, tz: string): void
 }
 
 /**
+ * 店のタイムゾーンでの「今日」（YYYY-MM-DD）。
+ * `new Date().toISOString().slice(0, 10)` は UTC の日付なので、日本時間 0:00〜8:59 は前日になる。日次の「今日」にはこちらを使う。
+ */
+export async function getShopCalendarToday(
+  admin: AdminClient,
+  shopId: string,
+  now: Date = new Date(),
+): Promise<string> {
+  const tz = await getShopTimezoneForDaily(admin, shopId);
+  return getCalendarDateStringInTimeZone(now, tz);
+}
+
+/**
  * Shopify のショップ設定から IANA タイムゾーンを取得する。
  * 取得できない場合は null を返す（呼び出し側で getShopTimezoneForDaily のフォールバックチェーンを使うこと）
  */

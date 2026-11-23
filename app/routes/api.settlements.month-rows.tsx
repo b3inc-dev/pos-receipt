@@ -14,13 +14,11 @@ import {
 import prisma from "../db.server";
 import { SUPERSEDED_SETTLEMENT_STATUS } from "../services/settlementConfirmedPure.server";
 import { splitDailySettlementsAndInspections } from "../utils/settlementHistoryQuery";
+import { getShopCalendarToday } from "../utils/shopTimezone.server";
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function buildDaysInMonth(year: number, month: number): string[] {
-  const today = todayStr();
+// 「今日」は店のタイムゾーンの暦日（一般設定 → Shopify → Asia/Tokyo）。
+// 以前は UTC の日付だったため、日本時間 0:00〜8:59 は前日扱いになり、今日の行が出なかった（2026-11-23 実機）。
+function buildDaysInMonth(year: number, month: number, today: string): string[] {
   const lastDay = new Date(year, month, 0).getDate();
   const days: string[] = [];
   for (let d = 1; d <= lastDay; d++) {
@@ -35,7 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const authResult = await authenticatePosRequestOrCorsError(request);
     if (authResult instanceof Response) return authResult;
-    const { shop, corsJson } = authResult;
+    const { admin, shop, corsJson } = authResult;
 
     const url = new URL(request.url);
     const locationId = url.searchParams.get("locationId");
@@ -55,7 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const locIdRaw = locationGid.replace("gid://shopify/Location/", "");
     const locationIds = [locationGid, locIdRaw];
 
-    const today = todayStr();
+    const today = await getShopCalendarToday(admin, shop.id);
     const ym = `${year}-${String(month).padStart(2, "0")}`;
     const dateFrom = `${ym}-01`;
     const lastDay = new Date(year, month, 0).getDate();
@@ -109,7 +107,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     // 日別行を組み立て（新しい日付順）
-    const days = buildDaysInMonth(year, month);
+    const days = buildDaysInMonth(year, month, today);
     const rows = days
       .map((targetDate) => {
         const settlement = settlementByDate.get(targetDate) ?? null;
