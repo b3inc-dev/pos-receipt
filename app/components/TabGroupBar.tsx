@@ -79,7 +79,7 @@ export function buildSystemTabs(memberCardEnabled: boolean): TabItem[] {
     { path: "/app/loyalty-settings", label: "ポイント/会員施策" },
   ];
   if (memberCardEnabled) {
-    tabs.push({ path: "/app/member-card-admin", label: "会員証（LIFF）" });
+    tabs.push({ path: "/app/member-card-admin", label: "会員証" });
   }
   return tabs;
 }
