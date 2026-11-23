@@ -7,6 +7,7 @@ import {
   isMonthKey,
   monthChoices,
   monthDays,
+  normalizeDateInput,
   parseBudgetInput,
   sumBudgetMonth,
 } from "./budgetMonthGrid";
@@ -102,5 +103,19 @@ describe("budgetToInput", () => {
     assert.equal(budgetToInput(1500.5), "1,500.5");
     assert.equal(budgetToInput(null), "");
     assert.deepEqual(parseBudgetInput(budgetToInput(1234567.25)), { ok: true, value: 1234567.25 });
+  });
+});
+
+describe("normalizeDateInput", () => {
+  it("2026/11/24・2026-11-24・2026/1/5・2026年11月24日を読む", () => {
+    assert.equal(normalizeDateInput("2026/11/24"), "2026-11-24");
+    assert.equal(normalizeDateInput("2026-11-24"), "2026-11-24");
+    assert.equal(normalizeDateInput(" 2026/1/5 "), "2026-01-05");
+    assert.equal(normalizeDateInput("2026年11月24日"), "2026-11-24");
+  });
+  it("無い日・形の違いは null", () => {
+    assert.equal(normalizeDateInput("2026/02/30"), null);
+    assert.equal(normalizeDateInput("11/24"), null);
+    assert.equal(normalizeDateInput(""), null);
   });
 });

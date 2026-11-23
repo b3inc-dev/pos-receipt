@@ -134,6 +134,19 @@ export function budgetToInput(value: number | null | undefined): string {
   return value === null || value === undefined ? "" : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
+/**
+ * 人が書いた日付を YYYY-MM-DD にする（2026/11/24・2026-11-24・2026/1/5 など）。読めない日付は null。
+ * CSV の取り込みで使う（保存は YYYY-MM-DD）。
+ */
+export function normalizeDateInput(raw: string): string | null {
+  const m = /^(\d{4})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})日?$/.exec(String(raw ?? "").trim());
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d) return null;
+  return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
 /** "2026-11-03" → "11/3" */
 export function shortDateLabel(date: string): string {
   const [, m, d] = date.split("-").map(Number);
