@@ -1,110 +1,157 @@
 # POS Receipt アプリ 進捗サマリー
 
-要件書 `posreceipt_requirements_spec.md` に基づく実装進捗です。  
-最終更新: 2026-03-12
+最終更新: 2026-11-23（基準: main `77b6de6`＝#50〜#52 のあと、と open PR。11/23 2:00 までの T の決定を反映）
+
+- 「main」= main にある。main に入ると Render の本番（公開用・自社用）に出る。配備が Live かは別途確認する。
+- PR 番号は GitHub の `b3inc-dev/pos-receipt`。open の PR は本番には出ていない。
+- 業務ルールの正本は `docs/BUSINESS_RULES.md`、構成は `docs/ARCHITECTURE.md`、判断と未確認事項は `docs/DECISIONS.md`。本書は進捗の一覧だけを持つ。
+- 2026-03 時点の旧版（Epic A〜H がすべて完了という表）は、その後の Printing API・料金・会員証・UI ルールなどの変更を反映していなかったため、本版で置きかえた。
 
 ---
 
-## 1. 全体の進捗イメージ
+## 1. 精算・点検
 
-| フェーズ | 状態 | 内容 |
-|----------|------|------|
-| **Epic A. 基盤構築** | ✅ 完了 | App scaffold / DB / 認証 / 公開用・自社用分離 |
-| **Epic B. 注文検索・取引選択** | ✅ 完了 | 注文検索API・取引一覧・取引詳細起動 |
-| **Epic C. 精算** | ✅ 完了 | 精算エンジン・印字分岐・点検レシート |
-| **Epic D. 特殊返金・商品券調整** | ✅ 完了 | イベントAPI・POS UI（4種） |
-| **Epic E. 領収書** | ✅ 完了 | プレビュー・発行・テンプレート編集 |
-| **Epic F. 売上サマリー** | ✅ 完了 | サマリーAPI・予算・入店数・キャッシュ |
-| **Epic G. プラン制御** | ✅ 完了 | スタンダード/プロの機能制御・Billing API |
-| **Epic H. 品質・運用** | ✅ 完了 | 管理画面履歴・予算管理・Retry UI・Seed data |
+| 機能 | 状態 | メモ |
+|---|---|---|
+| 今日の精算・日付を選んで精算（前日・翌日の送り） | main | |
+| 精算のプレビュー・集計し直し | main | 集計は GAS 型（その日に起きた取引で数える）。`settlementEngine.server.ts` |
+| 同じ日を 2 回確定しない（冪等キー・ロック） | main | 冪等キーから印字方式を外すのは #22 |
+| 確定済みの日をもう一度確定・再集計しても確定値を守る（DB の数字を返し、精算注文も書き換えない） | 未着手 | 11/23 決定。#13 のあと |
+| 点検レシート | main | 何回でも出せる（今のまま・11/23 決定）。出すたびに履歴に残し完了画面の文言を合わせるのは #22 のあと |
+| 再印字（保存した精算から） | main | 印字した帳票の店名・表題を保存するのは #22 |
+| 返金をどの店に載せるか（メタフィールド・設定） | main | メタフィールドを先に読む直しは #11 |
+| ポイント利用額（VIP-・SP-POINT-・Shop Point） | main | ポイント系の特殊返金はポイント利用額に入れない（2026-11-22 決定・今の動きのまま） |
+| 商品券の釣有り差額 | main | |
+| 消費税率の設定・税の逆算 | main | 精算設定「消費税率（%）」、未設定は 10%。逆算の切り出しと試験は #13 |
+| 特殊返金が精算で二重に数えられない | PR #11 | 本番待ち（POS 実機の確認のあと） |
+| Shopify の途中エラーで精算を確定しない | PR #16 | 本番待ち。出す前に「旧ギフトカード API 集計」を OFF で保存する |
+| 旧ギフトカード集計の初めの値 OFF・死コード削除 | PR #13（#40 を入れてから） | 本番待ち |
+| 精算設定の項目名・表題・表示する項目・順を印字に反映 | 未着手 | 11/23 決定で要件にした。4 レシートのレイアウト編集（PR #69）を #22 のあとに印字へつなぐ |
+| Ciara 向けの精算の決まりを管理画面の設定にする | PR #57 | 初めの値は今の動き |
+| 店舗・日・支払方法ごとの照合用 CSV | PR #68（API だけ） | 精算履歴の画面のボタンは #22 のあと |
+| 精算履歴（管理画面・月ごと） | main | |
+
+## 2. 印字
+
+| 機能 | 状態 | メモ |
+|---|---|---|
+| Printing API で精算・点検・領収書・販売レシートを印字 | main（旧経路と並存） | main は Printing API を先に試し、精算注文（order_based）・CloudPRNT の旧経路も残る |
+| つながっているプリンタだけに送る | PR #11・#22 | |
+| 精算注文（SETTLEMENT）を作らない・印字の一本化 | PR #22（#53 で main を取り込み中） | お金の直し #11→#16→#13 の本番のあとに進める |
+| CloudPRNT | main（データを作るだけ） | 実機アダプタなし。#22 で廃止（410） |
+| 用紙幅・印字レイアウトの編集（精算・領収書・販売レシート） | main | |
+| 4 レシートを全部管理画面で編集（ブロックエディタが初めの値＋コード編集・印字と同じプレビュー） | PR #69（新しいファイルだけ） | 11/23 決定。受け入れは Ciara の今のレシートを設定だけで作れること。印字への接続は #22 のあと |
+| 紙での確認（mPOP・mC-Print3） | 未実施 | 手順は #53 の `docs/PRINT_PAPER_TEST.md` |
+
+## 3. 特殊返金・商品券調整
+
+| 機能 | 状態 | メモ |
+|---|---|---|
+| 4 種の登録（現金返金・支払方法の付け替え・領収書現金調整・商品券釣銭） | main | |
+| 取引を検索して選ぶ・取引詳細から開く | main | |
+| Shopify の返金も一緒に実行（設定） | main | |
+| 取消（void） | main | |
+| 「返金処理中」を Shopify に確かめる | PR #11 | #11 のあと POS で 1 件ずつ確かめる |
+| 支払方法の付け替えに管理者の承認（設定・初めの値はオフ） | 未着手 | 11/23 決定。承認待ちは精算に数えない。#11 のあと |
+| 特殊返金履歴（管理画面） | main | |
+
+## 4. 領収書
+
+| 機能 | 状態 | メモ |
+|---|---|---|
+| プレビュー・発行・再発行 | main | |
+| テンプレート 1 つ・管理画面で編集 | main | 複数テンプレートは MVP の外 |
+| 発行の二重防止（idempotencyKey） | main | |
+| 発行したスタッフを記録して履歴に出す | 未着手 | 11/23 決定。今は POS から送っていない。#22 のあと |
+| 領収書履歴（管理画面） | main | |
+
+## 5. 販売レシート（要件書の 4 タイルのあとに追加）
+
+| 機能 | 状態 | メモ |
+|---|---|---|
+| 注文を選んで印字・取引詳細から・購入後のメニューから | main | `extensions/pos-smart-grid/shopify.extension.toml` の `pos-sales-receipt` には uid がまだ無い（deploy 時に CLI が付ける想定）。本番に出ているかは未確認 |
+| レイアウト・設定画面 | main | |
+| ギフトレシートの設定を広げる | 未着手 | 4 レシートのレイアウト編集（PR #69）に含めて #22 のあと |
+
+## 6. 売上サマリー（Pro）
+
+| 機能 | 状態 | メモ |
+|---|---|---|
+| 日次・期間・月の日別一覧・店舗別 | main | 実績は精算プレビュー（`buildSettlementPreview`）の純売上を使う |
+| 販売チャネル別 | main | |
+| 予算（手動・CSV・テンプレート CSV）・チャネル別の予算 | main | |
+| 入店数報告（設定 ON のときだけ） | main | |
+| 共有リンクの画面（`/p/sales-summary/…`） | main | |
+| キャッシュの更新 | main（Webhook とキュー） | 定期ジョブは無い。orders/updated の Webhook → pg-boss のキューで日次・月次キャッシュを更新。要件書 §25 を参照 |
+| 過去分の取り込み | main | 管理画面 `/app/backfill`。画面を閉じても裏で進める形は PR #66 |
+| 一部の店だけ失敗したとき途中の値を残さない | PR #16 | |
+
+## 7. 料金・プラン
+
+| 機能 | 状態 | メモ |
+|---|---|---|
+| Lite / Pro で機能を分ける | main | `app/utils/planFeatures.server.ts`（旧名 standard は Lite 扱い） |
+| 自社用（Ciara）は請求なし | main | |
+| 公開用の料金（Billing API の定額） | main | App Pricing に移すのが #41 |
+| App Pricing（Lite 月 $100・Pro 月 $200・含むロケーション 3 / 10・超えた 1 か所 $20・無料体験 14 日・月額だけ） | PR #41（#47・#59・#64 入り） | すべて T が決定済み。未契約の店を止めるスイッチと App Events は既定オフ。数えるのは直近 30 日にこのアプリを使った有効なロケーション。main に入れるのは Partner Dashboard の準備のあと |
+
+## 8. 会員証（自社用だけ）
+
+| 機能 | 状態 | メモ |
+|---|---|---|
+| LIFF の会員証（会員番号・バーコード・Shop Point のランク・ポイント） | main | 公開用では出さない |
+| LINE ユーザー ID の読み方（line_crm → socialplus） | main | |
+| 期限切れの見分け・混雑時の文・ログに本文を出さない | main（#51） | |
+| LINE CRM へ移す | 待ち | LINE CRM の会員証で同じ会員が出ると確かめてから移す（11/23 決定）。それまで今の LIFF のまま |
+
+## 9. 管理画面・運用
+
+| 機能 | 状態 | メモ |
+|---|---|---|
+| 一般・店舗・印字・精算・領収書・売上サマリー・予算・商品券・特殊返金・ポイント・支払方法・販売チャネルの設定 | main | |
+| UI ルール v1.1 | main（#48・#49） | SaveBar への置きかえ、表のスマホ表示など 12 行が `docs/UI_RULES.md` に残り。#22 の画面は未点検 |
+| デバッグ・診断は開発ストアだけ | main（#50） | |
+| GDPR の Webhook（data_request・redact） | main（一部） | 特殊返金のメモも消すのは #13 |
+| 公開用・自社用の取り違え防止（起動時・配備後） | main | toml の確認を CI に入れるのは #13 |
+| CI（test-and-build） | main | |
+| POS の販売担当（カート入力・訂正） | 未着手 | #18 は閉じた。お金の直しと #22 のあとに新しい PR で作り直す（11/23 決定） |
+| 利用者ヘルプとの対応表 | PR #19（draft） | #22 とレイアウト編集で画面が固まってから新しい PR で作り直す（11/23 決定） |
+| 掲載（ポリシー・サポート・問い合わせ先） | PR #70・#71 | ポリシーとサポートは紹介サイト、問い合わせはフォームと共通窓口（要件書 §0.3.8） |
+| 本番に出す手順書（お金の直し） | PR #46（draft・docs） | |
 
 ---
 
-## 2. 実装済み（Prompt 1〜3 + Phase 1）
+## 10. 進める順（2026-11-22 の案）
 
-### 2.1 基盤
-- **Prisma スキーマ**  
-  `prisma/schema.prisma` に要件書 20 章どおりのモデル定義済み  
-  （Shop, Location, AppSetting, Settlement, SpecialRefundEvent, ReceiptTemplate, ReceiptIssue, Budget, FootfallReport, SalesSummaryCacheDaily/Period）
-- **認証・セッション**  
-  `app/shopify.server.ts`、PrismaSessionStorage、auth ルート
-- **公開用・自社用**  
-  `shopify.app.public.toml` / `shopify.app.toml`、`extensions/common/appUrl.js`（APP_MODE, getAppUrl）
+1. Render の配備（#48〜#52）が Live か確かめる
+2. POS 実機の確認（#46 の手順）→ #11 を main へ → POS で「返金処理中」を 1 件ずつ確かめる
+3. 「旧ギフトカード API 集計」を OFF で保存 → #16 を main に合わせ直して main へ
+4. #40 を #13 に入れ、main に合わせ直して #13 を main へ
+5. Ciara 向けの精算の決まりを設定にする PR（#13 のあと、main に合わせて入れる）
+6. #53 を #22 に入れる → #11・#16・#13 が入った main を #22 にもう一度取り込む → #22 の画面の UI 点検 → 紙の確認 → #22 を main へ
+7. 料金 #41・#47: Partner Dashboard のプランとメーターを用意してから（公開版は今は開発ストアだけ）
+8. #22 のあとに作る（決定済み）: 4 レシートのレイアウト編集の印字への接続、点検の履歴と文言、領収書の発行者、照合用 CSV のボタン、販売担当（#18 の作り直し）、ヘルプ（#19 の作り直し）。#11 のあと: 特殊返金の承認の設定。#13 のあと: 確定値を守る
 
-### 2.2 注文検索・取引選択（Prompt 3）
-- **API**
-  - `GET /api/orders/search` … q, locationId, dateFrom, dateTo, cursor, limit
-  - `GET /api/orders/:orderId` … 注文詳細（transactions, refunds, lineItems 等）
-- **POS**
-  - `extensions/common/orderPickerApi.js` … searchOrders, getOrder
-  - `extensions/pos-smart-grid/src/Modal.jsx` … 検索フォーム・結果一覧・取引選択
-  - `extensions/pos-smart-grid/src/OrderAction.jsx` … 取引詳細画面から「この取引で開く」
-
-### 2.3 設定要件書（posreceipt_settings_detail.md）対応
-- **Phase 1〜2**  
-  - `PaymentMethodMaster` テーブル追加、Location に表示名・並び順・機能有効フラグ追加（§4, §13.3）  
-  - 支払方法マスタ設定画面（`/app/payment-methods`）と API（GET/POST/PATCH/DELETE）  
-  - 設定ページのロケーション設定を拡張（表示名・短縮名・並び順・精算/領収書/特殊返金/商品券/点検の ON/OFF）
-- **Phase 3（領収書・売上サマリー・ポイント）**  
-  - 領収書テンプレートを §9.2 全項目対応。管理画面プレビューを保存前後で一致（§9.3）  
-  - 売上サマリー設定（`/app/sales-summary-settings`）：§10 の表示・KPI・入店数報告を AppSetting で保存  
-  - ポイント/会員施策設定（`/app/loyalty-settings`）：§9A の loyalty_usage 表示名・抽出元を AppSetting で保存  
-- **Phase 4（設定参照・商品券・特殊返金）**  
-  - 売上サマリー API（daily/period）で sales_summary_settings を参照（表示対象ロケーション・displayOptions 返却）  
-  - 精算エンジンで支払方法マスタの表示ラベル・loyalty_settings の表示ラベルを参照  
-  - 特殊返金 API で special_refund_settings から有効イベント種別・UI ラベルを取得  
-  - 商品券設定（`/app/voucher-settings`）、特殊返金設定（`/app/special-refund-settings`）画面を追加  
-- **全設定画面の網羅（§3・§5・§11・§12・§4.2.3〜4.2.5）**  
-  - 一般設定（`/app/general-settings`）：アプリ表示名・連絡先・タイムゾーン・通貨・プラン・言語・デバッグ（AppSetting `general_settings`）  
-  - 精算設定（`/app/settlement-settings`）：表題・表示項目ON/OFF・項目名・項目順・税表示・再処理（精算注文フラグは無効）  
-  - 印字設定（`/app/print-settings`）：Shopify Printing API 統一・用紙幅・領収書プレビュー  
-  - 予算設定（`/app/budget-settings`）：CSVマッピング・手動/一括編集・input_unit・apply_mode（AppSetting `budget_settings`）  
-  - ロケーション設定：§4.2.3（店舗/全体合計・サマリー表示）、§4.2.4（printer_profile_id, cloudprnt_enabled）、§4.2.5（summary_target_group, budget_target_enabled, footfall_target_enabled）を Location に追加・設定ページで編集  
-- ギャップ一覧: `docs/SETTINGS_GAP_ANALYSIS.md`、網羅状況: `docs/SETTINGS_REQUIREMENTS_COVERAGE.md`
-
-### 2.4 ドキュメント・デプロイ
-- Render 手順: `RENDER_SETUP.md`, `RENDER_DATABASE_URL.md`, `NEXT_STEPS_AFTER_RENDER.md`
-- 構成案: `PROJECT_STRUCTURE_PROPOSAL.md`、DB: `DB_MIGRATION.md`
+main へのマージ・deploy・本番の設定変更は、毎回 T の承認が要る（`docs/DEV_FIRST_THEN_DEPLOY.md`）。
 
 ---
 
-## 3. 次のステップ（推奨順）
+## 11. 決定の記録
 
-詳細な手順・ファイル参照は **`docs/NEXT_STEPS_IMPLEMENTATION.md`** を参照してください。
+2026-11-21〜23 に T が決めたことは、要件書 `posreceipt_requirements_spec.md` の **§0.3** にまとめた（連絡帳 Issue #39 と同じ中身）。
 
-### 直近: POS タイルの UID 設定
-- 領収書・売上サマリー含め **4 タイルすべて UID は設定済み**（`extensions/pos-smart-grid/shopify.extension.toml`）。
-- 新規アプリや拡張の作り直しをした場合は、`shopify app generate extension` で UID を取得し、同 toml の該当ブロックに `uid` を設定する。
+次のファイルは、ほかの PR が直しているので、本書の PR（#58）では書いていない。それらが main に入ったあとに、決定を書き足す。
 
-### 実装済み（2026-03-12）
-- **Shopify Printing API 一本化** … 精算・点検・領収書・販売レシートは `shopify.printing`。CloudPRNT payload は 410。精算注文は作らない。
-- **税率の設定化** … 精算設定に「消費税率（%）」を追加。精算エンジンで `taxRatePercent` を参照（未設定時 10%）。
+| ファイル | 直している PR | 書き足すこと |
+|---|---|---|
+| `docs/DECISIONS.md` | #13・#22・#41 | 確定値を守る、点検は何回でも、領収書の発行者、特殊返金の承認の設定、照合用 CSV、レイアウト編集の 2 つのやり方、料金の決定（#41 には一部入っている）、31 行目の「PROGRESS_SUMMARY.md は古い」を消す |
+| `docs/BUSINESS_RULES.md` | #13・#22 | 確定値を守る、点検の履歴、ハウスカードのポイントは支払方法の行の返金、承認待ちの特殊返金は精算に数えない |
+| `docs/SHOPIFY.md` | #13・#22 | 精算注文を書き換えない（確定値を守る） |
 
-### 実装済み（続き）
-- **支払方法マスタ・商品券判定の拡張** … 一覧に「商品券」「釣銭あり」列を追加。分類ラベル「商品券・ギフトカード」、商品券の説明文、`formattedGatewayPattern` のマッチング修正、`getPaymentMethodVoucherInfo` API を追加。
-- **POS 印字導線** … 完了画面と履歴から Printing API。未接続は成功扱いにしない。
+## 12. 主要ファイル
 
-### オプション（必要に応じて）
-- **location_settings の key-value テーブル** … 必要になったら LocationSetting 等を追加。
-- **紙面確認** … mPOP / mC-Print3 はこの環境では未実施（`docs/PRINT_DEVICE_COMPAT.md`）。
+コード索引は `AGENTS.md` の「主要コード索引」を正本とする。
 
----
+## 13. 更新のしかた
 
-## 4. 主要ファイル参照
-
-| 種類 | パス |
-|------|------|
-| 要件書 | `docs/posreceipt_requirements_spec.md` |
-| DB | `prisma/schema.prisma` |
-| 注文検索API | `app/routes/api.orders.search.tsx`, `app/routes/api.orders.$orderId.tsx` |
-| POS 共通API | `extensions/common/orderPickerApi.js`, `extensions/common/appUrl.js` |
-| POS モーダル | `extensions/pos-smart-grid/src/Modal.jsx` |
-| 取引詳細アクション | `extensions/pos-smart-grid/src/OrderAction.jsx` |
-| API 仕様（要件書） | 第 21 章（21.4 特殊返金API） |
-| データモデル（要件書） | 第 20 章（20.5 special_refund_events） |
-
----
-
-## 5. 進捗の更新のしかた
-
-実装が進んだら、このファイルと `posreceipt_requirements_spec.md` の **30. 実装済み内容** をあわせて更新してください。
+機能が main に入ったら本書の該当行の「状態」を `main` にし、要件書 `posreceipt_requirements_spec.md` の **30. 実装済み内容** にも 1 行足す。業務ルールが変わったときは `BUSINESS_RULES.md` を直す（本書には書かない）。

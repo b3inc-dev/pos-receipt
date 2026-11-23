@@ -200,6 +200,42 @@ describe("synthetic first print vs reprint after settings change", () => {
   });
 });
 
+describe("reprint keeps the non-sales fee line (#87)", () => {
+  it("restores 売上に含めない送料等 from saved sections minus total, same as the first print", () => {
+    const snapshot = buildSettlementPrintSnapshot({ locationName: ISSUED_NAME, isInspection: false });
+    const row: SettlementRowLike & { periodLabel: string } = {
+      ...amounts(),
+      total: 2000,
+      refundTotal: 0,
+      periodLabel: "2026-11-12",
+      paymentSectionsJson: encodePaymentSectionsJson(
+        [{ gateway: "cash", label: "現金", net: 2500, refund: 0, txCount: 1, refundCount: 0 }],
+        snapshot,
+      ),
+    };
+    const reprint = buildSettlementReprintView(row, { currentLocationName: RENAMED_NAME, devicePaperWidthMm: 80 });
+    assert.equal(reprint.model.total, 2000);
+    assert.equal(reprint.model.nonSalesFeeTotal, 500);
+    assert.match(reprint.html, /売上に含めない送料等/);
+  });
+
+  it("no fee line when sections match the total", () => {
+    const snapshot = buildSettlementPrintSnapshot({ locationName: ISSUED_NAME, isInspection: false });
+    const row: SettlementRowLike & { periodLabel: string } = {
+      ...amounts(),
+      total: 2000,
+      periodLabel: "2026-11-12",
+      paymentSectionsJson: encodePaymentSectionsJson(
+        [{ gateway: "cash", label: "現金", net: 2000, refund: 0, txCount: 1, refundCount: 0 }],
+        snapshot,
+      ),
+    };
+    const reprint = buildSettlementReprintView(row, { currentLocationName: RENAMED_NAME, devicePaperWidthMm: 80 });
+    assert.equal(reprint.model.nonSalesFeeTotal ?? 0, 0);
+    assert.doesNotMatch(reprint.html, /売上に含めない送料等/);
+  });
+});
+
 describe("reprint does not create orders or settlements", () => {
   it("reprint helpers are read-only", () => {
     assert.equal(reprintCreatesShopifyOrder(), false);

@@ -10,9 +10,11 @@
 import prisma from "../db.server";
 import { resolvePaymentSectionLabels } from "../utils/paymentMethod.server";
 import { getAppSetting } from "../utils/appSettings.server";
+import { resolvePointRedemptionRules } from "../utils/pointRedemptionRules";
 import {
   LOYALTY_SETTINGS_KEY,
   DEFAULT_LOYALTY_SETTINGS,
+  type LoyaltySettings,
   SETTLEMENT_SETTINGS_KEY,
   DEFAULT_SETTLEMENT_SETTINGS,
   SPECIAL_REFUND_SETTINGS_KEY,
@@ -39,6 +41,11 @@ import {
   type GasAggregateAttributionOpts,
 } from "./settlementAggregatePure.server";
 import { extractLocationNumericId } from "./refundAggregationPure.server";
+import {
+  FEE_LINE_ITEM_GRAPHQL_FIELDS,
+  type FeeLineItemLike,
+  type FeeRefundLineItemLike,
+} from "./nonSalesFeeLines";
 
 export type { GasAggregateAttributionOpts } from "./settlementAggregatePure.server";
 import {
@@ -75,6 +82,12 @@ export interface SettlementPreviewDTO {
   itemCount: number;
   voucherChangeAmount: number;
   paymentSections: PaymentSectionDTO[];
+  /**
+   * 売上に含めない手数料の明細（`_lsi_fee="1"` かつ `_lsi_fee_sales="0"`。例: Location Stock の送料の行）の当日分。
+   * 支払方法別の金額には入ったまま、総売上・純売上・消費税・点数・割引からは外している。
+   * 支払方法別の合計 − 総売上 = この金額（総売上が 0 で止まる日を除く）。
+   */
+  nonSalesFeeTotal: number;
   /**
    * recompute 時の原因切り分け用デバッグ情報。
    * 通常時は入れない（重くなるため）。
@@ -152,7 +165,7 @@ interface ShopifyRefund {
   id: string;
   createdAt?: string; // ISO (UTC); 返金日でフィルタするため
   totalRefundedSet: { shopMoney: { amount: string; currencyCode: string } };
-  refundLineItems?: { quantity: number }[];
+  refundLineItems?: (Omit<FeeRefundLineItemLike, "quantity"> & { quantity: number })[];
   transactions: ShopifyRefundTransaction[];
 }
 
@@ -167,8 +180,9 @@ interface ShopifyOrder {
   currentTotalTaxSet?: { shopMoney: { amount: string } } | null;
   totalTaxSet: { shopMoney: { amount: string } };
   totalDiscountsSet: { shopMoney: { amount: string } };
+  taxesIncluded?: boolean | null;
   lineItems: {
-    nodes: {
+    nodes: (Omit<FeeLineItemLike, "quantity" | "discountAllocations"> & {
       quantity: number;
       discountAllocations?: {
         allocatedAmountSet: { shopMoney: { amount: string } };
@@ -178,7 +192,7 @@ interface ShopifyOrder {
           title?: string | null;
         } | null;
       }[];
-    }[];
+    })[];
   };
   transactions: ShopifyTransaction[];
   refunds: ShopifyRefund[];
@@ -206,9 +220,10 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
         currentTotalTaxSet { shopMoney { amount } }
         totalTaxSet { shopMoney { amount } }
         totalDiscountsSet { shopMoney { amount } }
+        taxesIncluded
         lineItems(first: 250) {
           nodes {
-            quantity
+            quantity${FEE_LINE_ITEM_GRAPHQL_FIELDS}
             discountAllocations {
               allocatedAmountSet { shopMoney { amount } }
               discountApplication {
@@ -235,7 +250,12 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
           id
           createdAt
           refundLineItems(first: 250) {
-            nodes { quantity }
+            nodes {
+              quantity
+              lineItem { id }
+              subtotalSet { shopMoney { amount } }
+              totalTaxSet { shopMoney { amount } }
+            }
           }
           totalRefundedSet { shopMoney { amount currencyCode } }
           transactions(first: 50) {
@@ -703,7 +723,12 @@ async function buildSettlementPreviewImpl(
     return t >= dayRange.startUtc.getTime() && t <= dayRange.endUtc.getTime();
   };
 
-  const gas = aggregateGasStyleForOrders(ordersUnion, inDay, attributionOpts);
+  // ポイント利用額に数える割引（旧 VIP の VIP-・Shop Point の SP-POINT- と旧形式・POS の「Shop Point」）。
+  // 「ポイント/会員施策設定」で変えられる。保存していない店は初めの値。
+  const loyaltySettings = await getAppSetting<Partial<LoyaltySettings>>(shopId, LOYALTY_SETTINGS_KEY);
+  const pointRules = resolvePointRedemptionRules(loyaltySettings);
+
+  const gas = aggregateGasStyleForOrders(ordersUnion, inDay, attributionOpts, pointRules);
 
   const settlementSettings = await getAppSetting<Partial<SettlementSettings>>(shopId, SETTLEMENT_SETTINGS_KEY);
   const settlementMerged: SettlementSettings = { ...DEFAULT_SETTLEMENT_SETTINGS, ...settlementSettings };
@@ -795,10 +820,9 @@ async function buildSettlementPreviewImpl(
   const voucherChangeAmount =
     Math.round(gas.voucherChangeObserved) +
     voucherAdjustments.reduce((sum, e) => sum + Number(e.voucherChangeAmount ?? 0), 0);
-  /** GAS: lineItems の VIP- 割引按分のみ（特殊返金の points は後続フェーズで合成可） */
+  /** lineItems のポイント利用の割引（pointRules）の按分のみ（特殊返金の points は後続フェーズで合成可） */
   const vipPointsUsed = gas.vipPointsUsed;
 
-  const loyaltySettings = await getAppSetting<{ loyaltyUsageDisplayLabel?: string }>(shopId, LOYALTY_SETTINGS_KEY);
   const loyaltyUsageDisplayLabel =
     loyaltySettings?.loyaltyUsageDisplayLabel ?? DEFAULT_LOYALTY_SETTINGS.loyaltyUsageDisplayLabel;
 
@@ -813,7 +837,9 @@ async function buildSettlementPreviewImpl(
   const sectionsTotal = roundInt(
     paymentSections.reduce((sum, sec) => sum + Number(sec.net || 0) - Number(sec.refund || 0), 0)
   );
-  total = Math.max(0, sectionsTotal);
+  // 売上に含めない手数料の明細は支払方法別には入ったまま、総売上から引く（BUSINESS_RULES §2.1）
+  const nonSalesFeeTotal = roundInt(gas.nonSalesFeeTotal);
+  total = Math.max(0, sectionsTotal - nonSalesFeeTotal);
   const taxRatePercent = Number(settlementMerged.taxRatePercent) || 10;
   const split = splitTaxInclusiveToNetAndTax(total, taxRatePercent);
   const tax = split.tax;
@@ -843,6 +869,7 @@ async function buildSettlementPreviewImpl(
     itemCount,
     voucherChangeAmount: roundInt(voucherChangeAmount),
     paymentSections,
+    nonSalesFeeTotal,
     debug: debugEnabled
       ? {
           ordersRawCount,
@@ -894,6 +921,9 @@ export function buildSettlementReceiptText(preview: SettlementPreviewDTO): strin
     `点数: ${preview.itemCount}点`,
     ...(preview.voucherChangeAmount > 0
       ? [`商品券釣有り差額: ¥${preview.voucherChangeAmount.toLocaleString()}`]
+      : []),
+    ...(preview.nonSalesFeeTotal
+      ? [`売上に含めない送料等: ¥${preview.nonSalesFeeTotal.toLocaleString()}`]
       : []),
     "─────────────────",
     ...preview.paymentSections.map(

@@ -8,6 +8,7 @@
  */
 import { useMemo, useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { isDevelopmentStore } from "../utils/devStore.server";
 import { useLoaderData, useFetcher, useRevalidator, useLocation, useNavigate } from "react-router";
 import {
   Page,
@@ -43,6 +44,8 @@ const LOCATIONS_QUERY = `#graphql
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
+  // 「システム診断」の枠は開発ストアだけに出す（T さんの決定 2026-11-22。読めなければ出さない）
+  const isDevStore = await isDevelopmentStore(admin);
 
   // Shopify ロケーション一覧取得
   const locRes = await admin.graphql(LOCATIONS_QUERY);
@@ -102,6 +105,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     locations,
     proFeatures: PLAN_FEATURES.pro,
     liteFeatures: PLAN_FEATURES.lite,
+    isDevStore,
   };
 }
 
@@ -222,7 +226,7 @@ const SETTING_CARD_STYLE: React.CSSProperties = {
 
 export default function SettingsPage() {
   const loaderData = useLoaderData<typeof loader>();
-  const { shop, isInhouse, locations: initialLocations } = loaderData;
+  const { shop, isInhouse, locations: initialLocations, isDevStore } = loaderData;
   const [locations, setLocations] = useState(initialLocations);
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const revalidator = useRevalidator();
@@ -414,13 +418,8 @@ export default function SettingsPage() {
                       </InlineStack>
 
                       <Text variant="bodySm" as="p">
-                        印字方式: Shopify Printing API（統一）
+                        印刷: POS につないだプリンタへ送ります
                       </Text>
-                      {loc.printMode && loc.printMode !== "shopify_printing" ? (
-                        <Text variant="bodySm" as="p" tone="subdued">
-                          保存値「{loc.printMode}」は出力に使いません。精算注文も CloudPRNT も起動しません。
-                        </Text>
-                      ) : null}
 
                       <Text variant="bodySm" as="p" tone="subdued">機能有効（§4.2.2）</Text>
                       <InlineStack gap="400" wrap>
@@ -515,9 +514,6 @@ export default function SettingsPage() {
                           placeholder="任意"
                           autoComplete="off"
                         />
-                        <Text variant="bodySm" as="p" tone="subdued">
-                          CloudPRNT 有効フラグは保存されていても印字出力には使いません。
-                        </Text>
                       </InlineStack>
 
                       <Text variant="bodySm" as="p" tone="subdued">売上サマリー関連（§4.2.5）</Text>
@@ -547,7 +543,8 @@ export default function SettingsPage() {
           </div>
         </Layout.AnnotatedSection>
 
-        {/* ── システム診断 ── */}
+        {/* ── システム診断（開発ストアだけ） ── */}
+        {isDevStore && (
         <Layout.AnnotatedSection
           title="システム診断"
           description="DB接続・テーブル件数・環境変数の設定状態を確認できます。"
@@ -561,6 +558,7 @@ export default function SettingsPage() {
             </BlockStack>
           </div>
         </Layout.AnnotatedSection>
+        )}
       </Layout>
 
       {/* 固定フッター（POS Stock 同様：変更時のみ表示・破棄・保存） */}

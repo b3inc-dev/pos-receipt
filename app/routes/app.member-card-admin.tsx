@@ -10,6 +10,7 @@ import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { MemberBarcode } from "../components/MemberBarcode";
 import { isInhouseMode } from "../utils/planFeatures.server";
 import { SystemPageNav } from "../components/SystemPageNav";
+import { fieldLabel, readLineIdFields } from "../utils/memberCardLineFields";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await authenticate.admin(request);
@@ -29,8 +30,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const proxyPath = "apps/member-card";
   const proxyUrl = shop ? `https://${shop}/${proxyPath}` : "";
 
+  const lineIdFields = readLineIdFields().map(fieldLabel);
+
   return {
     shop,
+    lineIdFields,
     liffIdSet,
     apiBaseSet,
     lineChannelSet,
@@ -69,6 +73,9 @@ export default function MemberCardAdminPage() {
                   <Text as="p" variant="bodyMd">
                     <strong>App Proxy パス:</strong> {data.proxyPath}
                   </Text>
+                  <Text as="p" variant="bodyMd">
+                    <strong>LINE ユーザー ID を読む項目（この順）:</strong> {data.lineIdFields.join(" → ")}
+                  </Text>
                   {data.proxyUrl && (
                     <Text as="p" variant="bodyMd" tone="subdued">
                       会員証の公開URL: {data.proxyUrl}
@@ -91,7 +98,7 @@ export default function MemberCardAdminPage() {
                   ）を設定してください。
                 </Text>
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  LINE リッチメニューからこの LIFF を開くと、LINE ログイン後に会員バーコードが表示されます。CRM PLUS on LINE で連携済みの顧客（socialplus.line）と会員番号（membership.id）が紐づいている必要があります。
+                  LINE リッチメニューからこの LIFF を開くと、LINE ログイン後に会員バーコードが表示されます。LINE と連携済みの顧客（上の「LINE ユーザー ID を読む項目」のどれかに LINE ユーザー ID が入っている人）に、会員番号（membership.id）が入っている必要があります。読む項目の順番は環境変数 MEMBER_CARD_LINE_ID_METAFIELDS で変えられます。
                 </Text>
               </BlockStack>
             </Card>

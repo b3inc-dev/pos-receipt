@@ -3,6 +3,7 @@
  */
 import type { ReactNode } from "react";
 import type { LoaderFunctionArgs } from "react-router";
+import { isDevelopmentStore } from "../utils/devStore.server";
 import { useLoaderData, useLocation, useNavigate } from "react-router";
 import {
   Page,
@@ -31,6 +32,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const fullAccess = await getFullAccess(admin, session);
   const general = await getAppSetting<Partial<GeneralSettings>>(shop.id, GENERAL_SETTINGS_KEY);
   const privacyPolicyUrl = resolvePrivacyPolicyUrl(general?.privacyPolicyUrl);
+  // 「システム診断」の枠は開発ストアだけに出す（T さんの決定 2026-11-22。読めなければ出さない）
+  const isDevStore = await isDevelopmentStore(admin);
   return {
     planCode: shop.planCode === "standard" ? "lite" : (shop.planCode ?? "lite"),
     planLabel: fullAccess
@@ -39,11 +42,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     isInhouse: fullAccess,
     distribution: isInhouseMode() ? "inhouse" : "public",
     privacyPolicyUrl,
+    isDevStore,
   };
 }
 
 export default function AppIndex() {
-  const { planCode, planLabel: label, isInhouse, distribution, privacyPolicyUrl } =
+  const { planCode, planLabel: label, isInhouse, distribution, privacyPolicyUrl, isDevStore } =
     useLoaderData<typeof loader>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -128,12 +132,15 @@ export default function AppIndex() {
               )}
             </HomeCard>
 
-            <HomeCard
-              title="システム診断"
-              description="接続中のショップ情報、直近のアクティビティ、必須環境変数の設定状態を確認します。"
-            >
-              <Button onClick={to("/app/diagnostics")} variant="primary">診断ページを開く</Button>
-            </HomeCard>
+            {/* システム診断は開発ストアだけ（main 88f0d80・T さんの決定 2026-11-22） */}
+            {isDevStore && (
+              <HomeCard
+                title="システム診断"
+                description="接続中のショップ情報、直近のアクティビティ、必須環境変数の設定状態を確認します。"
+              >
+                <Button onClick={to("/app/diagnostics")} variant="primary">診断ページを開く</Button>
+              </HomeCard>
+            )}
 
             <HomeCard
               title="プライバシー"

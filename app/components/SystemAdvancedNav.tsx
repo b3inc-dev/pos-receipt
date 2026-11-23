@@ -7,15 +7,19 @@ import { useLocation, useNavigate } from "react-router";
 import { BlockStack, Box, Button, Card, Collapsible, InlineStack, Text } from "@shopify/polaris";
 
 const ADVANCED_LINKS = [
-  { path: "/app/diagnostics", label: "システム診断" },
-  { path: "/app/backfill", label: "過去データ取込" },
+  { path: "/app/diagnostics", label: "システム診断", devStoreOnly: true },
+  { path: "/app/backfill", label: "過去データ取込", devStoreOnly: false },
 ] as const;
 
-export function SystemAdvancedNav() {
+/**
+ * showDiagnostics: 開発ストアのときだけ true（T さんの決定 2026-11-22。システム診断は客先の店に出さない）。
+ */
+export function SystemAdvancedNav({ showDiagnostics = false }: { showDiagnostics?: boolean }) {
   const location = useLocation();
   const navigate = useNavigate();
   const search = location.search || "";
-  const onAdvancedPage = ADVANCED_LINKS.some((l) => l.path === location.pathname);
+  const links = ADVANCED_LINKS.filter((l) => !l.devStoreOnly || showDiagnostics);
+  const onAdvancedPage = links.some((l) => l.path === location.pathname);
   const [open, setOpen] = useState(onAdvancedPage);
 
   return (
@@ -37,7 +41,7 @@ export function SystemAdvancedNav() {
             </Button>
           </InlineStack>
           <Text as="p" tone="subdued" variant="bodySm">
-            診断・過去データ取込など、日常運用以外の操作です。
+            {showDiagnostics ? "診断・過去データ取込など、日常運用以外の操作です。" : "過去データ取込など、日常運用以外の操作です。"}
           </Text>
           <Collapsible
             open={open}
@@ -46,7 +50,7 @@ export function SystemAdvancedNav() {
           >
             <Box paddingBlockStart="200">
               <InlineStack gap="300" wrap>
-                {ADVANCED_LINKS.map((link) => {
+                {links.map((link) => {
                   const active = location.pathname === link.path;
                   return (
                     <Button

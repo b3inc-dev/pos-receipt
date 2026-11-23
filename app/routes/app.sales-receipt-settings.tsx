@@ -2,7 +2,8 @@
  * /app/sales-receipt-settings — 販売レシート ON/OFF（注文まとめて／商品別属性）
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { SuccessToast, AdminIntro } from "../components/admin-ui";
 import {
   Page,
   Layout,
@@ -74,10 +75,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function SalesReceiptSettingsPage() {
   const { settings: initial } = useLoaderData<typeof loader>();
   const submit = useSubmit();
+  const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
   const navigate = useNavigate();
   const q = location.search || "";
-  const [saved, setSaved] = useState(false);
   const [form, setForm] = useState(initial);
 
   const handleSave = () => {
@@ -92,8 +93,6 @@ export default function SalesReceiptSettingsPage() {
     fd.set("showPayments", form.layoutJson.showPayments ? "true" : "false");
     fd.set("showLocation", form.layoutJson.showLocation ? "true" : "false");
     submit(fd, { method: "post" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   return (
@@ -107,16 +106,11 @@ export default function SalesReceiptSettingsPage() {
           <TabGroupBar tabs={RECEIPT_TABS} />
         </Card>
         <Layout>
-          {saved && (
-            <Layout.Section>
-              <Banner tone="success">保存しました。</Banner>
-            </Layout.Section>
-          )}
+          {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
+          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
           <Layout.Section>
-            <Banner tone="info">
-              Lite プラン以上で利用できます。注文まとめて（order customAttributes）／商品別（line
-              properties）の末尾印字を個別に ON/OFF できます。
-            </Banner>
+            {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
+            <AdminIntro><p>Lite プラン以上で利用できます。注文まとめて（order customAttributes）／商品別（line properties）の末尾印字を個別に ON/OFF できます。</p></AdminIntro>
           </Layout.Section>
           <Layout.AnnotatedSection title="有効化" description="POS の販売レシート印字">
             <Card>
@@ -177,13 +171,6 @@ export default function SalesReceiptSettingsPage() {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
-          <Layout.Section>
-            <InlineStack align="end">
-              <Button variant="primary" onClick={handleSave}>
-                保存
-              </Button>
-            </InlineStack>
-          </Layout.Section>
         </Layout>
       </Page>
     </PolarisPageWrapper>

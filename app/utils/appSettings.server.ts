@@ -3,6 +3,7 @@
  * 要件 §13.1: app_settings は shop 単位の key-value
  */
 import prisma from "../db.server";
+import { DEFAULT_POINT_REDEMPTION_RULES } from "./pointRedemptionRules";
 
 export async function getAppSetting<T = unknown>(
   shopId: string,
@@ -180,6 +181,15 @@ export interface LoyaltySettings {
   loyaltyUsageOrderAttributeKey: string | null;
   loyaltyUsageIncludeInSummary: boolean;
   loyaltyUsageIncludeInSettlement: boolean;
+  /**
+   * 精算の「ポイント利用額」に数える割引コードの頭（例: VIP-, SP-POINT-）。
+   * 上の loyaltyUsageDiscountCodePrefixes は精算では使っていない（前からの欄）。
+   */
+  pointRedemptionCodePrefixes: string[];
+  /** 精算の「ポイント利用額」に数える、コードの無い手入力の割引の名前（POS の「Shop Point」） */
+  pointRedemptionManualTitles: string[];
+  /** Shop Point の旧形式のコード（SP ＋ 16 桁の 16 進）も数えるか */
+  pointRedemptionLegacyShopPointHexCode: boolean;
 }
 
 export const DEFAULT_LOYALTY_SETTINGS: LoyaltySettings = {
@@ -193,6 +203,9 @@ export const DEFAULT_LOYALTY_SETTINGS: LoyaltySettings = {
   loyaltyUsageOrderAttributeKey: null,
   loyaltyUsageIncludeInSummary: true,
   loyaltyUsageIncludeInSettlement: true,
+  pointRedemptionCodePrefixes: [...DEFAULT_POINT_REDEMPTION_RULES.codePrefixes],
+  pointRedemptionManualTitles: [...DEFAULT_POINT_REDEMPTION_RULES.manualTitles],
+  pointRedemptionLegacyShopPointHexCode: DEFAULT_POINT_REDEMPTION_RULES.legacyShopPointHexCode,
 };
 
 // ── 商品券設定（要件 §7） ─────────────────────────────────────────────────────

@@ -155,14 +155,12 @@ export default function SettlementPrintLayoutPage() {
         <Layout>
           {saved ? (
             <Layout.Section>
-              <Banner tone="success">保存しました。プレビューは印字 HTML と同一レンダラです。</Banner>
+              <Banner tone="success">保存しました。</Banner>
             </Layout.Section>
           ) : null}
           <Layout.Section>
             <Banner tone="info">
-              `/api/print/settlement/:id` と同じ `renderPrintReceiptHtml` /
-              `settlementPreviewToPrintModel` を使います。用紙幅は印字設定のレシート用紙幅です。
-              印字出力は Shopify Printing API のみです。
+              右の見本は、POS で印刷する精算レシートと同じ見た目です。用紙幅は「印字設定」のレシート用紙幅を使います。
             </Banner>
           </Layout.Section>
           <Layout.Section variant="oneHalf">
@@ -211,7 +209,7 @@ export default function SettlementPrintLayoutPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
-                  印字 HTML プレビュー
+                  印刷の見本
                 </Text>
                 <Box
                   padding="300"

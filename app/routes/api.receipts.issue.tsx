@@ -9,8 +9,9 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
 import prisma from "../db.server";
 import { DEFAULT_TEMPLATE, type ReceiptTemplateData } from "./api.settings.receipt-template";
-import { encodeReceiptPrintSnapshot } from "../services/receiptPrintSnapshot.server";
-import { renderPrintReceiptHtml } from "../services/printReceiptHtml";
+import { encodeReceiptPrintSnapshot, renderReceiptHtmlByPaperWidth } from "../services/receiptPrintSnapshot.server";
+import { getAppSetting } from "../utils/appSettings.server";
+import { issuerNameAtIssue, normalizeStaffId, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
 
 const ORDER_QUERY = `#graphql
   query ReceiptIssueOrder($id: ID!) {
@@ -35,7 +36,15 @@ export async function action({ request }: ActionFunctionArgs) {
     const { admin, shop, corsJson } = authResult;
 
     const body = await request.json() as Record<string, unknown>;
-    const { orderId, recipientName, proviso, isReissue, createdBy, idempotencyKey } = body;
+    const { orderId, recipientName, proviso, isReissue, staffMemberId, idempotencyKey } = body;
+    // 発行者＝領収書を発行した人（POS のピン留め中スタッフ）。名前は「スタッフ名」の登録から。自由入力の createdBy は受けない
+    const createdByStaffId = normalizeStaffId(staffMemberId);
+    const createdByName = createdByStaffId
+      ? issuerNameAtIssue(
+          createdByStaffId,
+          parseStaffNameMap(await getAppSetting(shop.id, STAFF_DISPLAY_NAMES_SETTING_KEY).catch(() => null)),
+        )
+      : null;
 
     if (!orderId) {
       return corsJson({ ok: false, error: "orderId is required" }, { status: 400 });
@@ -118,36 +127,22 @@ export async function action({ request }: ActionFunctionArgs) {
           templateId: tmpl?.id ?? null,
           templateVersion: tmpl?.version ?? 1,
           isReissue: Boolean(isReissue),
-          createdBy: createdBy ? String(createdBy) : null,
+          createdBy: createdByName,
+          createdByStaffId,
           idempotencyKey: idempotencyKey && typeof idempotencyKey === "string"
             ? idempotencyKey
             : null,
         },
       });
 
-      const model = {
-        kind: "receipt" as const,
-        title: "領　収　書",
-        recipientName: created.recipientName ?? "",
-        proviso: created.proviso ?? effectiveProviso,
-        amount: Number(created.amount),
-        currency: created.currency ?? "JPY",
-        issueDate: created.createdAt.toISOString().slice(0, 10),
-        orderName: created.orderName ?? undefined,
-        locationName,
-        companyName: templateData.companyName,
-        address: templateData.address,
-        phone: templateData.phone,
-        showOrderNumber: Boolean(templateData.showOrderNumber ?? templateData.showOrderName),
-        showDate: Boolean(templateData.showDate ?? templateData.showIssueDate),
-      };
       const printSnapshotJson = encodeReceiptPrintSnapshot({
         locationName,
         templateData: templateData as unknown as Record<string, unknown>,
-        renderedHtmlByPaperWidth: {
-          58: renderPrintReceiptHtml({ ...model, paperWidthMm: 58 }),
-          80: renderPrintReceiptHtml({ ...model, paperWidthMm: 80 }),
-        },
+        renderedHtmlByPaperWidth: renderReceiptHtmlByPaperWidth(
+          { ...created, proviso: created.proviso ?? effectiveProviso },
+          locationName,
+          templateData as unknown as Record<string, unknown>,
+        ),
       });
 
       return tx.receiptIssue.update({
