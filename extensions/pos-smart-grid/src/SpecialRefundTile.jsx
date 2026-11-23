@@ -1,5 +1,5 @@
 /**
- * 返金タイル（返金の手段の付け替え）。商品券は「商品券」タイル（VoucherTile.jsx）に分けた（T の決定 2026-11-23）
+ * 返金タイル（返金の手段の変更）。商品券は「商品券」タイル（VoucherTile.jsx）に分けた（T の決定 2026-11-23）
  */
 import { render } from "preact";
 
@@ -11,7 +11,7 @@ function SpecialRefundTile() {
   return (
     <s-tile
       heading="返金"
-      subheading="返金の手段の付け替え"
+      subheading="返金の手段の変更"
       onClick={() => shopify.action.presentModal()}
     />
   );
