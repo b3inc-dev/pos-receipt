@@ -1522,7 +1522,7 @@ function VoucherAdjustmentForm({
                 value={appliedState === "loading" ? "読み込み中…" : `¥${applied.toLocaleString()}`}
               />
             )}
-            {/* 額面の候補: 払った額より大きい 500 円刻みを 3 つ（全額反映は釣銭が出ないのでやめた。T 2026-11-24） */}
+            {/* 額面の候補: 払った額より上の近い 100 円区切り 1 つ + 500 円区切り 2 つ（全額反映は釣銭が出ないのでやめた。T 2026-11-24） */}
             {appliedState !== "loading" && appliedAmount !== "" && applied > 0 ? (
               <VoucherFaceCandidates amount={applied} selected={faceValue} onPick={setFaceValue} disabled={loading} />
             ) : null}
