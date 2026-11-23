@@ -28,6 +28,7 @@ import {
   refundMethodNotInMasterMessage,
 } from "../utils/specialRefundMethodValidation";
 import { normalizeLocationGid } from "../utils/locationGid";
+import { initialApprovalStatus } from "../utils/specialRefundApproval";
 
 const EVENT_TYPES = ["cash_refund", "payment_method_override", "voucher_change_adjustment", "receipt_cash_adjustment"] as const;
 
@@ -200,6 +201,7 @@ export async function action({ request }: ActionFunctionArgs) {
         ok: true,
         event: serializeEvent(existing),
         idempotentReplay: true,
+        approvalRequired: existing.approvalStatus === "pending",
         correctionRegistration:
           existing.shopifyRefundStatus === "skipped" &&
           existing.shopifyRefundError === CORRECTION_SKIP_REASON,
@@ -273,6 +275,9 @@ export async function action({ request }: ActionFunctionArgs) {
             createdBy: createdBy ? String(createdBy) : null,
             status: "active",
             shopifyRefundStatus: "none",
+            // 承認制（設定でオンのときの付け替えだけ）: 承認待ちで登録し、管理画面で承認するまで精算に数えない。
+            // Shopify 返金の実行は今までどおり（承認では Shopify に何も書かない）
+            approvalStatus: initialApprovalStatus(merged, eventTypeStr),
           },
         });
       } catch (error: unknown) {
@@ -370,6 +375,7 @@ export async function action({ request }: ActionFunctionArgs) {
         ok: true,
         event: serializeEvent(processedEvent),
         correctionRegistration: isCorrectionRegistration,
+        approvalRequired: processedEvent.approvalStatus === "pending",
         shopifyRefund: {
           status: processedEvent.shopifyRefundStatus,
           refundId: processedEvent.shopifyRefundId,
@@ -500,6 +506,8 @@ function serializeEvent(e: {
   shopifyRefundId: string | null;
   shopifyRefundError: string | null;
   shopifyRefundProcessedAt: Date | null;
+  approvalStatus?: string | null;
+  approvalReviewedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -524,6 +532,8 @@ function serializeEvent(e: {
     shopifyRefundId: e.shopifyRefundId,
     shopifyRefundError: e.shopifyRefundError,
     shopifyRefundProcessedAt: e.shopifyRefundProcessedAt?.toISOString() ?? null,
+    approvalStatus: e.approvalStatus ?? "none",
+    approvalReviewedAt: e.approvalReviewedAt?.toISOString() ?? null,
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
   };

@@ -269,6 +269,11 @@ export interface SpecialRefundSettings {
   reflectPaymentOverrideToSettlement: boolean;
   reflectVoucherAdjustmentToSettlement: boolean;
   reflectReceiptCashAdjustmentToSettlement: boolean;
+  /**
+   * 支払方法の付け替え（payment_method_override）を管理者の承認制にする（初めはオフ = 今のまま承認なしで精算に入る）。
+   * オンのとき、付け替えは承認待ちで登録し、管理画面の特殊返金履歴で承認するまで精算・売上サマリーに数えない。
+   */
+  requireApprovalForPaymentMethodOverride: boolean;
   specialRefundUiLabel: string;
   voucherAdjustmentUiLabel: string;
   cashRefundUiLabel: string;
@@ -296,6 +301,7 @@ export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
   reflectPaymentOverrideToSettlement: true,
   reflectVoucherAdjustmentToSettlement: true,
   reflectReceiptCashAdjustmentToSettlement: true,
+  requireApprovalForPaymentMethodOverride: false,
   specialRefundUiLabel: "特殊返金",
   voucherAdjustmentUiLabel: "商品券調整",
   cashRefundUiLabel: "現金返金",

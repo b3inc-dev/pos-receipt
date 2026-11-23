@@ -170,6 +170,31 @@ function CorrectionModeBanner({ orderCorrectionContext }) {
 }
 
 function formatShopifyRefundNotice(res) {
+  const base = formatShopifyRefundNoticeBase(res);
+  // 管理者の承認が要る店（設定でオン）の返金手段変更は、承認されるまで精算に入らない
+  if (res?.approvalRequired || res?.event?.approvalStatus === "pending") {
+    return {
+      tone: base.tone === "warning" ? "warning" : "info",
+      text: `${base.text} 管理者の承認待ちです。承認されるまで精算に入りません。`,
+    };
+  }
+  return base;
+}
+
+function ApprovalStatusLine({ approvalStatus }) {
+  if (approvalStatus === "pending") {
+    return <s-text tone="caution" fontSize="small">管理者の承認待ち（承認されるまで精算に入りません）</s-text>;
+  }
+  if (approvalStatus === "approved") {
+    return <s-text tone="success" fontSize="small">管理者の承認済み</s-text>;
+  }
+  if (approvalStatus === "rejected") {
+    return <s-text tone="critical" fontSize="small">管理者が却下（精算に入りません）</s-text>;
+  }
+  return null;
+}
+
+function formatShopifyRefundNoticeBase(res) {
   if (res?.correctionRegistration) {
     return {
       tone: "info",
@@ -856,6 +881,8 @@ function EventCard({ event, onAskConfirm, legacyDecision, loading }) {
           status={event.shopifyRefundStatus}
           error={event.shopifyRefundError}
         />
+
+        <ApprovalStatusLine approvalStatus={event.approvalStatus} />
 
         {canRecheckShopifyRefund(event) || canRecheckLegacyShopifyRefund(event) ? (
           <s-stack gap="extraSmall">
