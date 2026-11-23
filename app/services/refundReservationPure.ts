@@ -1,7 +1,7 @@
 /**
  * 返金の予約（純関数）。docs/REFUND_RESERVATION.md
  *
- * 純正で返金する前に「実際に返す手段」を決めておき（分割可・最後の行は残り）、
+ * 純正で返金する前に「実際の返金方法」を決めておき（分割可・最後の行は残り）、
  * 予約のあとにできた最初の純正の返金に、付け替えを自動で作る。
  * 付け替えの決まり（金額は純正の返金額で固定・Shopify では返金しない・残りを超えない）は
  * nativeRefundReassignPure.server.ts のまま使う。
@@ -34,13 +34,13 @@ export type RowsCheck = { ok: true; rows: ReservationRow[] } | { ok: false; erro
 
 /** POS から来た行を確かめる。最後の行の金額は捨てて残りにする */
 export function normalizeReservationRows(input: unknown): RowsCheck {
-  if (!Array.isArray(input) || input.length === 0) return { ok: false, error: "返す手段を 1 つ以上選んでください" };
+  if (!Array.isArray(input) || input.length === 0) return { ok: false, error: "返金方法を 1 つ以上選んでください" };
   if (input.length > 10) return { ok: false, error: "分けられるのは 10 行までです" };
   const rows: ReservationRow[] = [];
   for (let i = 0; i < input.length; i++) {
     const r = (input[i] ?? {}) as Record<string, unknown>;
     const method = String(r.actualRefundMethod ?? "").trim();
-    if (!method) return { ok: false, error: `${i + 1} 行目の返す手段を選んでください` };
+    if (!method) return { ok: false, error: `${i + 1} 行目の返金方法を選んでください` };
     const eventType = String(r.eventType ?? "") as ReservationEventType;
     if (!RESERVATION_EVENT_TYPES.includes(eventType)) {
       return { ok: false, error: `${i + 1} 行目の種類が正しくありません` };
