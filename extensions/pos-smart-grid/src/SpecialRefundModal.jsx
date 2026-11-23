@@ -13,6 +13,7 @@
 import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
 import { getOrder, createRedoDraft } from "../../common/orderPickerApi.js";
+import { PosChoiceField } from "./PosChoiceField.jsx";
 import {
   listSpecialRefunds,
   createSpecialRefund,
@@ -1106,15 +1107,12 @@ function SpecialRefundForm({
             <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
 
             {/* 種別選択 */}
-            <s-select
+            <PosChoiceField
               label="返金種別"
               value={eventType}
-              onChange={(e) => setEventType(e?.currentTarget?.value ?? e?.currentValue?.value ?? eventType)}
-            >
-              {REFUND_EVENT_TYPES.map((t) => (
-                <s-option key={t.value} value={t.value}>{t.label}</s-option>
-              ))}
-            </s-select>
+              options={REFUND_EVENT_TYPES}
+              onChange={setEventType}
+            />
 
             {/* 金額 */}
             <s-text-field
@@ -1128,29 +1126,19 @@ function SpecialRefundForm({
             {/* 支払手段（cash_refund / payment_method_override） */}
             {showPaymentFields ? (
               <>
-                <s-select
+                <PosChoiceField
                   label="元の支払手段"
                   value={originalPaymentMethod}
-                  onChange={(e) =>
-                    setOriginalPaymentMethod(e?.currentTarget?.value ?? e?.currentValue?.value ?? originalPaymentMethod)
-                  }
-                >
-                  {paymentMethods.map((m) => (
-                    <s-option key={m.value} value={m.value}>{m.label}</s-option>
-                  ))}
-                </s-select>
+                  options={paymentMethods}
+                  onChange={setOriginalPaymentMethod}
+                />
                 {refundMethods.length > 0 ? (
-                  <s-select
+                  <PosChoiceField
                     label="実際の返金手段"
                     value={actualRefundMethod}
-                    onChange={(e) =>
-                      setActualRefundMethod(e?.currentTarget?.value ?? e?.currentValue?.value ?? actualRefundMethod)
-                    }
-                  >
-                    {refundMethods.map((m) => (
-                      <s-option key={m.value} value={m.value}>{m.label}</s-option>
-                    ))}
-                  </s-select>
+                    options={refundMethods}
+                    onChange={setActualRefundMethod}
+                  />
                 ) : (
                   <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} fontSize="small">
                     {refundMethodsMessage(refundMethodsState)}
@@ -1161,15 +1149,12 @@ function SpecialRefundForm({
 
             {/* 調整種別（receipt_cash_adjustment） */}
             {showAdjustKind ? (
-              <s-select
+              <PosChoiceField
                 label="調整種別"
                 value={adjustKind}
-                onChange={(e) => setAdjustKind(e?.currentTarget?.value ?? e?.currentValue?.value ?? adjustKind)}
-              >
-                {ADJUST_KINDS.map((k) => (
-                  <s-option key={k.value} value={k.value}>{k.label}</s-option>
-                ))}
-              </s-select>
+                options={ADJUST_KINDS}
+                onChange={setAdjustKind}
+              />
             ) : null}
 
             {/* メモ */}

@@ -64,7 +64,10 @@ const ORDER_FOR_REFUND_QUERY = `#graphql
   }
 `;
 
-const REFUND_CREATE_MUTATION = `#graphql
+// refundCreate の userErrors は UserError 型で、field と message しかない（code は無い）。
+// code を選ぶと GraphQL の検証で 500 になり、返金がすべて失敗する（開発ストアで確かめた 2026-11-23）。
+// 一時エラー（同じ冪等キーの実行中など）は最上位の errors[].extensions.code で来る。
+export const REFUND_CREATE_MUTATION = `#graphql
   mutation RefundCreate($input: RefundInput!, $idempotencyKey: String!) {
     refundCreate(input: $input) @idempotent(key: $idempotencyKey) {
       refund {
@@ -73,7 +76,6 @@ const REFUND_CREATE_MUTATION = `#graphql
       userErrors {
         field
         message
-        code
       }
     }
   }
@@ -276,7 +278,7 @@ export async function executeShopifyRefundForEvent(
     data?: {
       refundCreate?: {
         refund?: { id?: string };
-        userErrors?: { field?: string[]; message: string; code?: string }[];
+        userErrors?: { field?: string[] | null; message: string }[];
       };
     };
     errors?: { message?: string; extensions?: { code?: string } }[];
