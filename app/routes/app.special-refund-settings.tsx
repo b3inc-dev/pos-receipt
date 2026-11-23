@@ -59,9 +59,10 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   const bool = (k: string, def: boolean) => get(k) === "true" || (def && get(k) !== "false");
   const str = (k: string, d: string) => String(get(k) ?? d).trim();
-  const modeRaw = str("refundProcessingMode", "shopify_execute");
+  // 初めの値は記録だけ（T の決定 2026-11-23: 返金は純正で行う。保存した店はその値のまま）
+  const modeRaw = str("refundProcessingMode", "record_only");
   const refundProcessingMode =
-    modeRaw === "record_only" ? "record_only" : "shopify_execute";
+    modeRaw === "shopify_execute" ? "shopify_execute" : "record_only";
   const settings: SpecialRefundSettings = {
     ...DEFAULT_SPECIAL_REFUND_SETTINGS,
     refundProcessingMode,
