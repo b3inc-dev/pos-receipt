@@ -21,3 +21,10 @@ test("返金の予約: 返金する金額は要る・分けた額の合計より
   assert.equal(m.reservationExpectedAmountFromInput("", rows).ok, false);
   assert.equal(m.reservationExpectedAmountFromInput("1000", rows).ok, false);
 });
+
+test("返金の予約: 分割しないときは金額が要らない", async () => {
+  const m = await import("../../extensions/common/refundReservation.js");
+  const one = [{ actualRefundMethod: "cash", amount: null }];
+  assert.deepEqual(m.reservationExpectedAmountFromInput("", one), { ok: true, error: "", amount: null });
+  assert.equal(m.reservationRowText({ actualRefundLabel: "現金", amount: null }, { only: true }), "現金 返金した額の全部");
+});

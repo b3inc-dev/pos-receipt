@@ -108,6 +108,16 @@ test("返す見込みの金額: 要る・分けた額の合計より大きく", 
   assert.equal(checkExpectedAmount(rows, "abc").ok, false);
 });
 
+test("分割しない予約は金額が要らない（0 =「金額の条件なし」）", () => {
+  const one = [{ actualRefundMethod: "cash", eventType: "cash_refund" as const, amount: null }];
+  assert.deepEqual(checkExpectedAmount(one, undefined), { ok: true, expectedAmount: 0 });
+  assert.deepEqual(checkExpectedAmount(one, 2500), { ok: true, expectedAmount: 0 });
+  const l = { refundId: "r1", createdAt: "2026-11-23T03:00:00Z", gateway: "shopify_payments", formattedGateway: null, amount: 1800 };
+  const plan = planReservation([l], one, 0);
+  assert.equal(plan.ok, true);
+  if (plan.ok) assert.deepEqual(plan.rows.map((r) => r.amount), [1800]);
+});
+
 test("返金額が予約の金額と違えば要確認・同じなら当てる", () => {
   const l = { refundId: "r1", createdAt: "2026-11-23T03:00:00Z", gateway: "shopify_payments", formattedGateway: null, amount: 2500 };
   const rows = [{ actualRefundMethod: "cash", eventType: "cash_refund" as const, amount: null }];

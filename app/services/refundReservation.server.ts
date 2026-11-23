@@ -282,7 +282,7 @@ export async function applyRefundReservationsForOrder(
     }
 
     const rows: ReservationRow[] = parseReservationRows(res.rowsJson);
-    const plan = planReservation(picked.lines, rows, Number(res.expectedAmount));
+    const plan = planReservation(picked.lines, rows, Number(res.expectedAmount) > 0 ? Number(res.expectedAmount) : null);
     if (!plan.ok) {
       await prisma.refundReservation.updateMany({
         where: { id: res.id, status: "pending" },
