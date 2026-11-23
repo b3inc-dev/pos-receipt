@@ -306,12 +306,12 @@ function dailyKpiRows(row, o) {
   if (o.showAtv && row.atv !== null) rows.push({ label: "客単価", value: fmtAmount(row.atv) });
   if (o.showSetRate && row.setRate !== null)
     rows.push({ label: "セット率", value: fmtNum(row.setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   if (o.showUnitPrice && row.unit !== null) rows.push({ label: "一品単価", value: fmtAmount(row.unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   return rows;
 }
 
-/** 日次の店（またはチャネル）の行。月の数を出す設定なら一品単価の後ろに足す */
+/** 日次の店（またはチャネル）の行。月の数を出す設定なら日の数の後ろに足す */
 function dailyMetricItems(row, o, periodRow) {
   return mergeDailyRowsWithMonthKpi(dailyKpiRows(row, o), periodRow, o);
 }
@@ -343,8 +343,8 @@ function periodKpiRows(row, o) {
   if (o.showAtv && row.atv !== null) rows.push({ label: "客単価", value: fmtAmount(row.atv) });
   if (o.showSetRate && row.setRate !== null)
     rows.push({ label: "セット率", value: fmtNum(row.setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   if (o.showUnitPrice && row.unit !== null) rows.push({ label: "一品単価", value: fmtAmount(row.unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(row.items)}点` });
   return rows;
 }
 
@@ -367,9 +367,9 @@ function totalsDailyRows(totals, o) {
   if (o.showAtv && atv !== null) rows.push({ label: "客単価", value: fmtAmount(atv) });
   const setRate = totals.orders > 0 ? totals.items / totals.orders : null;
   if (o.showSetRate && setRate !== null) rows.push({ label: "セット率", value: fmtNum(setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   const unit = totals.items > 0 ? totals.actual / totals.items : null;
   if (o.showUnitPrice && unit !== null) rows.push({ label: "一品単価", value: fmtAmount(unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   return rows;
 }
 
@@ -396,7 +396,7 @@ function totalsToPseudoPeriodRow(totals, locationRows = []) {
   };
 }
 
-/** 月予算→月実績→達成率→遂行…（日次で一品単価の直後に挿入） */
+/** 月予算→月実績→達成率→遂行…（日次では日の数の後ろに足し、「今月」の見出しの下に出す） */
 function monthKpiRowsOrderedFromPeriodRow(row, o) {
   const items = [];
   if (!row) return items;
@@ -434,9 +434,8 @@ function mergeDailyRowsWithMonthKpi(baseItems, periodRow, o) {
   if (!wantMonth) return baseItems;
   const extra = monthKpiRowsOrderedFromPeriodRow(periodRow, o);
   if (extra.length === 0) return baseItems;
-  const idx = baseItems.findIndex((r) => r.label === "一品単価");
-  if (idx === -1) return [...baseItems, ...extra];
-  return [...baseItems.slice(0, idx + 1), ...extra, ...baseItems.slice(idx + 1)];
+  // 月の数はカードの「今月」の見出しの下にまとめて出すので、日の数の後ろに足す
+  return [...baseItems, ...extra];
 }
 
 /** 日次の1行（店舗 or チャネル）に対応する期間API行 */
@@ -488,8 +487,8 @@ function totalsPeriodRows(totals, o, locationRows = []) {
   if (o.showAtv && totals.atv !== null) rows.push({ label: "客単価", value: fmtAmount(totals.atv) });
   if (o.showSetRate && totals.setRate !== null)
     rows.push({ label: "セット率", value: fmtNum(totals.setRate, 2) });
-  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   if (o.showUnitPrice && totals.unit !== null) rows.push({ label: "一品単価", value: fmtAmount(totals.unit) });
+  if (o.showItems) rows.push({ label: "点数", value: `${fmtNum(totals.items)}点` });
   return rows;
 }
 
