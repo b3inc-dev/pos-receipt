@@ -19,6 +19,7 @@ import { toUserMessage } from "../../common/errorMessage.js";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { PosToggleField } from "./PosChoiceField.jsx";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
+import { customerLabel } from "../../common/orderDetailLayout.js";
 
 const STORAGE_KEY = "pos_receipt_order_id";
 
@@ -225,7 +226,7 @@ function FormView({
   const orderSubLine = [
     order?.transactionDateTime || "",
     order?.location?.name || "",
-    order?.customer?.displayName || "顧客なし",
+    customerLabel(order),
   ]
     .filter(Boolean)
     .join(" ・ ");

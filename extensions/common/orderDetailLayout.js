@@ -53,3 +53,16 @@ export function financialStatusTone(status, cancelledAt) {
   if (s === "PENDING" || s === "AUTHORIZED") return "caution";
   return "neutral";
 }
+
+/**
+ * 顧客の欄に出す字。
+ * 名前の許可が無いアプリでは名前なしで読み直すので、顧客がいても名前が無いことがある。
+ * そのときは「顧客なし」と誤って出さず「顧客あり（名前は表示できません）」にする。
+ */
+export function customerLabel(order) {
+  const c = order?.customer;
+  const name = String(c?.displayName ?? "").trim();
+  if (name) return name;
+  if (c && c.id) return "顧客あり（名前は表示できません）";
+  return "顧客なし";
+}

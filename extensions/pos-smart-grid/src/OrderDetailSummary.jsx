@@ -18,7 +18,7 @@
  * 見せ方だけで、数え方・登録の動きは変えない。
  */
 import { fmtYen } from "./orderDisplayUtils.js";
-import { orderPaymentSummaryLines } from "../../common/orderDetailLayout.js";
+import { customerLabel, orderPaymentSummaryLines } from "../../common/orderDetailLayout.js";
 
 /** 灰色の小さい見出し（商品・金額の内訳・取引情報） */
 function Heading({ children }) {
@@ -136,7 +136,7 @@ export function OrderDetailSummary({ order }) {
 
       <Heading>取引情報</Heading>
       <Line label="店舗" value={order.location?.name || "—"} />
-      <Line label="顧客" value={order.customer?.displayName || "顧客なし"} />
+      <Line label="顧客" value={customerLabel(order)} />
       {order.note ? <Line label="メモ" value={String(order.note)} /> : null}
     </s-stack>
   );

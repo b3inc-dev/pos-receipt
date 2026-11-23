@@ -42,3 +42,13 @@ describe("financialStatusTone", () => {
     assert.equal(financialStatusTone("PAID"), "neutral");
   });
 });
+
+describe("customerLabel", async () => {
+  const { customerLabel } = await import("../../extensions/common/orderDetailLayout.js");
+  it("名前 → 名前、名前なしで読み直したとき → 顧客あり、顧客がいない → 顧客なし", () => {
+    assert.equal(customerLabel({ customer: { id: "gid://shopify/Customer/1", displayName: "山田 太郎" } }), "山田 太郎");
+    assert.equal(customerLabel({ customer: { id: "gid://shopify/Customer/1" } }), "顧客あり（名前は表示できません）");
+    assert.equal(customerLabel({ customer: null }), "顧客なし");
+    assert.equal(customerLabel(null), "顧客なし");
+  });
+});
