@@ -109,6 +109,27 @@
 - 精算用内部 line item は `requiresShipping: true`（履行して閉じる用途）。点検は `false`
 - 配送注文を特別扱いする業務分岐は **コード上未確認（見当たらない）**
 
+### 7.1 売上に含めない送料等の明細（`_lsi_fee`）
+
+Location Stock の POS Lite 配送では、送料が注文の配送料でなく **商品の 1 行（カスタム売上）** で入る（b3inc-dev/location-stock-indicator#76）。明細の属性で見分ける（`app/services/nonSalesFeeLines.ts`）。名前（「送料」）では見分けない。
+
+| 明細の属性 | 扱い |
+|---|---|
+| `_lsi_fee="1"` かつ `_lsi_fee_sales="0"` | **売上に含めない**（下の表） |
+| `_lsi_fee="1"` かつ `_lsi_fee_sales` が `"0"` 以外・無し | 今までどおり普通の明細として数える |
+| `_lsi_fee` が無い | 普通の明細 |
+
+売上に含めない明細の扱い:
+
+- **支払方法別の金額（paymentSections）はそのまま**（お客さまから受け取ったお金。現金の納金額と合わせるため）
+- **総売上 `total` = 支払方法別の合計 − `nonSalesFeeTotal`**。純売上・消費税（`total` から逆算）も同じく外れる。売上サマリーの `actual` は精算の `netSales` なので同じく外れる（D2）
+- `nonSalesFeeTotal` = 当日売った送料の行の金額（割引後。税抜価格の店は税込に直す。分けて払った注文は当日の支払の割合で按分）− 計上対象の当日返金に入った送料の行（`refundLineItems.subtotalSet`）。あとの日に送料だけ返金するとその日はマイナス（売上を減らさない）
+- 点数 `itemCount` に数えない（返金の点数も引かない）。送料の行に配られた割引は「割引」「ポイント利用額」に数えない。`taxShopify` から送料の行の税を引く
+- 精算画面（POS）・精算レシートの印字に「売上に含めない送料等」を出す（0 なら出さない）。保存済みの精算は DB に列が無いので、印字のとき「支払方法別の合計 − 総売上」で戻す（総売上 0 の日は 0）
+- 領収書（プレビュー・発行）の金額は **受け取った全額のまま**（注文の合計。送料の行も含む。T 2026-11-23）
+- 値は会計のときの設定（Location Stock 側）。あとから設定を変えても前の注文は変わらない
+- 販売チャネル別集計（`salesChannelEngine`、POS 以外）・order_based の精算注文メタフィールドには未対応（POS Lite の配送は POS 注文なので精算側で外れる）
+
 ---
 
 ## 8. スタッフ名
@@ -125,7 +146,7 @@
 
 - `customAttributes` は注文詳細で取得・シリアライズされる
 - `OrderDetailSummary` は表示しない
-- 精算集計は quantity と discountAllocations を使用（customAttributes 不使用）
+- 精算集計は quantity と discountAllocations を使用。customAttributes は売上に含めない送料等の見分け（§7.1）だけに使う
 
 ---
 
