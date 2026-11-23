@@ -14,6 +14,7 @@ import prisma from "../db.server";
 import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import {
   fetchOrderVoucherApplied,
+  metafieldWrittenOf,
   syncOrderAdjustmentsMetafield,
 } from "../services/orderAdjustments.server";
 import { voucherChangeOf } from "../services/orderAdjustmentsPure.server";
@@ -145,7 +146,7 @@ export async function action({ request }: ActionFunctionArgs) {
           createdAt: event.createdAt.toISOString(),
         },
         appliedFromOrder: manualApplied == null,
-        metafieldWritten: metafieldSync.ok,
+        metafieldWritten: metafieldWrittenOf(metafieldSync),
         settlementAlreadyConfirmed,
         shopifyRefund: {
           status: "skipped",

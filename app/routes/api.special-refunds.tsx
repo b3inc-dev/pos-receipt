@@ -29,7 +29,7 @@ import {
 } from "../utils/specialRefundMethodValidation";
 import { normalizeLocationGid } from "../utils/locationGid";
 import { initialApprovalStatus } from "../utils/specialRefundApproval";
-import { syncOrderAdjustmentsMetafield } from "../services/orderAdjustments.server";
+import { metafieldWrittenOf, syncOrderAdjustmentsMetafield } from "../services/orderAdjustments.server";
 import { countDateOf } from "../services/orderAdjustmentsPure.server";
 import { loadRefundMethodResolver } from "../utils/paymentMethod.server";
 
@@ -403,7 +403,7 @@ export async function action({ request }: ActionFunctionArgs) {
         event: serializeEvent(processedEvent),
         correctionRegistration: isCorrectionRegistration,
         approvalRequired: processedEvent.approvalStatus === "pending",
-        metafieldWritten: metafieldSync.ok,
+        metafieldWritten: metafieldWrittenOf(metafieldSync),
         shopifyRefund: {
           status: processedEvent.shopifyRefundStatus,
           refundId: processedEvent.shopifyRefundId,
@@ -540,6 +540,7 @@ function serializeEvent(e: {
   replacesEventId?: string | null;
   voidedAt?: Date | null;
   voidReason?: string | null;
+  metafieldSyncedAt?: Date | null;
   metafieldSyncError?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -571,7 +572,7 @@ function serializeEvent(e: {
     replacesEventId: e.replacesEventId ?? null,
     voidedAt: e.voidedAt?.toISOString() ?? null,
     voidReason: e.voidReason ?? null,
-    metafieldWritten: !e.metafieldSyncError,
+    metafieldWritten: e.metafieldSyncError ? false : e.metafieldSyncedAt ? true : null,
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
   };

@@ -10,6 +10,11 @@ function num(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** 端数のある通貨でも切り捨てない（1/100 まで残す。円はそのまま） */
+export function roundMoney(v) {
+  return Math.round(num(v) * 100) / 100;
+}
+
 function keyOf(gateway) {
   return String(gateway ?? "").trim().toLowerCase();
 }
@@ -42,7 +47,7 @@ export function orderTenderLines(order) {
     }
   }
   return [...lines.values()]
-    .map((l) => ({ ...l, paid: Math.round(l.paid), refunded: Math.round(l.refunded) }))
+    .map((l) => ({ ...l, paid: roundMoney(l.paid), refunded: roundMoney(l.refunded) }))
     .filter((l) => l.paid > 0 || l.refunded > 0)
     .sort((a, b) => b.paid - a.paid || b.refunded - a.refunded);
 }
@@ -53,16 +58,13 @@ export function fullAmountForRefund(line) {
   return line.refunded > 0 ? line.refunded : line.paid;
 }
 
-/** 選択肢（支払方法マスタなど）の中から、取引の gateway に当たるものの value */
+/**
+ * 選択肢（支払方法マスタなど）の中から、取引の gateway と同じ名前のものの value。
+ * 名前の一部が同じだけのもの（cash と cash_on_delivery など）は当てない。当たらなければ null（呼び出し側は選択を変えない）
+ */
 export function matchMethodValue(items, gateway) {
   const g = keyOf(gateway);
   if (!g) return null;
-  const list = items ?? [];
-  const exact = list.find((m) => keyOf(m?.value) === g);
-  if (exact) return exact.value;
-  const loose = list.find((m) => {
-    const v = keyOf(m?.value);
-    return v && (g.includes(v) || v.includes(g));
-  });
-  return loose?.value ?? null;
+  const exact = (items ?? []).find((m) => keyOf(m?.value) === g);
+  return exact?.value ?? null;
 }

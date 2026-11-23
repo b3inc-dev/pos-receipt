@@ -42,7 +42,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     locationId,
     locationName,
     targetDate,
-    { debug: true },
+    // 調べるだけ。注文の特殊返金・商品券調整は書き直さない
+    { debug: true, resyncOrderAdjustments: false },
   );
 
   // GAS / ciara-system との比較用に整理

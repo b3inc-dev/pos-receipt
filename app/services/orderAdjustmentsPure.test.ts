@@ -40,6 +40,9 @@ function row(p: Partial<AdjustmentEventRow> & { id: string }): AdjustmentEventRo
     countDate: "2026-11-23",
     replacesEventId: null,
     createdAt: new Date("2026-11-23T06:04:00Z"),
+    // 初めは「注文に書く設定にしてから書いた注文」
+    metafieldSyncedAt: new Date("2026-11-23T06:04:01Z"),
+    metafieldSyncError: null,
     ...p,
   };
 }
@@ -256,6 +259,39 @@ test("精算: 注文に値が無い・読めないときも書き直す。読ま
   });
   assert.equal(notFetched.events.length, 1);
   assert.equal(notFetched.needsResync.length, 0);
+});
+
+test("精算: 注文に書く設定にする前の登録（書いたことが無い注文）は比べず、書き直さない（見直し P2-A）", () => {
+  const legacy = [row({ id: "old", metafieldSyncedAt: null, metafieldSyncError: null })];
+  const failed = [row({ id: "f", sourceOrderId: "gid://shopify/Order/5002", metafieldSyncedAt: null, metafieldSyncError: "429" })];
+  const r = resolveSettlementAdjustments({
+    date: "2026-11-23",
+    locationGid: LOC,
+    dbRows: [...legacy, ...failed],
+    docs: new Map(),
+    docsFetched: true,
+  });
+  assert.deepEqual(r.events.map((e) => e.id), ["old", "f"]);
+  assert.equal(r.notWrittenOrderCount, 1);
+  // 書けなかった注文は、設定にしてから書こうとした注文なので書き直す
+  assert.deepEqual(r.needsResync.map((w) => [w.sourceOrderId, w.reason]), [["gid://shopify/Order/5002", "metafield_missing"]]);
+});
+
+test("精算: 少し前に精算で書き直した注文がまた違うときは、書き直さずに知らせる", () => {
+  const rows = [row({ id: "a", amount: 1000 })];
+  const tampered = buildOrderAdjustmentsDoc(rows, { timeZone: TZ });
+  tampered.entries[0].amount = 1;
+  const r = resolveSettlementAdjustments({
+    date: "2026-11-23",
+    locationGid: LOC,
+    dbRows: rows,
+    docs: new Map([["gid://shopify/Order/5001", JSON.stringify(tampered)]]),
+    docsFetched: true,
+    recentlyRewritten: new Set(["gid://shopify/Order/5001"]),
+  });
+  assert.equal(r.needsResync.length, 0);
+  assert.deepEqual(r.warnings.map((w) => w.reason), ["metafield_differs_again"]);
+  assert.equal(r.events[0].amount, 1000);
 });
 
 test("商品券で払った額: 商品券の売上を足し、商品券の返金を引く。失敗した取引と他の支払方法は数えない", () => {

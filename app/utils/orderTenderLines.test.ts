@@ -3,7 +3,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { orderTenderLines, fullAmountForRefund, matchMethodValue } from "../../extensions/common/orderTenderLines.js";
+import { orderTenderLines, fullAmountForRefund, matchMethodValue, roundMoney } from "../../extensions/common/orderTenderLines.js";
 
 const order = {
   transactions: [
@@ -32,10 +32,21 @@ test("全額反映: 返金した額があればそれ、無ければ支払った
   assert.equal(fullAmountForRefund(null), 0);
 });
 
-test("選択肢の当てはめ: 同じ名前を先に、無ければ含む名前", () => {
+test("選択肢の当てはめ: 同じ名前だけ。一部が同じだけのものは当てない", () => {
   const items = [{ value: "cash" }, { value: "shopify_payments" }];
   assert.equal(matchMethodValue(items, "Shopify_Payments"), "shopify_payments");
-  assert.equal(matchMethodValue(items, "cash_on_delivery"), "cash");
+  assert.equal(matchMethodValue(items, "cash_on_delivery"), null);
+  assert.equal(matchMethodValue([{ value: "cashless" }], "cash"), null);
   assert.equal(matchMethodValue(items, "paypay"), null);
   assert.equal(matchMethodValue(items, ""), null);
+});
+
+test("端数のある通貨でも全額反映で切り捨てない", () => {
+  const lines = orderTenderLines({
+    transactions: [{ kind: "SALE", status: "SUCCESS", gateway: "cash", displayName: "Cash", amount: "12.34" }],
+    refunds: [{ transactions: [{ gateway: "cash", amount: "5.5" }] }],
+  });
+  assert.deepEqual(lines.map((l: { paid: number; refunded: number }) => [l.paid, l.refunded]), [[12.34, 5.5]]);
+  assert.equal(fullAmountForRefund(lines[0]), 5.5);
+  assert.equal(roundMoney("1000"), 1000);
 });

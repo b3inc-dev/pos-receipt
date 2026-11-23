@@ -3,7 +3,7 @@
  * 要件 §8: 利用可能イベント種別・入力要件・表示名
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useActionData, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
+import { useActionData, useFetcher, useLoaderData, useSubmit, useLocation, useNavigate } from "react-router";
 import { SuccessToast, AdminIntro } from "../components/admin-ui";
 import {
   Page,
@@ -29,6 +29,11 @@ import {
   DEFAULT_SPECIAL_REFUND_SETTINGS,
   type SpecialRefundSettings,
 } from "../utils/appSettings.server";
+import {
+  backfillOrderAdjustmentsMetafield,
+  countOrdersNotWrittenYet,
+  ORDER_ADJUSTMENTS_BACKFILL_MAX,
+} from "../services/orderAdjustments.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 
@@ -37,7 +42,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shop = await resolveShop(session.shop, admin);
   const saved = await getAppSetting<Partial<SpecialRefundSettings>>(shop.id, SPECIAL_REFUND_SETTINGS_KEY);
   const settings: SpecialRefundSettings = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...saved };
-  return { settings };
+  // 前からの登録で、まだ注文に書いていない注文の数（注文に書く設定がオンのときだけ数える）
+  const notWrittenCount = settings.writeOrderAdjustmentsMetafield ? await countOrdersNotWrittenYet(shop.id) : 0;
+  return { settings, notWrittenCount };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -45,6 +52,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const shop = await resolveShop(session.shop, admin);
   const formData = await request.formData();
   const get = (k: string) => formData.get(k);
+  if (get("intent") === "backfill") {
+    // 前からの登録を注文に書く（T が 1 件だけ→まとめて の順で押す。精算ではまとめて書かない）
+    const limit = Number(get("limit") ?? 1);
+    const r = await backfillOrderAdjustmentsMetafield(admin, shop.id, Number.isFinite(limit) ? limit : 1);
+    return Response.json({ intent: "backfill", ...r, at: Date.now() });
+  }
   const bool = (k: string, def: boolean) => get(k) === "true" || (def && get(k) !== "false");
   const str = (k: string, d: string) => String(get(k) ?? d).trim();
   const modeRaw = str("refundProcessingMode", "shopify_execute");
@@ -84,7 +97,19 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function SpecialRefundSettingsPage() {
-  const { settings: initial } = useLoaderData<typeof loader>();
+  const { settings: initial, notWrittenCount } = useLoaderData<typeof loader>();
+  const backfill = useFetcher<
+    | { intent: "backfill"; ok: true; written: { orderName: string }[]; failed: { orderName: string; error: string }[]; remaining: number }
+    | { intent: "backfill"; ok: false; reason: "off" }
+  >();
+  const backfillBusy = backfill.state !== "idle";
+  const runBackfill = (limit: number) => {
+    const fd = new FormData();
+    fd.set("intent", "backfill");
+    fd.set("limit", String(limit));
+    backfill.submit(fd, { method: "post" });
+  };
+  const backfillResult = backfill.data;
   const submit = useSubmit();
   const actionData = useActionData<{ ok?: boolean }>();
   const location = useLocation();
@@ -231,8 +256,48 @@ export default function SpecialRefundSettingsPage() {
                   label="特殊返金・商品券調整を注文にも記録する（注文メタフィールド pos.adjustments）"
                   checked={form.writeOrderAdjustmentsMetafield}
                   onChange={(v) => set("writeOrderAdjustmentsMetafield", v)}
-                  helpText="オンにすると、登録・変更・無効化のたびに、その注文に記録を書きます。注文を読むほかのアプリ（ciara-system など）が同じ記録で数えられます。精算はアプリの記録で数え、注文の記録が違うときはアプリの記録で書き直します。オフのときは注文に何も書かず、今までどおりアプリの記録だけで数えます。"
+                  helpText="オンにすると、登録・変更・無効化のたびに、その注文に記録を書きます。注文を読むほかのアプリ（ciara-system など）が同じ記録で数えられます。精算はアプリの記録で数え、注文の記録が違うときはアプリの記録で書き直します。オンにする前の登録は、下の「前からの登録を注文に書く」で書きます。オフのときは注文に何も書かず、今までどおりアプリの記録だけで数えます。"
                 />
+                {initial.writeOrderAdjustmentsMetafield ? (
+                  <>
+                    <Divider />
+                    <BlockStack gap="200">
+                      <Text as="h3" variant="headingSm">前からの登録を注文に書く</Text>
+                      <Text as="p" tone="subdued">
+                        {`オンにする前の登録で、まだ注文に書いていない注文が ${backfillResult?.ok ? backfillResult.remaining : notWrittenCount} 件あります。精算ではまとめて書かないので、ここから書きます。注文を書くと売上サマリーの計算し直しが走るので、まず 1 件だけ書いて注文ページで確かめてから、${ORDER_ADJUSTMENTS_BACKFILL_MAX} 件ずつ書いてください。`}
+                      </Text>
+                      <InlineStack gap="200">
+                        <Button
+                          onClick={() => runBackfill(1)}
+                          loading={backfillBusy}
+                          disabled={(backfillResult?.ok ? backfillResult.remaining : notWrittenCount) === 0}
+                        >
+                          1 件だけ書く
+                        </Button>
+                        <Button
+                          onClick={() => runBackfill(ORDER_ADJUSTMENTS_BACKFILL_MAX)}
+                          loading={backfillBusy}
+                          disabled={(backfillResult?.ok ? backfillResult.remaining : notWrittenCount) === 0}
+                        >
+                          {`${ORDER_ADJUSTMENTS_BACKFILL_MAX} 件書く`}
+                        </Button>
+                      </InlineStack>
+                      {backfillResult && !backfillResult.ok ? (
+                        <Text as="p" tone="critical">注文への記録がオフになっています。オンにして保存してから押してください。</Text>
+                      ) : null}
+                      {backfillResult?.ok ? (
+                        <BlockStack gap="100">
+                          <Text as="p">
+                            {`書きました: ${backfillResult.written.length} 件${backfillResult.written.length > 0 ? `（${backfillResult.written.map((w) => w.orderName).join("、")}）` : ""}`}
+                          </Text>
+                          {backfillResult.failed.map((f) => (
+                            <Text as="p" tone="critical" key={f.orderName}>{`書けませんでした: ${f.orderName}（${f.error}）。次からは精算のときに書き直します。`}</Text>
+                          ))}
+                        </BlockStack>
+                      ) : null}
+                    </BlockStack>
+                  </>
+                ) : null}
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>

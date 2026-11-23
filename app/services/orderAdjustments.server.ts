@@ -68,6 +68,15 @@ export type OrderAdjustmentsSyncResult =
   | { ok: true; skipped: true }
   | { ok: false; error: string };
 
+/**
+ * 応答の metafieldWritten に入れる値: 書けた true / 書けなかった false / 店の設定で書かない null。
+ * 書かない設定のときに「書けた」と見せない（見直し P3）。
+ */
+export function metafieldWrittenOf(sync: OrderAdjustmentsSyncResult): boolean | null {
+  if (!sync.ok) return false;
+  return sync.skipped ? null : true;
+}
+
 /** その店で、特殊返金・商品券調整を注文メタフィールドに書く・読むか（特殊返金設定。初めはオフ） */
 export async function isOrderAdjustmentsMetafieldEnabled(shopId: string): Promise<boolean> {
   const raw = await getAppSetting<Partial<SpecialRefundSettings>>(shopId, SPECIAL_REFUND_SETTINGS_KEY);
@@ -287,4 +296,56 @@ export async function fetchOrderVoucherApplied(
     console.warn(`[order-adjustments] voucher tx read failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
+}
+
+/**
+ * 注文に書く設定にする前の登録で、まだ注文に書いていない注文（書けた・書けなかったのどちらも残っていない）。
+ * 精算では書かない（見直し P2-A）。管理画面の特殊返金設定から T が「1 件だけ」→「まとめて」で書く。
+ */
+async function ordersNotWrittenYet(shopId: string): Promise<{ sourceOrderId: string; sourceOrderName: string | null }[]> {
+  const rows = await prisma.specialRefundEvent.findMany({
+    where: { shopId, metafieldSyncedAt: null, metafieldSyncError: null },
+    select: { sourceOrderId: true, sourceOrderName: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const seen = new Map<string, { sourceOrderId: string; sourceOrderName: string | null }>();
+  for (const r of rows as { sourceOrderId: string; sourceOrderName: string | null }[]) {
+    const key = toOrderGid(r.sourceOrderId);
+    if (!seen.has(key)) seen.set(key, { sourceOrderId: r.sourceOrderId, sourceOrderName: r.sourceOrderName ?? null });
+  }
+  return [...seen.values()];
+}
+
+/** まだ注文に書いていない注文の数（特殊返金設定の画面に出す） */
+export async function countOrdersNotWrittenYet(shopId: string): Promise<number> {
+  return (await ordersNotWrittenYet(shopId)).length;
+}
+
+/** 1 回で書く注文の数の上限（注文を書くと orders/updated が届き、売上サマリーの計算が走るので少しずつ） */
+export const ORDER_ADJUSTMENTS_BACKFILL_MAX = 20;
+
+/**
+ * 前からの登録を注文に書く（古い順に limit 件）。注文に書く設定がオフのときは何もしない。
+ * 書けなかった注文は metafieldSyncError が残り、次からは精算のときに書き直す対象になる。
+ */
+export async function backfillOrderAdjustmentsMetafield(
+  admin: AdminClient,
+  shopId: string,
+  limit: number,
+): Promise<
+  | { ok: true; written: { orderName: string }[]; failed: { orderName: string; error: string }[]; remaining: number }
+  | { ok: false; reason: "off" }
+> {
+  if (!(await isOrderAdjustmentsMetafieldEnabled(shopId))) return { ok: false, reason: "off" };
+  const n = Math.max(1, Math.min(ORDER_ADJUSTMENTS_BACKFILL_MAX, Math.floor(limit)));
+  const targets = (await ordersNotWrittenYet(shopId)).slice(0, n);
+  const written: { orderName: string }[] = [];
+  const failed: { orderName: string; error: string }[] = [];
+  for (const t of targets) {
+    const orderName = t.sourceOrderName || t.sourceOrderId.replace(/^gid:\/\/shopify\/Order\//, "");
+    const r = await syncOrderAdjustmentsMetafield(admin, shopId, t.sourceOrderId);
+    if (r.ok) written.push({ orderName });
+    else failed.push({ orderName, error: r.error });
+  }
+  return { ok: true, written, failed, remaining: await countOrdersNotWrittenYet(shopId) };
 }

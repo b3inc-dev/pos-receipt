@@ -37,7 +37,7 @@ import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
-import { orderTenderLines, fullAmountForRefund, matchMethodValue } from "../../common/orderTenderLines.js";
+import { orderTenderLines, fullAmountForRefund, matchMethodValue, roundMoney } from "../../common/orderTenderLines.js";
 import {
   paymentMethodsWithOrderGateway,
   primarySaleTransaction,
@@ -1029,7 +1029,7 @@ function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
 // ──────────────────────────────────────────────
 /** 元の支払い（支払方法ごとの支払った額・返金した額）と、1 行ずつの「全額反映」 */
 function OrderTenderPanel({ order, lines, onFill, fillLabel = "全額反映", disabled }) {
-  const total = Math.round(Number(order?.totalPrice?.amount ?? 0));
+  const total = roundMoney(order?.totalPrice?.amount ?? 0);
   return (
     <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
       <s-stack gap="small">
@@ -1469,8 +1469,8 @@ function VoucherAdjustmentForm({
             )}
             {/* 全額反映: 商品券で払った額をそのまま額面に入れる（お釣りなし。違えば直す） */}
             {appliedState !== "loading" && appliedAmount !== "" && applied > 0 ? (
-              <s-button kind="secondary" onClick={() => setFaceValue(String(Math.round(applied)))} disabled={loading}>
-                {`払った額 ¥${Math.round(applied).toLocaleString()} を額面に入れる（全額反映）`}
+              <s-button kind="secondary" onClick={() => setFaceValue(String(roundMoney(applied)))} disabled={loading}>
+                {`払った額 ¥${roundMoney(applied).toLocaleString()} を額面に入れる（全額反映）`}
               </s-button>
             ) : null}
 

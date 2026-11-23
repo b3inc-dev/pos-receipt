@@ -18,7 +18,7 @@ import {
   REFUND_METHOD_NOT_IN_MASTER_CODE,
 } from "../utils/specialRefundMethodValidation";
 import { SUPERSEDED_SETTLEMENT_STATUS } from "./settlementConfirmedPure.server";
-import { syncOrderAdjustmentsMetafield } from "./orderAdjustments.server";
+import { metafieldWrittenOf, syncOrderAdjustmentsMetafield } from "./orderAdjustments.server";
 import {
   countDateOf,
   planAdjustmentEdit,
@@ -83,7 +83,8 @@ export type AdjustmentChangeResult =
       settlementAlreadyConfirmed: boolean;
       /** 確定済みで、再確定が要る日（YYYY-MM-DD）。「今日の分にする」では元の日と今日の両方のことがある */
       confirmedDates: string[];
-      metafieldWritten: boolean;
+      /** 書けた true / 書けなかった false / 店の設定で書かない null */
+      metafieldWritten: boolean | null;
     }
   | { ok: false; status: number; code: string; message: string };
 
@@ -180,7 +181,7 @@ export async function editAdjustmentEvent(
     warning: plan.warning,
     settlementAlreadyConfirmed: confirmedDates.length > 0,
     confirmedDates,
-    metafieldWritten: sync.ok,
+    metafieldWritten: metafieldWrittenOf(sync),
   };
 }
 
@@ -230,7 +231,7 @@ export async function voidAdjustmentEvent(
     warning,
     settlementAlreadyConfirmed: confirmed,
     confirmedDates: confirmed ? [date] : [],
-    metafieldWritten: sync.ok,
+    metafieldWritten: metafieldWrittenOf(sync),
     shopifyRefundStatus: existing.shopifyRefundStatus,
   };
 }

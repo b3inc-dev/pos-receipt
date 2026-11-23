@@ -45,6 +45,10 @@ const shopifySummaries = new Map<string, string>();
 let failWrites = 0;
 /** 書き込みの直前に呼ぶ（同時に登録された場面の試験） */
 let onWrite: (() => void) | null = null;
+/** 書き込みのすぐあとに呼ぶ（ほかのアプリがすぐ書き換える場面の試験） */
+let afterWrite: (() => void) | null = null;
+/** 注文への書き込みの回数 */
+let writeCount = 0;
 /** 商品券の支払いがある注文（④ 額面だけの試験） */
 const voucherOrderTx = [
   { kind: "SALE", status: "SUCCESS", gateway: "商品券釣有り", formattedGateway: "商品券釣有り", amountSet: money(4200) },
@@ -89,6 +93,8 @@ const admin = {
           if (m.key === "adjustments") shopifyAdjustments.set(m.ownerId, m.value);
           if (m.key === "adjustments_summary") shopifySummaries.set(m.ownerId, m.value);
         }
+        writeCount++;
+        afterWrite?.();
         data = { metafieldsSet: { metafields: [], userErrors: [] } };
         break;
       case "OrderVoucherTransactions":
@@ -244,6 +250,7 @@ async function callRoute(path: string, modPath: string, body: Record<string, unk
 
 async function preview(date = TARGET_DATE) {
   const engine = await import("./settlementEngine.server.ts");
+  engineRef = engine;
   return engine.buildSettlementPreview(admin as any, SHOP_ID, LOC_GID, "本店", date);
 }
 
@@ -252,7 +259,9 @@ function docOf(orderGid: string) {
 }
 
 /** 記録のみの返金手段変更（カードで払った 500 円を現金で返した）を、その日の 14 時（日本時間）に登録したことにする */
+let engineRef: any = null;
 function putOverride(p: Record<string, unknown> = {}) {
+  engineRef?.resetRecentAdjustmentRewritesForTest();
   store.specialRefundEvent = [
     {
       id: "ev1",
@@ -273,6 +282,9 @@ function putOverride(p: Record<string, unknown> = {}) {
       countDate: TARGET_DATE,
       replacesEventId: null,
       createdAt: new Date(dayStartUtc + 5 * 3600_000),
+      // 初めは「注文に書く設定にしてから書いた注文」（前からの登録は metafieldSyncedAt: null で作る）
+      metafieldSyncedAt: new Date(dayStartUtc + 5 * 3600_000),
+      metafieldSyncError: null,
       ...p,
     },
   ];
@@ -342,6 +354,49 @@ test("精算: Shopify の画面で金額を書き換えられても、アプリ�
   assert.equal(p.total, 2500);
   assert.equal(p.adjustmentSourceWarnings, undefined);
   assert.equal(docOf("gid://shopify/Order/5001").entries[0].amount, 500);
+});
+
+test("精算: 注文に書く設定にする前の登録は、精算では書かない。特殊返金設定の「前からの登録を注文に書く」で書く（見直し P2-A）", async () => {
+  putOverride({ metafieldSyncedAt: null, metafieldSyncError: null });
+  shopifyAdjustments.clear();
+  writeCount = 0;
+  const p = await preview();
+  assert.equal(p.refundTotal, 500);
+  assert.equal(p.adjustmentSourceWarnings, undefined);
+  assert.equal(writeCount, 0);
+  assert.equal(shopifyAdjustments.has("gid://shopify/Order/5001"), false);
+  const { backfillOrderAdjustmentsMetafield, countOrdersNotWrittenYet } = await import("./orderAdjustments.server.ts");
+  assert.equal(await countOrdersNotWrittenYet(SHOP_ID), 1);
+  const r = await backfillOrderAdjustmentsMetafield(admin as any, SHOP_ID, 1);
+  assert.ok(r.ok);
+  assert.deepEqual(r.ok && r.written, [{ orderName: "#5001" }]);
+  assert.equal(r.ok && r.remaining, 0);
+  assert.equal(docOf("gid://shopify/Order/5001").entries[0].amount, 500);
+  assert.ok(store.specialRefundEvent[0].metafieldSyncedAt instanceof Date);
+});
+
+test("精算: 書き直してもほかのアプリがすぐ書き換えるときは知らせ、少しのあいだ続けて書き直さない（見直し P2-A）", async () => {
+  putOverride();
+  shopifyAdjustments.clear();
+  await writeDoc();
+  const tamper = () => {
+    const doc = docOf("gid://shopify/Order/5001");
+    doc.entries[0].amount = 800;
+    shopifyAdjustments.set("gid://shopify/Order/5001", JSON.stringify(doc));
+  };
+  tamper();
+  afterWrite = tamper;
+  writeCount = 0;
+  const p = await preview();
+  assert.equal(p.refundTotal, 500);
+  assert.equal(writeCount, 1);
+  assert.equal(p.adjustmentSourceWarnings?.[0].reason, "metafield_differs_again");
+  const q = await preview();
+  afterWrite = null;
+  assert.equal(writeCount, 1);
+  assert.equal(q.refundTotal, 500);
+  assert.equal(q.adjustmentSourceWarnings?.[0].reason, "metafield_differs_again");
+  assert.match(String(q.adjustmentSourceWarnings?.[0].message), /続けて書き直すことはしない/);
 });
 
 test("精算: 注文にまだ書けていない注文は、DB の行で数えて書き直す。書き直せなければ警告", async () => {

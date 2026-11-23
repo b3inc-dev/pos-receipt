@@ -81,6 +81,9 @@ export interface AdjustmentEventRow {
   replacesEventId?: string | null;
   voidedAt?: Date | null;
   voidReason?: string | null;
+  /** 注文に書けた時刻・書けなかった理由（どちらも無い注文は、注文に書く設定にする前の登録で、まだ書いていない） */
+  metafieldSyncedAt?: Date | null;
+  metafieldSyncError?: string | null;
   note?: string | null;
   createdAt: Date;
 }
@@ -397,7 +400,12 @@ export function dbRowToSettlementEvent(r: AdjustmentEventRow): SettlementAdjustm
   };
 }
 
-export type AdjustmentSourceWarningReason = "metafield_missing" | "metafield_invalid" | "metafield_differs";
+export type AdjustmentSourceWarningReason =
+  | "metafield_missing"
+  | "metafield_invalid"
+  | "metafield_differs"
+  /** 少し前に書き直したのに、まだ違う（ほかのアプリが書き換えている）。続けて書き直さない */
+  | "metafield_differs_again";
 
 export interface AdjustmentSourceWarning {
   reason: AdjustmentSourceWarningReason;
@@ -415,16 +423,66 @@ export function adjustmentSourceWarningMessage(w: AdjustmentSourceWarning): stri
       return `注文 ${order}: 注文の「特殊返金・商品券調整」の形が読めず、書き直しもできませんでした。${tail}`;
     case "metafield_differs":
       return `注文 ${order}: 注文の「特殊返金・商品券調整」がアプリの記録と違い、書き直しもできませんでした。${tail}`;
+    case "metafield_differs_again":
+      return `注文 ${order}: 注文の「特殊返金・商品券調整」を少し前に書き直しましたが、まだアプリの記録と違います。ほかのアプリや Shopify の画面で書き換えられている可能性があります。精算はアプリの記録で数えています。続けて書き直すことはしないので、書き換えている所を確かめてから、管理画面の注文ごとの記録で「書き直す」を押してください。`;
   }
 }
 
 /** 注文の値を書き直す必要がある注文（アプリの記録と違う・無い・読めない） */
 export interface AdjustmentResyncNeed extends AdjustmentSourceWarning {}
 
+/** 精算で書き直してからこの時間のうちにまた違っていたら、書き直さずに知らせる（同じ注文を何度も書き換えない） */
+export const ADJUSTMENT_REWRITE_COOLDOWN_MS = 10 * 60 * 1000;
+
+/**
+ * その注文を、注文に書く設定にしてから書いたことがあるか（書けた・書けなかったのどちらかが残っている）。
+ * どちらも無い注文は設定より前の登録で、精算では比べも書き直しもしない（前からの登録は管理画面から T が書く）。
+ */
+export function isOrderWrittenSinceSwitch(rows: Pick<AdjustmentEventRow, "metafieldSyncedAt" | "metafieldSyncError">[]): boolean {
+  return rows.some((r) => r.metafieldSyncedAt != null || (r.metafieldSyncError != null && r.metafieldSyncError !== ""));
+}
+
+/**
+ * 注文の値（raw）が、その日・その店のアプリの記録（rows）と同じか。
+ * 違う・無い・読めないときは理由を返す。同じなら null。
+ */
+export function orderDocMismatch(input: {
+  date: string;
+  locationGid: string;
+  rows: AdjustmentEventRow[];
+  raw: string | null;
+}): "metafield_missing" | "metafield_invalid" | "metafield_differs" | null {
+  const parsed = parseOrderAdjustmentsDoc(input.raw);
+  if (!parsed.ok) return parsed.reason === "missing" ? "metafield_missing" : "metafield_invalid";
+  const sourceOrderId = input.rows[0]?.sourceOrderId ?? "";
+  const sourceOrderName = input.rows.find((r) => r.sourceOrderName)?.sourceOrderName ?? null;
+  const fromDb = input.rows.map(dbRowToSettlementEvent);
+  const fromDoc = entriesForDayAndLocation(parsed.doc, input.date, input.locationGid).map((e) =>
+    entryToSettlementEvent(e, { sourceOrderId, sourceOrderName }),
+  );
+  const a = fromDb.map(fingerprint).sort().join("\n");
+  const b = fromDoc.map(fingerprint).sort().join("\n");
+  return a === b ? null : "metafield_differs";
+}
+
+/** 行を注文ごとにまとめる（キーは注文の GID） */
+export function groupAdjustmentRowsByOrder(rows: AdjustmentEventRow[]): Map<string, AdjustmentEventRow[]> {
+  const byOrder = new Map<string, AdjustmentEventRow[]>();
+  for (const r of rows) {
+    const key = toOrderGid(r.sourceOrderId);
+    const list = byOrder.get(key) ?? [];
+    list.push(r);
+    byOrder.set(key, list);
+  }
+  return byOrder;
+}
+
 /**
  * その日・その店で数える特殊返金・商品券調整を決める（T の決定 2026-11-23: 違うときはアプリの記録）。
  * - 数えるのはいつもアプリの記録（DB）。書くのは pos-receipt だけなので、違うときは DB が新しいか、注文の値が外で書き換えられたか
+ * - 比べるのは、注文に書く設定にしてから書いた注文だけ（isOrderWrittenSinceSwitch）。前からの登録はここでは書かない
  * - 注文の値が DB と違う・無い・読めない注文は needsResync に入れる（呼び出し側が注文を書き直し、書けなければ警告にする）
+ * - 精算で少し前に書き直した注文（recentlyRewritten）がまた違うときは、書き直さずに warnings に入れる
  * - docsFetched=false（読まなかった・読めなかった・注文に書かない設定）のときは比べない
  */
 export function resolveSettlementAdjustments(input: {
@@ -433,39 +491,41 @@ export function resolveSettlementAdjustments(input: {
   dbRows: AdjustmentEventRow[];
   docs: Map<string, string | null>;
   docsFetched: boolean;
-}): { events: SettlementAdjustmentEvent[]; needsResync: AdjustmentResyncNeed[] } {
-  const byOrder = new Map<string, AdjustmentEventRow[]>();
-  for (const r of input.dbRows) {
-    const key = toOrderGid(r.sourceOrderId);
-    const list = byOrder.get(key) ?? [];
-    list.push(r);
-    byOrder.set(key, list);
-  }
+  /** 精算で少し前に書き直した注文の GID */
+  recentlyRewritten?: ReadonlySet<string>;
+}): {
+  events: SettlementAdjustmentEvent[];
+  needsResync: AdjustmentResyncNeed[];
+  warnings: AdjustmentSourceWarning[];
+  notWrittenOrderCount: number;
+} {
   const events: SettlementAdjustmentEvent[] = [];
   const needsResync: AdjustmentResyncNeed[] = [];
-  for (const [orderGid, rows] of byOrder) {
-    const fromDb = rows.map(dbRowToSettlementEvent);
-    events.push(...fromDb);
+  const warnings: AdjustmentSourceWarning[] = [];
+  let notWrittenOrderCount = 0;
+  for (const [orderGid, rows] of groupAdjustmentRowsByOrder(input.dbRows)) {
+    events.push(...rows.map(dbRowToSettlementEvent));
     if (!input.docsFetched) continue;
-    const sourceOrderName = rows.find((r) => r.sourceOrderName)?.sourceOrderName ?? null;
-    const sourceOrderId = rows[0].sourceOrderId;
-    const parsed = parseOrderAdjustmentsDoc(input.docs.get(orderGid) ?? null);
-    if (!parsed.ok) {
-      needsResync.push({
-        reason: parsed.reason === "missing" ? "metafield_missing" : "metafield_invalid",
-        sourceOrderId,
-        sourceOrderName,
-      });
+    if (!isOrderWrittenSinceSwitch(rows)) {
+      notWrittenOrderCount += 1;
       continue;
     }
-    const fromDoc = entriesForDayAndLocation(parsed.doc, input.date, input.locationGid).map((e) =>
-      entryToSettlementEvent(e, { sourceOrderId, sourceOrderName }),
-    );
-    const a = fromDb.map(fingerprint).sort().join("\n");
-    const b = fromDoc.map(fingerprint).sort().join("\n");
-    if (a !== b) needsResync.push({ reason: "metafield_differs", sourceOrderId, sourceOrderName });
+    const reason = orderDocMismatch({
+      date: input.date,
+      locationGid: input.locationGid,
+      rows,
+      raw: input.docs.get(orderGid) ?? null,
+    });
+    if (!reason) continue;
+    const sourceOrderName = rows.find((r) => r.sourceOrderName)?.sourceOrderName ?? null;
+    const sourceOrderId = rows[0].sourceOrderId;
+    if (reason === "metafield_differs" && input.recentlyRewritten?.has(orderGid)) {
+      warnings.push({ reason: "metafield_differs_again", sourceOrderId, sourceOrderName });
+      continue;
+    }
+    needsResync.push({ reason, sourceOrderId, sourceOrderName });
   }
-  return { events, needsResync };
+  return { events, needsResync, warnings, notWrittenOrderCount };
 }
 
 /** 注文の値（pos.adjustments）が、アプリの記録から作った値と同じか */
