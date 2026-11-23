@@ -232,14 +232,14 @@ export default function SpecialRefundSettingsPage() {
                   helpText={
                     form.enableCashRefund !== form.enablePaymentMethodOverride
                       ? `今は${form.enableCashRefund ? "現金で返したときだけ" : "現金以外で返したときだけ"}使えます。押すと 2 つそろえます。`
-                      : "純正で返金した注文は、返金を選んで金額はそのまま、返金方法だけ選びます。"
+                      : "お客様が払った支払方法とは別の返金方法で返したときに使います。例: 施設ポイントで払った分を現金で返した。返金の合計は変わらず、精算の返金方法の内訳だけが移ります。 純正で返金した注文は、返金を選んで金額はそのまま、返金方法だけ選びます。"
                   }
                 />
                 <Checkbox
                   label="レシートの現金を直す"
                   checked={form.enableReceiptCashAdjustment}
                   onChange={(v) => set("enableReceiptCashAdjustment", v)}
-                  helpText="返金ではありません。レシートと実際の現金が違ったとき、精算の数字だけを直します。"
+                  helpText="返金ではありません。レシート（Shopify の記録）と実際のレジの現金が合わないときに使います。例: 返金を打ったが、お客様に現金を渡さなかった。Shopify では返金も注文の変更もしません。精算の数字だけが変わります。 「返金を取り消す」「現金を足す」の 2 つから選びます。"
                 />
                 <Checkbox
                   label="商品券釣銭登録"

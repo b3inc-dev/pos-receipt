@@ -126,8 +126,8 @@ const FALLBACK_PAYMENT_METHODS = [
 ];
 
 const ADJUST_KINDS = [
-  { value: "undo", label: "返金を取り消す（売上に戻す）" },
-  { value: "extra", label: "現金を足す（売上に足す）" },
+  { value: "undo", label: "返金を取り消す（売上に戻す）", help: "返金を打ったが、お客様に現金を渡さず、レジに残っているとき。精算の返金からこの額を引きます。" },
+  { value: "extra", label: "現金を足す（売上に足す）", help: "記録に無い現金を受け取り、レジに残っているとき。精算の売上にこの額を足します。" },
 ];
 
 function buildVoidConfirmMessage(event) {
@@ -1338,7 +1338,7 @@ function SpecialRefundForm({
               <FormHeading>取引</FormHeading>
               <FormLine label="取引" value={order?.orderName ?? "-"} />
               {showAdjustKind ? (
-                <FormLine label="調整種別" value={ADJUST_KINDS.find((k) => k.value === adjustKind)?.label ?? adjustKind} />
+                <FormLine label="直し方" value={ADJUST_KINDS.find((k) => k.value === adjustKind)?.label ?? adjustKind} />
               ) : null}
               {note ? <FormLine label="メモ" value={note} /> : null}
               {error ? (
@@ -1435,12 +1435,15 @@ function SpecialRefundForm({
 
             {/* 調整種別（receipt_cash_adjustment） */}
             {showAdjustKind ? (
-              <PosChoiceField
-                label="調整種別"
-                value={adjustKind}
-                options={ADJUST_KINDS}
-                onChange={setAdjustKind}
-              />
+              <s-stack gap="small-300">
+                <PosChoiceField
+                  label="どちらに直しますか"
+                  value={adjustKind}
+                  options={ADJUST_KINDS}
+                  onChange={setAdjustKind}
+                />
+                <s-text type="small" color="subdued">{ADJUST_KINDS.find((k) => k.value === adjustKind)?.help ?? ""}</s-text>
+              </s-stack>
             ) : null}
 
             {/* メモ */}
@@ -1917,7 +1920,10 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
               ) : null}
 
               {event.eventType === "receipt_cash_adjustment" ? (
-                <PosChoiceField label="調整種別" value={adjustKind} options={ADJUST_KINDS} onChange={setAdjustKind} />
+                <s-stack gap="small-300">
+                  <PosChoiceField label="どちらに直しますか" value={adjustKind} options={ADJUST_KINDS} onChange={setAdjustKind} />
+                  <s-text type="small" color="subdued">{ADJUST_KINDS.find((k) => k.value === adjustKind)?.help ?? ""}</s-text>
+                </s-stack>
               ) : null}
 
               {/* 商品券は注文の日で数えるので、数える日は選ばない */}

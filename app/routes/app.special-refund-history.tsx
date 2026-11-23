@@ -39,7 +39,7 @@ const EVENT_TYPE_OPTIONS = [
   { label: "現金返金", value: "cash_refund" },
   { label: "返金方法変更", value: "payment_method_override" },
   { label: "商品券釣銭登録", value: "voucher_change_adjustment" },
-  { label: "レシート現金調整", value: "receipt_cash_adjustment" },
+  { label: "レシートの現金を直す", value: "receipt_cash_adjustment" },
 ];
 
 function eventTypeLabel(t: string) {
@@ -47,7 +47,7 @@ function eventTypeLabel(t: string) {
     cash_refund: "現金返金",
     payment_method_override: "返金方法変更",
     voucher_change_adjustment: "商品券釣銭登録",
-    receipt_cash_adjustment: "レシート現金調整",
+    receipt_cash_adjustment: "レシートの現金を直す",
   };
   return map[t] ?? t;
 }
