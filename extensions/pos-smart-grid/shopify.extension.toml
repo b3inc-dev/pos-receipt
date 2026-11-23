@@ -31,10 +31,10 @@ target = "pos.order-details.action.menu-item.render"
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "商品券釣銭調整"
+name = "商品券 / 釣銭調整"
 uid = "b8e4f2a1-6c3d-4e5f-9a0b-1d2e3f4a5b6c7d8e9f0a"
 handle = "pos-voucher-adjustment"
-description = "商品券釣銭調整（取引詳細・任意タイル）"
+description = "商品券 / 釣銭調整"
 
 [[extensions.targeting]]
 module = "./src/VoucherTile.jsx"
@@ -126,9 +126,9 @@ target = "pos.home.modal.render"
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "販売レシート / 属性付き印字"
+name = "販売レシート / レシートを印刷する"
 handle = "pos-sales-receipt"
-description = "販売レシート / 属性付き印字（Shopify Printing API）"
+description = "販売レシート / レシートを印刷する"
 
 [[extensions.targeting]]
 module = "./src/SalesReceiptTile.jsx"
