@@ -38,8 +38,8 @@ function VoucherTile() {
   }, []);
   return (
     <s-tile
-      heading="商品券釣銭調整"
-      subheading={face != null ? `額面 ${Number(face).toLocaleString("ja-JP")}円 入力済み` : "登録・履歴"}
+      heading="商品券釣銭登録"
+      subheading={face != null ? `額面 ${Number(face).toLocaleString("ja-JP")}円 入力済み` : "入力・履歴"}
       onClick={() => shopify.action.presentModal()}
     />
   );

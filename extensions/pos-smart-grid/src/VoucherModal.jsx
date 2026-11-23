@@ -1,7 +1,7 @@
 /**
- * 「商品券釣銭調整」タイルのモーダル。
+ * 「商品券釣銭登録」タイルのモーダル。
  * - カートに商品があり、管理画面の「会計の前に額面を入れる」がオンのとき: 会計の前に額面を入れる画面（VoucherCartScreen）を先に出す
- * - カートが空・取引詳細の「商品券釣銭調整」から開いたとき: 後から登録する一覧
+ * - カートが空・取引詳細の「商品券釣銭登録」から開いたとき: 後から登録する一覧
  *   （特殊返金と同じ画面を、一覧の最初の絞り込みを「商品券釣有り」にして開く）
  * （「返金方法変更」タイルは SpecialRefundModal.jsx の既定で「返金・キャンセル」）
  */
@@ -11,7 +11,7 @@ import { getVoucherCartEntryEnabled } from "../../common/specialRefundApi.js";
 import { SpecialRefundModal } from "./SpecialRefundModal.jsx";
 import { VoucherCartScreen } from "./VoucherCartScreen.jsx";
 
-/** 取引詳細の「商品券釣銭調整」が入れる目印（VoucherOrderAction.jsx と同じ） */
+/** 取引詳細の「商品券釣銭登録」が入れる目印（VoucherOrderAction.jsx と同じ） */
 const STORAGE_KEY_VOUCHER_ORDER = "pos_voucher_adjustment_order_id";
 
 export default async () => {
@@ -93,7 +93,7 @@ function VoucherModal() {
   }, [screen]);
   if (screen === "checking") {
     return (
-      <s-page heading="商品券釣銭調整">
+      <s-page heading="商品券釣銭登録">
         <s-box padding="base">
           <s-text color="subdued">読み込み中…</s-text>
         </s-box>

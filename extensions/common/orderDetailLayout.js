@@ -89,7 +89,7 @@ export function adjustmentBadges(event) {
       out.push({ key: "refund", label: "返金失敗", tone: "critical" });
       break;
     case "skipped":
-      // 商品券釣銭調整は Shopify で返金しないのがいつもなので出さない（現金で釣銭を返したのに「記録のみ」と読めて紛らわしい。T 2026-11-24）
+      // 商品券釣銭登録は Shopify で返金しないのがいつもなので出さない（現金で釣銭を返したのに「記録のみ」と読めて紛らわしい。T 2026-11-24）
       if (event?.eventType !== "voucher_change_adjustment") {
         out.push({ key: "refund", label: "記録のみ", tone: "neutral" });
       }

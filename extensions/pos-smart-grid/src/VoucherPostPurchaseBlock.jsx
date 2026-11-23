@@ -60,7 +60,7 @@ function VoucherPostPurchaseBlock() {
       } catch (e) {
         console.error("[VoucherPostPurchaseBlock]", e);
         if (alive) {
-          setMessage({ tone: "critical", text: "商品券を登録できませんでした。あとで「商品券釣銭調整」タイルから確かめてください" });
+          setMessage({ tone: "critical", text: "商品券を登録できませんでした。あとで「商品券釣銭登録」タイルから確かめてください" });
         }
       }
     })();
@@ -71,7 +71,7 @@ function VoucherPostPurchaseBlock() {
 
   if (!message) return null;
   return (
-    <s-pos-block heading="商品券釣銭調整">
+    <s-pos-block heading="商品券釣銭登録">
       <s-box padding="small">
         <s-text tone={message.tone === "subdued" ? "neutral" : message.tone}>{message.text}</s-text>
       </s-box>

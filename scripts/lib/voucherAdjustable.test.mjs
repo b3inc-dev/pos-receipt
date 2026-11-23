@@ -13,7 +13,7 @@ test("商品券釣有りの注文だけ押せる（支払いが読めない注�
   assert.equal(isVoucherAdjustableOrder(null), false);
 });
 
-test("有効な商品券釣銭調整があるか（無効にしたもの・ほかの種類は数えない）", () => {
+test("有効な商品券釣銭登録があるか（無効にしたもの・ほかの種類は数えない）", () => {
   assert.equal(hasActiveVoucherAdjustment([{ eventType: "voucher_change_adjustment", status: "active" }]), true);
   assert.equal(hasActiveVoucherAdjustment([{ eventType: "voucher_change_adjustment", status: "voided" }]), false);
   assert.equal(hasActiveVoucherAdjustment([{ eventType: "cash_refund", status: "active" }]), false);

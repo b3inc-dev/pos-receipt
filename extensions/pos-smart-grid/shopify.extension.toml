@@ -1,7 +1,7 @@
 api_version = "2026-07"
 
 # ============================================================
-# 返金（ホームタイル + 取引詳細メニュー）。商品券は下の「商品券釣銭調整」タイルに分けた（T の決定 2026-11-23）
+# 返金（ホームタイル + 取引詳細メニュー）。商品券は下の「商品券釣銭登録」タイルに分けた（T の決定 2026-11-23）
 # name … POS のタイル一覧・取引詳細メニューのラベル（同一）
 # タイル上の文言は SpecialRefundTile.jsx の heading / subheading
 # 取引詳細を「特殊返金調整」と短く出す行は pos-voucher-adjustment と別拡張で分割
@@ -31,10 +31,10 @@ target = "pos.order-details.action.menu-item.render"
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "商品券釣銭調整 / 登録・履歴"
+name = "商品券釣銭登録 / 入力・履歴"
 uid = "b8e4f2a1-6c3d-4e5f-9a0b-1d2e3f4a5b6c7d8e9f0a"
 handle = "pos-voucher-adjustment"
-description = "商品券釣銭調整 / 登録・履歴"
+description = "商品券釣銭登録 / 入力・履歴"
 
 [[extensions.targeting]]
 module = "./src/VoucherTile.jsx"
@@ -54,7 +54,7 @@ target = "pos.order-details.action.menu-item.render"
 module = "./src/VoucherPostPurchaseBlock.jsx"
 target = "pos.purchase.post.block.render"
 
-# 会計が終わった画面の「管理」の行「商品券釣銭調整」→ その注文の商品券の画面（T 2026-11-24）
+# 会計が終わった画面の「管理」の行「商品券釣銭登録」→ その注文の商品券の画面（T 2026-11-24）
 [[extensions.targeting]]
 module = "./src/VoucherOrderAction.jsx"
 target = "pos.purchase.post.action.menu-item.render"
