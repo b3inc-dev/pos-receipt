@@ -25,6 +25,32 @@ target = "pos.home.modal.render"
 module = "./src/SpecialRefundOrderAction.jsx"
 target = "pos.order-details.action.menu-item.render"
 
+# 返品・交換が終わった画面: その注文に返金の予約があれば、その場で付け替えて結果を一行で出す（docs/REFUND_RESERVATION.md）
+[[extensions.targeting]]
+module = "./src/RefundReservationPostReturnBlock.jsx"
+target = "pos.return.post.block.render"
+
+[[extensions.targeting]]
+module = "./src/RefundReservationPostReturnBlock.jsx"
+target = "pos.exchange.post.block.render"
+
+# 返品・交換が終わった画面の「管理」の行「返金の手段の変更」→ その注文の返金の画面（T 2026-11-24）
+[[extensions.targeting]]
+module = "./src/RefundPostReturnAction.jsx"
+target = "pos.return.post.action.menu-item.render"
+
+[[extensions.targeting]]
+module = "./src/SpecialRefundModal.jsx"
+target = "pos.return.post.action.render"
+
+[[extensions.targeting]]
+module = "./src/RefundPostReturnAction.jsx"
+target = "pos.exchange.post.action.menu-item.render"
+
+[[extensions.targeting]]
+module = "./src/SpecialRefundModal.jsx"
+target = "pos.exchange.post.action.render"
+
 # ============================================================
 # 商品券（会計前の額面入力・後からの釣銭調整・会計後の自動登録。ホームタイルは任意で追加）
 # タイルをスマートグリッドに置かなくても、取引詳細メニュー表示のために tile target を定義

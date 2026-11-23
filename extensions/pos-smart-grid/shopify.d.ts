@@ -121,6 +121,12 @@ declare module './src/VoucherModal.jsx' {
 }
 
 //@ts-ignore
+declare module './src/RefundReservationPostReturnBlock.jsx' {
+  const shopify: import('@shopify/ui-extensions/pos.return.post.block.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
 declare module './src/VoucherCartScreen.jsx' {
   const shopify: import('@shopify/ui-extensions/pos.home.modal.render').Api;
   const globalThis: { shopify: typeof shopify };
@@ -129,5 +135,11 @@ declare module './src/VoucherCartScreen.jsx' {
 //@ts-ignore
 declare module './src/VoucherPostPurchaseBlock.jsx' {
   const shopify: import('@shopify/ui-extensions/pos.purchase.post.block.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/RefundPostReturnAction.jsx' {
+  const shopify: import('@shopify/ui-extensions/pos.return.post.action.menu-item.render').Api;
   const globalThis: { shopify: typeof shopify };
 }

@@ -22,6 +22,8 @@ T の追加の決定（2026-11-23 15:40 UTC）: 管理画面の「特殊返金�
 | 予約 | POS `RefundReservationForm.jsx` → `POST /api/refund-reservations` | `RefundReservation` に返金する金額（`expectedAmount`）と行（手段・種類・金額。最後の行は null＝残り）を保存。分けた行の合計は返金する金額より小さく。返す手段は支払方法マスタで「特殊返金で選べる」ものだけ。種類（返金・付け替え）は特殊返金設定でオンのものだけ。注文の id は数字だけで持つ（POS・#106 の付け替えと同じ形。探すときは gid でも探す）。「返金の予約」がオフなら 403 |
 | 当てる | `refundReservation.server.ts` `applyRefundReservationsForOrder` | 予約のあとにでき、まだ付け替えていない最初の純正の返金を選ぶ。行を返金額に当て、`createNativeRefundReassign`（#106）で付け替えを作る。行の id は `pos_rr_<予約>_<行>` で、同じ行を二度作らない。作ったら `pos.adjustments` と売上サマリーを直す |
 | 呼ぶところ | `orderAutoAdjustments.server.ts`（`orders/updated` の知らせ。売上サマリーのキューが動く店はキューの中、動かない店は知らせの中）、`GET /api/refund-reservations` | 知らせのたびに Shopify は読まない。その注文に使う前の予約があるときだけ読む。POS で予約の画面を開いたときにも当て直す。「返金の予約」がオフの店では当てない（予約は残す）。`SALES_SUMMARY_WEBHOOK_DEBOUNCE_SECONDS` を入れた店では同じ店の知らせがまとまるので、拾えなかった返金は POS で開いたときに当てる |
+| 返品・交換が終わった画面 | POS `RefundReservationPostReturnBlock.jsx`（`pos.return.post.block.render`・`pos.exchange.post.block.render`） | その注文に予約があれば `GET /api/refund-reservations` を呼んで、その場で付け替える（知らせが届かない・遅いときの本線）。使う前のままなら 3 秒おいて 2 回まで読み直す。結果を一行で出す。予約の無い注文では何も出さない。**店で POS の「Point of Sale を編集」→ アプリ → 拡張 →「有効にする場所」をオンにしないと出ない** |
+| 返品・交換が終わった画面の「管理」 | `RefundPostReturnAction.jsx`（`pos.return.post.action.menu-item.render`・`pos.exchange.post.action.menu-item.render`）→ `SpecialRefundModal.jsx`（`*.action.render`） | 「返金の手段の変更」の行から、その注文の返金の画面を開く（予約していなくても、その場で付け替えられる） |
 | 取り消し | `POST /api/refund-reservations/:id/cancel` | 使う前と要確認の予約だけ取り消せる |
 
 ### 予約の状態
