@@ -61,11 +61,16 @@ export function numericOrderId(sourceOrderId: string): string {
   return String(sourceOrderId ?? "").trim().replace(/^gid:\/\/shopify\/Order\//, "").replace(/\D/g, "");
 }
 
-/** 返す見込みの金額を確かめる。決めた行（最後以外）の合計は、この額より小さくする */
+/**
+ * 返す見込みの金額を確かめる。決めた行（最後以外）の合計は、この額より小さくする。
+ * 分割しない予約（行が 1 つ）は金額を使わない: 純正で返金した額の全部を選んだ返金方法に変える（T 2026-11-24）。
+ * そのときは 0 を入れておく（0 =「金額の条件なし」。planReservation は 0 を比べない）。
+ */
 export function checkExpectedAmount(
   rows: ReservationRow[],
   input: unknown,
 ): { ok: true; expectedAmount: number } | { ok: false; error: string } {
+  if (rows.length <= 1) return { ok: true, expectedAmount: 0 };
   const expectedAmount = money(input);
   if (!(expectedAmount > 0)) return { ok: false, error: "返金する金額を入れてください" };
   const fixed = rows.slice(0, -1).reduce((s, r) => s + money(r.amount), 0);
@@ -142,7 +147,8 @@ export function planReservation(
   const total = money(line.amount);
   if (rows.length === 0) return { ok: false, reason: "予約の内容が読めませんでした。「返金方法変更」タイルの一覧から返金方法を変更してください。" };
   // 返金額が予約の金額と違う: 別の返金かもしれないので、自動では返金方法を変更しない（T 2026-11-23）
-  if (expectedAmount != null && money(expectedAmount) !== total) {
+  // 0・空は「金額の条件なし」（分割しない予約）
+  if (expectedAmount != null && money(expectedAmount) > 0 && money(expectedAmount) !== total) {
     return {
       ok: false,
       reason: `返金額（¥${total.toLocaleString()}）が予約の金額（¥${money(expectedAmount).toLocaleString()}）と違ったので、自動では返金方法を変更していません。「返金方法変更」タイルの一覧から返金方法を変更してください。`,
