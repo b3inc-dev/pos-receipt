@@ -25,6 +25,12 @@ function formatYen(amount) {
   return `¥${(Number.isFinite(n) ? n : 0).toLocaleString()}`;
 }
 
+/** 英語の中のエラー（例: "x is not a function"）は店の画面に出さない */
+function shopMessage(raw, fallback) {
+  const msg = toUserMessage(raw);
+  return msg && /[ぁ-んァ-ヶ一-龠]/.test(msg) ? msg : fallback;
+}
+
 function planNotes(plan) {
   const out = [];
   for (const w of plan?.warnings ?? []) {
@@ -70,7 +76,7 @@ export function RedoCheckoutSection({
       setPlan(res.plan ?? null);
       setPhase("confirm");
     } catch (e) {
-      setMessage(toUserMessage(e?.message) || "注文を読み込めませんでした。再読み込みしてください。");
+      setMessage(shopMessage(e?.message, "注文を読み込めませんでした。しばらくしてから、もう一度押してください。"));
       setPhase("idle");
     }
   }, [cart, orderId]);
