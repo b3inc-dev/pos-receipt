@@ -166,7 +166,7 @@ export function adjustmentKindLabel(event) {
       // 純正の返金の付け替えも同じ名前。違いはバッジ「純正返金の付け替え」で分かる
       return "返金方法変更";
     case "receipt_cash_adjustment":
-      return "レシート現金調整";
+      return "レシートの現金を直す";
     case "voucher_change_adjustment":
       return "商品券釣銭登録";
     default:
