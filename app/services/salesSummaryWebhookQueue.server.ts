@@ -99,6 +99,16 @@ async function startBossAndWorker(): Promise<PgBoss | null> {
     },
   );
 
+  // 返金処理中のまま数分たった特殊返金の見回り（5 分ごと）。失敗しても売上サマリーのキューは動かす
+  try {
+    const { registerSpecialRefundAutoResolveSweep } = await import(
+      "./specialRefundAutoResolveQueue.server"
+    );
+    await registerSpecialRefundAutoResolveSweep(boss);
+  } catch (e) {
+    console.error("[pg-boss] special-refund auto-resolve schedule failed:", e);
+  }
+
   const stop = () => {
     void boss.stop({ timeout: 20000 }).catch(() => {});
   };
