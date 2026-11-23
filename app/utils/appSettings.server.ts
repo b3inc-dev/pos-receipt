@@ -287,7 +287,7 @@ export interface SpecialRefundSettings {
 }
 
 export const DEFAULT_SPECIAL_REFUND_SETTINGS: SpecialRefundSettings = {
-  refundProcessingMode: "shopify_execute",
+  refundProcessingMode: "record_only",
   shopifyExecuteCashRefund: true,
   shopifyExecutePaymentMethodOverride: true,
   shopifyExecuteReceiptCashAdjustment: true,
