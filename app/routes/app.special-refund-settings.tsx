@@ -150,7 +150,7 @@ export default function SpecialRefundSettingsPage() {
 
           <Layout.AnnotatedSection
             title="Shopify 返金の実行"
-            description="返金は POS の純正の返金で行い、タイルでは返した手段を付け替えます。純正で返金した注文の付け替えは、ここの選び方に関係なく Shopify では返金しません（金額は純正の返金のまま）。ここで選ぶのは、純正の返金が無い注文で手段を登録したときだけです。商品券釣銭調整とレシートの現金を直すは、いつも記録だけです。"
+            description="返金は POS の純正の返金で行い、タイルでは返金方法を変更します。純正で返金した注文の返金方法変更は、ここの選び方に関係なく Shopify では返金しません（金額は純正の返金のまま）。ここで選ぶのは、純正の返金が無い注文で返金方法を登録したときだけです。商品券釣銭調整とレシートの現金を直すは、いつも記録だけです。"
           >
             <Card>
               <BlockStack gap="400">
@@ -181,9 +181,9 @@ export default function SpecialRefundSettingsPage() {
                 {form.refundProcessingMode === "shopify_execute" ? (
                   <>
                     <Divider />
-                    {/* 現金で返した（cash_refund）・ほかの手段で返した（payment_method_override）は POS では 1 つの「返金の手段の付け替え」。設定の値は 2 つのまま、まとめて切り替える */}
+                    {/* 現金で返した（cash_refund）・ほかの手段で返した（payment_method_override）は POS では 1 つの「返金方法変更」。設定の値は 2 つのまま、まとめて切り替える */}
                     <Checkbox
-                      label="返金の手段の付け替えで、Shopify で返金まで行う"
+                      label="返金方法変更で、Shopify で返金まで行う"
                       checked={form.shopifyExecuteCashRefund || form.shopifyExecutePaymentMethodOverride}
                       onChange={(v) => {
                         set("shopifyExecuteCashRefund", v);
@@ -191,7 +191,7 @@ export default function SpecialRefundSettingsPage() {
                       }}
                       helpText={
                         form.shopifyExecuteCashRefund !== form.shopifyExecutePaymentMethodOverride
-                          ? "今は「現金で返した」と「ほかの手段で返した」で設定が分かれています。押すと 2 つそろえます。"
+                          ? "今は「現金で返した」と「ほかの返金方法で返した」で設定が分かれています。押すと 2 つそろえます。"
                           : undefined
                       }
                     />
@@ -218,12 +218,12 @@ export default function SpecialRefundSettingsPage() {
 
           <Layout.AnnotatedSection
             title="POS で使う種類"
-            description="POS の登録の画面に出る種類です。返した手段が現金かどうかで、記録の種類（現金返金・返金手段変更）は自動で決まります。"
+            description="POS の登録の画面に出る種類です。返金方法が現金かどうかで、記録の種類（現金返金・返金方法変更）は自動で決まります。"
           >
             <Card>
               <BlockStack gap="300">
                 <Checkbox
-                  label="返金の手段の付け替え"
+                  label="返金方法変更"
                   checked={form.enableCashRefund || form.enablePaymentMethodOverride}
                   onChange={(v) => {
                     set("enableCashRefund", v);
@@ -232,7 +232,7 @@ export default function SpecialRefundSettingsPage() {
                   helpText={
                     form.enableCashRefund !== form.enablePaymentMethodOverride
                       ? `今は${form.enableCashRefund ? "現金で返したときだけ" : "現金以外で返したときだけ"}使えます。押すと 2 つそろえます。`
-                      : "純正で返金した注文は、返金を選んで金額はそのまま、返した手段だけ選びます。"
+                      : "純正で返金した注文は、返金を選んで金額はそのまま、返金方法だけ選びます。"
                   }
                 />
                 <Checkbox
@@ -269,15 +269,15 @@ export default function SpecialRefundSettingsPage() {
 
           <Layout.AnnotatedSection
             title="管理者の承認"
-            description="返金の手段の付け替えを、管理者が承認してから精算に入れるかを選びます。"
+            description="返金方法変更を、管理者が承認してから精算に入れるかを選びます。"
           >
             <Card>
               <BlockStack gap="300">
                 <Checkbox
-                  label="付け替えは管理者の承認のあとで精算に入れる"
+                  label="返金方法変更は管理者の承認のあとで精算に入れる"
                   checked={form.requireApprovalForPaymentMethodOverride}
                   onChange={(v) => set("requireApprovalForPaymentMethodOverride", v)}
-                  helpText="オンにすると、POS で登録した返金手段変更と現金返金（純正の返金の付け替え・返金の予約を含む）は「承認待ち」になり、「特殊返金・商品券調整 履歴」で承認するまで精算・点検・売上サマリーに入りません。却下したものは入りません。Shopify での返金の実行は今までどおりで、承認・却下では Shopify に何もしません。オフのときは今までどおり、登録した時点で精算に入ります。"
+                  helpText="オンにすると、POS で登録した返金方法変更と現金返金（純正の返金の返金方法変更・返金の予約を含む）は「承認待ち」になり、「特殊返金・商品券調整 履歴」で承認するまで精算・点検・売上サマリーに入りません。却下したものは入りません。Shopify での返金の実行は今までどおりで、承認・却下では Shopify に何もしません。オフのときは今までどおり、登録した時点で精算に入ります。"
                 />
               </BlockStack>
             </Card>
@@ -346,7 +346,7 @@ export default function SpecialRefundSettingsPage() {
             <Card>
               <BlockStack gap="400">
                 <Checkbox
-                  label="返金の手段の付け替えを精算に入れる"
+                  label="返金方法変更を精算に入れる"
                   checked={form.reflectCashRefundToSettlement || form.reflectPaymentOverrideToSettlement}
                   onChange={(v) => {
                     set("reflectCashRefundToSettlement", v);
@@ -354,7 +354,7 @@ export default function SpecialRefundSettingsPage() {
                   }}
                   helpText={
                     form.reflectCashRefundToSettlement !== form.reflectPaymentOverrideToSettlement
-                      ? "今は「現金で返した」と「ほかの手段で返した」で設定が分かれています。押すと 2 つそろえます。"
+                      ? "今は「現金で返した」と「ほかの返金方法で返した」で設定が分かれています。押すと 2 つそろえます。"
                       : undefined
                   }
                 />

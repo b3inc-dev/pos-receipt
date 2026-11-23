@@ -27,7 +27,7 @@ export function reservationRowsFromInput(rows) {
 
 /**
  * 返金する金額（純正で返金する見込みの額）。要る。分けた行（最後以外）の合計はこれより小さく。
- * 純正の返金額がこれと違うと、自動では付け替えずに「要確認」にする（T 2026-11-23）
+ * 純正の返金額がこれと違うと、自動では返金方法を変更せずに「要確認」にする（T 2026-11-23）
  */
 export function reservationExpectedAmountFromInput(input, rows) {
   const expected = money(input);
