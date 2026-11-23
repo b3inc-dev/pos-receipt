@@ -412,3 +412,16 @@ test("注文ページの表示: 注文の値とアプリの記録が同じか（
   const empty = buildOrderAdjustmentsDoc([], { timeZone: TZ, labelOf: () => null });
   assert.equal(orderMetafieldStateOf({ rowCount: 0, fetched: true, currentValue: null, built: empty }), "none");
 });
+
+test("変更: 純正の返金の返金方法変更は、元の支払方法を送られても前の値のまま（見直し #106 P2-1）", () => {
+  const plan = planAdjustmentEdit(
+    row({ id: "n", refundSource: "native", originalPaymentMethod: "shopify_payments" }),
+    { originalPaymentMethod: "cash", actualRefundMethod: "facility_points", reason: "返金方法の入れ間違い" },
+    { timeZone: TZ, now: NOW, approvalStatusForNew: "none" },
+  );
+  assert.ok(plan.ok);
+  if (!plan.ok) return;
+  assert.equal(plan.create.originalPaymentMethod, "shopify_payments");
+  assert.equal(plan.create.actualRefundMethod, "facility_points");
+  assert.equal(plan.create.refundSource, "native");
+});

@@ -713,7 +713,12 @@ export function planAdjustmentEdit(
     eventType: old.eventType,
     amount,
     currency: old.currency ?? "JPY",
-    originalPaymentMethod: isVoucher ? null : pick(input.originalPaymentMethod, old.originalPaymentMethod),
+    // 純正の返金の元の支払方法は純正の返金から決まるので、変更では変えない（見直し #106 P2-1）
+    originalPaymentMethod: isVoucher
+      ? null
+      : isNative
+        ? (old.originalPaymentMethod ?? null)
+        : pick(input.originalPaymentMethod, old.originalPaymentMethod),
     actualRefundMethod: isVoucher ? null : pick(input.actualRefundMethod, old.actualRefundMethod),
     voucherFaceValue,
     voucherAppliedAmount,
