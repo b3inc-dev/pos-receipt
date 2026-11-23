@@ -41,12 +41,6 @@ export const ORDER_DETAIL_QUERY = `#graphql
           refundableQuantity
           originalUnitPriceSet { shopMoney { amount currencyCode } }
           discountedUnitPriceSet { shopMoney { amount currencyCode } }
-          staffMember {
-            id
-            name
-            firstName
-            lastName
-          }
           customAttributes {
             key
             value
@@ -150,16 +144,9 @@ export function serializeOrderDetail(
       const suffix = lineName.slice(titleOnly.length).replace(/^[\s\-–—]+/, "");
       if (suffix) variantTitle = suffix;
     }
-    const staff = li.staffMember as {
-      id?: string;
-      name?: string;
-      firstName?: string;
-      lastName?: string;
-    } | null;
-    const staffName =
-      staff?.name?.trim() ||
-      [staff?.firstName, staff?.lastName].filter(Boolean).join(" ").trim() ||
-      "";
+    // LineItem.staffMember は read_users が要り、無い店では ACCESS_DENIED で注文の取得ごと 500 になる。
+    // read_users は足さない（T の判断）ので読まない。帰属スタッフはアプリの記録（#84）から入れる。
+    const staffName = "";
     return {
       id: li.id,
       title: titleOnly || lineName,
