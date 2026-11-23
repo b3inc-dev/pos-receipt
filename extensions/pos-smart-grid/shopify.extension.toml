@@ -1,7 +1,7 @@
 api_version = "2026-07"
 
 # ============================================================
-# 特殊返金・商品券（ホームタイル + 取引詳細メニュー）
+# 返金（ホームタイル + 取引詳細メニュー）。商品券は下の「商品券」タイルに分けた（T の決定 2026-11-23）
 # name … POS のタイル一覧・取引詳細メニューのラベル（同一）
 # タイル上の文言は SpecialRefundTile.jsx の heading / subheading
 # 取引詳細を「特殊返金調整」と短く出す行は pos-voucher-adjustment と別拡張で分割
@@ -26,21 +26,21 @@ module = "./src/SpecialRefundOrderAction.jsx"
 target = "pos.order-details.action.menu-item.render"
 
 # ============================================================
-# 商品券釣銭調整（取引詳細メニュー用。ホームタイルは任意で追加）
+# 商品券（会計前の額面入力・後からの釣銭調整・会計後の自動登録。ホームタイルは任意で追加）
 # タイルをスマートグリッドに置かなくても、取引詳細メニュー表示のために tile target を定義
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "商品券釣銭調整"
+name = "商品券 / 会計前の入力・釣銭調整"
 uid = "b8e4f2a1-6c3d-4e5f-9a0b-1d2e3f4a5b6c7d8e9f0a"
 handle = "pos-voucher-adjustment"
-description = "商品券釣銭調整（取引詳細・任意タイル）"
+description = "商品券 / 会計前の入力・釣銭調整"
 
 [[extensions.targeting]]
 module = "./src/VoucherTile.jsx"
 target = "pos.home.tile.render"
 
-# 一覧の最初の絞り込みを「商品券釣有り」にして、特殊返金と同じ画面を開く
+# カートに商品があれば会計前の額面入力、無ければ一覧（最初の絞り込みは「商品券釣有り」）
 [[extensions.targeting]]
 module = "./src/VoucherModal.jsx"
 target = "pos.home.modal.render"
@@ -48,6 +48,11 @@ target = "pos.home.modal.render"
 [[extensions.targeting]]
 module = "./src/VoucherOrderAction.jsx"
 target = "pos.order-details.action.menu-item.render"
+
+# 会計後の画面: 会計の前に入れた額面があれば、商品券調整を自動で登録して一行で知らせる（docs/VOUCHER_CART_ENTRY.md）
+[[extensions.targeting]]
+module = "./src/VoucherPostPurchaseBlock.jsx"
+target = "pos.purchase.post.block.render"
 
 # ============================================================
 # 精算タイル（Phase 5 実装済み）
