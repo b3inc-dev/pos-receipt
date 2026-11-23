@@ -4,13 +4,13 @@
  */
 export const SPECIAL_REFUND_EVENT_TYPE_LABELS = {
   cash_refund: "現金返金",
-  payment_method_override: "返金手段変更",
+  payment_method_override: "返金方法変更",
   receipt_cash_adjustment: "レシートの現金を直す",
-  voucher_change_adjustment: "商品券調整",
+  voucher_change_adjustment: "商品券釣銭登録",
 };
 
-/** 知らない種類は「特殊返金」とだけ出す */
+/** 知らない種類は「調整」とだけ出す */
 export function specialRefundEventTypeLabel(eventType) {
   const k = String(eventType ?? "").trim();
-  return SPECIAL_REFUND_EVENT_TYPE_LABELS[k] ?? "特殊返金";
+  return SPECIAL_REFUND_EVENT_TYPE_LABELS[k] ?? "調整";
 }

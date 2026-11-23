@@ -141,7 +141,7 @@ target = "pos.home.modal.render"
 # ============================================================
 [[extensions]]
 type = "ui_extension"
-name = "販売レシート / 属性付き印字"
+name = "販売レシート / レシートを印刷する"
 handle = "pos-sales-receipt"
 description = "販売レシート / 属性付き印字（Shopify Printing API）"
 

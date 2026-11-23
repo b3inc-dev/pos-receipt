@@ -60,8 +60,9 @@ describe("画面に出すエラー文と表記", () => {
 
   it("特殊返金の種類は日本語の名前にする", () => {
     assert.equal(specialRefundEventTypeLabel("cash_refund"), "現金返金");
-    assert.equal(specialRefundEventTypeLabel("payment_method_override"), "返金手段変更");
-    assert.equal(specialRefundEventTypeLabel("something_new"), "特殊返金");
-    assert.equal(specialRefundEventTypeLabel(undefined), "特殊返金");
+    assert.equal(specialRefundEventTypeLabel("payment_method_override"), "返金方法変更");
+    assert.equal(specialRefundEventTypeLabel("something_new"), "調整");
+    assert.equal(specialRefundEventTypeLabel("voucher_change_adjustment"), "商品券釣銭登録");
+    assert.equal(specialRefundEventTypeLabel(undefined), "調整");
   });
 });
