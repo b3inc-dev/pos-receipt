@@ -82,6 +82,7 @@ export function formatPosBadges(item, badgeMode) {
  * @param {"receipt" | "specialRefund"} props.badgeMode
  * @param {(orderId: string) => void} props.onSelectOrderId
  * @param {import("preact").ComponentChildren} [props.footerTrailing] - 画面の下の右に固定する操作（例: 領収書の履歴）
+ * @param {() => void} [props.onBack] - あると下の固定の左に「戻る」を出す（戻る系は左の「戻る」に統一。T 2026-11-23）
  * @param {string} [props.noticeError] - 一覧上部に出す一時メッセージ（取引詳細からの起動失敗など）
  * @param {() => void} [props.onDismissNotice]
  * @param {"all" | "refunded" | "voucher_change"} [props.initialSegment] - 開いたときの絞り込み（タイルごとに変える）
@@ -98,6 +99,7 @@ export function OrderDayListScreen({
   badgeMode,
   onSelectOrderId,
   footerTrailing = null,
+  onBack = null,
   noticeError = "",
   onDismissNotice = () => {},
   initialSegment = "all",
@@ -576,7 +578,7 @@ export function OrderDayListScreen({
                   </s-text>
                   {!isSearchMode ? (
                     <s-button variant="secondary" onClick={reloadList}>
-                      読み込み直す
+                      再読み込み
                     </s-button>
                   ) : null}
                 </s-stack>
@@ -642,9 +644,9 @@ export function OrderDayListScreen({
           </s-box>
         </s-scroll-box>
 
-        {footerTrailing ? <s-divider /> : null}
-        {footerTrailing ? (
-          /* 下の固定（右下）: 領収書の「履歴」など。FixedFooterNavBar と同じ作り */
+        {footerTrailing || onBack ? <s-divider /> : null}
+        {footerTrailing || onBack ? (
+          /* 下の固定: 左に「戻る」、右に領収書の「履歴」など。FixedFooterNavBar と同じ作り */
           <s-box
             padding="base"
             style={{
@@ -656,11 +658,18 @@ export function OrderDayListScreen({
           >
             <s-stack
               direction="inline"
-              justifyContent="end"
+              justifyContent="space-between"
               alignItems="center"
               gap="small"
             >
-              {footerTrailing}
+              {onBack ? (
+                <s-button variant="secondary" onClick={onBack}>
+                  戻る
+                </s-button>
+              ) : (
+                <s-box />
+              )}
+              {footerTrailing ?? <s-box />}
             </s-stack>
           </s-box>
         ) : null}
