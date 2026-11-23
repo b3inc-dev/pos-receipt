@@ -40,6 +40,7 @@ import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
 import { adjustmentBadges, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
 import { financialStatusLabel } from "./orderDisplayUtils.js";
+import { RedoCheckoutSection } from "./RedoCheckoutSection.jsx";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import {
   orderTenderLines,
@@ -849,31 +850,15 @@ function OrderDetailView({
                 </s-text>
               ) : null}
 
-              {/* 会計をやり直す（下書き注文を作成）は一番下（T 2026-11-23） */}
-              {order?.canRedoAsDraft ? (
-                <s-box paddingBlockStart="base">
-                  <s-stack gap="small-300">
-                    <s-text type="small" color="subdued">会計をやり直す</s-text>
-                    <s-text type="small" color="subdued">
-                      キャンセル・返金済みの注文と同じ商品で下書き注文を作ります。お会計は POS か管理画面でします。
-                    </s-text>
-                    <s-box paddingBlockStart="small-300">
-                      <s-stack direction="inline" gap="small">
-                        <s-button
-                          variant="secondary"
-                          command="--show"
-                          commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
-                          onClick={() => onAskConfirm({ kind: "redo_draft" })}
-                          disabled={loading}
-                          loading={loading}
-                        >
-                          下書き注文を作成
-                        </s-button>
-                      </s-stack>
-                    </s-box>
-                  </s-stack>
-                </s-box>
-              ) : null}
+              {/* 会計をやり直す（カートに入れる／下書き注文）は一番下（T 2026-11-23）。方法は管理画面の特殊返金設定で選ぶ */}
+              <RedoCheckoutSection
+                order={order}
+                canRedoToCart={Boolean(order?.canRedoToCart)}
+                canRedoAsDraft={Boolean(order?.canRedoAsDraft)}
+                onRedoDraft={() => onAskConfirm({ kind: "redo_draft" })}
+                draftCommandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
+                busy={loading}
+              />
 
               {error ? <s-text tone="critical">{error}</s-text> : null}
             </s-stack>

@@ -34,6 +34,7 @@ import {
   countOrdersNotWrittenYet,
   ORDER_ADJUSTMENTS_BACKFILL_MAX,
 } from "../services/orderAdjustments.server";
+import { normalizeOrderRedoMethod } from "../services/orderRedoCartPlan";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 
@@ -41,7 +42,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const shop = await resolveShop(session.shop, admin);
   const saved = await getAppSetting<Partial<SpecialRefundSettings>>(shop.id, SPECIAL_REFUND_SETTINGS_KEY);
-  const settings: SpecialRefundSettings = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...saved };
+  const merged: SpecialRefundSettings = { ...DEFAULT_SPECIAL_REFUND_SETTINGS, ...saved };
+  const settings: SpecialRefundSettings = {
+    ...merged,
+    orderRedoMethod: normalizeOrderRedoMethod(merged.orderRedoMethod),
+  };
   // 前からの登録で、まだ注文に書いていない注文の数（注文に書く設定がオンのときだけ数える）
   const notWrittenCount = settings.writeOrderAdjustmentsMetafield ? await countOrdersNotWrittenYet(shop.id) : 0;
   return { settings, notWrittenCount, backfillMax: ORDER_ADJUSTMENTS_BACKFILL_MAX };
@@ -71,6 +76,7 @@ export async function action({ request }: ActionFunctionArgs) {
     shopifyExecuteReceiptCashAdjustment: bool("shopifyExecuteReceiptCashAdjustment", true),
     correctionUsesRecordOnly: bool("correctionUsesRecordOnly", true),
     enableOrderRedoDraft: bool("enableOrderRedoDraft", true),
+    orderRedoMethod: normalizeOrderRedoMethod(get("orderRedoMethod")),
     enableCashRefund: bool("enableCashRefund", true),
     enablePaymentMethodOverride: bool("enablePaymentMethodOverride", true),
     enableVoucherChangeAdjustment: bool("enableVoucherChangeAdjustment", true),
@@ -204,11 +210,36 @@ export default function SpecialRefundSettingsPage() {
                   helpText="誤登録を無効化して正しい内容で登録し直すとき、二重返金を防ぎます。ON 推奨です。"
                 />
                 <Checkbox
-                  label="会計やり直し（下書き注文を作成）"
+                  label="会計やり直し"
                   checked={form.enableOrderRedoDraft}
                   onChange={(v) => set("enableOrderRedoDraft", v)}
-                  helpText="キャンセル・返金済みの取引から、同じ商品構成の下書き注文を POS で作成できます。決済は POS または管理画面で行います。"
+                  helpText="キャンセル・返金済みの注文と同じ商品で、もう一度お会計できるようにします。"
                 />
+                {form.enableOrderRedoDraft ? (
+                  <ChoiceList
+                    title="会計やり直しの方法"
+                    choices={[
+                      {
+                        label: "カートに入れる・下書き注文の両方（POS で選ぶ）",
+                        value: "both",
+                        helpText: "POS の注文の詳細に、ボタンを 2 つ出します。",
+                      },
+                      {
+                        label: "カートに入れるだけ",
+                        value: "cart",
+                        helpText:
+                          "同じ商品・お客様・割引を POS のカートに入れ、そのままお会計します。削除した商品は同じ名前・値段のカスタム商品で入ります。",
+                      },
+                      {
+                        label: "下書き注文だけ",
+                        value: "draft",
+                        helpText: "同じ商品で下書き注文を作ります。お会計は POS か管理画面の「下書き注文」でします。",
+                      },
+                    ]}
+                    selected={[form.orderRedoMethod]}
+                    onChange={(v) => set("orderRedoMethod", normalizeOrderRedoMethod(v[0]))}
+                  />
+                ) : null}
                 <Banner tone="warning">
                   実返金を ON にすると、POS で登録した金額が Shopify 上の注文に返金として記録されます。誤登録に注意してください。Shopify 返金済みの無効化では返金は自動取り消しされません。
                 </Banner>

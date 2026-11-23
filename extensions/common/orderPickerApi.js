@@ -99,3 +99,14 @@ export async function createRedoDraft(orderId) {
   const id = String(orderId).replace(/^gid:\/\/shopify\/Order\//, "");
   return apiPost(`/api/orders/${id}/redo-draft`, {});
 }
+
+/**
+ * GET /api/orders/:orderId/redo-cart
+ * 会計やり直しで POS のカートに入れる中身を取得（サーバーは読み取りのみ）
+ * @param {string} orderId
+ */
+export async function getRedoCartPlan(orderId) {
+  if (!orderId) throw new Error("orderId required");
+  const id = String(orderId).replace(/^gid:\/\/shopify\/Order\//, "");
+  return apiGet(`/api/orders/${id}/redo-cart`);
+}
