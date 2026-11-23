@@ -154,6 +154,16 @@ function buildVoidConfirmMessage(event) {
   return msg;
 }
 
+/** 確認のタイトル（処理の名前）と、実行するボタンの文言 */
+const CONFIRM_TITLES = {
+  void: { heading: "無効化", action: "無効化する" },
+  recheck: { heading: "返金を確かめる", action: "確かめる" },
+  legacy_recheck: { heading: "返金を確かめる", action: "確かめる" },
+  legacy_link: { heading: "返金をこの登録につなぐ", action: "つなぐ" },
+  legacy_no_refund: { heading: "Shopify に返金はありません", action: "そう記録する" },
+  redo_draft: { heading: "下書き注文を作成", action: "作成する" },
+};
+
 function buildRedoDraftConfirmMessage(order) {
   const name = order?.orderName ?? "-";
   return [
@@ -478,6 +488,9 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
     }
   })();
 
+  // 確認のタイトルとボタンは処理の名前にそろえる（T 2026-11-24「タイトルを処理名で統一」）
+  const confirmTitle = CONFIRM_TITLES[confirmAction?.kind] ?? null;
+
   const handleConfirmExecute = useCallback(async () => {
     const action = confirmAction;
     hideSpecialRefundConfirmModal();
@@ -579,6 +592,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         onAskConfirm={setConfirmAction}
         legacyDecision={legacyDecision}
         confirmMessage={confirmMessage}
+        confirmTitle={confirmTitle}
         onConfirmExecute={handleConfirmExecute}
         onConfirmCancel={() => setConfirmAction(null)}
         submitNotice={submitNotice}
@@ -647,6 +661,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
       <SpecialRefundForm
         order={selectedOrder}
         orderCorrectionContext={orderCorrectionContext}
+        noNativeRefund={!refundFormOther && Array.isArray(nativeRefunds) && nativeRefunds.length === 0}
         allowedEventTypes={formAllowedTypes}
         loading={loading}
         error={error}
@@ -740,6 +755,7 @@ function OrderDetailView({
   onAskConfirm,
   legacyDecision,
   confirmMessage,
+  confirmTitle,
   onConfirmExecute,
   onConfirmCancel,
   submitNotice,
@@ -878,6 +894,7 @@ function OrderDetailView({
         />
       </s-stack>
       <SpecialRefundConfirmModal
+        title={confirmTitle}
         message={confirmMessage}
         loading={loading}
         onExecute={onConfirmExecute}
@@ -887,10 +904,10 @@ function OrderDetailView({
   );
 }
 
-function SpecialRefundConfirmModal({ message, loading, onExecute, onCancel }) {
+function SpecialRefundConfirmModal({ title, message, loading, onExecute, onCancel }) {
   const lines = String(message ?? "").split("\n");
   return (
-    <s-modal id={SPECIAL_REFUND_CONFIRM_MODAL_ID} heading="確かめ">
+    <s-modal id={SPECIAL_REFUND_CONFIRM_MODAL_ID} heading={title?.heading || "確認"}>
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="small">
@@ -911,7 +928,7 @@ function SpecialRefundConfirmModal({ message, loading, onExecute, onCancel }) {
         戻る
       </s-button>
       <s-button slot="primary-action" onClick={onExecute} disabled={loading || !message}>
-        {loading ? "処理中…" : "続ける"}
+        {loading ? "処理中…" : title?.action || "実行する"}
       </s-button>
     </s-modal>
   );
@@ -1119,6 +1136,7 @@ function OrderTenderPanel({ order, lines, onFill, fillLabel = "全額反映", di
 function SpecialRefundForm({
   order,
   orderCorrectionContext,
+  noNativeRefund = false,
   allowedEventTypes = null,
   loading,
   error,
@@ -1257,11 +1275,11 @@ function SpecialRefundForm({
 
   if (confirming) {
     return (
-      <s-page heading="登録確認">
+      <s-page heading="特殊返金調整を登録">
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
-              <s-text fontWeight="bold">以下の内容で登録します</s-text>
+              <s-text type="strong">この内容で登録します</s-text>
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <Row label="取引" value={order?.orderName ?? "-"} />
@@ -1304,6 +1322,13 @@ function SpecialRefundForm({
             <OrderTenderPanel order={order} lines={tenderLines} onFill={fillFromTender} disabled={loading} />
 
             <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
+
+            {/* 純正の返金の付け替えが出ない理由（POS で返金した記録が無い注文） */}
+            {noNativeRefund ? (
+              <s-text type="small" color="subdued">
+                この注文には POS で返金した記録がありません。POS で返品・返金した注文では、返金額のまま手段だけを付け替える画面になります。
+              </s-text>
+            ) : null}
 
             {/* 何をするか（2 つ）。種別は返金手段から決める */}
             {modes.length > 1 ? (
@@ -1479,11 +1504,11 @@ function VoucherAdjustmentForm({
 
   if (confirming) {
     return (
-      <s-page heading="登録確認">
+      <s-page heading="商品券釣銭調整を登録">
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
-              <s-text fontWeight="bold">商品券釣銭調整を登録します</s-text>
+              <s-text type="strong">この内容で登録します</s-text>
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <Row label="取引" value={order?.orderName ?? "-"} />
@@ -1699,11 +1724,11 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
 
   if (confirming) {
     return (
-      <s-page heading="変更の確認">
+      <s-page heading={`${label}を変更`}>
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
-              <s-text fontWeight="bold">前の登録を無効にして、次の内容で登録し直します</s-text>
+              <s-text type="strong">前の登録を無効にして、次の内容で登録し直します</s-text>
               <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                 <s-stack gap="small">
                   <Row label="取引" value={order?.orderName ?? "-"} />

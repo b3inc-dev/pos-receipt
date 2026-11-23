@@ -4,7 +4,7 @@
  * - 「実際に返す手段」を選んで予約する（分割可・最後の行は残り＝純正で返金した額から自動）
  * - そのあと、いつもどおり POS 純正で返品・返金する。返金ができたら、アプリが付け替えを自動で作る
  *   （金額は純正の返金額で固定・Shopify では返金しない）
- * - 予約はその日の営業が終わると使わない。ここで取り消しもできる
+ * - 予約はその日の営業が終わると使わない。ここでやめることもできる
  * docs/REFUND_RESERVATION.md（T の決定 2026-11-23）
  */
 import { useState, useEffect, useCallback } from "preact/hooks";
@@ -37,7 +37,7 @@ function ReservationCard({ item, onCancel, loading }) {
           <s-badge tone={reservationStatusTone(item.status)}>{reservationStatusLabel(item.status)}</s-badge>
           {canCancel ? (
             <s-button tone="critical" onClick={() => onCancel(item.id)} disabled={loading}>
-              取り消す
+              予約をやめる
             </s-button>
           ) : null}
         </s-stack>
@@ -162,10 +162,10 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
     setLoading(true);
     try {
       await cancelRefundReservation(id);
-      setNotice("予約を取り消しました。");
+      setNotice("予約をやめました。");
       await reload();
     } catch (e) {
-      setError(toUserMessage(e?.message) || "取り消せませんでした");
+      setError(toUserMessage(e?.message) || "予約をやめられませんでした");
     } finally {
       setLoading(false);
     }

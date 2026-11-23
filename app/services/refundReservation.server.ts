@@ -138,7 +138,7 @@ export async function createRefundReservation(
     ok: false as const,
     status: 409,
     code: "RESERVATION_EXISTS",
-    message: "この注文には、もう予約があります。直すときは、今の予約を取り消してから入れ直してください。",
+    message: "この注文には、もう予約があります。直すときは、今の予約をやめてから入れ直してください。",
   };
   let reservation: ReservationRecord | null;
   try {
