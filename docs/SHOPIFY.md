@@ -49,9 +49,9 @@ write_customers, write_app_proxy, write_draft_orders, write_orders
 
 | Topic | URI | 処理（コード） |
 |-------|-----|----------------|
-| `app/uninstalled` | `/webhooks/app/uninstalled` | アンインストール処理 |
-| compliance（customers/data_request, customers/redact, shop/redact） | `/webhooks/compliance` | GDPR。`data_request` は DB 列挙＋根拠ログ後に 200（email/phone 非保存。開示は運用）。詳細は `gdprCustomerDataRequest.server.ts` |
-| `orders/updated` | `/webhooks/orders/updated` | 売上サマリー更新キュー + 返金計上 metafield 同期 |
+| `app/uninstalled` | `/webhooks/app/uninstalled` | アンインストール処理。セッションを消す。HMAC は自分で確かめる（トークンの refresh をしない。DECISIONS D20） |
+| compliance（customers/data_request, customers/redact, shop/redact） | `/webhooks/compliance` | GDPR。`data_request` は DB 列挙＋根拠ログ後に 200（email/phone 非保存。開示は運用）。詳細は `gdprCustomerDataRequest.server.ts`。`shop/redact` は使用量の記録 `AppUsageReport`・セッション・Shop（CASCADE）を消し、件数だけを記録に出す（`shopRedact.server.ts`）。入れ直した店なら消さない（`shopInstallProbe.server.ts`）。`customers/redact` は領収書の宛名を空にし、特殊返金のメモを消す（金額・日時は残す。`customerRedact.server.ts`・DECISIONS D18）。HMAC は `webhookHmac.server.ts` で自分で確かめる（トークンの refresh をしない・DECISIONS D20）。不正なら 401、DB などの失敗は 500（Shopify がもう一度送る）。topic は `SHOP_REDACT` の形にそろえてから分ける（DECISIONS D19） |
+| `orders/updated` | `/webhooks/orders/updated` | 売上サマリー更新キュー + 返金計上 metafield 同期。キューに置いた中身は 30 日で消す（スイッチ `ORDER_WEBHOOK_QUEUE_PURGE`・既定オフ。DECISIONS D17） |
 
 ## 6. メタフィールド
 

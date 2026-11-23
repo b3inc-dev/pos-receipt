@@ -1,27 +1,19 @@
 /**
- * /app/plan/callback — Shopify 課金承認コールバック
- * Shopify の課金承認後にリダイレクトされる URL
+ * /app/plan/callback — 以前の Billing API（appSubscriptionCreate）の承認のあとに戻る URL。
+ *
+ * 2026-11-21 T の決定で公開用の料金は Shopify App Pricing になり、アプリは契約を作らない。
+ * プランは shopPlan.server.ts が Shopify の契約から読むので、ここでは planCode を書かない
+ * （URL の ?plan= で planCode を変えられないようにする）。古いリンクから来たときのために料金プラン画面へ戻すだけ。
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
-import { resolveShop } from "../utils/shopResolver.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
-  const shop = await resolveShop(session.shop, admin);
-
+  await authenticate.admin(request);
   const url = new URL(request.url);
-  const plan = url.searchParams.get("plan") ?? "lite";
-
-  // planCode を DB に保存（lite / standard / pro を許容。standard は後方互換で lite 相当）
-  if (plan === "pro" || plan === "lite" || plan === "standard") {
-    await prisma.shop.update({
-      where: { id: shop.id },
-      data: { planCode: plan === "standard" ? "lite" : plan },
-    });
-  }
-
-  return redirect("/app/plan");
+  url.searchParams.delete("plan");
+  url.searchParams.delete("charge_id");
+  const rest = url.searchParams.toString();
+  return redirect(`/app/plan${rest ? `?${rest}` : ""}`);
 }

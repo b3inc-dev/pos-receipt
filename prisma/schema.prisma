@@ -427,3 +427,27 @@ model SalesChannelCacheDaily {
   @@unique([shopId, channelId, targetDate])
   @@index([shopId, targetDate])
 }
+
+// プランに含まれる数（Lite 3 / Pro 10）を超えたロケーションの従量（App Events API）の報告記録（公開用だけ）。
+// 1 店・1 請求期間に 1 行（periodEnd は期間の終わりの UTC の日付。分からないときは "unknown"）。
+// POS Stock（stock-transfer-pos）の AppUsageReport と同じ形。app/utils/appEventsUsage.server.ts
+model AppUsageReport {
+  id             String    @id @default(cuid())
+  shop           String
+  periodEnd      String
+  plan           String
+  eventHandle    String
+  locationsCount Int
+  units          Int
+  idempotencyKey String    @unique
+  status         String
+  httpStatus     Int?
+  lastError      String?
+  attempts       Int       @default(0)
+  sentAt         DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([shop, periodEnd])
+  @@index([status])
+}

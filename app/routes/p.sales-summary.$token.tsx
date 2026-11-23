@@ -28,7 +28,7 @@ import {
   buildPeriodSalesSummaryPayload,
   type PeriodSalesSummaryPayload,
 } from "../services/salesSummaryPeriodPayload.server";
-import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
+import { checkShopPlanAccess } from "../utils/shopPlan.server";
 import type { DailySalesSummaryPayload } from "../services/salesSummaryDailyPayload.server";
 import { getShopTimezoneForDaily, getCalendarDateStringInTimeZone } from "../utils/shopTimezone.server";
 import {
@@ -153,8 +153,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   try {
     const { admin } = await unauthenticated.admin(shop.shopDomain);
-    const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
-    const access = checkPlanAccess(shop.planCode, "sales_summary", fullAccess);
+    const access = await checkShopPlanAccess(admin, shop, "sales_summary");
     if (!access.allowed) {
       return { kind: "forbidden" as const, message: access.message };
     }

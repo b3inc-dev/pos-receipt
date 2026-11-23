@@ -10,6 +10,7 @@
  */
 import { authenticate, unauthenticated } from "../shopify.server";
 import { resolveShop } from "./shopResolver.server";
+import { checkSubscriptionGate, PLAN_REQUIRED_MESSAGE } from "./shopPlan.server";
 
 /** CORS プリフライト（OPTIONS）用の 204 レスポンス。POST 前にブラウザが送る OPTIONS に必須。 */
 export function corsPreflightResponse(request: Request): Response {
@@ -78,6 +79,13 @@ export async function authenticatePosRequest(request: Request) {
   const shopDomain = new URL(sessionToken.dest as string).hostname;
   const { admin } = await unauthenticated.admin(shopDomain);
   const shop = await resolveShop(shopDomain, admin);
+
+  // 未契約の店を止める（PLAN_REQUIRE_SUBSCRIPTION=1 のときだけ。自社用・スイッチオフは Shopify に聞かずに通す）。
+  // 402 と決まった文を返し、POS の画面にそのまま出す（authenticatePosRequestOrCorsError が CORS を付ける）
+  const gate = await checkSubscriptionGate(admin, shop);
+  if (gate.blocked) {
+    throw Response.json({ ok: false, error: PLAN_REQUIRED_MESSAGE, code: "PLAN_REQUIRED" }, { status: 402 });
+  }
 
   /** CORS ヘッダー付きの JSON レスポンスを返すヘルパー */
   const corsJson = (data: unknown, init?: ResponseInit): Promise<Response> =>

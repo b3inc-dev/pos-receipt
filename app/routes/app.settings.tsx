@@ -30,7 +30,8 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { validateNonPosRefundAttributionLocations } from "../services/refundAggregation.server";
-import { planLabel, getFullAccess, isInhouseMode, PLAN_FEATURES } from "../utils/planFeatures.server";
+import { planLabel, isInhouseMode, PLAN_FEATURES } from "../utils/planFeatures.server";
+import { checkShopPlanAccess } from "../utils/shopPlan.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
 
@@ -93,14 +94,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // sort_order で並べ替え（要件 §4.2.1）
   locations.sort((a, b) => a.sortOrder - b.sortOrder);
 
-  const fullAccess = await getFullAccess(admin, session);
+  // プランの表示は門番と同じ 1 か所（checkShopPlanAccess）から読む。"settlement" は全プランの機能で、ここでは state だけを使う（表示だけ）
+  const { state: planState } = await checkShopPlanAccess(admin, shop, "settlement");
+  const fullAccess = planState.fullAccess;
   return {
     shop: {
       id: shop.id,
-      planCode: shop.planCode,
+      planCode: planState.planCode,
       planLabel: fullAccess
         ? (isInhouseMode() ? "自社用（無制限）" : "全機能利用可能")
-        : planLabel(shop.planCode),
+        : planLabel(planState.planCode),
     },
     isInhouse: fullAccess,
     locations,

@@ -15,7 +15,7 @@ import {
   DEFAULT_SALES_RECEIPT_SETTINGS,
   type SalesReceiptSettings,
 } from "../utils/salesReceiptSettings";
-import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
+import { checkShopPlanAccess } from "../utils/shopPlan.server";
 import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import {
   SALES_RECEIPT_ORDER_QUERY,
@@ -27,8 +27,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (authResult instanceof Response) return authResult;
     const { admin, shop } = authResult;
 
-    const fullAccess = await getFullAccess(admin, { shop: shop.shopDomain });
-    const access = checkPlanAccess(shop.planCode, "sales_receipt", fullAccess);
+    const access = await checkShopPlanAccess(admin, shop, "sales_receipt");
     if (!access.allowed) {
       return corsHtml(request, `<!DOCTYPE html><html><body><p>${access.message}</p></body></html>`, {
         status: 403,

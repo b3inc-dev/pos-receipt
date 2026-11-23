@@ -23,6 +23,8 @@ const shopify = shopifyApp({
 export default shopify;
 export const addDocumentResponseHeaders = shopify.addDocumentResponseHeaders;
 export const authenticate = shopify.authenticate;
+/** webhook の HMAC を自分で確かめるルート（app/uninstalled・compliance）用。前後の空白は取り除き済み */
+export const webhookSecret = apiSecretKey;
 export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
 export const registerWebhooks = shopify.registerWebhooks;
