@@ -22,7 +22,7 @@ T の決定（2026-11-23、カード）: 商品券釣有りの会計では、会
 | 注文 | Shopify | カートの項目は会計後も注文に残る。「_」始まりは POS の画面・レシートに出ないが、注文（管理画面・Admin API・webhook）には書かれる（shopify.dev Cart API, 2026-07） |
 | 自動登録 | `VoucherPostPurchaseBlock.jsx`（`pos.purchase.post.block.render`） | 目印があるときだけ `POST /api/voucher-adjustments/from-cart`（注文 ID）。結果を一行で出す。目印が無い会計では何も出さず、サーバーも呼ばない |
 | 拾い直し | `webhooks.orders.updated.tsx` | 知らせの `note_attributes` に額面があれば同じ関数を呼ぶ（会計後の画面を閉じた・端末の目印が消えたとき） |
-| 会計が終わった画面の「管理」 | `VoucherOrderAction.jsx`（`pos.purchase.post.action.menu-item.render`）→ `VoucherModal.jsx`（`pos.purchase.post.action.render`） | 「商品券釣銭調整」の行から、その注文の商品券の画面を開く（自動で登録できなかったとき・額面を直すとき） |
+| 会計が終わった画面の「管理」 | `VoucherOrderAction.jsx`（`pos.purchase.post.action.menu-item.render`）→ `VoucherModal.jsx`（`pos.purchase.post.action.render`） | 行の名前は POS が拡張の名前で描く。押すと POS がそのまま `action.render` を開くので、注文は画面の Order API（`shopify.order.id`）から取る（行の onClick には頼らない）。釣有りの会計で未登録なら、その注文の商品券釣銭調整の登録画面を直接開く。登録済みなら注文の詳細（調整履歴の「変更」）を案内つきで開く。釣有りでない会計では、行を押せないボタンにする（POS が行を自分で描くときに効くかは未確認）。開いた画面でも同じ判定をして、釣有りでなければ案内を出す（T のカード 2026-11-24「釣有りの会計だけ押せる」） |
 | 登録 | `voucherCartEntry.server.ts` `registerVoucherFromCartEntry` | 注文を読み直し、`customAttributes` の額面・商品券で払った額（`fetchOrderVoucherApplied`）から、後から登録したときと同じ行を作り、`pos.adjustments` と売上サマリーを直す |
 
 ### 決まり

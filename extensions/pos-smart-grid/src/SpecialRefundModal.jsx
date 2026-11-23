@@ -41,6 +41,7 @@ import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
 import { adjustmentBadges, adjustmentKindLabel, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
 import { financialStatusLabel, listSegmentsForTile } from "./orderDisplayUtils.js";
 import { RedoCheckoutSection } from "./RedoCheckoutSection.jsx";
+import { isVoucherAdjustableOrder, voucherShortcutStep } from "../../common/voucherAdjustable.js";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import {
   orderTenderLines,
@@ -280,12 +281,31 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
 
   // 取引詳細: 「特殊返金」または「商品券調整」から起動
   useEffect(() => {
-    const vid = sessionStorage.getItem(STORAGE_KEY_VOUCHER);
-    const rid = sessionStorage.getItem(STORAGE_KEY_REFUND);
+    let vid = null;
+    let rid = null;
+    try {
+      vid = sessionStorage.getItem(STORAGE_KEY_VOUCHER);
+      rid = sessionStorage.getItem(STORAGE_KEY_REFUND);
+    } catch (_) {
+      /* 読めないときは下の Order API だけで決める */
+    }
+    // 会計が終わった画面の「商品券釣銭調整」の行から開いたとき: この画面が受け取る注文（Order API）を使う
+    if (!vid && !rid && initialListSegment === "voucher_change") {
+      try {
+        const oid = globalThis?.shopify?.order?.id;
+        if (oid != null && oid !== "") vid = String(oid);
+      } catch (_) {
+        /* ホームのタイルには注文が無い */
+      }
+    }
     const preId = vid || rid;
     if (!preId) return;
-    if (vid) sessionStorage.removeItem(STORAGE_KEY_VOUCHER);
-    else sessionStorage.removeItem(STORAGE_KEY_REFUND);
+    try {
+      if (vid) sessionStorage.removeItem(STORAGE_KEY_VOUCHER);
+      else sessionStorage.removeItem(STORAGE_KEY_REFUND);
+    } catch (_) {
+      /* ignore */
+    }
     const voucherShortcut = Boolean(vid);
 
     setOrderEntryLoading(true);
@@ -300,7 +320,22 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         setOrderCorrectionContext(res.orderCorrectionContext ?? null);
         setNativeRefunds(Array.isArray(res.nativeRefunds) ? res.nativeRefunds : null);
         // 取引詳細メニューからは一覧を挟まず、各処理のフォームへ直行
-        setStep(voucherShortcut ? "form_voucher" : "form_refund");
+        if (!voucherShortcut) {
+          setStep("form_refund");
+          return;
+        }
+        // 商品券釣銭調整: 登録済みなら調整履歴、釣有りでない会計なら案内を出す（T のカード 2026-11-24）
+        const next = voucherShortcutStep(order, res.items ?? []);
+        if (next === "form_voucher") {
+          setStep("form_voucher");
+          return;
+        }
+        setSubmitNotice(
+          next === "order_detail_registered"
+            ? { tone: "info", text: "この会計の商品券釣銭調整は、もう登録してあります。直すときは、調整履歴の「変更」を押してください。" }
+            : { tone: "warning", text: "この会計は商品券釣有りではないので、商品券釣銭調整は登録できません。" },
+        );
+        setStep("order_detail");
       })
       .catch((e) => setBootstrapError(toUserMessage(e?.message) || "取得に失敗しました"))
       .finally(() => setOrderEntryLoading(false));
@@ -766,8 +801,7 @@ function OrderDetailView({
   const voidedEvents = events.filter((e) => e.status === "voided");
   // 商品券釣銭調整は「商品券釣有り」の注文だけ（一覧の「商品券釣有り」の印と同じ判定: 支払方法マスタの
   // 釣り有りの商品券で払った、またはメモに「商品券」）。支払いが 1 件も読めない注文は判定できないので押せるまま。
-  const voucherAdjustable =
-    Boolean(order?.estimatedVoucherChange) || (order?.transactions ?? []).length === 0;
+  const voucherAdjustable = isVoucherAdjustableOrder(order);
 
   return (
     <s-page heading="特殊返金調整・商品券釣銭調整">
