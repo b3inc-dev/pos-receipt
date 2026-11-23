@@ -60,8 +60,11 @@ describe("バッジの言葉", () => {
       "extensions/pos-smart-grid/src/orderDisplayUtils.js",
       "extensions/pos-smart-grid/src/OrderDayListScreen.jsx",
     ]) {
+      const utils = readFileSync(`${ROOT}/extensions/pos-smart-grid/src/orderDisplayUtils.js`, "utf8");
+      assert.match(utils, /PARTIALLY_REFUNDED"\) return \{ key: "refund", label: "一部返金"/);
+      assert.match(utils, /label: "返金済"/);
       const src = readFileSync(`${ROOT}/${rel}`, "utf8");
-      assert.match(src, /key: "refund", label: "返金済"/, rel);
+      assert.match(src, /refundBadge\(item\)/, rel);
     }
   });
 });
