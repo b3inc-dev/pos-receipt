@@ -113,3 +113,9 @@ declare module './src/orderDisplayUtils.js' {
   const shopify: import('@shopify/ui-extensions/pos.home.modal.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
+
+//@ts-ignore
+declare module './src/RefundReservationPostReturnBlock.jsx' {
+  const shopify: import('@shopify/ui-extensions/pos.return.post.block.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
