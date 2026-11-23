@@ -579,7 +579,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
     return (
       <s-page heading={pageHeading}>
         <s-box padding="base">
-          <s-text tone="subdued">取引を開いています…</s-text>
+          <s-text color="subdued">取引を開いています…</s-text>
         </s-box>
       </s-page>
     );
@@ -591,11 +591,11 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         <s-box padding="base">
           <s-stack gap="base">
             <s-text tone="critical">{bootstrapError}</s-text>
-            <s-text tone="subdued" size="small">
+            <s-text type="small" color="subdued">
               取引詳細から開けませんでした。アプリの権限更新後に再度お試しください。
             </s-text>
             <s-button
-              kind="primary"
+              variant="primary"
               onClick={() => {
                 if (tryDismissModal()) return;
                 setBootstrapError("");
@@ -1008,7 +1008,7 @@ function SpecialRefundConfirmModal({ title, message, loading, onExecute, onCance
       </s-scroll-box>
       <s-button
         slot="secondary-actions"
-        kind="secondary"
+        variant="secondary"
         command="--hide"
         commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
         onClick={onCancel}
@@ -1029,24 +1029,24 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
   return (
     <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
       <s-stack gap="small">
-        <s-text fontWeight="bold" fontSize="small">
+        <s-text type="strong">
           {decision?.reason === "none_found"
             ? "Shopify の注文に、この調整の返金は見つかりませんでした"
             : "Shopify の注文に、この調整かもしれない返金があります"}
         </s-text>
-        <s-text tone="subdued" fontSize="small">
+        <s-text type="small" color="subdued">
           Shopify の管理画面でこの注文の返金を確かめて、下から選んでください。どれを選んでも Shopify の返金は実行しません。
         </s-text>
         {candidates.map((c) => (
           <s-stack key={c.refundId} gap="extraSmall">
-            <s-text fontSize="small">
+            <s-text type="small">
               ¥{Number(c.amount ?? 0).toLocaleString()} ・
               {` ${localDateTimeLabel(c.createdAt)}`}
               {c.looksLikeThisEvent ? "（この登録のメモ・金額が合う）" : ""}
             </s-text>
-            {c.note ? <s-text tone="subdued" fontSize="small">メモ: {c.note}</s-text> : null}
+            {c.note ? <s-text type="small" color="subdued">メモ: {c.note}</s-text> : null}
             <s-button
-              kind="secondary"
+              variant="secondary"
               command="--show"
               commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
               onClick={() =>
@@ -1065,7 +1065,7 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
         ))}
         {hasLikely ? null : (
           <s-button
-            kind="secondary"
+            variant="secondary"
             tone="critical"
             command="--show"
             commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
@@ -1136,11 +1136,11 @@ function EventCard({ event, readOnlyHint = "", onEdit, onAskConfirm, legacyDecis
 
         {!readOnlyHint && (canRecheckShopifyRefund(event) || canRecheckLegacyShopifyRefund(event)) ? (
           <s-stack gap="extraSmall">
-            <s-text tone="subdued" fontSize="small">
+            <s-text type="small" color="subdued">
               先に Shopify の管理画面でこの注文に返金があるかを確かめてから押してください。登録し直さないでください。
             </s-text>
             <s-button
-              kind="secondary"
+              variant="secondary"
               command="--show"
               commandFor={SPECIAL_REFUND_CONFIRM_MODAL_ID}
               onClick={() =>
@@ -1491,7 +1491,7 @@ function SpecialRefundForm({
                     onChange={setActualRefundMethod}
                   />
                 ) : (
-                  <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} fontSize="small">
+                  <s-text type="small" tone={refundMethodsState === "loading" ? undefined : "critical"}>
                     {refundMethodsMessage(refundMethodsState)}
                   </s-text>
                 )}
@@ -1864,7 +1864,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
   // 入力・確認は注文の詳細と同じ形（T 2026-11-24）: 見出しで区切り、確かめる所は大きく。下は固定の「戻る」と主のボタン
   if (confirming) {
     return (
-      <s-page heading={`${label}を変更`}>
+      <s-page heading={`${label}を直す`}>
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="none">
@@ -1929,98 +1929,118 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
   }
 
   return (
-    <s-page heading={`${label}を変更`}>
+    <s-page heading={`${label}を直す`}>
       <s-scroll-box>
         <s-box padding="base">
-          <s-stack gap="base">
-            {/* 元の支払い。特殊返金は「全額反映」で金額を入れる（元の支払手段は前の登録のまま） */}
+          <s-stack gap="none">
+            <s-text color="subdued">前の登録は無効にして残し、直した内容で登録し直します。</s-text>
+            {refundDone ? (
+              <s-text type="small" tone="critical">
+                この登録は Shopify でも返金済みです。Shopify の返金は直りません。金額を変えるときは Shopify の管理画面でも直してください。
+              </s-text>
+            ) : null}
+
+            {/* 取引: 合計と元の支払方法ごとの額。手で入れた返金だけ「全額反映」で金額を入れる */}
             <OrderTenderPanel
               order={order}
               lines={orderTenderLines(order)}
               onFill={isVoucher || isNative ? null : (line) => setAmount(String(fullAmountForRefund(line)))}
               disabled={loading}
             />
-            <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="extraSmall">
-                <s-text type="small" color="subdued">
-                  前の登録は無効にして残し、直した内容で登録し直します。
-                </s-text>
-                {refundDone ? (
-                  <s-text type="small" tone="critical">
-                    この登録は Shopify でも返金済みです。Shopify の返金は直りません。金額を変えるときは Shopify の管理画面でも直してください。
-                  </s-text>
-                ) : null}
-              </s-stack>
-            </s-box>
 
+            {/* 今の登録 */}
+            <FormHeading>今の登録</FormHeading>
             {isVoucher ? (
               <>
-                <s-text-field
-                  label="受け取った商品券の額面（円）"
-                  value={faceValue}
-                  type="number"
-                  onInput={(e) => setFaceValue(e?.currentTarget?.value ?? "")}
-                />
-                <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
-                <FormLine label="釣銭" value={change == null ? "-" : yen(change)} strong />
+                <FormLine label="商品券の額面" value={yen(event.voucherFaceValue)} />
+                <FormLine label="釣銭" value={yen(event.amount)} />
               </>
-            ) : isNative ? (
-              <s-stack gap="none">
-                <Row label="金額（純正の返金のまま）" value={`¥${Number(amount).toLocaleString()}`} />
-                <s-text type="small" color="subdued">分け方を変えるときは、無効にしてから変更し直してください。</s-text>
-              </s-stack>
             ) : (
-              <s-text-field
-                label="金額（円）"
-                value={amount}
-                type="number"
-                onInput={(e) => setAmount(e?.currentTarget?.value ?? "")}
-              />
+              <FormLine label="金額" value={yen(event.amount)} />
             )}
-
             {needsMethod ? (
-              refundMethods.length > 0 ? (
-                <PosChoiceField
-                  label="返金方法"
-                  value={actualRefundMethod}
-                  options={refundMethods}
-                  onChange={setActualRefundMethod}
-                />
+              <FormLine label="返金方法" value={event.actualRefundLabel || event.actualRefundMethod || "-"} />
+            ) : null}
+
+            {/* 直す内容 */}
+            <FormHeading>直す内容</FormHeading>
+            <s-stack gap="small">
+              {isVoucher ? (
+                <>
+                  <s-text-field
+                    label="受け取った商品券の額面（円）"
+                    value={faceValue}
+                    type="number"
+                    onInput={(e) => setFaceValue(e?.currentTarget?.value ?? "")}
+                  />
+                  <FormLine label="商品券で払った額" value={yen(applied)} />
+                </>
+              ) : isNative ? (
+                <>
+                  <FormLine label="金額（純正の返金のまま）" value={yen(amount)} strong />
+                  <s-text type="small" color="subdued">分け方を変えるときは、無効にしてから変更し直してください。</s-text>
+                </>
               ) : (
-                <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} fontSize="small">
-                  {refundMethodsMessage(refundMethodsState)}
-                </s-text>
-              )
-            ) : null}
+                <s-text-field
+                  label="金額（円）"
+                  value={amount}
+                  type="number"
+                  onInput={(e) => setAmount(e?.currentTarget?.value ?? "")}
+                />
+              )}
 
-            {event.eventType === "receipt_cash_adjustment" ? (
-              <PosChoiceField
-                label="調整種別"
-                value={adjustKind}
-                options={ADJUST_KINDS}
-                onChange={setAdjustKind}
+              {needsMethod ? (
+                refundMethods.length > 0 ? (
+                  <PosChoiceField
+                    label="返金方法"
+                    value={actualRefundMethod}
+                    options={refundMethods}
+                    onChange={setActualRefundMethod}
+                  />
+                ) : (
+                  <s-text type="small" tone={refundMethodsState === "loading" ? undefined : "critical"} color={refundMethodsState === "loading" ? "subdued" : undefined}>
+                    {refundMethodsMessage(refundMethodsState)}
+                  </s-text>
+                )
+              ) : null}
+
+              {event.eventType === "receipt_cash_adjustment" ? (
+                <PosChoiceField label="調整種別" value={adjustKind} options={ADJUST_KINDS} onChange={setAdjustKind} />
+              ) : null}
+
+              {/* 商品券は注文の日で数えるので、数える日は選ばない */}
+              {isVoucher || isNative ? null : (
+                <PosChoiceField label="数える日" value={dateMode} options={EDIT_DATE_MODES} onChange={setDateMode} />
+              )}
+            </s-stack>
+
+            {/* 確かめる所（直したあとの額）を大きく */}
+            <s-box paddingBlockStart="base">
+              {isVoucher ? (
+                <FormHero label="直したあとの釣銭" value={change == null ? "-" : yen(change)} sub={`額面 − 商品券で払った額 ${yen(applied)}`} />
+              ) : (
+                <FormHero
+                  label="直したあとの金額"
+                  value={yen(amount)}
+                  sub={needsMethod ? `${event.originalPaymentLabel || event.originalPaymentMethod || "元の支払方法"} → ${refundMethods.find((m) => m.value === actualRefundMethod)?.label ?? actualRefundMethod ?? "-"}` : undefined}
+                />
+              )}
+            </s-box>
+
+            <s-box paddingBlockStart="base">
+              <s-text-field
+                label="直したわけ（必須）"
+                value={reason}
+                onInput={(e) => setReason(e?.currentTarget?.value ?? "")}
+                placeholder="例: 返金方法の選び間違い"
               />
+            </s-box>
+
+            {error ? (
+              <s-box paddingBlockStart="base">
+                <s-text tone="critical">{error}</s-text>
+              </s-box>
             ) : null}
-
-            {/* 商品券は注文の日で数えるので、数える日は選ばない */}
-            {isVoucher || isNative ? null : (
-              <PosChoiceField
-                label="数える日"
-                value={dateMode}
-                options={EDIT_DATE_MODES}
-                onChange={setDateMode}
-              />
-            )}
-
-            <s-text-field
-              label="直したわけ（必須）"
-              value={reason}
-              onInput={(e) => setReason(e?.currentTarget?.value ?? "")}
-              placeholder="例: 返金方法の選び間違い"
-            />
-
-            {error ? <s-text tone="critical">{error}</s-text> : null}
-
           </s-stack>
         </s-box>
       </s-scroll-box>
@@ -2043,7 +2063,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
 function Row({ label, value }) {
   return (
     <s-stack direction="horizontal" align="space-between">
-      <s-text tone="subdued">{label}</s-text>
+      <s-text color="subdued">{label}</s-text>
       <s-text>{value}</s-text>
     </s-stack>
   );
