@@ -26,6 +26,7 @@ const ORDER_FOR_REFUND_QUERY = `#graphql
         kind
         status
         gateway
+        manualPaymentGateway
         amountSet {
           shopMoney {
             amount
@@ -56,6 +57,8 @@ type OrderTx = {
   kind?: string;
   status?: string;
   gateway?: string;
+  /** Shopify の OrderTransaction.manualPaymentGateway（手動の決済か） */
+  manualPaymentGateway?: boolean | null;
   amountSet?: { shopMoney?: { amount?: string } };
 };
 
@@ -108,6 +111,43 @@ function pickParentTransactions(transactions: OrderTx[], preferGateway?: string 
     (a, b) =>
       Number(b.amountSet?.shopMoney?.amount ?? 0) - Number(a.amountSet?.shopMoney?.amount ?? 0),
   );
+}
+
+/** 決済会社を通す支払い（Shopify Payments など）か。返金するとお客様のカード等へ実際にお金が戻る */
+function isProcessorTransaction(tx: OrderTx): boolean {
+  const gw = String(tx.gateway ?? "").toLowerCase();
+  if (gw.includes("shopify_payments")) return true;
+  // 現金は返金してもお金は動かない（店が手で渡す）
+  if (gw === "cash") return false;
+  return tx.manualPaymentGateway === false;
+}
+
+function gatewayMatches(txGateway: string | undefined, method: string): boolean {
+  const gw = String(txGateway ?? "").toLowerCase().trim();
+  const m = String(method).toLowerCase().trim();
+  if (!gw || !m) return false;
+  return gw.includes(m) || m.includes(gw);
+}
+
+/**
+ * 返金先の親取引が決済会社の支払い（Shopify Payments など）なのに、実際は別の手段（現金など）で返したとき、
+ * Shopify で返金するとカード等にも戻り、二重に返すことになる。そのときは Shopify では返金せず記録だけにする
+ * （T の決定 2026-11-23）。止めるときは理由の文を返す。止めないときは null。
+ */
+export function processorRefundMismatchReason(
+  parents: OrderTx[],
+  eventType: string,
+  actualRefundMethod?: string | null,
+): string | null {
+  const actual =
+    String(actualRefundMethod ?? "").trim() || (eventType === "cash_refund" ? "cash" : "");
+  // 実際の手段が分からないとき（元の支払いへそのまま返す）は今までどおり
+  if (!actual) return null;
+  const mismatched = parents.find(
+    (tx) => isProcessorTransaction(tx) && !gatewayMatches(tx.gateway, actual),
+  );
+  if (!mismatched) return null;
+  return `元の支払い（${String(mismatched.gateway ?? "決済会社")}）は Shopify で返金するとカード等に戻るため、別の手段で返した登録は記録だけにしました（Shopify では返金していません）`;
 }
 
 function buildRefundTransactions(
@@ -192,6 +232,16 @@ export async function executeShopifyRefundForEvent(
   const parents = pickParentTransactions(order.transactions ?? [], preferGw);
   if (parents.length === 0) {
     return { status: "failed", error: "返金対象の支払いトランザクションがありません" };
+  }
+
+  // 決済会社の支払いを別の手段で返したときは Shopify で返金しない（二重に返さない）
+  const mismatchReason = processorRefundMismatchReason(
+    parents,
+    params.eventType,
+    params.actualRefundMethod,
+  );
+  if (mismatchReason) {
+    return { status: "skipped", reason: mismatchReason };
   }
 
   let refundTxs;
