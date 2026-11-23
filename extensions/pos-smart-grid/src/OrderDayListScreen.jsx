@@ -89,7 +89,7 @@ export function formatPosBadges(item, badgeMode) {
  * @param {"all" | "refunded" | "voucher_change"} [props.initialSegment] - 開いたときの絞り込み（タイルごとに変える）
  * @param {{ value: string, label: string, noun: string }[]} [props.segments] - 出す絞り込み（既定は全部）
  * @param {string} [props.listNote] - 一覧の上に出す案内（1 行）
- * @param {{ label: string, onClick: () => void } | null} [props.listAction] - 画面の下の固定の右に出すボタン（1 つ。「会計前に登録」など。T 2026-11-24）
+ * @param {{ label: string, onClick: () => void } | null} [props.listAction] - 画面の下の固定の右に出すボタン（1 つ。「会計前登録」など。T 2026-11-24）
  * @param {(params: object) => Promise<{ items: object[], nextCursor?: string|null, todayLocalDate?: string, fetchedAtTime?: string }>} [props.fetchList]
  *   一覧の読み込み（既定は注文の検索）。領収書の発行履歴は発行の記録を読む
  * @param {(item: object, todayKey: string) => { key: string, title: string, amountLabel: string, dateTimeLabel: string, badges: object[], selectId?: string }} [props.toRow]
@@ -312,7 +312,7 @@ export function OrderDayListScreen({
     setDayMenuOpen(false);
   };
 
-  // 下の固定の右: 領収書の「履歴」など。無ければ「会計前に登録」などの一覧のボタン（T 2026-11-24: 一覧の上ではなく右下）
+  // 下の固定の右: 領収書の「履歴」など。無ければ「会計前登録」などの一覧のボタン（T 2026-11-24: 一覧の上ではなく右下）
   const trailing =
     footerTrailing ??
     (listAction ? (
