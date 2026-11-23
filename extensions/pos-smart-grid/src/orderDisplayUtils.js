@@ -21,7 +21,7 @@ export function formatListBadges(item) {
   // Shopify 返金の結果が分かっていない特殊返金がある（この日の精算が止まる）
   if (b.hasPendingShopifyRefund) out.push({ key: "pending", label: "返金処理中", tone: "critical" });
   if (b.cancelled) out.push({ key: "cancelled", label: "キャンセル", tone: "critical" });
-  if (b.refundedShopify) out.push({ key: "refund", label: "返金", tone: "warning" });
+  if (b.refundedShopify) out.push({ key: "refund", label: "返金済", tone: "warning" });
   if (b.hasApprovalPending) out.push({ key: "approval", label: "承認待ち", tone: "caution" });
   if (b.hasSpecialRefund || b.appSpecialApplied) out.push({ key: "special", label: "特殊返金 登録済", tone: "info" });
   if (b.hasVoucherAdjustment) out.push({ key: "vadj", label: "商品券 登録済", tone: "success" });

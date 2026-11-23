@@ -5,7 +5,11 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
-import { formatTimeHmInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
+import {
+  formatTimeHmInTimeZone,
+  getCalendarDateStringInTimeZone,
+  getShopTimezoneForDaily,
+} from "../utils/shopTimezone.server";
 import { buildSearchQuery, normalizeLocationIdForQuery } from "../utils/orderSearchQuery";
 import { hasVoucherLikeGatewayHeuristic, matchPaymentMethodMaster } from "../utils/paymentMethodMatch.server";
 import { isShopifyRefundPending } from "../services/specialRefundOverlayPure.server";
@@ -126,6 +130,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         currency: "JPY",
         createdAt: n.createdAt,
         transactionTime: n.createdAt ? formatTimeHmInTimeZone(n.createdAt, timezone) : "",
+        // 一覧の「今日 18:14」「11月20日 19:04」用。店のタイムゾーンの暦日（日本の店は日本時間）
+        localDate: n.createdAt ? getCalendarDateStringInTimeZone(new Date(n.createdAt), timezone) : "",
         financialStatus,
         segmentFlags: {
           isCancelled,
@@ -219,6 +225,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         items,
         nextCursor: pageInfo.hasNextPage ? pageInfo.endCursor : null,
         timezone,
+        // 一覧の「今日」の判定と「18:14 に更新」用（店のタイムゾーン）。端末の時計には頼らない
+        todayLocalDate: getCalendarDateStringInTimeZone(new Date(), timezone),
+        fetchedAtTime: formatTimeHmInTimeZone(new Date().toISOString(), timezone),
         searchMode: Boolean(q?.trim()),
       },
       { headers: { "Content-Type": "application/json" } },

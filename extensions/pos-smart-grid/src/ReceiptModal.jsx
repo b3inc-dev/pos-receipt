@@ -138,7 +138,7 @@ function ReceiptModal() {
         noticeError={bootstrapError}
         onDismissNotice={() => setBootstrapError("")}
         headerTrailing={(
-          <s-button kind="secondary" onClick={() => setStep("history")}>
+          <s-button variant="secondary" onClick={() => setStep("history")}>
             履歴
           </s-button>
         )}
