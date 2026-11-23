@@ -917,7 +917,7 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
             <s-text fontSize="small">
               ¥{Number(c.amount ?? 0).toLocaleString()} ・
               {c.createdAt ? ` ${String(c.createdAt).slice(0, 16).replace("T", " ")}` : " -"}
-              {c.looksLikeThisEvent ? "（特殊返金のメモ・金額が合う）" : ""}
+              {c.looksLikeThisEvent ? "（この登録のメモ・金額が合う）" : ""}
             </s-text>
             {c.note ? <s-text tone="subdued" fontSize="small">メモ: {c.note}</s-text> : null}
             <s-button
@@ -1878,7 +1878,7 @@ function Row({ label, value }) {
 function refundMethodsMessage(state) {
   if (state === "loading") return "支払方法を読み込み中…";
   if (state === "error") return "支払方法を読み込めませんでした。通信を確かめて、この画面を開き直してください。";
-  if (state === "empty") return "特殊返金で選べる支払方法がありません。管理画面の「支払方法」で登録してください。";
+  if (state === "empty") return "返金方法に選べる支払方法がありません。管理画面の「支払方法」で「特殊返金で選べる」をオンにしてください。";
   return "";
 }
 

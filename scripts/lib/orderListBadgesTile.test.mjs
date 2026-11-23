@@ -9,7 +9,7 @@ const item = {
 
 test("返金方法変更のタイルは返金のバッジだけ（T 2026-11-24）", async () => {
   const formatListBadgesForTile = await load();
-  assert.deepEqual(formatListBadgesForTile(item, "refunded").map((b) => b.label), ["一部返金", "特殊返金登録済"]);
+  assert.deepEqual(formatListBadgesForTile(item, "refunded").map((b) => b.label), ["一部返金", "返金方法変更済"]);
 });
 
 test("商品券釣銭登録のタイルは商品券のバッジだけ", async () => {
