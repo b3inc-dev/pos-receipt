@@ -73,26 +73,33 @@ function hideSpecialRefundConfirmModal() {
 }
 
 const RECHECK_CONFIRM_MESSAGE =
-  "この登録の返金を確かめます。\n\nShopify に返金ができていれば、その結果を記録します。" +
-  "まだできていなければ、この登録の返金を今実行します（同じ登録なので 2 回にはなりません）。";
+  "この調整の返金を確かめます。\n\nShopify に返金ができていれば、その結果を記録します。" +
+  "まだできていなければ、この調整の返金を今実行します（同じ調整なので 2 回にはなりません）。";
 
 const LEGACY_RECHECK_CONFIRM_MESSAGE =
-  "この登録の返金を確かめます。\n\nShopify の注文の返金を読み直して、この登録の返金があれば「返金済」と記録します。" +
-  "この画面からは Shopify の返金を実行しません（お金は動きません）。";
+  "この調整の返金を確かめます。\n\nShopify の注文の返金を読み直して、この調整の返金があれば「返金済」と記録します。" +
+  "ここでは Shopify の返金を実行しません（お金は動きません）。";
+
+/** 端末の時刻で「11/24 01:27」の形にする（UTC のまま出さない） */
+function localDateTimeLabel(iso) {
+  const d = new Date(String(iso ?? ""));
+  if (Number.isNaN(d.getTime())) return "-";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 function buildLegacyLinkConfirmMessage(candidate) {
   const amount = Number(candidate?.amount ?? 0).toLocaleString();
-  const at = candidate?.createdAt ? String(candidate.createdAt).slice(0, 16).replace("T", " ") : "-";
   return (
-    `Shopify の返金（¥${amount}・${at}）を、この登録の返金として記録します。\n\n` +
-    "Shopify の返金は実行しません。この返金がこの登録のものかを、Shopify の管理画面で確かめてから進めてください。"
+    `Shopify の返金（¥${amount}・${localDateTimeLabel(candidate?.createdAt)}）を、この調整の返金として記録します。\n\n` +
+    "Shopify の返金は実行しません。この返金がこの調整のものかを、Shopify の管理画面で確かめてから進めてください。"
   );
 }
 
 const LEGACY_NO_REFUND_CONFIRM_MESSAGE =
-  "「Shopify に返金はありません」として記録します。\n\n" +
-  "このあと精算では、この登録の金額をアプリの記録（店で渡したお金）として数えます。" +
-  "Shopify の管理画面でこの注文に、この登録の返金が無いことを確かめてから進めてください。\n\n" +
+  "この調整の返金は Shopify に無い、と記録します。\n\n" +
+  "このあと精算では、この調整の金額をアプリの記録（店で渡したお金）として数えます。" +
+  "Shopify の管理画面で、この注文にこの調整の返金が無いことを確かめてから進めてください。\n\n" +
   "Shopify の返金は実行しません。";
 const STORAGE_KEY_VOUCHER = "pos_voucher_adjustment_order_id";
 
@@ -121,33 +128,26 @@ const ADJUST_KINDS = [
 ];
 
 function buildVoidConfirmMessage(event) {
-  let msg =
-    "この登録を無効にしますか？\n\n精算からは外れます（記録は履歴に残ります）。";
+  let msg = "この調整を無効にしますか？\n\n精算からは外れます（履歴には残ります）。";
   if (event?.shopifyRefundStatus === "pending") {
-    msg +=
-      "\n\n【重要】この登録は返金の結果が分かっていません（返金処理中）。";
-    msg += "無効化する前に、Shopify の管理画面でこの注文に返金があるかを確かめ、";
-    msg += "まずこの登録の「返金を確かめる」を使ってください。";
-    msg +=
-      "\n\nShopify に返金があるのに無効化して登録し直すと、記録のみの登録になり、Shopify の返金と二重に数えられます。";
-    msg +=
-      "\nShopify に返金が無いのに無効化だけすると、店で渡したお金が精算から消えます。";
+    msg += "\n\n【重要】この調整は返金の結果がまだ分かっていません（返金処理中）。";
+    msg += "無効にする前に、Shopify の管理画面でこの注文に返金があるかを確かめ、";
+    msg += "まずこの調整の「返金を確かめる」を使ってください。";
+    msg += "\n\nShopify に返金があるのに無効にして調整し直すと、記録だけの調整になり、Shopify の返金と二重に数えられます。";
+    msg += "\nShopify に返金が無いのに無効にするだけだと、店で渡したお金が精算から消えます。";
     return msg;
   }
   if (event?.refundSource === "native") {
     msg += "\n\nこれは純正の返金の付け替えです。無効にすると、その返金は元の支払方法の返金に戻ります（純正の返金はそのまま）。";
   } else if (event?.shopifyRefundStatus === "success") {
-    msg +=
-      "\n\n【重要】この登録では Shopify 上に返金が作成済みです。";
-    msg += "無効化しても Shopify の返金は自動では取り消されません。";
-    msg += "必要な場合は Shopify 管理画面で手動対応してください。";
-    msg +=
-      "\n\n訂正する場合は、正しい内容で再登録してください（再登録は記録のみになります）。";
+    msg += "\n\n【重要】この調整では Shopify に返金をしています。";
+    msg += "無効にしても Shopify の返金は取り消されません。";
+    msg += "取り消すときは Shopify の管理画面でしてください。";
+    msg += "\n\n直すときは、正しい内容で調整し直してください（調整し直すと記録だけになります）。";
   } else if (event?.shopifyRefundStatus === "failed") {
-    msg +=
-      "\n\n返金は失敗しています（返金失敗）。無効にしたあと、正しい内容で登録し直せます。";
+    msg += "\n\n返金は失敗しています（返金失敗）。無効にしたあと、正しい内容で調整し直せます。";
   } else {
-    msg += "\n\n訂正する場合は、正しい内容で再登録してください。";
+    msg += "\n\n直すときは、正しい内容で調整し直してください。";
   }
   return msg;
 }
@@ -157,8 +157,8 @@ const CONFIRM_TITLES = {
   void: { heading: "無効化", action: "無効化する" },
   recheck: { heading: "返金を確かめる", action: "確かめる" },
   legacy_recheck: { heading: "返金を確かめる", action: "確かめる" },
-  legacy_link: { heading: "返金をこの登録につなぐ", action: "つなぐ" },
-  legacy_no_refund: { heading: "Shopify に返金はありません", action: "そう記録する" },
+  legacy_link: { heading: "返金をこの調整につなぐ", action: "つなぐ" },
+  legacy_no_refund: { heading: "返金なしとして記録", action: "記録する" },
   redo_draft: { heading: "下書き注文を作成", action: "作成する" },
 };
 
@@ -910,7 +910,7 @@ function SpecialRefundConfirmModal({ title, message, loading, onExecute, onCance
         onClick={onCancel}
         disabled={loading}
       >
-        戻る
+        やめる
       </s-button>
       <s-button slot="primary-action" onClick={onExecute} disabled={loading || !message}>
         {loading ? "処理中…" : title?.action || "実行する"}
@@ -927,8 +927,8 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
       <s-stack gap="small">
         <s-text fontWeight="bold" fontSize="small">
           {decision?.reason === "none_found"
-            ? "Shopify の注文に、この登録の返金は見つかりませんでした"
-            : "Shopify の注文に、この登録かもしれない返金があります"}
+            ? "Shopify の注文に、この調整の返金は見つかりませんでした"
+            : "Shopify の注文に、この調整かもしれない返金があります"}
         </s-text>
         <s-text tone="subdued" fontSize="small">
           Shopify の管理画面でこの注文の返金を確かめて、下から選んでください。どれを選んでも Shopify の返金は実行しません。
@@ -937,7 +937,7 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
           <s-stack key={c.refundId} gap="extraSmall">
             <s-text fontSize="small">
               ¥{Number(c.amount ?? 0).toLocaleString()} ・
-              {c.createdAt ? ` ${String(c.createdAt).slice(0, 16).replace("T", " ")}` : " -"}
+              {` ${localDateTimeLabel(c.createdAt)}`}
               {c.looksLikeThisEvent ? "（特殊返金のメモ・金額が合う）" : ""}
             </s-text>
             {c.note ? <s-text tone="subdued" fontSize="small">メモ: {c.note}</s-text> : null}
@@ -955,7 +955,7 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
               }
               disabled={loading}
             >
-              この返金がこの登録のもの
+              この返金がこの調整のもの
             </s-button>
           </s-stack>
         ))}
