@@ -4,6 +4,7 @@
  * - 紐づく注文が当日 POS ユニオンに含まれる場合はスキップ（取引で既に計上済みの二重加算防止）
  * - 注文がある場合は retailLocation でロケーション一致、無い場合は GAS 同型 LOC:店名 をギフトカード note で判定
  */
+import { searchDateRange } from "../utils/shopifySearchDate";
 import type { DayRangeUtc } from "../utils/shopTimezone.server";
 import { adminGraphqlWithRetry, GRAPHQL_PAGE_DELAY_MS, sleep } from "../lib/shopifyGraphqlThrottle.server";
 
@@ -167,7 +168,7 @@ export async function fetchLegacyGiftCardIssuanceForDay(
   const endMs = dayRange.endUtc.getTime();
   const result = { amount: 0, count: 0 };
 
-  const q = `created_at:>=${dayRange.startUtcIso} created_at:<=${dayRange.endUtcIso}`;
+  const q = searchDateRange("created_at", dayRange.startUtcIso, dayRange.endUtcIso);
 
   let cursor: string | null = null;
   let hasNext = true;
