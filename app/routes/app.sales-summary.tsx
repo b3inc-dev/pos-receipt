@@ -1033,7 +1033,7 @@ function ReportLoading({ view, locationCount }: { view: string; locationCount: n
     <Layout.Section>
       <Card>
         <div role="status" aria-busy="true">
-          <Text as="p" tone="subdued">
+          <Text as="p" fontWeight="semibold">
             {view === "daily"
               ? `集計しています。${locationCount > 1 ? `${locationCount} 店の分を順に数えるので、` : ""}1 分ほどかかることがあります。`
               : "集計しています。まだ数えていない日があると、1 分ほどかかることがあります。"}
@@ -1058,10 +1058,13 @@ function ReportBody({
   report,
   searchParams,
   setSearchParams,
+  provisionalAsOf = null,
 }: {
   report: SalesSummaryReport;
   searchParams: URLSearchParams;
   setSearchParams: (next: URLSearchParams) => void;
+  /** 数え直し中に保存済みの数字を見せるときの時点（HH:MM）。あると表を薄くし、上に時点を書く */
+  provisionalAsOf?: string | null;
 }) {
   const recomputeDebug = (report as any).recomputeDebug as
     | null
@@ -1289,6 +1292,14 @@ function ReportBody({
           )}
               <Layout.Section>
                 <Card>
+                  {provisionalAsOf && (
+                    <Box paddingBlockEnd="200">
+                      <Text as="p" variant="headingSm" tone="subdued">
+                        参考：{provisionalAsOf} 時点の数字（いま数え直しているので、最新ではありません）
+                      </Text>
+                    </Box>
+                  )}
+                  <div style={provisionalAsOf ? { opacity: 0.45 } : undefined}>
                   {tableRows.length === 0 ? (
                     <Text tone="subdued" as="p">表示対象データがありません。</Text>
                   ) : (
@@ -1304,6 +1315,7 @@ function ReportBody({
                       />
                     </Box>
                   )}
+                  </div>
                 </Card>
               </Layout.Section>
     </>
@@ -1429,17 +1441,13 @@ export default function SalesSummaryAdminPage() {
                 fallback={
                   cachePreview ? (
                     <>
-                      <Layout.Section>
-                        <div role="status" aria-busy="true">
-                          <Banner tone="info">
-                            {cachePreview.asOf} 時点の数字です。いま最新の数字に数え直しています。
-                          </Banner>
-                        </div>
-                      </Layout.Section>
+                      {/* 主役は「集計しています。」。保存済みの数字は時点を付けた参考として薄く出す（T 2026-11-23） */}
+                      <ReportLoading view={data.view} locationCount={locationCount} />
                       <ReportBody
                         report={{ ...data, ...cachePreview, loadError: null, loadWarning: null, recomputeDailyApplied: false, recomputeChannelMonthApplied: false, recomputeDebug: null } as unknown as SalesSummaryReport}
                         searchParams={searchParams}
                         setSearchParams={setSearchParams}
+                        provisionalAsOf={cachePreview.asOf}
                       />
                     </>
                   ) : (
