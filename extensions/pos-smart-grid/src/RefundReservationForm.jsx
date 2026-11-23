@@ -52,14 +52,14 @@ function ReservationCard({ item, onCancel, loading }) {
           <s-text key={i}>{reservationRowText(row, { only: (item.rows ?? []).length === 1 })}</s-text>
         ))}
         {item.status === "pending" ? (
-          <s-text tone="neutral">
+          <s-text type="small" color="subdued">
             {(item.rows ?? []).length > 1
               ? "このあと POS で同じ金額を返金すると、自動でこの返金方法に変えます。金額が違うときは「要確認」になります。"
               : "このあと POS で返金すると、返金した額の全部を自動でこの返金方法に変えます。"}
           </s-text>
         ) : null}
         {item.status === "applied" ? (
-          <s-text tone="neutral">純正の返金の返金方法を変えました。調整履歴に出ています。</s-text>
+          <s-text type="small" color="subdued">純正の返金の返金方法を変えました。調整履歴に出ています。</s-text>
         ) : null}
         {item.status === "needs_review" && item.reviewReason ? <s-text tone="caution">{item.reviewReason}</s-text> : null}
       </s-stack>
@@ -225,7 +225,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                 reload();
               }}
             />
-            <s-text tone="neutral">
+            <s-text type="small" color="subdued">
               {`${order?.orderName ?? "この取引"} をこれから POS で返金するときに、実際の返金方法を先に決めておけます。返金が終わると、返金した額のまま自動で返金方法を変えます。Shopify では返金しません。`}
             </s-text>
 
@@ -235,7 +235,8 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
             {open ? (
               <ReservationCard item={open} onCancel={cancel} loading={loading} />
             ) : state === "ready" ? (
-              <s-section heading="返金方法">
+              <s-stack gap="small">
+                <FormHeading>返金方法</FormHeading>
                 <s-stack gap="small">
                   {/* 分割しないときは金額を入れない（純正で返金した額の全部を、選んだ返金方法に変える） */}
                   {split ? (
@@ -248,7 +249,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                     />
                   ) : null}
                   {methods.length === 0 ? (
-                    <s-text tone={methodsState === "loading" ? "subdued" : "critical"}>{methodsMessage}</s-text>
+                    <s-text tone={methodsState === "loading" ? "auto" : "critical"}>{methodsMessage}</s-text>
                   ) : !split ? (
                     <PosChoiceField
                       label="返金方法"
@@ -263,7 +264,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                         <s-box key={i} padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                           <s-stack gap="small">
                             {isLast ? (
-                              <s-text tone="neutral">{`${i + 1} 行目（残り・返金した額から自動）`}</s-text>
+                              <s-text color="subdued">{`${i + 1} 行目（残り・返金した額から自動）`}</s-text>
                             ) : (
                               <s-text-field
                                 label={`${i + 1} 行目の金額（円）`}
@@ -280,9 +281,11 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                               onChange={(v) => setRow(i, { method: v })}
                             />
                             {!isLast ? (
-                              <s-button onClick={() => removeRow(i)} disabled={loading}>
-                                この行を消す
-                              </s-button>
+                              <s-stack direction="inline" justifyContent="end">
+                                <s-button variant="secondary" onClick={() => removeRow(i)} disabled={loading}>
+                                  この行を消す
+                                </s-button>
+                              </s-stack>
                             ) : null}
                           </s-stack>
                         </s-box>
@@ -292,11 +295,13 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                   {methods.length > 0 ? (
                     split ? (
                       <s-stack direction="inline" gap="small">
-                        <s-button onClick={addRow} disabled={loading}>行を追加</s-button>
-                        <s-button onClick={stopSplit} disabled={loading}>分割をやめる</s-button>
+                        <s-button variant="secondary" onClick={addRow} disabled={loading}>行を追加</s-button>
+                        <s-button variant="secondary" onClick={stopSplit} disabled={loading}>分割をやめる</s-button>
                       </s-stack>
                     ) : (
-                      <s-button onClick={startSplit} disabled={loading}>分割</s-button>
+                      <s-stack direction="inline" gap="small">
+                        <s-button variant="secondary" onClick={startSplit} disabled={loading}>分割</s-button>
+                      </s-stack>
                     )
                   ) : null}
                   <s-text-field
@@ -305,34 +310,34 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
                     onInput={(e) => setNote(e?.currentTarget?.value ?? "")}
                     placeholder="補足説明など"
                   />
-                  <s-text tone="neutral">
+                  <s-text type="small" color="subdued">
                     {split
                       ? "予約はその日のうちの返金にだけ使います。返金した額が「返金する金額」と違うときは、自動では返金方法を変えません。"
                       : "予約はその日のうちの返金にだけ使います。返金した額の全部を、選んだ返金方法に変えます。"}
                   </s-text>
                 </s-stack>
-              </s-section>
+              </s-stack>
             ) : null}
 
             {recent.length > 0 ? (
-              <s-section heading="前の予約">
-                <s-stack gap="small">
-                  {recent.map((r) => (
-                    <ReservationCard key={r.id} item={r} onCancel={cancel} loading={loading} />
-                  ))}
-                </s-stack>
-              </s-section>
+              <s-stack gap="small">
+                <FormHeading>前の予約</FormHeading>
+                {recent.map((r) => (
+                  <ReservationCard key={r.id} item={r} onCancel={cancel} loading={loading} />
+                ))}
+              </s-stack>
             ) : null}
 
             {onOtherRegistration ? (
-              <s-section heading="ほかの登録">
-                <s-stack gap="small">
-                  <s-text tone="neutral">POS で返金せずに、ここで返金やレシートの現金の直しを登録するとき。</s-text>
-                  <s-button onClick={onOtherRegistration} disabled={loading}>
-                    ここで登録する
+              <s-stack gap="none">
+                <FormHeading>ほかの登録</FormHeading>
+                <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
+                  <s-text type="small" color="subdued">POS で返金せずに、ここで登録するとき</s-text>
+                  <s-button variant="secondary" onClick={onOtherRegistration} disabled={loading}>
+                    ここで登録
                   </s-button>
                 </s-stack>
-              </s-section>
+              </s-stack>
             ) : null}
           </s-stack>
         </s-box>
@@ -343,15 +348,12 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
           {error && state !== "error" ? <s-banner tone="critical">{error}</s-banner> : <s-banner tone="success">{notice}</s-banner>}
         </s-box>
       ) : null}
-      {/* 下は固定: 左に「戻る」、右に「予約する」（予約があるときは「再読込」）。T 2026-11-24 */}
+      {/* 下は固定: 左に「戻る」、右に主ボタン 1 つ「予約する」（予約があるときは結果を見る「再読込」）。T 2026-11-24 */}
       <FixedFooterNavBar
         centerAlignWithButtons
         leftLabel="戻る"
         onLeft={onBack}
         leftDisabled={loading}
-        middleLabel={canReserve ? "再読込" : undefined}
-        onMiddle={reloadClick}
-        middleDisabled={loading}
         rightLabel={canReserve ? "予約する" : "再読込"}
         onRight={canReserve ? submit : reloadClick}
         rightDisabled={loading || (canReserve && methods.length === 0)}

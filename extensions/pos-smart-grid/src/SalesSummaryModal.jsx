@@ -262,7 +262,7 @@ function FootfallReportModalHost({
       <s-box padding="base">
         <s-stack gap="base">
           {dateLine ? (
-            <s-text tone="subdued" size="small">
+            <s-text type="small" color="subdued">
               {dateLine}
             </s-text>
           ) : null}
@@ -273,7 +273,7 @@ function FootfallReportModalHost({
             onChange={(e) => onChange(e.detail?.value ?? e.target?.value ?? value)}
           />
           {footfallErr ? (
-            <s-text tone="critical" size="small">
+            <s-text type="small" tone="critical">
               {footfallErr}
             </s-text>
           ) : null}
@@ -519,13 +519,13 @@ function DailyListThreeColCell({ widthPct, label, valueAlignEnd = false, padInli
       minInlineSize="0"
       maxInlineSize={widthPct}
     >
-      <s-stack gap="extraSmall" inlineSize="100%">
+      <s-stack gap="small-300" inlineSize="100%">
         {label != null && label !== "" ? (
-          <s-text tone="subdued" size="small">
+          <s-text type="small" color="subdued">
             {label}
           </s-text>
         ) : (
-          <s-text size="small">{nbsp}</s-text>
+          <s-text type="small">{nbsp}</s-text>
         )}
         <s-stack direction="block" alignItems={valueAlignEnd ? "end" : "start"} inlineSize="100%">
           {children}
@@ -568,24 +568,22 @@ function DailyListDayRowGrid({ row, o }) {
   const W = DAILY_LIST_COL_W;
 
   return (
-    <s-stack gap="extraSmall">
+    <s-stack gap="small-300">
       <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
         <DailyListThreeColCell widthPct={W.c1} label="日付" valueAlignEnd={false} padInlineEnd>
-          <s-text emphasis="bold" size="small">
+          <s-text type="strong">
             {formatYmdSlash(row.targetDate)}
           </s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c2} label="" padInlineEnd>
-          <s-text size="small" tone="subdued">
+          <s-text type="small" color="subdued">
             {"\u00a0"}
           </s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c3} label="" valueAlignEnd padInlineEnd={false}>
           <s-stack direction="inline" gap="small" justifyContent="end" alignItems="center" inlineSize="100%">
             <s-badge tone="neutral">予算比</s-badge>
-            <s-text
-              size="small"
-              fontWeight="bold"
+            <s-text type="strong"
               tone={o.showBudgetRatio !== false ? budgetRatioTone : undefined}
             >
               {o.showBudgetRatio !== false ? budgetRatioText : "—"}
@@ -596,39 +594,39 @@ function DailyListDayRowGrid({ row, o }) {
 
       <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
         <DailyListThreeColCell widthPct={W.c1} label="予算" valueAlignEnd padInlineEnd>
-          <s-text size="small">{budget}</s-text>
+          <s-text type="small">{budget}</s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c2} label="純売上" valueAlignEnd padInlineEnd>
-          <s-text size="small" fontWeight="bold">
+          <s-text type="strong">
             {net}
           </s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c3} label="点数" valueAlignEnd padInlineEnd={false}>
-          <s-text size="small">{itemsVal}</s-text>
+          <s-text type="small">{itemsVal}</s-text>
         </DailyListThreeColCell>
       </s-stack>
 
       <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
         <DailyListThreeColCell widthPct={W.c1} label="客数" valueAlignEnd padInlineEnd>
-          <s-text size="small">{orders}</s-text>
+          <s-text type="small">{orders}</s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c2} label="入店数" valueAlignEnd padInlineEnd>
-          <s-text size="small">{visitors}</s-text>
+          <s-text type="small">{visitors}</s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c3} label="購買率" valueAlignEnd padInlineEnd={false}>
-          <s-text size="small">{conv}</s-text>
+          <s-text type="small">{conv}</s-text>
         </DailyListThreeColCell>
       </s-stack>
 
       <s-stack direction="inline" gap="none" alignItems="start" inlineSize="100%">
         <DailyListThreeColCell widthPct={W.c1} label="客単価" valueAlignEnd padInlineEnd>
-          <s-text size="small">{atv}</s-text>
+          <s-text type="small">{atv}</s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c2} label="セット率" valueAlignEnd padInlineEnd>
-          <s-text size="small">{setRate}</s-text>
+          <s-text type="small">{setRate}</s-text>
         </DailyListThreeColCell>
         <DailyListThreeColCell widthPct={W.c3} label="一品単価" valueAlignEnd padInlineEnd={false}>
-          <s-text size="small">{unit}</s-text>
+          <s-text type="small">{unit}</s-text>
         </DailyListThreeColCell>
       </s-stack>
     </s-stack>
@@ -728,7 +726,7 @@ function DailyListView({
     };
   }, [locationGid, listYear, listMonth, reloadKey]);
 
-  const displayName = locationName?.trim() || "ロケーション";
+  const displayName = locationName?.trim() || "店舗";
 
   return (
     <s-page heading="日別一覧">
@@ -752,14 +750,14 @@ function DailyListView({
           <s-stack gap="small">
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
               <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <s-text type="strong" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {displayName}
                 </s-text>
               </s-box>
               <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
                 <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
                   <s-button
-                    kind="secondary"
+                    variant="secondary"
                     style={{ width: "100%", maxInlineSize: "100%" }}
                     onClick={() => {
                       setMonthMenuOpen(false);
@@ -771,7 +769,7 @@ function DailyListView({
                 </s-box>
                 <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
                   <s-button
-                    kind="secondary"
+                    variant="secondary"
                     style={{ width: "100%", maxInlineSize: "100%" }}
                     onClick={() => {
                       setYearMenuOpen(false);
@@ -791,14 +789,14 @@ function DailyListView({
                   style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
                 >
                   {listAvailableYears.length === 0 ? (
-                    <s-text tone="subdued" fontSize="small">
+                    <s-text type="small" color="subdued">
                       選べる年がありません
                     </s-text>
                   ) : (
                     listAvailableYears.map((y) => (
                       <s-button
                         key={`dl-year-${y}`}
-                        kind={y === listYear ? "primary" : "secondary"}
+                        variant={y === listYear ? "primary" : "secondary"}
                         style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                         onClick={() => {
                           setListYear(y);
@@ -820,18 +818,18 @@ function DailyListView({
                   style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
                 >
                   {monthsLoading ? (
-                    <s-text tone="subdued" fontSize="small">
+                    <s-text type="small" color="subdued">
                       {INLINE_LOADING_TEXT}
                     </s-text>
                   ) : listAvailableMonthsForYear.length === 0 ? (
-                    <s-text tone="subdued" fontSize="small">
+                    <s-text type="small" color="subdued">
                       選べる月がありません
                     </s-text>
                   ) : (
                     listAvailableMonthsForYear.map((m) => (
                       <s-button
                         key={`dl-month-${m}`}
-                        kind={m === listMonth ? "primary" : "secondary"}
+                        variant={m === listMonth ? "primary" : "secondary"}
                         style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                         onClick={() => {
                           setListMonth(m);
@@ -856,7 +854,7 @@ function DailyListView({
               {/* 読み込み中・失敗の案内は全画面共通（見出しのすぐ下・青い帯ひとつ。T 2026-11-24） */}
               <LoadingNotice loading={loading} error={err} onRetry={() => setReloadKey((n) => n + 1)} />
               {loading || err ? null : rows.length === 0 ? (
-                <s-text tone="subdued" size="small">
+                <s-text type="small" color="subdued">
                   表示できる日がありません
                 </s-text>
               ) : (
@@ -888,7 +886,7 @@ function DailyListView({
           }}
         >
           <s-stack direction="inline" justifyContent="start" alignItems="center" gap="base">
-            <s-button kind="secondary" onClick={onBack}>
+            <s-button variant="secondary" onClick={onBack}>
               戻る
             </s-button>
           </s-stack>
@@ -941,7 +939,7 @@ function HistoryDailyDetailView({
       if (scope === "single" && !sessionGid) {
         setData(null);
         setLoadedHistoryParamsKey(null);
-        setError("ロケーションを取得できませんでした。POSで店舗を選択してから開き直してください。");
+        setError("POS の店舗が分かりません。店舗を選び直してから開き直してください。");
         return;
       }
       const result = await getDailySummary({ targetDate: viewDate, locationIds: locationIdsForApi });
@@ -1075,21 +1073,21 @@ function HistoryDailyDetailView({
           >
             <s-stack gap="small">
               {locLoadErr ? (
-                <s-text tone="critical" size="small">
+                <s-text type="small" tone="critical">
                   {locLoadErr}
                 </s-text>
               ) : null}
               <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" inlineSize="100%">
                 <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                  <s-stack gap="extraSmall">
-                    <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <s-stack gap="small-300">
+                    <s-text type="strong" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {sessionLocationName || INLINE_LOADING_TEXT}
                     </s-text>
-                    <s-text tone="subdued" size="small">
+                    <s-text type="small" color="subdued">
                       日次（履歴） {formatYmdSlash(viewDate)}
                     </s-text>
                     {scope === "all" ? (
-                      <s-text tone="subdued" size="small">
+                      <s-text type="small" color="subdued">
                         表示: 全店舗
                       </s-text>
                     ) : null}
@@ -1106,11 +1104,11 @@ function HistoryDailyDetailView({
               </s-stack>
 
               <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
-                <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setViewDate(addDays(viewDate, -1))}>
+                <s-button variant="secondary" disabled={!canPrevDay} onClick={() => setViewDate(addDays(viewDate, -1))}>
                   前日
                 </s-button>
                 <s-text type="strong">{formatYmdWithWeekday(viewDate)}</s-text>
-                <s-button kind="secondary" disabled={!canNextDay} onClick={() => setViewDate(addDays(viewDate, 1))}>
+                <s-button variant="secondary" disabled={!canNextDay} onClick={() => setViewDate(addDays(viewDate, 1))}>
                   翌日
                 </s-button>
               </s-stack>
@@ -1131,22 +1129,18 @@ function HistoryDailyDetailView({
                 <LoadingNotice loading={historyShowLoading} error={error} onRetry={loadData} />
 
                 {kpiHidden ? (
-                  <s-banner tone="info">
-                    表示する数字の項目がすべてOFFです。管理画面の売上サマリー設定で、実績や件数などをONにしてください。
-                  </s-banner>
+                  <s-banner tone="info" heading="出す数字がひとつもありません。管理画面の「売上サマリー設定」で、実績・注文数などをオンにしてください。" />
                 ) : null}
 
                 {layoutEmpty ? (
-                  <s-banner tone="info">
-                    店舗ごとの一覧と店舗合計の両方が非表示です。管理画面で「ロケーション行を表示」または「店舗合計を表示」をONにしてください。
-                  </s-banner>
+                  <s-banner tone="info" heading="店ごとの行と店舗の合計が、どちらも出ない設定です。管理画面の「売上サマリー設定」で「店ごとの行を出す」か「店舗の合計を出す」をオンにしてください。" />
                 ) : null}
 
                 {!loading && data && historyDataFresh && (
                   <>
                     {rows.length === 0 && channelRowsForUi.length === 0 ? (
-                      <s-text tone="subdued" size="small">
-                        売上サマリーが有効な店舗がありません。管理画面でロケーション設定を確認してください。
+                      <s-text type="small" color="subdued">
+                        売上サマリーを出す店舗がありません。管理画面の店舗の設定を確かめてください。
                       </s-text>
                     ) : (
                       <>
@@ -1193,14 +1187,15 @@ function HistoryDailyDetailView({
           >
             {/* POS Stock: FixedFooterNavBar centerAlignWithButtons と同型（space-between 3 子） */}
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
-              <s-button kind="secondary" onClick={loadData} disabled={loading}>
-                更新
+              {/* 日別一覧から開いた日: 左下は一覧へ戻る「戻る」（T のルール: 一覧へ戻るボタンは左下の「戻る」） */}
+              <s-button variant="secondary" onClick={onNavigateToDailyList}>
+                戻る
               </s-button>
               {scope === "single" && sessionRow?.footfallReportingEnabled ? (
                 <s-box style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
-                  <s-stack gap="extraSmall" alignItems="center">
+                  <s-stack gap="small-300" alignItems="center">
                     <s-button
-                      kind="secondary"
+                      variant="secondary"
                       command="--show"
                       commandFor={FOOTFALL_MODAL_ID_HISTORY}
                       onClick={() => setFootfallErr("")}
@@ -1210,7 +1205,7 @@ function HistoryDailyDetailView({
                         : "入店数報告"}
                     </s-button>
                     {footfallErr ? (
-                      <s-text tone="critical" size="small">
+                      <s-text type="small" tone="critical">
                         {footfallErr}
                       </s-text>
                     ) : null}
@@ -1219,8 +1214,8 @@ function HistoryDailyDetailView({
               ) : (
                 <s-box />
               )}
-              <s-button kind="secondary" onClick={onNavigateToDailyList}>
-                日別一覧
+              <s-button variant="secondary" onClick={loadData} disabled={loading}>
+                更新
               </s-button>
             </s-stack>
           </s-box>
@@ -1438,7 +1433,7 @@ function SalesSummaryModal() {
         setData(null);
         setDailyMonthPeriod(null);
         setLoadedSummaryParamsKey(null);
-        setError("ロケーションを取得できませんでした。POSで店舗を選択してから開き直してください。");
+        setError("POS の店舗が分かりません。店舗を選び直してから開き直してください。");
         return;
       }
       let result;
@@ -1792,18 +1787,18 @@ function SalesSummaryModal() {
           >
             <s-stack gap="small">
               {locLoadErr ? (
-                <s-text tone="critical" size="small">
+                <s-text type="small" tone="critical">
                   {locLoadErr}
                 </s-text>
               ) : null}
               <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" inlineSize="100%">
                 <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}>
-                  <s-stack gap="extraSmall">
-                    <s-text emphasis="bold" size="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <s-stack gap="small-300">
+                    <s-text type="strong" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {sessionLocationName || INLINE_LOADING_TEXT}
                     </s-text>
                     {scope === "all" ? (
-                      <s-text tone="subdued" size="small">
+                      <s-text type="small" color="subdued">
                         表示: 全店舗
                       </s-text>
                     ) : null}
@@ -1872,11 +1867,11 @@ function SalesSummaryModal() {
 
               {grain === "daily" ? (
                 <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%" }}>
-                  <s-button kind="secondary" disabled={!canPrevDay} onClick={() => setTargetDate(addDays(targetDate, -1))}>
+                  <s-button variant="secondary" disabled={!canPrevDay} onClick={() => setTargetDate(addDays(targetDate, -1))}>
                     前日
                   </s-button>
                   <s-text type="strong">{formatYmdWithWeekday(targetDate)}</s-text>
-                  <s-button kind="secondary" disabled={!canNextDay} onClick={() => setTargetDate(addDays(targetDate, 1))}>
+                  <s-button variant="secondary" disabled={!canNextDay} onClick={() => setTargetDate(addDays(targetDate, 1))}>
                     翌日
                   </s-button>
                 </s-stack>
@@ -1884,14 +1879,14 @@ function SalesSummaryModal() {
                 <s-stack gap="small">
                   <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
                     <s-box style={{ flex: "0 0 auto" }}>
-                      <s-text tone="subdued" size="small">
+                      <s-text type="small" color="subdued">
                         対象月
                       </s-text>
                     </s-box>
                     <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
                       <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setMonthMenuOpen(false);
@@ -1903,7 +1898,7 @@ function SalesSummaryModal() {
                       </s-box>
                       <s-box style={{ inlineSize: "5.25rem", flex: "0 0 5.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setYearMenuOpen(false);
@@ -1925,7 +1920,7 @@ function SalesSummaryModal() {
                         {availableYears.map((y) => (
                           <s-button
                             key={`y-${y}`}
-                            kind={y === selectedYear ? "primary" : "secondary"}
+                            variant={y === selectedYear ? "primary" : "secondary"}
                             style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               setSelectedYear(y);
@@ -1946,14 +1941,14 @@ function SalesSummaryModal() {
                         style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}
                       >
                         {monthsLoading ? (
-                          <s-text tone="subdued" size="small">
+                          <s-text type="small" color="subdued">
                             {INLINE_LOADING_TEXT}
                           </s-text>
                         ) : (
                           availableMonthsForYear.map((m) => (
                             <s-button
                               key={`m-${m}`}
-                              kind={m === selectedMonth ? "primary" : "secondary"}
+                              variant={m === selectedMonth ? "primary" : "secondary"}
                               style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                               onClick={() => {
                                 setSelectedMonth(m);
@@ -1972,14 +1967,14 @@ function SalesSummaryModal() {
                 <s-stack gap="small">
                   <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
                     <s-box style={{ flex: "0 0 auto" }}>
-                      <s-text tone="subdued" size="small">
+                      <s-text type="small" color="subdued">
                         開始日
                       </s-text>
                     </s-box>
                     <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
                       <s-box style={{ inlineSize: "4.75rem", flex: "0 0 4.75rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodStartMonthMenuOpen(false);
@@ -1995,7 +1990,7 @@ function SalesSummaryModal() {
                       </s-box>
                       <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodStartYearMenuOpen(false);
@@ -2011,7 +2006,7 @@ function SalesSummaryModal() {
                       </s-box>
                       <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodStartYearMenuOpen(false);
@@ -2033,7 +2028,7 @@ function SalesSummaryModal() {
                         {availableYears.map((y) => (
                           <s-button
                             key={`ps-y-${y}`}
-                            kind={y === periodStartYear ? "primary" : "secondary"}
+                            variant={y === periodStartYear ? "primary" : "secondary"}
                             style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               setPeriodStartYear(y);
@@ -2050,14 +2045,14 @@ function SalesSummaryModal() {
                     <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                       <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
                         {monthsLoading ? (
-                          <s-text tone="subdued" size="small">
+                          <s-text type="small" color="subdued">
                             {INLINE_LOADING_TEXT}
                           </s-text>
                         ) : (
                           Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                             <s-button
                               key={`ps-m-${m}`}
-                              kind={m === periodStartMonth ? "primary" : "secondary"}
+                              variant={m === periodStartMonth ? "primary" : "secondary"}
                               style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                               onClick={() => {
                                 setPeriodStartMonth(m);
@@ -2077,7 +2072,7 @@ function SalesSummaryModal() {
                         {Array.from({ length: daysInMonth(periodStartYear, periodStartMonth) }, (_, i) => i + 1).map((d) => (
                           <s-button
                             key={`ps-d-${d}`}
-                            kind={d === periodStartDay ? "primary" : "secondary"}
+                            variant={d === periodStartDay ? "primary" : "secondary"}
                             style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               setPeriodStartDay(d);
@@ -2093,14 +2088,14 @@ function SalesSummaryModal() {
 
                   <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
                     <s-box style={{ flex: "0 0 auto" }}>
-                      <s-text tone="subdued" size="small">
+                      <s-text type="small" color="subdued">
                         終了日
                       </s-text>
                     </s-box>
                     <s-stack direction="inline" gap="small" alignItems="center" justifyContent="end" style={{ flex: "0 0 auto" }}>
                       <s-box style={{ inlineSize: "4.75rem", flex: "0 0 4.75rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodEndMonthMenuOpen(false);
@@ -2116,7 +2111,7 @@ function SalesSummaryModal() {
                       </s-box>
                       <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodEndYearMenuOpen(false);
@@ -2132,7 +2127,7 @@ function SalesSummaryModal() {
                       </s-box>
                       <s-box style={{ inlineSize: "4.25rem", flex: "0 0 4.25rem" }}>
                         <s-button
-                          kind="secondary"
+                          variant="secondary"
                           style={{ width: "100%", maxInlineSize: "100%" }}
                           onClick={() => {
                             setPeriodEndYearMenuOpen(false);
@@ -2154,7 +2149,7 @@ function SalesSummaryModal() {
                         {availableYears.map((y) => (
                           <s-button
                             key={`pe-y-${y}`}
-                            kind={y === periodEndYear ? "primary" : "secondary"}
+                            variant={y === periodEndYear ? "primary" : "secondary"}
                             style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               setPeriodEndYear(y);
@@ -2171,14 +2166,14 @@ function SalesSummaryModal() {
                     <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
                       <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap", width: "100%", alignItems: "center" }}>
                         {monthsLoading ? (
-                          <s-text tone="subdued" size="small">
+                          <s-text type="small" color="subdued">
                             {INLINE_LOADING_TEXT}
                           </s-text>
                         ) : (
                           Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                             <s-button
                               key={`pe-m-${m}`}
-                              kind={m === periodEndMonth ? "primary" : "secondary"}
+                              variant={m === periodEndMonth ? "primary" : "secondary"}
                               style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                               onClick={() => {
                                 setPeriodEndMonth(m);
@@ -2198,7 +2193,7 @@ function SalesSummaryModal() {
                         {Array.from({ length: daysInMonth(periodEndYear, periodEndMonth) }, (_, i) => i + 1).map((d) => (
                           <s-button
                             key={`pe-d-${d}`}
-                            kind={d === periodEndDay ? "primary" : "secondary"}
+                            variant={d === periodEndDay ? "primary" : "secondary"}
                             style={{ flex: "0 0 auto", width: "auto", maxInlineSize: "none" }}
                             onClick={() => {
                               setPeriodEndDay(d);
@@ -2213,21 +2208,21 @@ function SalesSummaryModal() {
                   ) : null}
                   <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small" style={{ width: "100%", flexWrap: "wrap" }}>
                     <s-stack direction="inline" gap="small" style={{ flexWrap: "wrap" }}>
-                      <s-button kind="secondary" onClick={() => applyPeriodPreset("thisWeek")}>
+                      <s-button variant="secondary" onClick={() => applyPeriodPreset("thisWeek")}>
                         今週
                       </s-button>
-                      <s-button kind="secondary" onClick={() => applyPeriodPreset("lastWeek")}>
+                      <s-button variant="secondary" onClick={() => applyPeriodPreset("lastWeek")}>
                         先週
                       </s-button>
-                      <s-button kind="secondary" onClick={() => applyPeriodPreset("thisMonth")}>
+                      <s-button variant="secondary" onClick={() => applyPeriodPreset("thisMonth")}>
                         今月
                       </s-button>
-                      <s-button kind="secondary" onClick={() => applyPeriodPreset("lastMonth")}>
+                      <s-button variant="secondary" onClick={() => applyPeriodPreset("lastMonth")}>
                         先月
                       </s-button>
                     </s-stack>
                     <s-button
-                      kind="primary"
+                      variant="primary"
                       disabled={!periodDirty || periodRangeInvalid}
                       onClick={() => {
                         setPeriodAppliedFrom(periodDateFrom);
@@ -2272,22 +2267,18 @@ function SalesSummaryModal() {
                 ) : null}
 
                 {kpiHidden ? (
-                  <s-banner tone="info">
-                    表示する数字の項目がすべてOFFです。管理画面の売上サマリー設定で、実績や件数などをONにしてください。
-                  </s-banner>
+                  <s-banner tone="info" heading="出す数字がひとつもありません。管理画面の「売上サマリー設定」で、実績・注文数などをオンにしてください。" />
                 ) : null}
 
                 {layoutEmpty ? (
-                  <s-banner tone="info">
-                    店舗ごとの一覧と店舗合計の両方が非表示です。管理画面で「ロケーション行を表示」または「店舗合計を表示」をONにしてください。
-                  </s-banner>
+                  <s-banner tone="info" heading="店ごとの行と店舗の合計が、どちらも出ない設定です。管理画面の「売上サマリー設定」で「店ごとの行を出す」か「店舗の合計を出す」をオンにしてください。" />
                 ) : null}
 
                 {!loading && data && summaryDataFresh && (
                   <>
                     {rows.length === 0 && channelRowsForUi.length === 0 ? (
-                      <s-text tone="subdued" size="small">
-                        売上サマリーが有効な店舗がありません。管理画面でロケーション設定を確認してください。
+                      <s-text type="small" color="subdued">
+                        売上サマリーを出す店舗がありません。管理画面の店舗の設定を確かめてください。
                       </s-text>
                     ) : (
                       <>
@@ -2345,14 +2336,14 @@ function SalesSummaryModal() {
           >
             {/* POS Stock: FixedFooterNavBar centerAlignWithButtons と同型（space-between 3 子） */}
             <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base" style={{ width: "100%" }}>
-              <s-button kind="secondary" onClick={loadData} disabled={loading || refreshing}>
+              <s-button variant="secondary" onClick={loadData} disabled={loading || refreshing}>
                 更新
               </s-button>
               {showFooterFootfallButton ? (
                 <s-box style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
-                  <s-stack gap="extraSmall" alignItems="center">
+                  <s-stack gap="small-300" alignItems="center">
                     <s-button
-                      kind="secondary"
+                      variant="secondary"
                       command="--show"
                       commandFor={FOOTFALL_MODAL_ID_MAIN}
                       onClick={() => setFootfallErr("")}
@@ -2362,7 +2353,7 @@ function SalesSummaryModal() {
                         : "入店数報告"}
                     </s-button>
                     {footfallErr ? (
-                      <s-text tone="critical" size="small">
+                      <s-text type="small" tone="critical">
                         {footfallErr}
                       </s-text>
                     ) : null}
@@ -2371,7 +2362,7 @@ function SalesSummaryModal() {
               ) : (
                 <s-box />
               )}
-              <s-button kind="secondary" disabled={!sessionGid} onClick={openDailyList}>
+              <s-button variant="secondary" disabled={!sessionGid} onClick={openDailyList}>
                 日別一覧
               </s-button>
             </s-stack>

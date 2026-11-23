@@ -152,17 +152,19 @@ export function VoucherCartScreen({ onOpenList }) {
             ) : null}
             {current != null ? (
               <s-box paddingBlockStart="base">
-                <s-button tone="critical" onClick={remove} disabled={saving}>
-                  額面を外す
-                </s-button>
+                <s-stack direction="inline" justifyContent="end">
+                  <s-button variant="secondary" tone="critical" onClick={remove} disabled={saving}>
+                    額面を外す
+                  </s-button>
+                </s-stack>
               </s-box>
             ) : null}
 
             <FormHeading>会計のあとで登録する</FormHeading>
-            <s-text color="subdued">会計が終わった注文に、あとから商品券の額面を登録します。</s-text>
-            <s-box paddingBlockStart="small">
-              <s-button onClick={onOpenList} disabled={saving}>注文の一覧を開く</s-button>
-            </s-box>
+            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
+              <s-text type="small" color="subdued">会計が終わった注文に、あとから登録します。</s-text>
+              <s-button variant="secondary" onClick={onOpenList} disabled={saving}>注文一覧</s-button>
+            </s-stack>
           </s-stack>
         </s-box>
       </s-scroll-box>

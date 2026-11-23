@@ -564,9 +564,11 @@ export function OrderDayListScreen({
               {noticeError ? (
                 <s-stack gap="small-300">
                   <s-banner tone="critical" heading={storeFacingNotice(noticeError)} />
-                  <s-button variant="secondary" onClick={onDismissNotice}>
-                    閉じる
-                  </s-button>
+                  <s-stack direction="inline" justifyContent="end">
+                    <s-button variant="secondary" onClick={onDismissNotice}>
+                      閉じる
+                    </s-button>
+                  </s-stack>
                 </s-stack>
               ) : null}
               {/* 読み込み中・失敗の案内は全画面共通（見出しのすぐ下・青い帯ひとつ。T 2026-11-24）。店の確認と一覧の読み込みは同じ帯 */}

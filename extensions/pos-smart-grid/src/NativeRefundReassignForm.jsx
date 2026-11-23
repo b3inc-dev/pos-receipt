@@ -329,7 +329,7 @@ export function NativeRefundReassignForm({
               <FormHeading>変更後の返金方法</FormHeading>
               <s-stack gap="small">
                 {refundMethods.length === 0 ? (
-                  <s-text tone={refundMethodsState === "loading" ? "subdued" : "critical"} type="small">
+                  <s-text tone={refundMethodsState === "loading" ? "auto" : "critical"} type="small">
                     {methodsMessage}
                   </s-text>
                 ) : !split ? (
@@ -363,9 +363,11 @@ export function NativeRefundReassignForm({
                             onChange={(v) => setRow(i, { method: v })}
                           />
                           {!isLast ? (
-                            <s-button variant="secondary" onClick={() => removeRow(i)} disabled={loading}>
-                              この行を消す
-                            </s-button>
+                            <s-stack direction="inline" justifyContent="end">
+                              <s-button variant="secondary" onClick={() => removeRow(i)} disabled={loading}>
+                                この行を消す
+                              </s-button>
+                            </s-stack>
                           ) : null}
                         </s-stack>
                       </s-box>
@@ -384,9 +386,11 @@ export function NativeRefundReassignForm({
                       </s-button>
                     </s-stack>
                   ) : (
-                    <s-button variant="secondary" onClick={startSplit} disabled={loading}>
-                      分割
-                    </s-button>
+                    <s-stack direction="inline" gap="small">
+                      <s-button variant="secondary" onClick={startSplit} disabled={loading}>
+                        分割
+                      </s-button>
+                    </s-stack>
                   )
                 ) : null}
               </s-stack>
@@ -481,13 +485,17 @@ export function NativeRefundReassignForm({
               </s-text>
             ) : null}
             {error ? <s-text tone="critical">{error}</s-text> : null}
-            <s-stack gap="small">
-              {onOtherRegistration ? (
-                <s-button variant="secondary" onClick={onOtherRegistration} disabled={loading}>
-                  レシートの現金を直す
-                </s-button>
-              ) : null}
-            </s-stack>
+            {onOtherRegistration ? (
+              <s-stack gap="none">
+                <FormHeading>ほかの登録</FormHeading>
+                <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
+                  <s-text type="small" color="subdued">レシートの現金だけを直すとき</s-text>
+                  <s-button variant="secondary" onClick={onOtherRegistration} disabled={loading}>
+                    レシートの現金を直す
+                  </s-button>
+                </s-stack>
+              </s-stack>
+            ) : null}
           </s-stack>
         </s-box>
       </s-scroll-box>

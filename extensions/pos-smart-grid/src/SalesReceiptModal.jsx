@@ -9,6 +9,9 @@ import { printSalesReceipt, printResultMessage, PRINT_OUTCOME } from "../../comm
 import { toUserMessage } from "../../common/errorMessage.js";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { LoadingPage } from "./LoadingNotice.jsx";
+import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
+import { PosChoiceField } from "./PosChoiceField.jsx";
+import { FormHeading, FormLine, yen } from "./AdjustFormParts.jsx";
 
 const STORAGE_KEY = "pos_sales_receipt_order_id";
 
@@ -96,75 +99,119 @@ function SalesReceiptModal() {
     );
   }
 
+  const backToList = () => {
+    setSelectedOrder(null);
+    setPrintResult(null);
+    setError("");
+    setStep("day_list");
+  };
+
+  const orderLine = (
+    <>
+      <FormHeading>取引</FormHeading>
+      <FormLine
+        label={selectedOrder?.orderName || "注文"}
+        value={selectedOrder?.totalPrice?.amount != null ? yen(selectedOrder.totalPrice.amount) : ""}
+        strong
+      />
+      {selectedOrder?.transactionDateTime ? (
+        <s-text type="small" color="subdued">{selectedOrder.transactionDateTime}</s-text>
+      ) : null}
+    </>
+  );
+
+  // 完了: 上に結果、下に固定で「閉じる」（左）。もう一度印刷するときは右の「もう一度印刷」
   if (step === "done") {
+    const dialog = printResult?.outcome === PRINT_OUTCOME.DIALOG_PRESENTED;
     return (
-      <s-page heading="プリンタに送りました">
-        <s-box padding="base">
-          <s-stack gap="base">
-            <s-text fontWeight="bold">
-              {printResult?.outcome === PRINT_OUTCOME.DIALOG_PRESENTED
-                ? "印刷の画面を開きました"
-                : `${gift ? "ギフト" : ""}レシートをプリンタに送りました`}
-            </s-text>
-            <s-text tone="subdued">
-              {selectedOrder?.orderName || selectedOrder?.orderId}
-            </s-text>
-            <s-text tone="subdued" fontSize="small">
-              {printResultMessage(printResult)}
-            </s-text>
-            <s-button
-              variant="primary"
-              onClick={() => {
-                setSelectedOrder(null);
-                setPrintResult(null);
-                setStep("day_list");
-              }}
-            >
-              別の注文を印刷する
-            </s-button>
-          </s-stack>
-        </s-box>
+      <s-page heading="印刷完了">
+        <s-scroll-box>
+          <s-box padding="base">
+            <s-stack gap="none">
+              <s-banner
+                tone="success"
+                heading={dialog ? "印刷の画面を開きました" : `${gift ? "ギフトレシート" : "販売レシート"}をプリンタに送りました`}
+              />
+              {orderLine}
+              <FormLine label="種類" value={gift ? "ギフトレシート（金額なし）" : "販売レシート"} />
+              {printResultMessage(printResult) ? (
+                <s-box paddingBlockStart="base">
+                  <s-text type="small" color="subdued">{printResultMessage(printResult)}</s-text>
+                </s-box>
+              ) : null}
+              {error ? (
+                <s-box paddingBlockStart="base">
+                  <s-text tone="critical">{error}</s-text>
+                </s-box>
+              ) : null}
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="閉じる"
+          onLeft={backToList}
+          rightLabel="もう一度印刷"
+          onRight={() => handlePrint(false)}
+          rightDisabled={loading}
+          rightLoading={loading}
+        />
       </s-page>
     );
   }
 
+  // 印刷の前: 種類を選んで、右下の「印刷する」
   return (
     <s-page heading="レシートを印刷">
       <s-scroll-box>
         <s-box padding="base">
-          <s-stack gap="base">
-            <s-text fontWeight="bold">{selectedOrder?.orderName || "注文"}</s-text>
-            <s-text tone="subdued">
-              {gift ? "ギフト用に注文番号・品名・数量を印刷します。" : "販売レシートでは設定に応じて金額・注文属性・商品属性を印刷します。"}
-            </s-text>
-            <s-button disabled={loading} onClick={() => {
-              setGift(!gift);
-              setPrintResult(null);
-              setError("");
-            }}>
-              {gift ? "通常の販売レシートに切り替え" : "金額なしのギフトレシートに切り替え"}
-            </s-button>
-            {error ? <s-banner tone="critical" heading={error} /> : null}
-            <s-button variant="primary" onClick={() => handlePrint(false)} disabled={loading}>
-              {loading ? "印刷中…" : `${gift ? "ギフト" : ""}レシートを印刷する`}
-            </s-button>
-            {printResult?.canUseDialog ? (
-              <s-button onClick={() => handlePrint(true)} disabled={loading}>
-                ほかのプリンタを選んで印刷する
-              </s-button>
-            ) : null}
-            <s-button
-              onClick={() => {
-                setSelectedOrder(null);
+          <s-stack gap="none">
+            {orderLine}
+            <FormHeading>レシートの種類</FormHeading>
+            <PosChoiceField
+              value={gift ? "gift" : "sales"}
+              options={[
+                { value: "sales", label: "販売レシート" },
+                { value: "gift", label: "ギフトレシート（金額なし）" },
+              ]}
+              onChange={(v) => {
+                setGift(v === "gift");
+                setPrintResult(null);
                 setError("");
-                setStep("day_list");
               }}
-            >
-              戻る
-            </s-button>
+            />
+            <s-box paddingBlockStart="small">
+              <s-text type="small" color="subdued">
+                {gift ? "注文番号・品名・数量を印刷します（金額は出しません）。" : "管理画面の設定に合わせて、金額・注文の項目・商品の項目を印刷します。"}
+              </s-text>
+            </s-box>
+            {error ? (
+              <s-box paddingBlockStart="base">
+                <s-stack gap="small">
+                  <s-text tone="critical">{error}</s-text>
+                  {printResult?.canUseDialog ? (
+                    <s-stack direction="inline" justifyContent="end">
+                      <s-button variant="secondary" onClick={() => handlePrint(true)} disabled={loading}>
+                        ほかのプリンタで印刷
+                      </s-button>
+                    </s-stack>
+                  ) : null}
+                </s-stack>
+              </s-box>
+            ) : null}
           </s-stack>
         </s-box>
       </s-scroll-box>
+      <FixedFooterNavBar
+        centerAlignWithButtons
+        leftLabel="戻る"
+        onLeft={backToList}
+        leftDisabled={loading}
+        rightLabel="印刷する"
+        onRight={() => handlePrint(false)}
+        rightDisabled={loading}
+        rightLoading={loading}
+      />
     </s-page>
   );
 }

@@ -43,15 +43,15 @@ export function FixedFooterNavBar({
       {centerAlignWithButtons ? (
         <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
           <s-button tone={leftTone} disabled={leftDisabled} loading={leftLoading} onClick={onLeft}>{leftLabel}</s-button>
-          {hasCenter ? (typeof summaryCenter === "string" ? <s-text size="small" tone="subdued">{summaryCenter}</s-text> : summaryCenter) : hasMiddle ? <s-button tone={middleTone} disabled={middleDisabled} loading={middleLoading} onClick={onMiddle} command={middleCommand} commandFor={middleCommandFor}>{middleLabel}</s-button> : <s-box />}
+          {hasCenter ? (typeof summaryCenter === "string" ? <s-text type="small" color="subdued">{summaryCenter}</s-text> : summaryCenter) : hasMiddle ? <s-button tone={middleTone} disabled={middleDisabled} loading={middleLoading} onClick={onMiddle} command={middleCommand} commandFor={middleCommandFor}>{middleLabel}</s-button> : <s-box />}
           {rightLabel && typeof onRight === "function" ? <s-button tone={rightTone} disabled={rightDisabled} loading={rightLoading} onClick={onRight} command={rightCommand} commandFor={rightCommandFor}>{rightLabel}</s-button> : <s-box />}
         </s-stack>
       ) : (
         <s-stack gap="base">
           <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
-            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}><s-text size="small" tone="subdued">{summaryLeft ?? ""}</s-text></s-box>
-            {hasCenter ? <s-box style={{ flex: "1 1 0", minInlineSize: 0, textAlign: "center" }}>{typeof summaryCenter === "string" ? <s-text size="small" tone="subdued">{summaryCenter}</s-text> : summaryCenter}</s-box> : <s-box style={{ flex: "1 1 0", minInlineSize: 0 }} />}
-            <s-box style={{ flex: "1 1 0", minInlineSize: 0, textAlign: "right" }}><s-text size="small" tone="subdued">{summaryRight ?? ""}</s-text></s-box>
+            <s-box style={{ flex: "1 1 0", minInlineSize: 0 }}><s-text type="small" color="subdued">{summaryLeft ?? ""}</s-text></s-box>
+            {hasCenter ? <s-box style={{ flex: "1 1 0", minInlineSize: 0, textAlign: "center" }}>{typeof summaryCenter === "string" ? <s-text type="small" color="subdued">{summaryCenter}</s-text> : summaryCenter}</s-box> : <s-box style={{ flex: "1 1 0", minInlineSize: 0 }} />}
+            <s-box style={{ flex: "1 1 0", minInlineSize: 0, textAlign: "right" }}><s-text type="small" color="subdued">{summaryRight ?? ""}</s-text></s-box>
           </s-stack>
           <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
             <s-button tone={leftTone} disabled={leftDisabled} loading={leftLoading} onClick={onLeft}>{leftLabel}</s-button>

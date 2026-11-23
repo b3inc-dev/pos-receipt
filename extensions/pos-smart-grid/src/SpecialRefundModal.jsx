@@ -582,27 +582,29 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
   }
 
   if (bootstrapError && fromOrderEntry) {
+    // 取引詳細から開けなかったとき: 理由を 1 文、下に固定で「閉じる」（左）だけ
     return (
       <s-page heading={pageHeading}>
-        <s-box padding="base">
-          <s-stack gap="base">
-            <s-text tone="critical">{bootstrapError}</s-text>
-            <s-text type="small" color="subdued">
-              取引詳細から開けませんでした。アプリの権限更新後に再度お試しください。
-            </s-text>
-            <s-button
-              variant="primary"
-              onClick={() => {
-                if (tryDismissModal()) return;
-                setBootstrapError("");
-                setFromOrderEntry(false);
-                setStep("day_list");
-              }}
-            >
-              閉じる
-            </s-button>
-          </s-stack>
-        </s-box>
+        <s-scroll-box>
+          <s-box padding="base">
+            <s-stack gap="small">
+              <s-banner tone="critical" heading={bootstrapError} />
+              <s-text type="small" color="subdued">
+                注文を開けませんでした。閉じてから、もう一度開いてください。
+              </s-text>
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="閉じる"
+          onLeft={() => {
+            if (tryDismissModal()) return;
+            setBootstrapError("");
+            setFromOrderEntry(false);
+            setStep("day_list");
+          }}
+        />
       </s-page>
     );
   }
@@ -963,7 +965,7 @@ function OrderDetailView({
 
         {!voucherAllowed ? (
           <s-box padding="small">
-            <s-text tone="subdued">商品券釣銭登録は、管理画面の商品券設定で「手動調整」がオフのため使えません。</s-text>
+            <s-text color="subdued">商品券釣銭登録は、管理画面の商品券設定で「手動調整」がオフのため使えません。</s-text>
           </s-box>
         ) : null}
 
@@ -1035,7 +1037,7 @@ function LegacyDecisionPanel({ event, decision, onAskConfirm, loading }) {
           Shopify の管理画面でこの注文の返金を確かめて、下から選んでください。どれを選んでも Shopify の返金は実行しません。
         </s-text>
         {candidates.map((c) => (
-          <s-stack key={c.refundId} gap="extraSmall">
+          <s-stack key={c.refundId} gap="small-300">
             <s-text type="small">
               ¥{Number(c.amount ?? 0).toLocaleString()} ・
               {` ${localDateTimeLabel(c.createdAt)}`}
@@ -1132,7 +1134,7 @@ function EventCard({ event, readOnlyHint = "", onEdit, onAskConfirm, legacyDecis
         <AdjustmentStatusNote event={event} />
 
         {!readOnlyHint && (canRecheckShopifyRefund(event) || canRecheckLegacyShopifyRefund(event)) ? (
-          <s-stack gap="extraSmall">
+          <s-stack gap="small-300">
             <s-text type="small" color="subdued">
               先に Shopify の管理画面でこの注文に返金があるかを確かめてから押してください。登録し直さないでください。
             </s-text>
@@ -2073,7 +2075,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
 // ──────────────────────────────────────────────
 function Row({ label, value }) {
   return (
-    <s-stack direction="horizontal" align="space-between">
+    <s-stack direction="inline" justifyContent="space-between">
       <s-text color="subdued">{label}</s-text>
       <s-text>{value}</s-text>
     </s-stack>

@@ -18,7 +18,7 @@ export function PosChoiceField({ label, value, options, onChange }) {
   };
   return (
     <s-stack gap="small">
-      {label ? <s-text emphasis="bold">{label}</s-text> : null}
+      {label ? <s-text type="strong">{label}</s-text> : null}
       <s-choice-list values={value != null && value !== "" ? [String(value)] : []} onChange={handleChange}>
         {list.map((o) => (
           <s-choice key={o.value} value={String(o.value)}>
