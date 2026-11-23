@@ -677,6 +677,44 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
     );
   }
 
+  if (step === "form_refund" && !refundFormOther && nativeRefunds === null) {
+    // 純正の返金を読めなかったとき: 手で金額を入れる形に落とさず止める（2 回数えないため。見直し #106 P2-3）
+    return (
+      <s-page heading={pageHeading}>
+        <s-scroll-box>
+          <s-box padding="base">
+            <s-stack gap="small">
+              <s-banner tone="critical" heading="この注文の返金を読めませんでした" />
+              <s-text type="small" color="subdued">
+                少し待ってから「再読み込み」を押してください。
+              </s-text>
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+        <FixedFooterNavBar
+          centerAlignWithButtons
+          leftLabel="戻る"
+          onLeft={() => {
+            if (fromOrderEntry && tryDismissModal()) return;
+            setStep("order_detail");
+          }}
+          rightLabel="再読み込み"
+          rightTone="success"
+          rightLoading={loading}
+          rightDisabled={loading}
+          onRight={async () => {
+            setLoading(true);
+            try {
+              await refreshEvents();
+            } finally {
+              setLoading(false);
+            }
+          }}
+        />
+      </s-page>
+    );
+  }
+
   if (step === "form_refund" && !refundFormOther && Array.isArray(nativeRefunds) && nativeRefunds.length > 0) {
     // 純正で返金した注文: 返金を選び、金額はそのまま手段だけ付け替える（手で金額を入れる形は出さない。二重に数えないため）
     const receiptAllowed = !allowedEventTypes || allowedEventTypes.includes("receipt_cash_adjustment");
