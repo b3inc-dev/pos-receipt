@@ -37,23 +37,38 @@ function cartHasItems() {
 
 function VoucherModal() {
   // カートに商品があるときだけ、管理画面の「会計の前に額面を入れる」（初めはオフ）を確かめてから決める
-  const [screen, setScreen] = useState(() =>
-    !openedFromOrderDetails() && cartHasItems() ? "checking" : "list",
-  );
+  // 取引詳細から開いたか（一覧の画面が目印を消すので、最初に一度だけ読む）
+  const [fromOrder] = useState(() => openedFromOrderDetails());
+  const [screen, setScreen] = useState(() => (!fromOrder && cartHasItems() ? "checking" : "list"));
+  const [listNote, setListNote] = useState("");
+  // カートに商品がある: 「会計の前に額面を入れる」がオンなら入力の画面へ。使えないときは一覧の上に一行でわけを出す
   useEffect(() => {
     if (screen !== "checking") return;
     let alive = true;
     getVoucherCartEntryEnabled()
-      .then((res) => alive && setScreen(res?.enabled === true ? "cart" : "list"))
-      .catch(() => alive && setScreen("list"));
+      .then((res) => {
+        if (!alive) return;
+        if (res?.enabled === true) {
+          setScreen("cart");
+          return;
+        }
+        setListNote(
+          "会計の前に額面を入れる機能がオフです。使うときは、管理画面の「商品券設定」で「商品券機能」「手動調整」「会計の前に額面を入れる」をオンにします。",
+        );
+        setScreen("list");
+      })
+      .catch(() => {
+        if (!alive) return;
+        setListNote("会計の前に額面を入れる設定を読めませんでした。通信を確かめて、タイルを開き直してください。");
+        setScreen("list");
+      });
     return () => {
       alive = false;
     };
   }, [screen]);
   // カートが空で一覧を出すとき: 会計の前に額面を入れる使い方を一行で案内する（スイッチがオンの店だけ）
-  const [listNote, setListNote] = useState("");
   useEffect(() => {
-    if (screen !== "list" || openedFromOrderDetails() || cartHasItems()) return;
+    if (screen !== "list" || listNote || fromOrder || cartHasItems()) return;
     let alive = true;
     getVoucherCartEntryEnabled()
       .then((res) => {
@@ -70,7 +85,7 @@ function VoucherModal() {
     return (
       <s-page heading="商品券">
         <s-box padding="base">
-          <s-text tone="subdued">読み込み中…</s-text>
+          <s-text color="subdued">読み込み中…</s-text>
         </s-box>
       </s-page>
     );
