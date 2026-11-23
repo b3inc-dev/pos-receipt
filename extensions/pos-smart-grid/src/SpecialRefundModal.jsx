@@ -37,7 +37,7 @@ import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
 import { adjustmentBadges, adjustmentSubLines, financialStatusTone } from "../../common/orderDetailLayout.js";
-import { financialStatusLabel } from "./orderDisplayUtils.js";
+import { financialStatusLabel, listSegmentsForTile } from "./orderDisplayUtils.js";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
 import {
   orderTenderLines,
@@ -249,7 +249,7 @@ export default async () => {
 /**
  * @param {{ initialListSegment?: "all" | "refunded" | "voucher_change" }} props
  */
-export function SpecialRefundModal({ initialListSegment = "refunded" }) {
+export function SpecialRefundModal({ initialListSegment = "refunded", listNote = "" }) {
   const [step, setStep] = useState("day_list");
   // 「変更」する登録
   const [editingEvent, setEditingEvent] = useState(null);
@@ -522,6 +522,8 @@ export function SpecialRefundModal({ initialListSegment = "refunded" }) {
         noticeError={bootstrapError}
         onDismissNotice={() => setBootstrapError("")}
         initialSegment={initialListSegment}
+        segments={listSegmentsForTile(initialListSegment)}
+        listNote={listNote}
       />
     );
   }

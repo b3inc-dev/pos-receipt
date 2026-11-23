@@ -50,6 +50,22 @@ function VoucherModal() {
       alive = false;
     };
   }, [screen]);
+  // カートが空で一覧を出すとき: 会計の前に額面を入れる使い方を一行で案内する（スイッチがオンの店だけ）
+  const [listNote, setListNote] = useState("");
+  useEffect(() => {
+    if (screen !== "list" || openedFromOrderDetails() || cartHasItems()) return;
+    let alive = true;
+    getVoucherCartEntryEnabled()
+      .then((res) => {
+        if (alive && res?.enabled === true) {
+          setListNote("会計の前に額面を入れるときは、商品をカートに入れてから「商品券」タイルを開きます。");
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [screen]);
   if (screen === "checking") {
     return (
       <s-page heading="商品券">
@@ -62,5 +78,5 @@ function VoucherModal() {
   if (screen === "cart") {
     return <VoucherCartScreen onOpenList={() => setScreen("list")} />;
   }
-  return <SpecialRefundModal initialListSegment="voucher_change" />;
+  return <SpecialRefundModal initialListSegment="voucher_change" listNote={listNote} />;
 }
