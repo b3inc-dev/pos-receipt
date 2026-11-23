@@ -165,7 +165,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
           select: { orderId: true },
         }),
         prisma.specialRefundEvent.findMany({
-          where: { shopId: shop.id, sourceOrderId: { in: idKeys }, status: "active" },
+          // 登録の注文 ID は数字のときと GID のときがある（どちらでも拾う）
+          where: {
+            shopId: shop.id,
+            sourceOrderId: { in: [...idKeys, ...idKeys.map((k) => `gid://shopify/Order/${k}`)] },
+            status: "active",
+          },
           select: { sourceOrderId: true, eventType: true, shopifyRefundStatus: true },
         }),
       ]);

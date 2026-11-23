@@ -36,6 +36,7 @@ import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
 import { OrderDayListScreen } from "./OrderDayListScreen.jsx";
 import { OrderDetailSummary } from "./OrderDetailSummary.jsx";
 import { listSelectablePaymentMethods } from "../../common/paymentMethodsApi.js";
+import { orderTenderLines, fullAmountForRefund, matchMethodValue } from "../../common/orderTenderLines.js";
 import {
   paymentMethodsWithOrderGateway,
   primarySaleTransaction,
@@ -993,6 +994,44 @@ function EventCard({ event, onEdit, onAskConfirm, legacyDecision, loading }) {
 // ──────────────────────────────────────────────
 // 特殊返金フォーム
 // ──────────────────────────────────────────────
+/** 元の支払い（支払方法ごとの支払った額・返金した額）と、1 行ずつの「全額反映」 */
+function OrderTenderPanel({ order, lines, onFill, fillLabel = "全額反映", disabled }) {
+  const total = Math.round(Number(order?.totalPrice?.amount ?? 0));
+  return (
+    <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
+      <s-stack gap="small">
+        <s-text tone="subdued">対象取引: {order?.orderName ?? "-"}（合計 ¥{total.toLocaleString()}）</s-text>
+        {lines.length === 0 ? (
+          <s-text tone="subdued" fontSize="small">注文の支払いを読めませんでした。金額は手で入れてください。</s-text>
+        ) : (
+          lines.map((line) => (
+            <s-stack
+              key={line.gateway || line.label}
+              direction="inline"
+              justifyContent="space-between"
+              alignItems="center"
+              gap="small"
+            >
+              <s-stack gap="none">
+                <s-text fontWeight="bold">{line.label}</s-text>
+                <s-text tone="subdued" fontSize="small">
+                  {`支払い ¥${line.paid.toLocaleString()}`}
+                  {line.refunded > 0 ? ` ／ 返金 ¥${line.refunded.toLocaleString()}` : ""}
+                </s-text>
+              </s-stack>
+              {onFill ? (
+                <s-button kind="secondary" onClick={() => onFill(line)} disabled={disabled}>
+                  {fillLabel}
+                </s-button>
+              ) : null}
+            </s-stack>
+          ))
+        )}
+      </s-stack>
+    </s-box>
+  );
+}
+
 function SpecialRefundForm({
   order,
   orderCorrectionContext,
@@ -1020,6 +1059,14 @@ function SpecialRefundForm({
   const [adjustKind, setAdjustKind] = useState("undo");
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const tenderLines = orderTenderLines(order);
+
+  // 全額反映: その支払方法の返金した額（無ければ支払った額）を金額に入れ、元の支払手段もその方法にする
+  const fillFromTender = (line) => {
+    setAmount(String(fullAmountForRefund(line)));
+    const value = matchMethodValue(paymentMethods, line.gateway);
+    if (value) setOriginalPaymentMethod(value);
+  };
 
   useEffect(() => {
     // 内容を変えた操作は別intent。同じキーを再利用するとpayload mismatchになる。
@@ -1153,10 +1200,8 @@ function SpecialRefundForm({
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
-            {/* 取引情報 */}
-            <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-text tone="subdued">対象取引: {order?.orderName ?? "-"}</s-text>
-            </s-box>
+            {/* 取引情報と元の支払い（支払方法ごと）。「全額反映」で金額と元の支払手段を入れる */}
+            <OrderTenderPanel order={order} lines={tenderLines} onFill={fillFromTender} disabled={loading} />
 
             <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
 
@@ -1271,6 +1316,7 @@ function VoucherAdjustmentForm({
   const [appliedState, setAppliedState] = useState("loading"); // loading | order | manual
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const tenderLines = orderTenderLines(order);
 
   useEffect(() => {
     if (!order?.orderId) return;
@@ -1372,15 +1418,11 @@ function VoucherAdjustmentForm({
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
-            {/* 取引情報 */}
-            <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
-              <s-stack gap="extraSmall">
-                <s-text tone="subdued">対象取引: {order?.orderName ?? "-"}</s-text>
-                {order?.estimatedVoucherChange ? (
-                  <s-text tone="subdued" fontSize="small">この取引は商品券釣有りの可能性があります</s-text>
-                ) : null}
-              </s-stack>
-            </s-box>
+            {/* 取引情報と元の支払い（支払方法ごと） */}
+            <OrderTenderPanel order={order} lines={tenderLines} />
+            {order?.estimatedVoucherChange ? (
+              <s-text tone="subdued" fontSize="small">この取引は商品券釣有りの可能性があります</s-text>
+            ) : null}
 
             <CorrectionModeBanner orderCorrectionContext={orderCorrectionContext} />
 
@@ -1408,6 +1450,12 @@ function VoucherAdjustmentForm({
                 value={appliedState === "loading" ? "読み込み中…" : `¥${applied.toLocaleString()}`}
               />
             )}
+            {/* 全額反映: 商品券で払った額をそのまま額面に入れる（お釣りなし。違えば直す） */}
+            {appliedState !== "loading" && appliedAmount !== "" && applied > 0 ? (
+              <s-button kind="secondary" onClick={() => setFaceValue(String(Math.round(applied)))} disabled={loading}>
+                {`払った額 ¥${Math.round(applied).toLocaleString()} を額面に入れる（全額反映）`}
+              </s-button>
+            ) : null}
 
             {/* お釣り（自動） */}
             <Row
@@ -1594,9 +1642,15 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">
+            {/* 元の支払い。特殊返金は「全額反映」で金額を入れる（元の支払手段は前の登録のまま） */}
+            <OrderTenderPanel
+              order={order}
+              lines={orderTenderLines(order)}
+              onFill={isVoucher ? null : (line) => setAmount(String(fullAmountForRefund(line)))}
+              disabled={loading}
+            />
             <s-box padding="small" borderWidth="base" borderRadius="base" borderColor="subdued">
               <s-stack gap="extraSmall">
-                <s-text tone="subdued">対象取引: {order?.orderName ?? "-"}</s-text>
                 <s-text tone="subdued" fontSize="small">
                   前の登録は無効にして残し、直した内容で登録し直します。
                 </s-text>

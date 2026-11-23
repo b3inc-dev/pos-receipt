@@ -24,7 +24,7 @@ export function formatListBadges(item) {
   if (b.refundedShopify) out.push({ key: "refund", label: "返金", tone: "warning" });
   if (b.hasVoucherAdjustment) out.push({ key: "vadj", label: "釣調整済", tone: "success" });
   if (b.hasSpecialRefund || b.appSpecialApplied) out.push({ key: "special", label: "特殊適用", tone: "info" });
-  if (b.hasVoucherChange) out.push({ key: "vchg", label: "釣有り", tone: "attention" });
+  if (b.hasVoucherChange) out.push({ key: "vchg", label: "釣有り", tone: "caution" });
   else if (b.voucherLikeGateway) out.push({ key: "voucher", label: "商品券", tone: "neutral" });
   if (b.receiptIssued) out.push({ key: "receipt", label: "領収書", tone: "neutral" });
   return out;
