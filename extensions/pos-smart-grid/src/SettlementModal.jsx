@@ -83,7 +83,7 @@ function SettlementModal() {
   const [isInspection, setIsInspection] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  /** 精算の数を読み込んだ時刻（ms）。画面に「HH:MM 時点」と出して、更新が効いたことをわかるようにする */
+  /** 精算の数を読み込んだ時刻（ms）。画面に「HH:MM 更新」と出して（売上サマリーと同じ書き方）、更新が効いたことをわかるようにする */
   const [previewLoadedAt, setPreviewLoadedAt] = useState(null);
   const [locationLoadError, setLocationLoadError] = useState("");
   const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
@@ -938,7 +938,7 @@ function PreviewView({
               <s-stack gap="none" alignItems="center">
                 <s-text type="strong">{formatYmdWithWeekday(targetDate)}</s-text>
                 <s-text type="small" color="subdued">
-                  {loading ? "読み込み中…" : loadedAt ? `${formatJstHm(loadedAt)} 時点の数` : ""}
+                  {loading ? "読み込み中…" : loadedAt ? `${formatJstHm(loadedAt)} 更新` : ""}
                 </s-text>
               </s-stack>
               <s-button kind="secondary" disabled={!canNextDay || loading} onClick={() => onPickDate(addDays(targetDate, 1))}>
