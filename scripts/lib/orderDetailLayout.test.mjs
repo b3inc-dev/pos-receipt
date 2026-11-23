@@ -109,7 +109,7 @@ test("adjustmentKindLabel: 返金の付け替えは手段を変えても同じ�
   assert.equal(adjustmentKindLabel({ eventType: "cash_refund" }), "返金方法変更");
   assert.equal(adjustmentKindLabel({ eventType: "payment_method_override" }), "返金方法変更");
   assert.equal(adjustmentKindLabel({ eventType: "cash_refund", refundSource: "native" }), "返金方法変更");
-  assert.equal(adjustmentKindLabel({ eventType: "voucher_change_adjustment" }), "商品券調整");
+  assert.equal(adjustmentKindLabel({ eventType: "voucher_change_adjustment" }), "商品券釣銭登録");
 });
 
 test("adjustmentSubLines: 手段が変わらない行は「のまま（返金方法の変更なし）」", () => {

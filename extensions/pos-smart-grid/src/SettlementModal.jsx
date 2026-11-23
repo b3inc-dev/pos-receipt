@@ -1080,7 +1080,7 @@ function PreviewView({
                 </s-box>
               ) : null}
 
-              {/* 適用済み特殊返金・商品券調整 */}
+              {/* 適用済み返金方法変更・商品券釣銭登録 */}
               {eventRows.length > 0 ? (
                 <s-box padding="none" borderWidth="base" borderRadius="base" borderColor="subdued">
                   <s-stack gap="none">

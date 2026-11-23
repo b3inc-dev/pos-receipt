@@ -14,7 +14,7 @@ export type PlanCode = "lite" | "pro" | "unlimited" | "standard"; // standard �
 
 export type FeatureKey =
   | "settlement"          // 精算（全プラン）
-  | "special_refund"      // 特殊返金・商品券調整（全プラン）
+  | "special_refund"      // 返金方法変更・商品券釣銭登録（全プラン）
   | "receipt"             // 領収書（全プラン）
   | "sales_receipt"       // 販売レシート印字（Lite+）
   | "sales_receipt_layout" // 販売レシート・レイアウト編集（Lite+）
@@ -115,14 +115,14 @@ export function checkPlanAccess(
 export const PLAN_FEATURES: Record<"lite" | "pro", { key: FeatureKey; label: string }[]> = {
   lite: [
     { key: "settlement",     label: "精算・点検レシート" },
-    { key: "special_refund", label: "特殊返金・商品券調整" },
+    { key: "special_refund", label: "返金方法変更・商品券釣銭登録" },
     { key: "receipt",        label: "領収書発行・再発行" },
     { key: "sales_receipt",  label: "販売レシート印字" },
     { key: "sales_receipt_layout", label: "販売レシート・レイアウト編集" },
   ],
   pro: [
     { key: "settlement",        label: "精算・点検レシート" },
-    { key: "special_refund",    label: "特殊返金・商品券調整" },
+    { key: "special_refund",    label: "返金方法変更・商品券釣銭登録" },
     { key: "receipt",           label: "領収書発行・再発行" },
     { key: "sales_receipt",     label: "販売レシート印字" },
     { key: "sales_receipt_layout", label: "販売レシート・レイアウト編集" },

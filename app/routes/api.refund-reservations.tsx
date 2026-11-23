@@ -33,7 +33,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (authResult instanceof Response) return authResult;
     const { admin, shop, corsJson } = authResult;
     const sourceOrderId = new URL(request.url).searchParams.get("sourceOrderId");
-    if (!sourceOrderId) return corsJson({ ok: false, error: "sourceOrderId is required" }, { status: 400 });
+    // 注文を付けずに呼ぶと、「返金の予約」がオンかだけ返す（POS の一覧の「返金前に登録」を出すか決める）
+    if (!sourceOrderId) return corsJson({ ok: true, enabled: await refundReservationEnabled(shop.id), items: [] });
     let applyError: string | null = null;
     try {
       await applyRefundReservationsForOrder(admin, shop.id, sourceOrderId);

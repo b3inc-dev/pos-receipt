@@ -1,6 +1,6 @@
-# 注文メタフィールド `pos.adjustments`（特殊返金・商品券調整）
+# 注文メタフィールド `pos.adjustments`（返金方法変更・商品券釣銭登録）
 
-特殊返金（③）と商品券調整（④）の記録は、注文 1 件につき 1 つの JSON メタフィールドに残します。ciara-system はこの値を、pos-receipt の精算と同じ決まりで数えます。ギフトカードは使いません（T の決定 2026-11-23）。
+特殊返金（③）と商品券釣銭登録（④）の記録は、注文 1 件につき 1 つの JSON メタフィールドに残します。ciara-system はこの値を、pos-receipt の精算と同じ決まりで数えます。ギフトカードは使いません（T の決定 2026-11-23）。
 
 - 注文に書くかは店ごとの設定です（管理画面の特殊返金設定「注文への記録」。**初めはオフ**）。オフの店は注文に何も書かず・読まず、精算は今までどおりアプリの記録で数えます。Ciara は先にオンにして確かめます。
 - 書くのは pos-receipt だけです。直すときは、アプリの「変更」（POS・管理画面・注文ページ）から直します。Shopify の画面で JSON を書き換えないでください。
@@ -17,7 +17,7 @@
 | `pos.adjustments_summary` | `single_line_text_field` | 人が読むための 1 行（表示用。数えるときは使わない）。例: `11/23 返金方法変更 クレジット→現金 ¥1,200 ／ 11/23 商品券 額面¥5,000 お釣り¥800`。行が無いときは「なし」 |
 
 - 名前空間は `pos`（アプリ専用の `$app` ではない）。ほかのアプリ（ciara-system）からも読めるようにするため。`pos.refund_aggregation_location_gid` と同じ場所です。
-- 名前付きの定義（「POS 特殊返金・商品券調整」）は、インストールのとき（`auth.$`）か `POST /api/admin/settlement-metafields/ensure` で作ります。定義が無くても値は書けます。
+- 名前付きの定義（「POS 返金方法変更・商品券釣銭登録」）は、インストールのとき（`auth.$`）か `POST /api/admin/settlement-metafields/ensure` で作ります。定義が無くても値は書けます。
 - 古い定義 `pos.special_refund_events`・`pos.voucher_change_events`・`pos.business_adjustments_version` は値を書いていません（使いません）。
 
 ## 2. 値の形（version 1）

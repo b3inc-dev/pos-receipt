@@ -172,7 +172,7 @@ export function RefundReservationForm({ order, allowedEventTypes = null, onBack,
   };
 
   return (
-    <s-page heading="返金の予約">
+    <s-page heading="返金前に登録">
       <s-scroll-box>
         <s-box padding="base">
           <s-stack gap="base">

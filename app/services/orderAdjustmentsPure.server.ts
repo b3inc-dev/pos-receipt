@@ -1,5 +1,5 @@
 /**
- * 特殊返金（③）と商品券調整（④）を注文に残すメタフィールド `pos.adjustments` の形と数え方（純関数）。
+ * 特殊返金（③）と商品券釣銭登録（④）を注文に残すメタフィールド `pos.adjustments` の形と数え方（純関数）。
  * 仕様の正本は docs/ORDER_ADJUSTMENTS_METAFIELD.md。ciara-system も同じ決まりで読む。
  *
  * - 注文 1 件に JSON 1 つ。行（entry）は消さない。直すときは前の行を "voided" にして、replaces 付きの行を足す。
@@ -422,11 +422,11 @@ export function adjustmentSourceWarningMessage(w: AdjustmentSourceWarning): stri
     case "metafield_missing":
       return `注文 ${order}: 特殊返金・商品券の記録を注文に書けていません。${tail}`;
     case "metafield_invalid":
-      return `注文 ${order}: 注文の「特殊返金・商品券調整」の形が読めず、書き直しもできませんでした。${tail}`;
+      return `注文 ${order}: 注文の「返金方法変更・商品券釣銭登録」の形が読めず、書き直しもできませんでした。${tail}`;
     case "metafield_differs":
-      return `注文 ${order}: 注文の「特殊返金・商品券調整」がアプリの記録と違い、書き直しもできませんでした。${tail}`;
+      return `注文 ${order}: 注文の「返金方法変更・商品券釣銭登録」がアプリの記録と違い、書き直しもできませんでした。${tail}`;
     case "metafield_differs_again":
-      return `注文 ${order}: 注文の「特殊返金・商品券調整」を少し前に書き直しましたが、まだアプリの記録と違います。ほかのアプリや Shopify の画面で書き換えられている可能性があります。精算はアプリの記録で数えています。続けて書き直すことはしないので、書き換えている所を確かめてから、管理画面の注文ごとの記録で「書き直す」を押してください。`;
+      return `注文 ${order}: 注文の「返金方法変更・商品券釣銭登録」を少し前に書き直しましたが、まだアプリの記録と違います。ほかのアプリや Shopify の画面で書き換えられている可能性があります。精算はアプリの記録で数えています。続けて書き直すことはしないので、書き換えている所を確かめてから、管理画面の注文ごとの記録で「書き直す」を押してください。`;
   }
 }
 
@@ -480,7 +480,7 @@ export function groupAdjustmentRowsByOrder(rows: AdjustmentEventRow[]): Map<stri
 }
 
 /**
- * その日・その店で数える特殊返金・商品券調整を決める（T の決定 2026-11-23: 違うときはアプリの記録）。
+ * その日・その店で数える返金方法変更・商品券釣銭登録を決める（T の決定 2026-11-23: 違うときはアプリの記録）。
  * - 数えるのはいつもアプリの記録（DB）。書くのは pos-receipt だけなので、違うときは DB が新しいか、注文の値が外で書き換えられたか
  * - 比べるのは、注文に書く設定にしてから書いた注文だけ（isOrderWrittenSinceSwitch）。前からの登録はここでは書かない
  * - 注文の値が DB と違う・無い・読めない注文は needsResync に入れる（呼び出し側が注文を書き直し、書けなければ警告にする）

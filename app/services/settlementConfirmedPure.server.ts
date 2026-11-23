@@ -99,7 +99,7 @@ export function parseSavedPaymentSections(json: string | null): SettlementPrevie
 
 /**
  * 確定済みの Settlement 行を preview の形にする。集計し直さないので、
- * 適用した特殊返金・商品券調整の一覧や取引時刻は持っていない（空・null で返す）。
+ * 適用した返金方法変更・商品券釣銭登録の一覧や取引時刻は持っていない（空・null で返す）。
  */
 export function settlementRowToPreview(
   row: SettlementRowForPreview,

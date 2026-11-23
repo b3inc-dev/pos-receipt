@@ -168,7 +168,7 @@ export function adjustmentKindLabel(event) {
     case "receipt_cash_adjustment":
       return "レシート現金調整";
     case "voucher_change_adjustment":
-      return "商品券調整";
+      return "商品券釣銭登録";
     default:
       return String(event?.eventType ?? "");
   }

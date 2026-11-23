@@ -1,5 +1,5 @@
 /**
- * 特殊返金・商品券調整 API クライアント
+ * 返金方法変更・商品券釣銭登録 API クライアント
  * 要件書 21.4 対応
  */
 import { toUserMessage } from "./errorMessage.js";
@@ -110,6 +110,11 @@ export async function getVoucherCartEntryEnabled() {
  */
 export async function listRefundReservations(sourceOrderId) {
   return apiGet("/api/refund-reservations", { sourceOrderId });
+}
+
+/** GET /api/refund-reservations（注文なし）→ { enabled }（管理画面の「返金の予約」がオンか） */
+export async function getRefundReservationEnabled() {
+  return apiGet("/api/refund-reservations");
 }
 
 export async function createRefundReservation(data) {

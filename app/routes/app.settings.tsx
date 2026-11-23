@@ -452,7 +452,7 @@ export default function SettingsPage() {
                           }
                         />
                         <Checkbox
-                          label="商品券調整"
+                          label="商品券釣銭登録"
                           checked={loc.voucherAdjustmentEnabled}
                           onChange={(v) =>
                             handleLocationChange(loc.id, loc.name, "voucherAdjustmentEnabled", v)

@@ -1,21 +1,21 @@
 /**
- * 特殊返金・商品券調整モーダル
+ * 返金方法変更・商品券釣銭登録モーダル
  * 要件書 §7, §23.2
  *
  * Steps:
  *   day_list     → ロケーション・年月日＋その日の取引一覧（バッジ）
- *   order_detail → 取引サマリー＋イベント一覧＋固定フッターで特殊返金／商品券調整を選択
+ *   order_detail → 取引サマリー＋イベント一覧＋固定フッターで特殊返金／商品券釣銭登録を選択
  *   form_refund  → 特殊返金フォーム
- *   form_voucher → 商品券調整フォーム（額面だけ入れる。使った額は注文の取引から）
+ *   form_voucher → 商品券釣銭登録フォーム（額面だけ入れる。使った額は注文の取引から）
  *   form_edit    → 登録の「変更」（前の登録を無効にし、直した内容の登録を足す。Shopify の返金はしない）
  *
  * タイルごとに一覧の最初の絞り込みを変える: 「返金方法変更」タイルは返金・キャンセル、「商品券釣銭登録」タイルは商品券釣有り
  * （VoucherModal.jsx が initialListSegment="voucher_change" で開く）
  *
- * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券調整」→ form_voucher へ直行
+ * 取引詳細のメニュー: 「特殊返金」→ order_detail / 「商品券釣銭登録」→ form_voucher へ直行
  */
 import { render } from "preact";
-import { useState, useCallback, useEffect } from "preact/hooks";
+import { useState, useCallback, useEffect, useRef } from "preact/hooks";
 import { getOrder, createRedoDraft } from "../../common/orderPickerApi.js";
 import { PosChoiceField } from "./PosChoiceField.jsx";
 import { NativeRefundReassignForm } from "./NativeRefundReassignForm.jsx";
@@ -28,6 +28,7 @@ import {
   recheckLegacySpecialRefund,
   editSpecialRefund,
   getVoucherApplied,
+  getRefundReservationEnabled,
 } from "../../common/specialRefundApi.js";
 import { toUserMessage } from "../../common/errorMessage.js";
 import {
@@ -119,7 +120,7 @@ function tryDismissModal() {
   return false;
 }
 
-// 特殊返金の event_type 選択肢（voucher_change_adjustment は商品券調整フォームで別途扱う）
+// 特殊返金の event_type 選択肢（voucher_change_adjustment は商品券釣銭登録フォームで別途扱う）
 const FALLBACK_PAYMENT_METHODS = [
   { value: "cash", label: "現金" },
   { value: "manual", label: "手動決済" },
@@ -279,7 +280,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
   // まだ純正で返金していない注文で「ここで登録する」を選んだとき（返金の予約の画面を飛ばす）
   const [reservationSkipped, setReservationSkipped] = useState(false);
 
-  // 取引詳細: 「特殊返金」または「商品券調整」から起動
+  // 取引詳細: 「特殊返金」または「商品券釣銭登録」から起動
   useEffect(() => {
     let vid = null;
     let rid = null;
@@ -341,6 +342,24 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
       .finally(() => setOrderEntryLoading(false));
   }, []);
 
+  // 「返金前に登録」（返金の予約）: 一覧の右下のボタンから、まだ返金していない注文を選んで予約の画面へ（T 2026-11-24）
+  const [reservationEnabled, setReservationEnabled] = useState(false);
+  const [reserveMode, setReserveMode] = useState(false);
+  const reserveModeRef = useRef(false);
+  reserveModeRef.current = reserveMode;
+  useEffect(() => {
+    if (initialListSegment === "voucher_change") return;
+    let alive = true;
+    getRefundReservationEnabled()
+      .then((res) => {
+        if (alive) setReservationEnabled(res?.enabled === true);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [initialListSegment]);
+
   const handleOrderSelect = useCallback(async (orderId) => {
     setLoading(true);
     setError("");
@@ -354,7 +373,8 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
       setOrderCorrectionContext(res.orderCorrectionContext ?? null);
         setNativeRefunds(Array.isArray(res.nativeRefunds) ? res.nativeRefunds : null);
       setFromOrderEntry(false);
-      setStep("order_detail");
+      // 「返金前に登録」から選んだ注文は、注文の詳細を挟まずに予約の画面へ
+      setStep(reserveModeRef.current ? "form_refund" : "order_detail");
     } catch (e) {
       setBootstrapError(toUserMessage(e?.message) || "取得に失敗しました");
     } finally {
@@ -582,15 +602,22 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
   if (step === "day_list") {
     return (
       <OrderDayListScreen
-        pageHeading={`${pageHeading}（取引を選択）`}
+        key={reserveMode ? "reserve" : "list"}
+        pageHeading={reserveMode ? "返金前に登録（取引を選択）" : `${pageHeading}（取引を選択）`}
         badgeMode="specialRefund"
         onSelectOrderId={handleOrderSelect}
         noticeError={bootstrapError}
         onDismissNotice={() => setBootstrapError("")}
-        initialSegment={initialListSegment}
-        segments={listSegmentsForTile(initialListSegment)}
-        listNote={listNote}
-        listAction={listAction}
+        initialSegment={reserveMode ? "all" : initialListSegment}
+        segments={reserveMode ? undefined : listSegmentsForTile(initialListSegment)}
+        listNote={reserveMode ? "" : listNote}
+        onBack={reserveMode ? () => setReserveMode(false) : undefined}
+        listAction={
+          listAction ??
+          (reservationEnabled && !reserveMode && initialListSegment !== "voucher_change"
+            ? { label: "返金前に登録", onClick: () => setReserveMode(true) }
+            : null)
+        }
       />
     );
   }
@@ -676,7 +703,8 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         allowedEventTypes={allowedEventTypes}
         onBack={() => {
           if (fromOrderEntry && tryDismissModal()) return;
-          setStep("order_detail");
+          // 「返金前に登録」の一覧から来たときは一覧へ戻る
+          setStep(reserveMode ? "day_list" : "order_detail");
         }}
         onOtherRegistration={() => {
           setError("");
@@ -754,7 +782,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
           setStep("order_detail");
         }}
         onSuccess={async (res) => {
-          const parts = ["登録しました（商品券調整は記録のみで、返金はしません）。"];
+          const parts = ["登録しました（商品券釣銭登録は記録だけで、返金はしません）。"];
           if (res?.event?.countDate) parts.push(`注文の日（${shortDateLabel(res.event.countDate)}）の精算に入ります。`);
           if (res?.settlementAlreadyConfirmed) {
             parts.push("その日の精算はもう確定しています。精算の画面でその日を開き「更新」を押し、「今の数で再確定する」を押してください。");
@@ -1456,7 +1484,7 @@ function SpecialRefundForm({
 }
 
 // ──────────────────────────────────────────────
-// 商品券調整フォーム
+// 商品券釣銭登録フォーム
 // ──────────────────────────────────────────────
 function VoucherAdjustmentForm({
   order,

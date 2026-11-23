@@ -2,7 +2,7 @@ api_version = "2026-07"
 
 # ============================================================
 # 注文ページ（Shopify 管理画面の注文詳細）のブロック
-# その注文の特殊返金・商品券調整（注文メタフィールド pos.adjustments）を出し、
+# その注文の返金方法変更・商品券釣銭登録（注文メタフィールド pos.adjustments）を出し、
 # 「変更」でアプリの注文ごとの記録の画面（/app/order-adjustments）を開く。
 # 記録の形: docs/ORDER_ADJUSTMENTS_METAFIELD.md
 # ============================================================
@@ -10,7 +10,7 @@ api_version = "2026-07"
 type = "ui_extension"
 name = "返金方法変更・商品券釣銭登録"
 handle = "order-adjustments-block"
-description = "注文の返金方法変更・商品券釣銭登録の記録を見て、アプリで変更する"
+description = "注文の返金方法変更・商品券釣銭登録の記録を表示し、アプリで変更する"
 
 [[extensions.targeting]]
 module = "./src/OrderAdjustmentsBlock.jsx"
