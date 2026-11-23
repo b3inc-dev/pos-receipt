@@ -794,7 +794,7 @@ function OrderDetailView({
                   ))}
                 </s-stack>
               ) : (
-                <s-text tone="subdued" size="small">まだ登録はありません。</s-text>
+                <s-text tone="subdued" size="small">まだ調整はありません。</s-text>
               )}
 
               {voidedEvents.length > 0 ? (
