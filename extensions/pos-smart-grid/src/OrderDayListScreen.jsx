@@ -5,8 +5,8 @@
  *
  * 純正と違うところ（POS UI 拡張に同じ部品が無い）:
  * - 検索欄の右端のバーコード読み取りは無い
- * - 絞り込みのボタンに下向きの印（アイコン）を入れられないので「▾」の字で出す
- * - 日付は年・月・日のボタンで選ぶ（純正は日付の絞り込みが無い）
+ * - 絞り込みは開かずに並べたまま出す（純正は下向きの印で開く）
+ * - 日付は「今日」と年・月・日のボタンで選ぶ（純正は日付の絞り込みが無い）
  */
 import { useState, useEffect, useCallback, useMemo } from "preact/hooks";
 import { searchOrders } from "../../common/orderPickerApi.js";
@@ -61,7 +61,7 @@ export function formatPosBadges(item, badgeMode) {
  * @param {string} props.pageHeading - s-page heading
  * @param {"receipt" | "specialRefund"} props.badgeMode
  * @param {(orderId: string) => void} props.onSelectOrderId
- * @param {import("preact").ComponentChildren} [props.headerTrailing] - ヘッダー右寄せの横に並べる操作（例: 履歴）
+ * @param {import("preact").ComponentChildren} [props.footerTrailing] - 画面の下の右に固定する操作（例: 領収書の履歴）
  * @param {string} [props.noticeError] - 一覧上部に出す一時メッセージ（取引詳細からの起動失敗など）
  * @param {() => void} [props.onDismissNotice]
  * @param {"all" | "refunded" | "voucher_change"} [props.initialSegment] - 開いたときの絞り込み（タイルごとに変える）
@@ -70,7 +70,7 @@ export function OrderDayListScreen({
   pageHeading,
   badgeMode,
   onSelectOrderId,
-  headerTrailing = null,
+  footerTrailing = null,
   noticeError = "",
   onDismissNotice = () => {},
   initialSegment = "all",
@@ -94,7 +94,6 @@ export function OrderDayListScreen({
   const [nextCursor, setNextCursor] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [listSegment, setListSegment] = useState(initialSegment);
-  const [dateMenuOpen, setDateMenuOpen] = useState(false);
   // 店のタイムゾーンの「今日」と取得した時刻（サーバーが返す。無いときは端末の日付）
   const [todayLocalDate, setTodayLocalDate] = useState("");
   const [fetchedAtTime, setFetchedAtTime] = useState("");
@@ -233,17 +232,10 @@ export function OrderDayListScreen({
 
   const todayKey = todayLocalDate || ymdToStr(t0.y, t0.m, t0.day);
   const dayChipLabel = formatOrderDayLabel(dateStr, todayKey) || dateStr;
-  const segmentLabel = LIST_SEGMENTS.find((x) => x.value === effectiveSegment)?.label ?? "すべて";
   const visibleItems = items.filter((order) => matchesListSegment(order, effectiveSegment));
   const storeLabel = sessionReady ? locationName || "店舗を確認中…" : "確認中…";
 
-  const yesterday = useMemo(() => {
-    const d = new Date(t0.y, t0.m - 1, t0.day - 1);
-    return { y: d.getFullYear(), m: d.getMonth() + 1, day: d.getDate() };
-  }, [t0]);
   const isTodaySelected = dateStr === ymdToStr(t0.y, t0.m, t0.day);
-  const isYesterdaySelected = dateStr === ymdToStr(yesterday.y, yesterday.m, yesterday.day);
-  const isOtherDaySelected = !isTodaySelected && !isYesterdaySelected;
 
   const selectYmd = (ymd) => {
     setSelectedYear(ymd.y);
@@ -252,7 +244,6 @@ export function OrderDayListScreen({
     setYearMenuOpen(false);
     setMonthMenuOpen(false);
     setDayMenuOpen(false);
-    setDateMenuOpen(false);
     setListError("");
   };
 
@@ -271,8 +262,10 @@ export function OrderDayListScreen({
         minBlockSize="0"
         style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}
       >
+        {/* 上の固定: 検索欄〜「店名・時刻 に更新」まではスクロールしても動かない（直す前と同じ作り） */}
         <s-box
           padding="base"
+          border="base"
           style={{
             position: "sticky",
             top: 0,
@@ -298,55 +291,13 @@ export function OrderDayListScreen({
                 </s-button>
               ) : (
                 <>
+                  {/* 今日の分を扱うことが多いので年・月・日のボタン。日付を変えたとき用に「今日」へ戻すボタン（T 2026-11-23） */}
                   <s-button
                     variant={isTodaySelected ? "primary" : "secondary"}
                     onClick={() => selectYmd(t0)}
                   >
                     今日
                   </s-button>
-                  <s-button
-                    variant={isYesterdaySelected ? "primary" : "secondary"}
-                    onClick={() => selectYmd(yesterday)}
-                  >
-                    昨日
-                  </s-button>
-                  <s-button
-                    variant={isOtherDaySelected || dateMenuOpen ? "primary" : "secondary"}
-                    onClick={() => {
-                      closeDateMenus();
-                      setDateMenuOpen((v) => !v);
-                    }}
-                  >
-                    {isOtherDaySelected ? `${dayChipLabel} ▾` : "別の日 ▾"}
-                  </s-button>
-                </>
-              )}
-              {headerTrailing}
-            </s-stack>
-
-            {badgeMode === "specialRefund" ? (
-              <s-stack direction="inline" gap="small-300" alignItems="center">
-                {LIST_SEGMENTS.map((seg) => (
-                  <s-button
-                    key={seg.value}
-                    variant={effectiveSegment === seg.value ? "primary" : "secondary"}
-                    onClick={() => {
-                      setListSegment(seg.value);
-                      if (isSearchMode) {
-                        setSearchDraft("");
-                        setSearchQuery("");
-                      }
-                    }}
-                  >
-                    {seg.label}
-                  </s-button>
-                ))}
-              </s-stack>
-            ) : null}
-
-            {dateMenuOpen && !isSearchMode ? (
-              <s-stack gap="small-300">
-                <s-stack direction="inline" gap="small-300">
                   <s-button
                     variant={yearMenuOpen ? "primary" : "secondary"}
                     onClick={() => {
@@ -377,8 +328,32 @@ export function OrderDayListScreen({
                   >
                     {Math.min(selectedDay, maxDayForSelection)}日
                   </s-button>
-                </s-stack>
+                </>
+              )}
+            </s-stack>
 
+            {badgeMode === "specialRefund" ? (
+              <s-stack direction="inline" gap="small-300" alignItems="center">
+                {LIST_SEGMENTS.map((seg) => (
+                  <s-button
+                    key={seg.value}
+                    variant={effectiveSegment === seg.value ? "primary" : "secondary"}
+                    onClick={() => {
+                      setListSegment(seg.value);
+                      if (isSearchMode) {
+                        setSearchDraft("");
+                        setSearchQuery("");
+                      }
+                    }}
+                  >
+                    {seg.label}
+                  </s-button>
+                ))}
+              </s-stack>
+            ) : null}
+
+            {!isSearchMode && (yearMenuOpen || monthMenuOpen || dayMenuOpen) ? (
+              <s-stack gap="small-300">
                 {yearMenuOpen ? (
                   <s-stack direction="inline" gap="small-300">
                     {availableYears.map((y) => (
@@ -428,7 +403,6 @@ export function OrderDayListScreen({
                         onClick={() => {
                           setSelectedDay(d);
                           setDayMenuOpen(false);
-                          setDateMenuOpen(false);
                           setListError("");
                         }}
                       >
@@ -488,7 +462,7 @@ export function OrderDayListScreen({
                   <s-text type="small" color="subdued">
                     {isSearchMode
                       ? "注文番号は数字だけでも探せます。顧客名は 2 文字以上入れてください。"
-                      : "ほかの日は「昨日」「別の日」から選べます。上の欄で注文番号や顧客名から探すこともできます。"}
+                      : "ほかの日は年・月・日のボタンから選べます。上の欄で注文番号や顧客名から探すこともできます。"}
                   </s-text>
                   {!isSearchMode ? (
                     <s-button variant="secondary" onClick={reloadList}>読み込み直す</s-button>
@@ -521,6 +495,24 @@ export function OrderDayListScreen({
             </s-stack>
           </s-box>
         </s-scroll-box>
+
+        {footerTrailing ? (
+          /* 下の固定（右下）: 領収書の「履歴」など。FixedFooterNavBar と同じ作り */
+          <s-box
+            padding="base"
+            border="base"
+            style={{
+              position: "sticky",
+              bottom: 0,
+              background: "var(--s-color-bg)",
+              zIndex: 10,
+            }}
+          >
+            <s-stack direction="inline" justifyContent="end" alignItems="center" gap="small">
+              {footerTrailing}
+            </s-stack>
+          </s-box>
+        ) : null}
       </s-stack>
     </s-page>
   );
