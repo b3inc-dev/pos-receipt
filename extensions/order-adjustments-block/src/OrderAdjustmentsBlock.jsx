@@ -127,7 +127,7 @@ function OrderAdjustmentsBlock() {
         {voidedCount > 0 ? <s-text color="subdued">{`無効にした登録 ${voidedCount} 件（履歴に残っています）`}</s-text> : null}
         {entries.length > 0 ? (
           <s-stack direction="inline">
-            <s-link href={editHref}>変更・履歴を開く</s-link>
+            <s-button href={editHref}>変更・履歴を開く</s-button>
           </s-stack>
         ) : null}
       </s-stack>
