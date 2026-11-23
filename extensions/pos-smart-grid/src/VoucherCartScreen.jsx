@@ -11,6 +11,7 @@ import {
   voucherFaceInCart,
 } from "../../common/voucherCartEntry.js";
 import { FixedFooterNavBar } from "./FixedFooterNavBar.jsx";
+import { VoucherFaceCandidates } from "./VoucherFaceCandidates.jsx";
 
 function readCart() {
   try {
@@ -138,6 +139,10 @@ export function VoucherCartScreen({ onOpenList }) {
                   onInput={(e) => setInput(e?.currentTarget?.value ?? "")}
                   placeholder="例: 5000"
                 />
+                {/* 額面の候補: カートの合計より大きい 500 円刻みを 3 つ（T 2026-11-24） */}
+                {Number.isFinite(total) && total > 0 ? (
+                  <VoucherFaceCandidates amount={total} selected={input} onPick={setInput} disabled={saving} />
+                ) : null}
                 <s-button variant="primary" onClick={save} disabled={saving || face == null}>
                   {current != null ? "額面を入れ直す" : "カートに入れる"}
                 </s-button>
