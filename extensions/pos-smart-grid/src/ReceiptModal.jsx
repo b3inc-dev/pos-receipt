@@ -26,6 +26,7 @@ import { FormHeading, FormLine, FormHero, yen } from "./AdjustFormParts.jsx";
 import { summarizePriorReceipts, reissueHelpText } from "../../common/receiptReissue.js";
 
 const STORAGE_KEY = "pos_receipt_order_id";
+const PRIOR_CHECK_TIMEOUT_MS = 10000;
 
 export default async () => {
   render(<ReceiptModal />, document.body);
@@ -48,6 +49,8 @@ function ReceiptModal() {
   const [prior, setPrior] = useState({ state: "idle", summary: null });
   const priorSeq = useRef(0);
   const reissueTouched = useRef(false);
+  const isReissueRef = useRef(false);
+  isReissueRef.current = isReissue;
 
   /** 注文を開いたとき: 再発行の選択を戻し、この注文の発行の記録を見にいく */
   const openOrder = useCallback((order) => {
@@ -61,7 +64,16 @@ function ReceiptModal() {
       return;
     }
     setPrior({ state: "loading", summary: null });
-    getReceiptHistory({ orderId: String(orderId).replace("gid://shopify/Order/", ""), limit: 50 })
+    // 通信が固まって「確認する」が押せないままにならないよう、10 秒で失敗に倒す
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("timeout")), PRIOR_CHECK_TIMEOUT_MS);
+    });
+    Promise.race([
+      getReceiptHistory({ orderId: String(orderId).replace("gid://shopify/Order/", ""), limit: 50 }),
+      timeout,
+    ])
+      .finally(() => clearTimeout(timer))
       .then((res) => {
         if (seq !== priorSeq.current) return;
         const summary = summarizePriorReceipts(res?.items, res?.todayLocalDate);
@@ -74,6 +86,17 @@ function ReceiptModal() {
         setPrior({ state: "failed", summary: null });
       });
   }, []);
+
+  /** 確かめ直し: 店の人がもう選んでいたら、その選択は残す */
+  const openOrderKeepReissue = useCallback((order) => {
+    const touched = reissueTouched.current;
+    const current = isReissueRef.current;
+    openOrder(order);
+    if (touched) {
+      reissueTouched.current = true;
+      setIsReissue(current);
+    }
+  }, [openOrder]);
 
   const changeReissue = useCallback((next) => {
     reissueTouched.current = true;
@@ -194,6 +217,7 @@ function ReceiptModal() {
         proviso={proviso}
         isReissue={isReissue}
         prior={prior}
+        onRetryPrior={() => openOrderKeepReissue(selectedOrder)}
         loading={loading}
         error={error}
         setRecipientName={setRecipientName}
@@ -234,7 +258,7 @@ function ReceiptModal() {
 
 // ── 入力フォーム ──────────────────────────────────────────────────────────────
 function FormView({
-  order, recipientName, proviso, isReissue, prior,
+  order, recipientName, proviso, isReissue, prior, onRetryPrior,
   loading, error,
   setRecipientName, setProviso, setIsReissue, setError,
   onPreview, onBack,
@@ -294,13 +318,25 @@ function FormView({
 
               <s-stack gap="small-300">
                 <s-text type="small" color="subdued">再発行</s-text>
+                {prior?.state === "failed" ? (
+                  <s-banner tone="warning" heading="前に発行したかを確かめられませんでした">
+                    <s-stack gap="small">
+                      <s-text>出し直しのときは「再発行として記録する」を選んでください。</s-text>
+                      <s-stack direction="inline" justifyContent="end">
+                        <s-button variant="secondary" onClick={onRetryPrior} disabled={loading}>
+                          もう一度確かめる
+                        </s-button>
+                      </s-stack>
+                    </s-stack>
+                  </s-banner>
+                ) : null}
                 {prior?.summary?.issuedBefore ? <s-text>{prior.summary.notice}</s-text> : null}
                 <PosToggleField label="再発行として記録する" checked={isReissue} onChange={setIsReissue} />
                 <s-text type="small" color="subdued">
                   {prior?.state === "loading"
                     ? "前に発行したかを確かめています（読み込み中…）"
                     : prior?.state === "failed"
-                      ? "前に発行したかを確かめられませんでした。前に出した領収書を出し直すときは選んでください。"
+                      ? "選ばずに発行すると、管理画面の発行履歴で「再発行を外して発行」と出ることがあります。"
                       : reissueHelpText(prior?.summary, isReissue)}
                 </s-text>
               </s-stack>
