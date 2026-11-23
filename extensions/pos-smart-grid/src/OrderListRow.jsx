@@ -17,11 +17,10 @@
  * @param {string} props.amountLabel - 「¥2,230」
  * @param {string} [props.dateTimeLabel] - 「今日 18:14」
  * @param {{ key: string, label: string, tone?: string }[]} [props.badges]
- * @param {() => void} props.onClick
+ * @param {() => void} [props.onClick] - 無いときは押せない行（発行履歴など）
  */
 export function OrderListRow({ title, amountLabel, dateTimeLabel = "", badges = [], onClick }) {
-  return (
-    <s-clickable onClick={onClick}>
+  const body = (
       <s-box paddingBlock="small">
         <s-stack gap="small-300">
           <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
@@ -42,6 +41,6 @@ export function OrderListRow({ title, amountLabel, dateTimeLabel = "", badges = 
           ) : null}
         </s-stack>
       </s-box>
-    </s-clickable>
   );
+  return onClick ? <s-clickable onClick={onClick}>{body}</s-clickable> : body;
 }

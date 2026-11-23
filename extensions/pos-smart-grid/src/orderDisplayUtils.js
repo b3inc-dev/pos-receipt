@@ -32,10 +32,12 @@ export function formatListBadges(item) {
   return out;
 }
 
+// label はボタン（スマホの 3 等分に 1 行で収まる長さ。T 2026-11-23「返金」だけに）。
+// noun は 0 件の案内で使う（「返金」の絞り込みはキャンセルの注文も含む）
 export const LIST_SEGMENTS = [
-  { value: "all", label: "すべて" },
-  { value: "refunded", label: "返金・キャンセル" },
-  { value: "voucher_change", label: "商品券釣有り" },
+  { value: "all", label: "すべて", noun: "すべて" },
+  { value: "refunded", label: "返金", noun: "返金・キャンセル" },
+  { value: "voucher_change", label: "商品券釣有り", noun: "商品券釣有り" },
 ];
 
 /** @param {Record<string, unknown>} item @param {string} segment */
