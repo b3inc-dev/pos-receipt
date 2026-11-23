@@ -1428,7 +1428,7 @@ function VoucherAdjustmentForm({
                   <Row label="取引" value={order?.orderName ?? "-"} />
                   <Row label="商品券額面" value={`¥${face.toLocaleString()}`} />
                   <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
-                  <Row label="お釣り" value={`¥${Number(changeAmount ?? 0).toLocaleString()}`} />
+                  <Row label="釣銭" value={`¥${Number(changeAmount ?? 0).toLocaleString()}`} />
                   {note ? <Row label="メモ" value={note} /> : null}
                 </s-stack>
               </s-box>
@@ -1485,16 +1485,16 @@ function VoucherAdjustmentForm({
                 value={appliedState === "loading" ? "読み込み中…" : `¥${applied.toLocaleString()}`}
               />
             )}
-            {/* 全額反映: 商品券で払った額をそのまま額面に入れる（お釣りなし。違えば直す） */}
+            {/* 全額反映: 商品券で払った額をそのまま額面に入れる（釣銭なし。違えば直す） */}
             {appliedState !== "loading" && appliedAmount !== "" && applied > 0 ? (
               <s-button kind="secondary" onClick={() => setFaceValue(String(roundMoney(applied)))} disabled={loading}>
                 {`払った額 ¥${roundMoney(applied).toLocaleString()} を額面に入れる（全額反映）`}
               </s-button>
             ) : null}
 
-            {/* お釣り（自動） */}
+            {/* 釣銭（自動） */}
             <Row
-              label="お釣り（額面 − 払った額）"
+              label="釣銭（額面 − 払った額）"
               value={changeAmount == null ? "-" : `¥${changeAmount.toLocaleString()}`}
             />
 
@@ -1648,7 +1648,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
                   {isVoucher ? (
                     <>
                       <Row label="商品券額面" value={`¥${face.toLocaleString()}`} />
-                      <Row label="お釣り" value={`¥${Number(change ?? 0).toLocaleString()}`} />
+                      <Row label="釣銭" value={`¥${Number(change ?? 0).toLocaleString()}`} />
                     </>
                   ) : (
                     <Row label="金額" value={`¥${Number(amount).toLocaleString()}`} />
@@ -1713,7 +1713,7 @@ function AdjustmentEditForm({ order, event, loading, error, setLoading, setError
                   onInput={(e) => setFaceValue(e?.currentTarget?.value ?? "")}
                 />
                 <Row label="商品券で払った額" value={`¥${applied.toLocaleString()}`} />
-                <Row label="お釣り" value={change == null ? "-" : `¥${change.toLocaleString()}`} />
+                <Row label="釣銭" value={change == null ? "-" : `¥${change.toLocaleString()}`} />
               </>
             ) : (
               <s-text-field

@@ -89,7 +89,10 @@ export function adjustmentBadges(event) {
       out.push({ key: "refund", label: "返金失敗", tone: "critical" });
       break;
     case "skipped":
-      out.push({ key: "refund", label: "記録のみ", tone: "neutral" });
+      // 商品券釣銭調整は Shopify で返金しないのがいつもなので出さない（現金で釣銭を返したのに「記録のみ」と読めて紛らわしい。T 2026-11-24）
+      if (event?.eventType !== "voucher_change_adjustment") {
+        out.push({ key: "refund", label: "記録のみ", tone: "neutral" });
+      }
       break;
     default:
       break;
@@ -124,7 +127,7 @@ export function adjustmentSubLines(event) {
   const lines = [];
   if (event?.eventType === "voucher_change_adjustment") {
     lines.push(
-      `額面 ${yen(event.voucherFaceValue)} ・ 商品券で払った額 ${yen(event.voucherAppliedAmount)} ・ お釣り ${yen(event.voucherChangeAmount)}`,
+      `額面 ${yen(event.voucherFaceValue)} ・ 商品券で払った額 ${yen(event.voucherAppliedAmount)} ・ 釣銭 ${yen(event.voucherChangeAmount)}`,
     );
   }
   const from = event?.originalPaymentMethod ? event.originalPaymentLabel || event.originalPaymentMethod : "";

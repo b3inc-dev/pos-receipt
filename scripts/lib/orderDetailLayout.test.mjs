@@ -76,13 +76,19 @@ describe("調整履歴の行", async () => {
       ["現金 → 現金 で返金", "11/23 の精算 ・ 登録 11/23 18:21"],
     );
   });
-  it("商品券は額面・払った額・お釣りを出す", () => {
+  it("商品券は額面・払った額・釣銭を出す", () => {
     const lines = adjustmentSubLines({
       eventType: "voucher_change_adjustment",
       voucherFaceValue: 1000,
       voucherAppliedAmount: 800,
       voucherChangeAmount: 200,
     });
-    assert.equal(lines[0], "額面 ¥1,000 ・ 商品券で払った額 ¥800 ・ お釣り ¥200");
+    assert.equal(lines[0], "額面 ¥1,000 ・ 商品券で払った額 ¥800 ・ 釣銭 ¥200");
   });
+});
+
+it("商品券釣銭調整には「記録のみ」を出さない（ほかの記録のみの登録には出す）", async () => {
+  const { adjustmentBadges } = await import("../../extensions/common/orderDetailLayout.js");
+  assert.deepEqual(adjustmentBadges({ eventType: "voucher_change_adjustment", shopifyRefundStatus: "skipped" }), []);
+  assert.equal(adjustmentBadges({ eventType: "payment_method_override", shopifyRefundStatus: "skipped" })[0].label, "記録のみ");
 });
