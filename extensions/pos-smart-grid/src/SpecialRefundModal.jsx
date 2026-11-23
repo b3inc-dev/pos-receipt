@@ -1312,7 +1312,7 @@ function SpecialRefundForm({
 
   if (confirming) {
     return (
-      <s-page heading="特殊返金調整を登録">
+      <s-page heading={currentMode === "receipt" ? "レシートの現金を直す" : "返金方法変更を登録"}>
         <s-scroll-box>
           <s-box padding="base">
             <s-stack gap="base">
