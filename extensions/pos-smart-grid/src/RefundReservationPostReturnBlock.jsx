@@ -43,7 +43,7 @@ function RefundReservationPostReturnBlock() {
 
   if (!message) return null;
   return (
-    <s-pos-block heading="返金">
+    <s-pos-block heading="返金の予約">
       <s-box padding="small">
         <s-text tone={message.tone}>{message.text}</s-text>
       </s-box>

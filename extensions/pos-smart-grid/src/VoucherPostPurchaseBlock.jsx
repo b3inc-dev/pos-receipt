@@ -71,7 +71,7 @@ function VoucherPostPurchaseBlock() {
 
   if (!message) return null;
   return (
-    <s-pos-block heading="商品券">
+    <s-pos-block heading="商品券釣銭調整">
       <s-box padding="small">
         <s-text tone={message.tone === "subdued" ? "neutral" : message.tone}>{message.text}</s-text>
       </s-box>
