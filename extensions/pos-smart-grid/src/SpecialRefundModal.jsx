@@ -12,7 +12,7 @@
  */
 import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
-import { getOrder, createRedoDraft } from "../../common/orderPickerApi.js";
+import { getOrder } from "../../common/orderPickerApi.js";
 import { PosChoiceField } from "./PosChoiceField.jsx";
 import {
   listSpecialRefunds,
@@ -85,19 +85,6 @@ function buildVoidConfirmMessage(event) {
     msg += "\n\n訂正する場合は、正しい内容で再登録してください。";
   }
   return msg;
-}
-
-function buildRedoDraftConfirmMessage(order) {
-  const name = order?.orderName ?? "-";
-  return [
-    `取引 ${name} と同じ商品構成で、会計やり直し用の下書き注文を作成します。`,
-    "",
-    "・決済は自動では行いません",
-    "・Shopify POS または管理画面の「下書き注文」から会計してください",
-    "・元の注文の返金・キャンセルは取り消されません",
-    "",
-    "作成しますか？",
-  ].join("\n");
 }
 
 function CorrectionModeBanner({ orderCorrectionContext }) {
@@ -255,30 +242,6 @@ function SpecialRefundModal() {
     [events, refreshEvents],
   );
 
-  const handleRedoDraft = useCallback(async () => {
-    if (!selectedOrder?.canRedoAsDraft) return;
-    if (!confirm(buildRedoDraftConfirmMessage(selectedOrder))) return;
-    setLoading(true);
-    setError("");
-    try {
-      const res = await createRedoDraft(selectedOrder.orderId);
-      const draftName = res.draftOrder?.name ?? "";
-      const count = res.draftOrder?.lineItemCount ?? 0;
-      const skipped =
-        res.skippedLineCount > 0
-          ? `（${res.skippedLineCount}行は数量0のためスキップ）`
-          : "";
-      setSubmitNotice({
-        tone: "success",
-        text: `${res.message ?? "下書きを作成しました"} 下書き: ${draftName} / ${count}品目${skipped}`,
-      });
-    } catch (e) {
-      setError(toUserMessage(e?.message) || "下書きの作成に失敗しました");
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedOrder]);
-
   if (orderEntryLoading) {
     return (
       <s-page heading="返金・商品券">
@@ -347,7 +310,6 @@ function SpecialRefundModal() {
         onRefund={() => setStep("form_refund")}
         onVoucher={() => setStep("form_voucher")}
         onVoid={handleVoid}
-        onRedoDraft={handleRedoDraft}
         submitNotice={submitNotice}
         onDismissNotice={() => setSubmitNotice(null)}
         orderCorrectionContext={orderCorrectionContext}
@@ -420,7 +382,6 @@ function OrderDetailView({
   onRefund,
   onVoucher,
   onVoid,
-  onRedoDraft,
   submitNotice,
   onDismissNotice,
   orderCorrectionContext,
@@ -473,7 +434,6 @@ function OrderDetailView({
                 order={order}
                 canRedoToCart={Boolean(order?.canRedoToCart)}
                 canRedoAsDraft={Boolean(order?.canRedoAsDraft)}
-                onRedoDraft={onRedoDraft}
                 busy={loading}
               />
 
