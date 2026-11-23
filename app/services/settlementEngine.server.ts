@@ -61,6 +61,7 @@ import {
   sleep,
 } from "../lib/shopifyGraphqlThrottle.server";
 import { readOrdersPageOrThrow } from "./settlementUpstreamPage.server";
+import { autoResolveStalePendingSpecialRefunds } from "./specialRefundAutoResolve.server";
 import { splitTaxInclusiveToNetAndTax } from "./settlementTaxPure.server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -636,6 +637,29 @@ async function buildSettlementPreviewImpl(
   // ショップタイムゾーンで「その日」の UTC 範囲を算出
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dayRange = getDayRangeInUtc(targetDate, timezone);
+
+  // 返金処理中（pending）のまま数分たった特殊返金を、Shopify を読み直して success / failed に決める
+  // （T 2026-11-23 4:25）。読むだけで返金は作らない。注文を読む前に決めるので、返金の計上ロケーションの
+  // メタフィールドもこのあとの取得に入る。決められなかったものは pending のまま、下の assert で止まる。
+  try {
+    await autoResolveStalePendingSpecialRefunds(
+      admin,
+      shopId,
+      {
+        locationIds: [
+          locationId,
+          locationId.startsWith("gid://") ? locationId : `gid://shopify/Location/${locIdRaw}`,
+          locIdRaw,
+        ],
+        createdFrom: dayRange.startUtc,
+        createdTo: dayRange.endUtc,
+      },
+      { refreshDailySummary: false },
+    );
+  } catch (e) {
+    console.warn("[settlement] auto-resolve of pending special refunds failed", e);
+  }
+
   const attributionCtx = await loadRefundAggregationContext(shopId);
 
   // 精算の注文境界（D1 / BUSINESS_RULES §1）:
