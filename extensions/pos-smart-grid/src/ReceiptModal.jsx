@@ -298,7 +298,7 @@ function FormView({
         {/* 次に押すボタンを下に固定。「プレビューを確認」だけ色付き（精算の「精算」と同じ） */}
         <FixedFooterNavBar
           centerAlignWithButtons
-          leftLabel="日付一覧に戻る"
+          leftLabel="戻る"
           onLeft={onBack}
           leftDisabled={loading}
           rightLabel="プレビューを確認"
