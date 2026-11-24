@@ -178,12 +178,17 @@ export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style" | "
     `.blk{margin:6px 0}`,
     `.a-left{text-align:left}.a-center{text-align:center}.a-right{text-align:right}`,
     `.b{font-weight:700}`,
-    `.fs-s{font-size:.85em}.fs-m{font-size:1em}.fs-l{font-size:1.3em}.fs-xl{font-size:1.8em}`,
+    // Keep explicit block sizes as multipliers of the paper-specific total size.
+    `.fs-s{font-size:.85em;--receipt-font-scale:.85}.fs-m{font-size:1em;--receipt-font-scale:1}.fs-l{font-size:1.3em;--receipt-font-scale:1.3}.fs-xl{font-size:1.8em;--receipt-font-scale:1.8}`,
     `.row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin:2px 0}`,
     `.row>span:first-child{min-width:0;flex:1;overflow-wrap:anywhere}`,
     `.row>span:last-child{min-width:0;max-width:65%;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}`,
-    `.row .print-value{font-size:${p.amountFontSizePt}pt}`,
-    `.print-total,.row .print-total{font-size:max(14pt,${p.amountFontSizePt}pt);font-weight:700}`,
+    `.print-value,.row .print-value{font-size:${p.amountFontSizePt}pt}`,
+    // The standard total/receipt amount block uses l (1.3): normalize it to
+    // the recommended 14pt total. Other sizes retain their relative ratios.
+    // Do not force bold here: totals inherit total_bold from their row;
+    // receipt amounts retain their own .b class.
+    `.print-total,.row .print-total{font-size:calc(max(14pt,${p.amountFontSizePt}pt) * var(--receipt-font-scale,1.3) / 1.3)}`,
     `.item{margin:6px 0}`,
     `.indent{padding-left:12px}`,
     `.logo{display:inline-block;max-width:min(100%,${p.logoWidthMm}mm);height:auto}`,

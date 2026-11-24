@@ -102,7 +102,7 @@ describe("receiptLayout: 描き方", () => {
     const t = text(html(defaultLayout("settlement")));
     assert.match(t, /総売上 ¥128,400/);
     assert.match(t, /件数 42件/);
-    assert.match(t, /現金 \(18件\) ¥45,300/);
+    assert.match(t, /現金 \( 18件 \) ¥45,300/);
     assert.match(t, /うち返金 1件 -¥4,950/);
   });
 
@@ -224,7 +224,7 @@ describe("receiptLayout: Ciara 風のひな形（T さんの liquid 2026-11-22�
 
   it("領収書: 様・金額のハイフン・税と支払方法・領収文・但し書き・担当印・日付と番号", () => {
     const t = text(html(ciaraReceiptLayout()));
-    inOrder(t, ["サンプルストア", "領収書", "山田 太郎 様", "¥4,950-", "消費税 (10%)：¥450", "現金：¥4,950", "上記金額を正に領収いたしました。", "但 お品代 として", "担当印", "2026年11月22日", "領収書: R-000123"]);
+    inOrder(t, ["サンプルストア", "領収書", "山田 太郎 様", "¥4,950-", "消費税 (10%)： ¥450", "現金： ¥4,950", "上記金額を正に領収いたしました。", "但 お品代 として", "担当印", "2026年11月22日", "領収書: R-000123"]);
     assert.ok(!t.includes("収入印紙"), "5 万円未満は収入印紙の枠を出さない");
     const data = sampleTemplateData("receipt") as Record<string, any>;
     data.receipt = { ...data.receipt, amount: 55000 };
