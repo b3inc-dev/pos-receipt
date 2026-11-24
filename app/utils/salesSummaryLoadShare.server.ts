@@ -71,14 +71,20 @@ export function __resetSalesSummaryLoadShareForTest() {
  * key には shopId を必ず含めること。
  */
 const inFlight = new Map<string, Promise<unknown>>();
+const foregroundJoins = new Map<string, () => void>();
+type SharePriority = { background: boolean; onForegroundJoin?: () => void };
 
-export function shareInFlight<T>(key: string, fn: () => Promise<T>): Promise<T> {
+export function shareInFlight<T>(key: string, fn: () => Promise<T>, priority?: SharePriority): Promise<T> {
   const hit = inFlight.get(key);
-  if (hit) return hit as Promise<T>;
+  if (hit) {
+    if (!priority?.background) foregroundJoins.get(key)?.();
+    return hit as Promise<T>;
+  }
   const promise = fn();
   inFlight.set(key, promise);
+  if (priority?.onForegroundJoin) foregroundJoins.set(key, priority.onForegroundJoin);
   const clear = () => {
-    if (inFlight.get(key) === promise) inFlight.delete(key);
+    if (inFlight.get(key) === promise) { inFlight.delete(key); foregroundJoins.delete(key); }
   };
   promise.then(clear, clear);
   return promise;
@@ -96,9 +102,11 @@ export function shareSalesSummaryCompute<T>(
 /** 試験用 */
 export function __resetSalesSummaryInFlightForTest() {
   inFlight.clear();
+  foregroundJoins.clear();
 }
 
 /** いま数えている途中なら、その Promise（無ければ null） */
 export function getInFlight<T>(key: string): Promise<T> | null {
+  foregroundJoins.get(key)?.();
   return (inFlight.get(key) as Promise<T> | undefined) ?? null;
 }
