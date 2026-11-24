@@ -2,7 +2,8 @@
  * 入店数を ciara-system と見せ合う（純関数）。Ciara のカスタムアプリだけで使う（T 2026-11-24）。
  *
  * どちらも「読みにいくだけ」で、相手に書かない。店 × 日ごとに、人があとから入れたほうを出す（同じ時刻なら ciara-system の数）。
- * - このアプリの時刻: FootfallReport.enteredAt（POS で入れた時刻、または ciara-system で人が入れた時刻）
+ * - POS の入店数（FootfallReport）は書き変えない。ciara-system の数は別の表（CiaraFootfallDaily）に写し、売上サマリーを出すときに比べる
+ * - このアプリの時刻: FootfallReport.enteredAt（POS で人が入れた時刻）
  * - ciara-system の時刻: SalesStoreVisitDaily.reportedAt（人が入店数報告・売上サマリーで入れた時刻。CSV の取込では進まない）
  * POS で入れた数は、ciara-system が読む口（/api/external/ciara/footfall）から読みにくる。
  */
@@ -19,11 +20,17 @@ export type CiaraVisitSyncLastRun = {
   at: string;
   ok: boolean;
   message: string;
-  /** ciara-system の数をこのアプリに入れた日数 */
-  pulled: number;
+  /** ciara-system の数が変わった日数（写しの表を書き変えた日数） */
+  changed: number;
+  /** 変わった日（多いときは初めの CIARA_VISIT_CHANGES_MAX 件だけ） */
+  changes?: CiaraVisitChange[];
   /** このストアに同じロケーションが無い店（ciara-system の店名） */
   unmatched: string[];
 };
+
+/** ciara-system の数が変わった 1 日（前の数 → 新しい数。空は「数が無い」） */
+export type CiaraVisitChange = { storeName: string; date: string; before: number | null; after: number | null };
+export const CIARA_VISIT_CHANGES_MAX = 50;
 
 export type CiaraVisitSyncSettings = {
   enabled: boolean;
@@ -89,42 +96,52 @@ export function parseCiaraVisitResponse(
   return { ok: true, stores };
 }
 
-export type LocalVisit = { visitors: number; enteredAt: string; source: string };
 export type RemoteVisit = { visitCount: number; reportedAt: string | null };
-
-/** 前からの数（ciara-system で入れた時刻が無い）を入れるときの「入れた時刻」。POS で入れた数がいつも新しくなる */
-export const UNKNOWN_ENTERED_AT = "1970-01-01T00:00:00.000Z";
+/** 写しの表（CiaraFootfallDaily）に今ある数 */
+export type StoredCiaraVisit = { visitors: number; reportedAt: string | null };
 
 /**
- * 店 × 日（key = `${locationGid}|${date}`）ごとに、ciara-system の数をこのアプリに入れるかを決める（このアプリから外へは書かない）。
- * - ciara-system にだけある → 入れる
- * - 同じ数 → 何もしない
- * - 前に ciara-system から入れた数 → ciara-system の今の数に合わせる
- * - POS で入れた数 → ciara-system で人があとから入れたときだけ入れる（同じ時刻・時刻が無いときは POS の数のまま）
+ * ciara-system の今の数と、写しの表を見比べる（店 × 日。key = `${locationGid}|${date}`）。
+ * - 新しい日・数か時刻が変わった日 → 書く
+ * - ciara-system から消えた日（写しの表だけにある） → 消す
+ * 同じなら何もしない。POS の入店数にはさわらない。
  */
-export function planVisitPull(
-  local: Map<string, LocalVisit>,
+export function planCiaraMirror(
+  stored: Map<string, StoredCiaraVisit>,
   remote: Map<string, RemoteVisit>,
-): { key: string; visitCount: number; enteredAt: string }[] {
-  const out: { key: string; visitCount: number; enteredAt: string }[] = [];
+): { upserts: { key: string; before: number | null; visitCount: number; reportedAt: string | null }[]; deletes: { key: string; before: number }[] } {
+  const upserts: { key: string; before: number | null; visitCount: number; reportedAt: string | null }[] = [];
+  const deletes: { key: string; before: number }[] = [];
   for (const key of [...remote.keys()].sort()) {
     const r = remote.get(key)!;
-    const l = local.get(key);
-    const enteredAt = r.reportedAt ?? UNKNOWN_ENTERED_AT;
-    if (!l) {
-      out.push({ key, visitCount: r.visitCount, enteredAt });
-      continue;
-    }
-    if (l.visitors === r.visitCount) continue;
-    if (l.source !== "pos") {
-      out.push({ key, visitCount: r.visitCount, enteredAt });
-      continue;
-    }
-    if (r.reportedAt && Date.parse(r.reportedAt) > Date.parse(l.enteredAt)) {
-      out.push({ key, visitCount: r.visitCount, enteredAt });
-    }
+    const s = stored.get(key);
+    if (s && s.visitors === r.visitCount && s.reportedAt === r.reportedAt) continue;
+    upserts.push({ key, before: s ? s.visitors : null, visitCount: r.visitCount, reportedAt: r.reportedAt });
   }
-  return out;
+  for (const key of [...stored.keys()].sort()) {
+    if (!remote.has(key)) deletes.push({ key, before: stored.get(key)!.visitors });
+  }
+  return { upserts, deletes };
+}
+
+export type DisplayedVisitors = { visitors: number; from: "pos" | "ciara" };
+
+/**
+ * 売上サマリーに出す入店数を決める（店 × 日）。人があとから入れたほうを出す。同じ時刻なら ciara-system の数（ciara-system 側と同じ決まり）。
+ * - ciara-system の時刻が空（前からの数・CSV の取込）なら、POS の数があれば POS の数
+ * - 片方だけならその数。どちらも無ければ空（未報告）
+ */
+export function pickDisplayedVisitors(
+  pos: { visitors: number; enteredAt: string } | null,
+  ciara: StoredCiaraVisit | null,
+): DisplayedVisitors | null {
+  if (!pos && !ciara) return null;
+  if (!ciara) return { visitors: pos!.visitors, from: "pos" };
+  if (!pos) return { visitors: ciara.visitors, from: "ciara" };
+  if (ciara.reportedAt && Date.parse(ciara.reportedAt) >= Date.parse(pos.enteredAt)) {
+    return { visitors: ciara.visitors, from: "ciara" };
+  }
+  return { visitors: pos.visitors, from: "pos" };
 }
 
 export function visitKey(locationGid: string, date: string): string {

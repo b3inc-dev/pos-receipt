@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   CIARA_VISIT_SYNC_DAYS,
-  UNKNOWN_ENTERED_AT,
   parseCiaraVisitResponse,
-  planVisitPull,
+  pickDisplayedVisitors,
+  planCiaraMirror,
   splitVisitKey,
   visitKey,
   visitSyncDateRange,
-  type LocalVisit,
   type RemoteVisit,
+  type StoredCiaraVisit,
 } from "./ciaraVisitSync";
 import { footfallReadDateRange } from "./ciaraFootfallRead";
 
@@ -63,57 +63,57 @@ describe("parseCiaraVisitResponse", () => {
   });
 });
 
-describe("planVisitPull", () => {
-  const pos = (visitors: number, enteredAt: string): LocalVisit => ({ visitors, enteredAt, source: "pos" });
-  const fromCiara = (visitors: number, enteredAt: string): LocalVisit => ({ visitors, enteredAt, source: "ciara" });
+describe("planCiaraMirror", () => {
   const remote = (visitCount: number, reportedAt: string | null): RemoteVisit => ({ visitCount, reportedAt });
+  const stored = (visitors: number, reportedAt: string | null): StoredCiaraVisit => ({ visitors, reportedAt });
 
-  it("ciara-system にだけある日は入れる（時刻が空なら古い時刻で入れる）", () => {
-    const plan = planVisitPull(new Map(), new Map([
-      [k("2026-11-21"), remote(50, null)],
-      [k("2026-11-22"), remote(60, "2026-11-22T10:00:00Z")],
-    ]));
-    assert.deepEqual(plan, [
-      { key: k("2026-11-21"), visitCount: 50, enteredAt: UNKNOWN_ENTERED_AT },
-      { key: k("2026-11-22"), visitCount: 60, enteredAt: "2026-11-22T10:00:00Z" },
+  it("新しい日は書く・同じ数と時刻は何もしない・数か時刻が変われば書く（前の数つき）", () => {
+    const plan = planCiaraMirror(
+      new Map([
+        [k("2026-11-21"), stored(50, "2026-11-21T10:00:00.000Z")],
+        [k("2026-11-22"), stored(60, null)],
+        [k("2026-11-23"), stored(70, "2026-11-23T10:00:00.000Z")],
+      ]),
+      new Map([
+        [k("2026-11-21"), remote(50, "2026-11-21T10:00:00.000Z")],
+        [k("2026-11-22"), remote(66, null)],
+        [k("2026-11-23"), remote(70, "2026-11-23T11:00:00.000Z")],
+        [k("2026-11-24"), remote(80, null)],
+      ]),
+    );
+    assert.deepEqual(plan.upserts, [
+      { key: k("2026-11-22"), before: 60, visitCount: 66, reportedAt: null },
+      { key: k("2026-11-23"), before: 70, visitCount: 70, reportedAt: "2026-11-23T11:00:00.000Z" },
+      { key: k("2026-11-24"), before: null, visitCount: 80, reportedAt: null },
     ]);
+    assert.deepEqual(plan.deletes, []);
   });
 
-  it("同じ数は何もしない。POS にだけある日も何もしない（外へは書かない）", () => {
-    const plan = planVisitPull(
-      new Map([
-        [k("2026-11-21"), pos(50, "2026-11-21T10:00:00Z")],
-        [k("2026-11-22"), pos(60, "2026-11-22T10:00:00Z")],
-      ]),
-      new Map([[k("2026-11-21"), remote(50, "2026-11-21T11:00:00Z")]]),
-    );
-    assert.deepEqual(plan, []);
+  it("ciara-system から消えた日は写しからも消す", () => {
+    const plan = planCiaraMirror(new Map([[k("2026-11-21"), stored(50, null)]]), new Map());
+    assert.deepEqual(plan, { upserts: [], deletes: [{ key: k("2026-11-21"), before: 50 }] });
+  });
+});
+
+describe("pickDisplayedVisitors", () => {
+  const pos = (visitors: number, enteredAt: string) => ({ visitors, enteredAt });
+  const ciara = (visitors: number, reportedAt: string | null): StoredCiaraVisit => ({ visitors, reportedAt });
+
+  it("片方だけならその数。どちらも無ければ空", () => {
+    assert.equal(pickDisplayedVisitors(null, null), null);
+    assert.deepEqual(pickDisplayedVisitors(pos(50, "2026-11-21T10:00:00Z"), null), { visitors: 50, from: "pos" });
+    assert.deepEqual(pickDisplayedVisitors(null, ciara(60, null)), { visitors: 60, from: "ciara" });
   });
 
-  it("POS の数は、ciara-system で人があとから入れたときだけ入れる（同じ時刻・時刻が空なら POS のまま）", () => {
-    const plan = planVisitPull(
-      new Map([
-        [k("2026-11-21"), pos(50, "2026-11-21T12:00:00Z")],
-        [k("2026-11-22"), pos(60, "2026-11-22T09:00:00Z")],
-        [k("2026-11-23"), pos(70, "2026-11-23T10:00:00Z")],
-        [k("2026-11-24"), pos(80, "2026-11-24T10:00:00Z")],
-      ]),
-      new Map([
-        [k("2026-11-21"), remote(55, "2026-11-21T11:00:00Z")],
-        [k("2026-11-22"), remote(66, "2026-11-22T10:00:00Z")],
-        [k("2026-11-23"), remote(77, "2026-11-23T10:00:00Z")],
-        [k("2026-11-24"), remote(88, null)],
-      ]),
-    );
-    assert.deepEqual(plan.map((v) => [v.key, v.visitCount]), [[k("2026-11-22"), 66]]);
+  it("人があとから入れたほう。同じ時刻なら ciara-system の数。ciara-system の時刻が空なら POS の数", () => {
+    assert.deepEqual(pickDisplayedVisitors(pos(50, "2026-11-21T10:00:00Z"), ciara(60, "2026-11-21T11:00:00Z")), { visitors: 60, from: "ciara" });
+    assert.deepEqual(pickDisplayedVisitors(pos(50, "2026-11-21T12:00:00Z"), ciara(60, "2026-11-21T11:00:00Z")), { visitors: 50, from: "pos" });
+    assert.deepEqual(pickDisplayedVisitors(pos(50, "2026-11-21T11:00:00Z"), ciara(60, "2026-11-21T11:00:00.000Z")), { visitors: 60, from: "ciara" });
+    assert.deepEqual(pickDisplayedVisitors(pos(50, "2026-11-21T11:00:00Z"), ciara(60, null)), { visitors: 50, from: "pos" });
   });
 
-  it("前に ciara-system から入れた数は、ciara-system の今の数に合わせる", () => {
-    const plan = planVisitPull(
-      new Map([[k("2026-11-22"), fromCiara(60, "2026-11-22T10:00:00Z")]]),
-      new Map([[k("2026-11-22"), remote(65, null)]]),
-    );
-    assert.deepEqual(plan.map((v) => v.visitCount), [65]);
+  it("0 は 0 として出す", () => {
+    assert.deepEqual(pickDisplayedVisitors(pos(0, "2026-11-21T12:00:00Z"), ciara(60, "2026-11-21T11:00:00Z")), { visitors: 0, from: "pos" });
   });
 });
 

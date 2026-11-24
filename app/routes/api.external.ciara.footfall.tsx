@@ -5,7 +5,7 @@
  * - 自社用（APP_DISTRIBUTION=inhouse）でないときは 404（公開アプリでは口が無い）
  * - 合言葉はヘッダー X-Cron-Secret に、予算と同じ CIARA_BUDGET_SYNC_SECRET（ciara-system の POS_RECEIPT_BUDGET_SECRET）。
  *   時間一定で比べる。未設定なら 404、違えば 401
- * - 渡すのは、管理画面で「見せ合う」をオンにしたショップの、POS で人が入れた数だけ（ciara-system から入れた数は返さない）
+ * - 渡すのは、管理画面で「見せ合う」をオンにしたショップの、POS で人が入れた数だけ（FootfallReport。ciara-system の数の写しは返さない）
  * - 渡すのはロケーション ID・日付・数・入れた時刻だけ（報告した人の名前は渡さない）
  */
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -43,7 +43,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       if ((await getCiaraVisitSyncSettings(shop.id)).enabled) enabledShopIds.push(shop.id);
     }
     const rows = enabledShopIds.length === 0 ? [] : await prisma.footfallReport.findMany({
-      where: { shopId: { in: enabledShopIds }, source: "pos", targetDate: { gte: range.from, lte: range.to } },
+      where: { shopId: { in: enabledShopIds }, targetDate: { gte: range.from, lte: range.to } },
       select: { locationId: true, targetDate: true, visitors: true, enteredAt: true },
       orderBy: [{ locationId: "asc" }, { targetDate: "asc" }],
     });

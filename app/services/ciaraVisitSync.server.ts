@@ -3,7 +3,9 @@
  *
  * どちらも「読みにいくだけ」で、相手に書かない。
  * - ciara-system → このアプリ: 5 分ごとと、POS で売上サマリーを開いたとき（1 分に 1 回まで・待たせない）に、
- *   ciara-system の読む口から今日を含めた前の 35 日の入店数を読み、人があとから入れた数ならこのアプリの入店数に入れる
+ *   ciara-system の読む口から今日を含めた前の 35 日の入店数を読み、別の表 CiaraFootfallDaily に写す（POS の入店数は書き変えない）。
+ *   売上サマリーを出すときに POS の数と比べ、人があとから入れたほうを出す（footfallWrite.server.ts の getDisplayedVisitors）。
+ *   オフにすると写しは使わず、POS で入れた数だけに戻る
  * - このアプリ → ciara-system: ciara-system が /api/external/ciara/footfall を読みにくる（POS で入れた数だけを渡す）
  *
  * - 自社用（APP_DISTRIBUTION=inhouse）でないときは何もしない。公開アプリでは設定も画面も出さない
@@ -19,18 +21,20 @@ import {
   CIARA_VISIT_SYNC_KEY,
   DEFAULT_CIARA_VISIT_SYNC,
   parseCiaraVisitResponse,
-  planVisitPull,
+  CIARA_VISIT_CHANGES_MAX,
+  planCiaraMirror,
   splitVisitKey,
   visitKey,
   visitSyncDateRange,
   type CiaraVisitSyncLastRun,
   type CiaraVisitSyncSettings,
-  type LocalVisit,
+  type CiaraVisitChange,
   type RemoteVisit,
+  type StoredCiaraVisit,
 } from "../utils/ciaraVisitSync";
 import { ciaraBudgetSyncSecret } from "./ciaraBudgetSync.server";
 import { CIARA_VISITS_PATH, ciaraSystemUrl } from "./ciaraSystemOrigin.server";
-import { writeCiaraFootfall } from "./footfallWrite.server";
+import { refreshCachedVisitors } from "./footfallWrite.server";
 
 export const CIARA_VISIT_SYNC_QUEUE = "pos-receipt-ciara-visit-sync";
 const FETCH_TIMEOUT_MS = 20_000;
@@ -57,6 +61,18 @@ export async function saveCiaraVisitSyncSettings(shopId: string, settings: Ciara
   await setAppSetting(shopId, CIARA_VISIT_SYNC_KEY, settings);
 }
 
+/**
+ * 見せ合うのオン・オフを変えたとき、ciara-system の数がある日の控え（売上サマリーの日次）を、出す数で直す。
+ * オフにすると POS で入れた数だけに戻る（写しの表は消さない。オンに戻せばまた使う）。
+ */
+export async function refreshCachedVisitorsForCiaraDays(shopId: string, shown: boolean) {
+  const rows = await prisma.ciaraFootfallDaily.findMany({
+    where: { shopId },
+    select: { locationId: true, targetDate: true },
+  });
+  for (const r of rows) await refreshCachedVisitors(prisma, shopId, r.locationId, r.targetDate, shown);
+}
+
 const LOCATIONS_QUERY = `#graphql
   query Locations {
     locations(first: 250, includeLegacy: false) {
@@ -68,7 +84,7 @@ const LOCATIONS_QUERY = `#graphql
 /** 1 回読む。結果は設定の lastRun に残す（失敗してもこのアプリの入店数は変えない） */
 export async function runCiaraVisitSync(shopId: string, admin: AdminClient): Promise<CiaraVisitSyncLastRun> {
   const settings = await getCiaraVisitSyncSettings(shopId);
-  const base: CiaraVisitSyncLastRun = { at: new Date().toISOString(), ok: false, message: "", pulled: 0, unmatched: [] };
+  const base: CiaraVisitSyncLastRun = { at: new Date().toISOString(), ok: false, message: "", changed: 0, unmatched: [] };
   const finish = async (lastRun: CiaraVisitSyncLastRun) => {
     const latest = await getCiaraVisitSyncSettings(shopId);
     await saveCiaraVisitSyncSettings(shopId, { ...latest, lastRun });
@@ -115,6 +131,7 @@ export async function runCiaraVisitSync(shopId: string, admin: AdminClient): Pro
   }
 
   const remote = new Map<string, RemoteVisit>();
+  const storeNameByGid = new Map<string, string>();
   const unmatched: string[] = [];
   for (const s of parsed.stores) {
     const gid = `gid://shopify/Location/${s.shopifyLocationId}`;
@@ -122,36 +139,50 @@ export async function runCiaraVisitSync(shopId: string, admin: AdminClient): Pro
       if (s.days.length > 0) unmatched.push(s.storeName);
       continue;
     }
+    storeNameByGid.set(gid, s.storeName);
     for (const d of s.days) remote.set(visitKey(gid, d.date), { visitCount: d.visitCount, reportedAt: d.reportedAt });
   }
 
-  const localRows = await prisma.footfallReport.findMany({
-    where: { shopId, locationId: { in: [...shopLocationIds] }, targetDate: { gte: dates[0], lte: dates[dates.length - 1] } },
-    select: { locationId: true, targetDate: true, visitors: true, enteredAt: true, source: true },
+  const storedRows = await prisma.ciaraFootfallDaily.findMany({
+    where: { shopId, targetDate: { gte: dates[0], lte: dates[dates.length - 1] } },
+    select: { locationId: true, targetDate: true, visitors: true, reportedAt: true },
   });
-  const local = new Map<string, LocalVisit>(
-    localRows.map((r) => [visitKey(r.locationId, r.targetDate), { visitors: r.visitors, enteredAt: r.enteredAt.toISOString(), source: r.source }]),
+  const stored = new Map<string, StoredCiaraVisit>(
+    storedRows.map((r) => [visitKey(r.locationId, r.targetDate), { visitors: r.visitors, reportedAt: r.reportedAt?.toISOString() ?? null }]),
   );
 
-  let pulled = 0;
-  for (const item of planVisitPull(local, remote)) {
-    const { locationGid, date } = splitVisitKey(item.key);
-    // 確かめと書き込みは 1 つの文（読んだあとに POS で報告されていたら書かない）
-    const wrote = await writeCiaraFootfall(prisma, {
-      shopId,
-      locationGid,
-      date,
-      visitors: item.visitCount,
-      enteredAt: new Date(item.enteredAt),
+  const plan = planCiaraMirror(stored, remote);
+  const changes: CiaraVisitChange[] = [];
+  const nameOf = (gid: string) => storeNameByGid.get(gid) ?? gid.replace(/^gid:\/\/shopify\/Location\//, "");
+  const now = new Date();
+  for (const u of plan.upserts) {
+    const { locationGid, date } = splitVisitKey(u.key);
+    const reportedAt = u.reportedAt ? new Date(u.reportedAt) : null;
+    await prisma.ciaraFootfallDaily.upsert({
+      where: { shopId_locationId_targetDate: { shopId, locationId: locationGid, targetDate: date } },
+      update: { visitors: u.visitCount, reportedAt, fetchedAt: now },
+      create: { shopId, locationId: locationGid, targetDate: date, visitors: u.visitCount, reportedAt, fetchedAt: now },
     });
-    if (wrote) pulled++;
+    await refreshCachedVisitors(prisma, shopId, locationGid, date, true);
+    if (u.before !== u.visitCount) changes.push({ storeName: nameOf(locationGid), date, before: u.before, after: u.visitCount });
+  }
+  for (const d of plan.deletes) {
+    const { locationGid, date } = splitVisitKey(d.key);
+    await prisma.ciaraFootfallDaily.deleteMany({ where: { shopId, locationId: locationGid, targetDate: date } });
+    await refreshCachedVisitors(prisma, shopId, locationGid, date, true);
+    changes.push({ storeName: nameOf(locationGid), date, before: d.before, after: null });
+  }
+  if (changes.length > 0) {
+    // 前の数 → 新しい数をログにも残す（画面には初めの 50 件）
+    console.log(`[ciara-visit-sync] shop=${shopId} changes=${JSON.stringify(changes)}`);
   }
 
   return finish({
     at: new Date().toISOString(),
     ok: true,
-    message: pulled > 0 ? `ciara-system で入れた入店数を ${pulled} 日ぶん入れました` : "変わった入店数はありませんでした",
-    pulled,
+    message: changes.length > 0 ? `ciara-system の入店数が ${changes.length} 日ぶん変わりました` : "変わった入店数はありませんでした",
+    changed: changes.length,
+    changes: changes.slice(0, CIARA_VISIT_CHANGES_MAX),
     unmatched,
   });
 }

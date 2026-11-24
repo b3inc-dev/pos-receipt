@@ -12,6 +12,7 @@ import {
   ciaraVisitSyncAvailable,
   ciaraVisitSyncServerReady,
   getCiaraVisitSyncSettings,
+  refreshCachedVisitorsForCiaraDays,
   runCiaraVisitSync,
   saveCiaraVisitSyncSettings,
 } from "../services/ciaraVisitSync.server";
@@ -57,6 +58,8 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
   const enabled = formData.get("enabled") === "on";
   const current = await getCiaraVisitSyncSettings(shop.id);
   await saveCiaraVisitSyncSettings(shop.id, { ...current, enabled });
+  // オン・オフで売上サマリーに出す数が変わる日（ciara-system の数がある日）の控えを直す
+  if (current.enabled !== enabled) await refreshCachedVisitorsForCiaraDays(shop.id, enabled);
   return Response.json({ ok: true, intent, message: "保存しました" } satisfies ActionResult);
 }
 
@@ -111,7 +114,7 @@ export default function FootfallSyncPage() {
 
           <Layout.AnnotatedSection
             title="見せ合う設定"
-            description="今日を含めた前の 35 日の入店数を、Shopify のロケーションが同じ店どうしで見せ合います。同じ店・同じ日は、あとから入れた数を出します。どちらも相手の数を読むだけで、相手には書きません。"
+            description="今日を含めた前の 35 日の入店数を、Shopify のロケーションが同じ店どうしで見せ合います。同じ店・同じ日は、あとから入れた数を売上サマリーに出します。POS で入れた数は書き変えないので、オフにすると POS で入れた数だけに戻ります。どちらも相手の数を読むだけで、相手には書きません。"
           >
             <Card>
               <Form method="post" className="Admin-form">
@@ -162,6 +165,19 @@ export default function FootfallSyncPage() {
                 {last && (
                   <BlockStack gap="100">
                     <Text as="p">{last.message}</Text>
+                    {(last.changes ?? []).length > 0 && (
+                      <BlockStack gap="050">
+                        <Text as="p" tone="subdued">変わった日（ciara-system の数。前 → 今）</Text>
+                        {(last.changes ?? []).map((c) => (
+                          <Text as="p" key={`${c.storeName}|${c.date}`}>
+                            {c.storeName} {c.date.replaceAll("-", "/")}: {c.before === null ? "なし" : `${c.before} 人`} → {c.after === null ? "なし" : `${c.after} 人`}
+                          </Text>
+                        ))}
+                        {last.changed > (last.changes ?? []).length && (
+                          <Text as="p" tone="subdued">ほか {last.changed - (last.changes ?? []).length} 日</Text>
+                        )}
+                      </BlockStack>
+                    )}
                     {last.unmatched.length > 0 && (
                       <Text as="p" tone="caution">
                         このストアに同じロケーションが無いので入れなかった店: {last.unmatched.join("・")}
