@@ -63,7 +63,7 @@ export async function action({request}: ActionFunctionArgs) {
   const {admin,session} = await authenticate.admin(request); const shop = await resolveShop(session.shop,admin);
   try {
     const form = await request.formData();
-    const order = await saveStoreOrder(shop.id, JSON.parse(String(form.get("order"))), JSON.parse(String(form.get("baselineSortOrder"))));
+    const order = await saveStoreOrder(shop.id, JSON.parse(String(form.get("order"))), JSON.parse(String(form.get("baselineSortOrder"))), await loadStoreLocations(admin, shop.id));
     return {ok:true as const, order, at:Date.now()};
   } catch (error) { return {ok:false as const,error: error instanceof SyntaxError ? "表示順を読み取れませんでした。画面を開き直してください。" : error instanceof StoreOrderError ? error.message : "表示順を保存できませんでした。時間をおいてもう一度お試しください。"}; }
 }

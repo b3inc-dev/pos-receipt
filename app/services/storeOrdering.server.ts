@@ -4,13 +4,20 @@ import { parseStoreOrder } from "../utils/storeOrdering";
 
 export class StoreOrderError extends Error {}
 
-export async function saveStoreOrder(shopId: string, input: unknown, baseline: unknown) {
+export async function saveStoreOrder(shopId: string, input: unknown, baseline: unknown, verifiedLocations: { id: string; name: string }[] = []) {
   const order = parseStoreOrder(input);
   if (!order || !baseline || typeof baseline !== "object" || Array.isArray(baseline)) throw new StoreOrderError("表示順を読み取れませんでした。画面を開き直してください。");
   const original = baseline as Record<string, unknown>;
   if (Object.keys(original).length !== order.length || Object.keys(original).some((id) => !order.includes(id))) throw new StoreOrderError("店舗一覧の表示順が正しくありません。画面を開き直してください。");
   for (const id of order) if (!Number.isInteger(original[id])) throw new StoreOrderError("表示順の保存値が正しくありません。画面を開き直してください。");
+  const verified = new Map(verifiedLocations.map((loc) => [locationNumericId(loc.id), loc]));
+  if (verifiedLocations.length && order.some((id) => !verified.has(id))) throw new StoreOrderError("店舗一覧が更新されました。画面を開き直してください。");
   await prisma.$transaction(async (tx) => {
+    // Shopifyで確認した稼働店舗のみ作成。既存行の機能設定・表示順は上書きしない。
+    if (verifiedLocations.length) await tx.location.createMany({
+      data: order.map((id) => ({ shopId, shopifyLocationGid: verified.get(id)!.id, name: verified.get(id)!.name })),
+      skipDuplicates: true,
+    });
     const rows = await tx.location.findMany({ where: { shopId, shopifyLocationGid: { in: order.map((id) => `gid://shopify/Location/${id}`) } }, select: { id: true, shopifyLocationGid: true, sortOrder: true } });
     const byId = new Map(rows.map((row) => [locationNumericId(row.shopifyLocationGid), row]));
     if (rows.length !== order.length || order.some((id) => !byId.has(id))) throw new StoreOrderError("店舗一覧が更新されました。画面を開き直してから並び替えてください。");
