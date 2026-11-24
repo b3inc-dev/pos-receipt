@@ -1,3 +1,4 @@
+import { applyPrinterProfile } from "../services/receiptPrinterProfile";
 /**
  * GET /api/print/receipt/:id
  * 領収書 HTML（Shopify Printing API の src）
@@ -65,7 +66,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const isReprint = markSettings.receiptReprint ? await wasPrinted(shop.id, "receipt", issued.id) : false;
     const printMarks = printMarksFor("receipt", { isReprint }, markSettings);
     if (snapshot) {
-      const html = insertPrintMarkAtTop(snapshot.renderedHtmlByPaperWidth[paper], printMarks);
+      const html = applyPrinterProfile(insertPrintMarkAtTop(snapshot.renderedHtmlByPaperWidth[paper], printMarks), printSettings.receiptPrinterProfile, paper);
       // レイアウト（#69）で作った領収書は、スクリプトを止める CSP をヘッダーでも付ける
       const fromLayout = html.includes('http-equiv="Content-Security-Policy"');
       return corsHtml(request, html, fromLayout ? { headers: { "Content-Security-Policy": PRINT_CSP } } : undefined);
@@ -122,7 +123,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ),
       paperWidthMm: paper,
     });
-    return corsHtml(request, insertPrintMarkAtTop(html, printMarks));
+    return corsHtml(request, applyPrinterProfile(insertPrintMarkAtTop(html, printMarks), printSettings.receiptPrinterProfile, paper));
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);

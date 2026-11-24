@@ -1,3 +1,4 @@
+import { applyPrinterProfile } from "../services/receiptPrinterProfile";
 /**
  * GET /api/print/sales/:orderId
  * 販売レシート HTML（Shopify Printing API の src）
@@ -10,7 +11,7 @@ import {
   corsHtml,
   corsPreflightResponse,
 } from "../utils/posAuth.server";
-import { getAppSetting } from "../utils/appSettings.server";
+import { getAppSetting, PRINT_SETTINGS_KEY, type PrintSettings } from "../utils/appSettings.server";
 import {
   SALES_RECEIPT_SETTINGS_KEY,
   DEFAULT_SALES_RECEIPT_SETTINGS,
@@ -74,6 +75,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return corsErrorJson(request, { ok: false, error: "帳票種別が無効です。" }, 400);
     }
     const paperWidthMm = settings.paperWidthMm === 58 ? 58 : 80;
+    const printSettings = await getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY);
+    const output = (html: string) => applyPrinterProfile(html, printSettings?.receiptPrinterProfile, paperWidthMm);
 
     // 管理画面のレイアウト（#69）を「印字に使う」にしているときだけ。作れなければ今までの印字
     const layoutKind = copy === "gift" ? "gift" : "sales";
@@ -94,7 +97,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         return corsErrorJson(request, { ok: false, error: "注文が見つかりません。" }, 404);
       }
       if (result.status === "ok") {
-        return corsHtml(request, result.html, { headers: { "Content-Security-Policy": PRINT_CSP } });
+        return corsHtml(request, output(result.html), { headers: { "Content-Security-Policy": PRINT_CSP } });
       }
     }
 
@@ -107,7 +110,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         return result.data?.order ?? null;
       }, settings.paperWidthMm === 58 ? 58 : 80, giftLayout ?? undefined);
       if (html === null) return corsErrorJson(request, { ok: false, error: "注文が見つかりません。" }, 404);
-      return corsHtml(request, insertPrintMarkAtTop(html, printMarks));
+      return corsHtml(request, output(insertPrintMarkAtTop(html, printMarks)));
     }
     const response = await admin.graphql(SALES_RECEIPT_ORDER_QUERY, { variables: { id: gid } });
     const json = (await response.json()) as {
@@ -127,7 +130,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       timezone,
       shopName: settings.headerTitle || undefined,
     });
-    return corsHtml(request, insertPrintMarkAtTop(html, printMarks));
+    return corsHtml(request, output(insertPrintMarkAtTop(html, printMarks)));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);

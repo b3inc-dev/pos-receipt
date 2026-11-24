@@ -1,3 +1,4 @@
+import { applyPrinterProfile } from "../services/receiptPrinterProfile";
 /**
  * GET /api/print/settlement/:id
  * 精算／点検レシート HTML（Shopify Printing API の src）
@@ -86,14 +87,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         });
         return null;
       });
-      if (html) return corsHtml(request, applyPrintMarksToLayoutHtml(html, layout, printMarks), { headers: { "Content-Security-Policy": PRINT_CSP } });
+      if (html) return corsHtml(request, applyPrinterProfile(applyPrintMarksToLayoutHtml(html, layout, printMarks), printSettings.receiptPrinterProfile, devicePaperWidthMm), { headers: { "Content-Security-Policy": PRINT_CSP } });
     }
 
     const reprint = buildSettlementReprintView(settlement, {
       currentLocationName,
       devicePaperWidthMm,
     });
-    return corsHtml(request, insertPrintMarkAtTop(reprint.html, printMarks));
+    return corsHtml(request, applyPrinterProfile(insertPrintMarkAtTop(reprint.html, printMarks), printSettings.receiptPrinterProfile, devicePaperWidthMm));
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return corsErrorJson(request, { ok: false, error: message }, 500);

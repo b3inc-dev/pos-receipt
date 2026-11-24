@@ -1,3 +1,5 @@
+import { ReceiptPrinterSettings } from "../components/ReceiptPrinterSettings";
+import { normalizePrinterProfile } from "../services/receiptPrinterProfile";
 /**
  * /app/print-settings — 印字設定（要件 §12）
  * アプリ独自印字は Shopify Printing API に統一。旧方式は保存値の読み取りのみ。
@@ -81,6 +83,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const settings: PrintSettings = {
     ...DEFAULT_PRINT_SETTINGS,
     ...existing,
+    receiptPrinterProfile: normalizePrinterProfile(formData.get("receiptPrinterProfile") ?? existing.receiptPrinterProfile),
     defaultPrintMode: UNIFIED_PRINT_MODE,
     locationPrintModeOverrideEnabled: false,
     cloudprntPaperWidth: str("cloudprntPaperWidth", existing.cloudprntPaperWidth ?? "80mm"),
@@ -139,6 +142,7 @@ export default function PrintSettingsPage() {
 
   const handleSave = () => {
     const fd = new FormData();
+    fd.set("receiptPrinterProfile", normalizePrinterProfile(form.receiptPrinterProfile));
     fd.set("cloudprntPaperWidth", form.cloudprntPaperWidth);
     fd.set(
       "receiptPreviewBeforePrintRequired",
@@ -224,6 +228,10 @@ export default function PrintSettingsPage() {
                 />
               </BlockStack>
             </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection title="プリンターに合わせる" description="全帳票の58mm印字とレイアウトのプレビューで共通の設定です。80mmには適用しません。">
+            <ReceiptPrinterSettings value={normalizePrinterProfile(form.receiptPrinterProfile)} onChange={(v) => set("receiptPrinterProfile", v)} />
           </Layout.AnnotatedSection>
 
           <Layout.AnnotatedSection

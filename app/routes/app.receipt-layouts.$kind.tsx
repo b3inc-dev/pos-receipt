@@ -1,3 +1,4 @@
+import { normalizePrinterProfile } from "../services/receiptPrinterProfile";
 /**
  * /app/receipt-layouts/:kind — 1 種類のレシートのレイアウトを編集する
  * 保存は Shopify の保存の帯（SaveBar）。1 回の保存でレイアウト全部を保存し、誤りが 1 つでもあれば何も保存しない。
@@ -10,7 +11,7 @@ import { Page, Layout, Card, Checkbox, BlockStack, Text, Button, InlineStack } f
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { getAppSetting, setAppSetting } from "../utils/appSettings.server";
+import { getAppSetting, setAppSetting, PRINT_SETTINGS_KEY, type PrintSettings } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SaveBar, StatusBanner, SuccessToast, markFormDirty } from "../components/admin-ui";
 import { ReceiptLayoutEditor } from "../components/ReceiptLayoutEditor";
@@ -34,13 +35,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const kind = params.kind;
   if (!isReceiptKind(kind)) throw new Response("Not Found", { status: 404 });
   const shop = await resolveShop(session.shop, admin);
-  const [raw, enabled] = await Promise.all([
+  const [raw, enabled, printSettings] = await Promise.all([
     getAppSetting<unknown>(shop.id, receiptLayoutSettingKey(kind)),
     getLayoutPrintEnabled(shop.id),
+    getAppSetting<Partial<PrintSettings>>(shop.id, PRINT_SETTINGS_KEY),
   ]);
   // 精算のプレビューは、店の支払方法の並び順・まとめの行・納金額の設定を入れた見本で出す
   const sampleData = kind === "settlement" ? sampleSettlementData(await getSettlementCalc(shop.id)) : undefined;
-  return { kind, layout: normalizeLayout(raw, kind), printEnabled: enabled[kind], sampleData };
+  return { printerProfile: normalizePrinterProfile(printSettings?.receiptPrinterProfile), kind, layout: normalizeLayout(raw, kind), printEnabled: enabled[kind], sampleData };
 }
 
 type ActionData =
@@ -72,7 +74,7 @@ export async function action({ request, params }: ActionFunctionArgs): Promise<A
 }
 
 export default function ReceiptLayoutEdit() {
-  const { kind, layout: loaded, printEnabled: loadedEnabled, sampleData } = useLoaderData<typeof loader>();
+  const { kind, layout: loaded, printEnabled: loadedEnabled, sampleData, printerProfile } = useLoaderData<typeof loader>();
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
   const navigate = useNavigate();
@@ -167,7 +169,7 @@ export default function ReceiptLayoutEdit() {
                     ) : null}
                   </BlockStack>
                 </Card>
-                <ReceiptLayoutEditor kind={kind} initial={baseline} onLayoutChange={setCurrent} sampleData={sampleData} />
+                <ReceiptLayoutEditor kind={kind} initial={baseline} onLayoutChange={setCurrent} sampleData={sampleData} printerProfile={printerProfile} />
               </BlockStack>
             </Form>
           </Layout.Section>
