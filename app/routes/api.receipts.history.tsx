@@ -1,13 +1,16 @@
 /**
  * GET /api/receipts/history
  * 要件書 §21.5: 領収書発行履歴
- * Query: orderId?, dateFrom?, dateTo?, limit?, locationId?, q?
+ * Query: orderId?, dateFrom?, dateTo?, limit?, locationId?, q?, cursor?
  *
  * POS の発行履歴の一覧（注文一覧と同じ見た目）用に、2026-11-23 から次を足した:
  * - dateFrom/dateTo は店のタイムゾーンの 0 時〜23:59 で区切る（前は UTC の 0 時で、0〜9 時の発行が前の日に出ていた）
- * - locationId: 指定した店で発行したものだけ（POS の今の店）
+ * - locationId: 指定した店で売った注文の領収書だけ（発行の記録には注文の店が入っている。発行した端末の店ではない）。
+ *   orderId が無いときは必須（無いと全店の履歴を返してしまうため 400）
  * - q: 注文番号・宛名の一部で探す（日付は使わない）
  * - 行の localDate / transactionTime と、todayLocalDate / fetchedAtTime（店のタイムゾーン）
+ * - limit は 1〜50。cursor（前のページの nextCursor）で続きを読む
+ * - dateFrom/dateTo は YYYY-MM-DD 以外なら 400
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse } from "../utils/posAuth.server";
@@ -19,6 +22,7 @@ import {
   getShopTimezoneForDaily,
 } from "../utils/shopTimezone.server";
 import { normalizeLocationIdForQuery } from "../utils/orderSearchQuery";
+import { isYmd, parseHistoryLimit } from "../utils/receiptHistoryParams";
 import { getAppSetting } from "../utils/appSettings.server";
 import { formatReceiptIssuer, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
 
@@ -32,7 +36,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const orderId = url.searchParams.get("orderId");
     const dateFrom = url.searchParams.get("dateFrom");
     const dateTo = url.searchParams.get("dateTo");
-    const limit = Math.min(50, parseInt(url.searchParams.get("limit") ?? "20", 10) || 20);
+    const limit = parseHistoryLimit(url.searchParams.get("limit"));
+    const cursor = url.searchParams.get("cursor")?.trim() || null;
+    if ((dateFrom && !isYmd(dateFrom)) || (dateTo && !isYmd(dateTo))) {
+      return corsJson({ ok: false, error: "dateFrom/dateTo must be YYYY-MM-DD" }, { status: 400 });
+    }
 
     const where: Parameters<typeof prisma.receiptIssue.findMany>[0]["where"] = {
       shopId: shop.id,
@@ -40,6 +48,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const timezone = await getShopTimezoneForDaily(admin, shop.id);
     const q = url.searchParams.get("q")?.trim() ?? "";
     const locRaw = normalizeLocationIdForQuery(url.searchParams.get("locationId"));
+    if (!orderId && !locRaw) {
+      // 店の指定が無いと全店の履歴を返してしまう
+      return corsJson({ ok: false, error: "locationId required" }, { status: 400 });
+    }
 
     const w = where as Record<string, unknown>;
     const and: Record<string, unknown>[] = [];
@@ -66,11 +78,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (and.length) w.AND = and;
 
     const staffNames = parseStaffNameMap(await getAppSetting(shop.id, STAFF_DISPLAY_NAMES_SETTING_KEY).catch(() => null));
-    const items = await prisma.receiptIssue.findMany({
+    const rows = await prisma.receiptIssue.findMany({
       where,
-      orderBy: { createdAt: "desc" },
-      take: limit,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor = hasMore ? items[items.length - 1].id : null;
 
     return corsJson({
       items: items.map((r) => ({
@@ -92,6 +108,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         localDate: getCalendarDateStringInTimeZone(r.createdAt, timezone),
         transactionTime: formatTimeHmInTimeZone(r.createdAt.toISOString(), timezone),
       })),
+      nextCursor,
       timezone,
       todayLocalDate: getCalendarDateStringInTimeZone(new Date(), timezone),
       fetchedAtTime: formatTimeHmInTimeZone(new Date().toISOString(), timezone),
