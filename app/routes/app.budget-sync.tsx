@@ -14,7 +14,10 @@ import {
   getCiaraBudgetSyncSettings,
   runCiaraBudgetSync,
   saveCiaraBudgetSyncSettings,
+  ensureCiaraBudgetSyncScheduler,
+  ciaraBudgetSyncSchedulerStatus,
 } from "../services/ciaraBudgetSync.server";
+import { ciaraConnectionView } from "../utils/ciaraSyncConnection";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SaveBar, SuccessToast, confirmLeave } from "../components/admin-ui";
 
@@ -35,7 +38,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const shop = await resolveShop(session.shop, admin);
   const settings = await getCiaraBudgetSyncSettings(shop.id);
-  return { settings, hasSecret: ciaraSyncServerReady() };
+  // 定期の仕事が止まっていたら、開いたときにもう一度始める（待たずに今の状態を出す）
+  void ensureCiaraBudgetSyncScheduler();
+  return { settings, hasSecret: ciaraSyncServerReady(), scheduler: ciaraBudgetSyncSchedulerStatus() };
 }
 
 export async function action({ request }: ActionFunctionArgs): Promise<Response> {
@@ -52,14 +57,15 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
     return Response.json({ ok: Boolean(lastRun?.ok), intent, message: lastRun?.message ?? "" } satisfies ActionResult);
   }
 
-  const enabled = formData.get("enabled") === "on";
+  // Polaris の Checkbox は値を空で送るので、隠し入力の true / false で受ける（ほかの設定画面と同じ形）
+  const enabled = formData.get("enabled") === "true";
   const current = await getCiaraBudgetSyncSettings(shop.id);
   await saveCiaraBudgetSyncSettings(shop.id, { ...current, enabled });
   return Response.json({ ok: true, intent, message: "保存しました" } satisfies ActionResult);
 }
 
 export default function BudgetSyncPage() {
-  const { settings, hasSecret } = useLoaderData<typeof loader>();
+  const { settings, hasSecret, scheduler } = useLoaderData<typeof loader>();
   const actionData = useActionData<ActionResult>();
   const navigation = useNavigation();
   const navigate = useNavigate();
@@ -76,16 +82,21 @@ export default function BudgetSyncPage() {
     notice = { tone: "critical", title: actionData.intent === "run" ? "取り込めませんでした" : "保存できませんでした", text: actionData.message };
   }
   // つながりの状態（サーバーの設定の名前は出さない）
-  const connected = hasSecret && settings.enabled && Boolean(last?.ok);
-  const connectionNote = connected
-    ? "1 時間ごとに取り込んでいます。"
-    : !settings.enabled
-      ? "取り込みをオンにして保存すると、つながりを確かめます。"
-      : !hasSecret
-        ? "サーバーの準備がまだです。準備ができると 1 時間ごとに取り込みます。"
-        : last && !last.ok
-          ? last.message
-          : "「今すぐ取り込む」を押すと、つながりを確かめます。";
+  // 定期の仕事が動いているときだけ「つながっています」にする（止まっていれば黙らずに出す）
+  const view = ciaraConnectionView({
+    hasSecret,
+    enabled: settings.enabled,
+    last,
+    scheduler,
+    texts: {
+      job: "1 時間ごとの取り込み",
+      running: "1 時間ごとに取り込んでいます。",
+      turnOn: "取り込みをオンにして保存すると、つながりを確かめます。",
+      notReady: "サーバーの準備がまだです。準備ができると 1 時間ごとに取り込みます。",
+      tryNow: "「今すぐ取り込む」を押すと、つながりを確かめます。",
+    },
+  });
+  const connectionNote = view.note;
 
   return (
     <PolarisPageWrapper>
@@ -121,10 +132,10 @@ export default function BudgetSyncPage() {
                   }}
                 />
                 <BlockStack gap="300">
+                  <input type="hidden" name="enabled" value={enabled ? "true" : "false"} />
                   <Checkbox
                     label="ciara-system から予算を取り込む"
                     helpText="オンの間、取り込んだ店の予算はこのアプリでは見るだけになります（入力は ciara-system で行います）。"
-                    name="enabled"
                     checked={enabled}
                     onChange={setEnabled}
                   />
@@ -138,7 +149,7 @@ export default function BudgetSyncPage() {
               <BlockStack gap="300">
                 <InlineStack gap="200" blockAlign="center">
                   <Text as="span" variant="headingSm">ciara-system とのつながり</Text>
-                  <Badge tone={connected ? "success" : "attention"}>{connected ? "つながっています" : "まだです"}</Badge>
+                  <Badge tone={view.badge.tone}>{view.badge.label}</Badge>
                 </InlineStack>
                 <Text as="p" tone="subdued">{connectionNote}</Text>
                 <InlineStack align="space-between" blockAlign="center" gap="200">
