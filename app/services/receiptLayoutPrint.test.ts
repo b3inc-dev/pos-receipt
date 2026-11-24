@@ -324,7 +324,7 @@ describe("印字の HTML", () => {
     const d = sampleSettlementData(DEFAULT_SETTLEMENT_CALC);
     const html58 = renderLayoutForPrint(defaultLayout("settlement"), d, 58)!;
     assert.ok(html58.includes("Content-Security-Policy"));
-    assert.ok(html58.includes("width:48mm"));
+    assert.ok(html58.includes("width:100%;max-width:100%"));
   });
   it("テンプレートの誤りは null（呼ぶ側は今までの印字）", () => {
     const bad = { ...defaultLayout("sales"), mode: "code" as const, code: "{% if %}" };

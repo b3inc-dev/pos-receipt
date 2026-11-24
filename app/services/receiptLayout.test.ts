@@ -106,10 +106,10 @@ describe("receiptLayout: 描き方", () => {
     assert.match(t, /うち返金 1件 -¥4,950/);
   });
 
-  it("用紙の幅で本文の幅が変わる", () => {
+  it("どちらの用紙でも本文は印字領域を使う", () => {
     const l = defaultLayout("receipt");
-    assert.match(html(l), /width:72mm/);
-    assert.match(html({ ...l, paperWidthMm: 58 }), /width:48mm/);
+    assert.match(html(l), /width:100%;max-width:100%/);
+    assert.match(html({ ...l, paperWidthMm: 58 }), /width:100%;max-width:100%/);
   });
 
   it("include・render は使えず、理由を返す", () => {

@@ -32,6 +32,14 @@ export function paperWidthPx(mm: 58 | 80): number {
   return Math.round((mm === 58 ? 48 : 72) * 96 / 25.4);
 }
 
+/** 実測から求める描画幅。プリンターのドット数をCSS pxと仮定しない。 */
+export function previewViewportPx(layout: Pick<ReceiptLayout, "paperWidthMm" | "previewCalibration">): number {
+  const measured = layout.previewCalibration?.[layout.paperWidthMm];
+  return measured && measured >= 5 && measured <= 60
+    ? (layout.paperWidthMm === 58 ? 48 : 72) * 100 / measured
+    : paperWidthPx(layout.paperWidthMm);
+}
+
 function formatNumber(v: unknown): string {
   const n = Number(v);
   if (!Number.isFinite(n)) return "0";
@@ -173,7 +181,7 @@ export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style" | "
     `*{box-sizing:border-box}`,
     `@page{size:auto;margin:0}`,
     `html,body{margin:0;padding:0;background:#fff}`,
-    `body{padding:${p.marginYMm}mm ${p.marginXMm}mm;width:${layout.paperWidthMm === 58 ? 48 : 72}mm;max-width:100%;overflow-wrap:anywhere;color:#000;font-family:${FONT_STACKS[st.fontFamily]};font-size:${bodyFont};line-height:${p.lineHeight};font-weight:${st.fontWeight}}`,
+    `body{padding:${p.marginYMm}mm ${p.marginXMm}mm;width:100%;max-width:100%;overflow-wrap:anywhere;color:#000;font-family:${FONT_STACKS[st.fontFamily]};font-size:${bodyFont};line-height:${p.lineHeight};font-weight:${st.fontWeight}}`,
     `p{margin:0}`,
     `.blk{margin:6px 0}`,
     `.a-left{text-align:left}.a-center{text-align:center}.a-right{text-align:right}`,
@@ -191,7 +199,7 @@ export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style" | "
     `.print-total,.row .print-total{font-size:calc(max(14pt,${p.amountFontSizePt}pt) * var(--receipt-font-scale,1.3) / 1.3)}`,
     `.item{margin:6px 0}`,
     `.indent{padding-left:12px}`,
-    `.logo{display:inline-block;max-width:min(100%,${p.logoWidthMm}mm);height:auto}`,
+    `.logo{display:inline-block;max-width:${Math.min(100, p.logoWidthMm / (layout.paperWidthMm === 58 ? 48 : 72) * 100)}%;height:auto}`,
     `.hr{border:0;margin:8px 0}`,
     `.hr-none{border-top:0}.hr-solid{border-top:1px solid #000}.hr-thick{border-top:3px solid #000}.hr-dashed{border-top:1px dashed #000}.hr-dotted{border-top:2px dotted #000}`,
     `.ul-solid{border-bottom:1px solid #000;padding-bottom:4px}.ul-thick{border-bottom:3px solid #000;padding-bottom:6px}.ul-dashed{border-bottom:1px dashed #000;padding-bottom:4px}.ul-dotted{border-bottom:2px dotted #000;padding-bottom:4px}`,
