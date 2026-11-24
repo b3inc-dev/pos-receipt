@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function ReceiptLayoutPreview({ html, widthPx, viewportPx }: { html: string; widthPx: number; viewportPx: number }) {
   const frame = useRef<HTMLIFrameElement | null>(null);
@@ -22,11 +22,16 @@ export function ReceiptLayoutPreview({ html, widthPx, viewportPx }: { html: stri
     ro.observe(el);
     return () => ro.disconnect();
   }, [widthPx]);
-  const fit = () => {
+  const fit = useCallback(() => {
     // スクリプトは動かさない（sandbox に allow-scripts を付けない）。高さを読むため同じ origin だけ許す
     const doc = frame.current?.contentDocument;
-    if (doc?.body) setHeight(Math.max(200, doc.documentElement.scrollHeight + 4));
-  };
+    // documentElementのscrollHeightは以前のiframe高さを含み、短く戻せないためbodyを測る。
+    if (doc?.body) setHeight(Math.max(200, doc.body.scrollHeight + 4));
+  }, []);
+  useEffect(() => {
+    const id = window.requestAnimationFrame(fit);
+    return () => window.cancelAnimationFrame(id);
+  }, [viewportPx, fit]);
   return (
     <div ref={box} className="RL-preview-box">
       <div style={{ width: (widthPx + 2) * scale, height: height * (widthPx / viewportPx) * scale, margin: "0 auto", overflow: "hidden" }}>

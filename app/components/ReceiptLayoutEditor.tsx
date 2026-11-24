@@ -87,7 +87,7 @@ function blockSummary(block: LayoutBlock): string {
  * 数の欄。打っている途中（空・「1.」など）は文字のまま持ち、数として読めたときだけ親へ渡す。
  * 範囲の外・空は欄の下に赤い文字で出す（保存の前の確認でも止まる）。
  */
-function NumField({
+export function NumField({
   label,
   value,
   min,
@@ -101,7 +101,7 @@ function NumField({
   value: number;
   min: number;
   max: number;
-  step?: number;
+  step?: number | "any";
   suffix?: string;
   helpText?: string;
   onChange: (v: number) => void;
@@ -122,7 +122,8 @@ function NumField({
       value={draft}
       min={min}
       max={max}
-      step={step}
+      // Polarisの型はnumberのみだが、HTML inputは小数精度を保持するstep="any"を受け取る。
+      step={step as number}
       suffix={suffix}
       helpText={helpText}
       error={error}
@@ -452,7 +453,7 @@ export function ReceiptLayoutEditor({
                     value={paperStyle[key]} onChange={(v) => updatePaperStyle(key, v)} />
                 ))}
                 <NumField label="ロゴの最大幅" suffix="%" min={15 / (layout.paperWidthMm === 58 ? 48 : 72) * 100}
-                  max={42 / (layout.paperWidthMm === 58 ? 48 : 72) * 100} step={1}
+                  max={42 / (layout.paperWidthMm === 58 ? 48 : 72) * 100} step="any"
                   value={paperStyle.logoWidthMm / (layout.paperWidthMm === 58 ? 48 : 72) * 100}
                   onChange={(v) => updatePaperStyle("logoWidthMm", v / 100 * (layout.paperWidthMm === 58 ? 48 : 72))}
                   helpText="印字領域に対する割合です。ブロックの「画像の幅」がこれより小さい場合は、ブロックの値を使います。" />
@@ -465,7 +466,7 @@ export function ReceiptLayoutEditor({
                     update({ ...layout, previewCalibration: next });
                   }} />
                 {layout.previewCalibration?.[layout.paperWidthMm] !== undefined ? (
-                  <NumField label="100px診断線の実測長" suffix="mm" min={5} max={60} step={0.1}
+                  <NumField label="100px診断線の実測長" suffix="mm" min={5} max={60} step="any"
                     value={layout.previewCalibration[layout.paperWidthMm]!}
                     onChange={(v) => update({ ...layout, previewCalibration: { ...layout.previewCalibration, [layout.paperWidthMm]: v } })}
                     helpText="診断印字の100pxの線を定規で測って入力します。この用紙幅のプレビューだけを補正し、印字サイズは変えません。" />
