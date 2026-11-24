@@ -185,9 +185,7 @@ export default function SettlementCalcSettingsPage() {
         }}
       >
         <BlockStack gap="400">
-          <Card padding="0">
-            <TabGroupBar tabs={SETTLEMENT_TABS} />
-          </Card>
+          <TabGroupBar tabs={SETTLEMENT_TABS} />
           <Layout>
             {/* 保存の成功はトーストで出し、保存のたびに出す（UI ルール v1.1 7章） */}
             <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />

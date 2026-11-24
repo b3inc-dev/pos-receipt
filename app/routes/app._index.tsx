@@ -98,31 +98,23 @@ export default function AppIndex() {
               description="日付、ロケーション、金額を履歴で比較します。"
             >
               <Button onClick={to("/app/settlement-history")} variant="primary">精算履歴を開く</Button>
-              <Button onClick={to("/app/special-refund-history")}>特殊返金履歴</Button>
-              {(isInhouse || isPro) && (
-                <Button onClick={to("/app/budget-management")}>予算管理</Button>
-              )}
+              <Button onClick={to("/app/special-refund-history")}>調整履歴</Button>
             </HomeCard>
 
-            <HomeCard
-              title="用紙と印字"
-              description="用紙幅が精算・点検・領収書・販売レシートのどれに対応するかを印字設定で確認します。"
-            >
-              <Button onClick={to("/app/print-settings")} variant="primary">印字設定を開く</Button>
-              <Button onClick={to("/app/settlement-print-layout")}>精算印字プレビュー</Button>
-            </HomeCard>
-
-            <HomeCard
-              title="領収書"
-              description="発行者情報（会社名・住所・電話番号）や但し書きのデフォルト値を設定します。"
-            >
-              <Button onClick={to("/app/receipt-template")} variant="primary">テンプレート設定を開く</Button>
+            <HomeCard title="レシート" description="販売・ギフト・領収書・精算／点検の基本設定とデザインを編集します。">
+              <Button onClick={to("/app/receipt-layouts")} variant="primary">レシートのデザインを開く</Button>
+              <Button onClick={to("/app/print-settings")}>プリンター・印字設定</Button>
               <Button onClick={to("/app/receipt-history")}>領収書履歴</Button>
             </HomeCard>
+            <HomeCard title="レポート" description="売上サマリー・店舗予算・販売チャネルの管理を選びます。">
+              <Button onClick={to("/app/reports")} variant="primary">レポート一覧を開く</Button>
+              <Button onClick={to("/app/sales-summary-settings")}>サマリー設定</Button>
+              <Button onClick={to("/app/sales-channels")}>チャネル管理</Button>
+            </HomeCard>
 
             <HomeCard
-              title="ロケーション"
-              description="印字方式と売上サマリーの有効化を、店舗ごとに設定します。"
+              title="店舗一覧"
+              description="店舗ごとの機能・表示名・並び順を設定します。"
             >
               <Button onClick={to("/app/settings")} variant="primary">設定を開く</Button>
               {!isInhouse && (

@@ -86,7 +86,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           salesSummaryEnabled: db?.salesSummaryEnabled ?? false,
           footfallReportingEnabled: isFootfallReportingAllowedForLocation(merged, node.id),
         };
-      });
+      }).sort((a,b) => (dbMap.get(a.locationId)?.sortOrder ?? 0) - (dbMap.get(b.locationId)?.sortOrder ?? 0));
 
     return corsJson({ locations }, { headers: { "Content-Type": "application/json" } });
   } catch (err) {

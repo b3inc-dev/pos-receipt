@@ -238,11 +238,9 @@ export default function SettlementHistoryPage() {
 
   return (
     <PolarisPageWrapper>
-      <Page title="精算履歴" fullWidth backAction={{ content: "戻る", onAction: () => navigate("/app" + q) }}>
+      <Page title="精算履歴" backAction={{ content: "戻る", onAction: () => navigate("/app" + q) }}>
         <div className="AdminHistory">
-          <Card padding="0">
-            <TabGroupBar tabs={SETTLEMENT_TABS} />
-          </Card>
+          <TabGroupBar tabs={SETTLEMENT_TABS} />
           <Layout>
             <Layout.Section>
               <Card>

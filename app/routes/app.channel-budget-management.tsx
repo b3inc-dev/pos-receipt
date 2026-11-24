@@ -467,9 +467,7 @@ export default function ChannelBudgetManagementPage() {
           </Box>
         )}
 
-        <Card padding="0">
-          <TabGroupBar tabs={REPORTS_TABS} />
-        </Card>
+        <TabGroupBar tabs={REPORTS_TABS} />
 
         <Layout>
           <Layout.Section>

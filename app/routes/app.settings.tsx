@@ -1,3 +1,5 @@
+import { saveStoreOrder, StoreOrderError } from "../services/storeOrdering.server";
+import { moveStore } from "../utils/storeOrdering";
 /**
  * /app/settings — 店舗（一覧）
  *
@@ -7,9 +9,9 @@
  * - 選んだ店をまとめて変更: /app/settings/bulk?ids=…
  * 精算・売上サマリーが読む Location の列はそのまま（ここは読むだけ。あとから足された店に決まりを当てるときだけ書く）。
  */
-import { useMemo, useState } from "react";
-import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useLocation, useNavigate } from "react-router";
+import { useEffect, useMemo, useState } from "react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { Form, useActionData, useLoaderData, useLocation, useNavigation } from "react-router";
 import { Page } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
@@ -25,7 +27,7 @@ import {
 import { DEFAULTABLE_LABELS, DEFAULT_GROUPS, differingKeys, featureSummary, locationNumericId } from "../utils/locationDefaults";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, STORE_TABS } from "../components/TabGroupBar";
-import { AdminBlock, AdminIntro, SecondaryLink, StateBadge, SummaryRows } from "../components/admin-ui";
+import { AdminBlock, AdminIntro, SecondaryLink, StateBadge, SummaryRows, SaveBar, StatusBanner, SuccessToast, useGuardedNavigate } from "../components/admin-ui";
 import { withSearch } from "../utils/withSearch";
 import { StoreBody } from "../components/StoreBody";
 
@@ -47,6 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       id: locationNumericId(loc.id),
       name: loc.displayName || loc.name,
       shopifyName: loc.name,
+      sortOrder: loc.sortOrder,
       features: featureSummary(loc, "features"),
       // 売上サマリーに出すかは店舗設定だけで決まる（T さん 2026-11-24）。一覧で 1 目で分かるようにする。プランで使えない店では出さない
       salesSummary: locked.includes("salesSummaryEnabled") ? null : loc.salesSummaryEnabled,
@@ -56,11 +59,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
+export async function action({request}: ActionFunctionArgs) {
+  const {admin,session} = await authenticate.admin(request); const shop = await resolveShop(session.shop,admin);
+  try {
+    const form = await request.formData();
+    const order = await saveStoreOrder(shop.id, JSON.parse(String(form.get("order"))), JSON.parse(String(form.get("baselineSortOrder"))));
+    return {ok:true as const, order, at:Date.now()};
+  } catch (error) { return {ok:false as const,error: error instanceof SyntaxError ? "表示順を読み取れませんでした。画面を開き直してください。" : error instanceof StoreOrderError ? error.message : "表示順を保存できませんでした。時間をおいてもう一度お試しください。"}; }
+}
+
 type Filter = "all" | "custom" | "same";
 
 export default function StoresPage() {
   const { defaults, saved, isDevStore, locations } = useLoaderData<typeof loader>();
-  const navigate = useNavigate();
+  const navigate = useGuardedNavigate();
+  const navigation = useNavigation();
+  const actionData = useActionData<typeof action>();
+  const [order,setOrder] = useState(locations.map((loc)=>loc.id));
+  const [baseline,setBaseline] = useState(order);
+  const [baselineSort,setBaselineSort] = useState(Object.fromEntries(locations.map((loc)=>[loc.id,loc.sortOrder])));
+  const [positions,setPositions] = useState<Record<string,string>>({});
+  const [dismissed,setDismissed] = useState(false);
+  useEffect(()=>{setDismissed(false); if(actionData?.ok){setOrder(actionData.order);setBaseline(actionData.order);setBaselineSort(Object.fromEntries(actionData.order.map((id,i)=>[id,i+1])));setPositions({});}},[actionData]);
+  const saving = navigation.state === "submitting";
+  const orderedLocations = useMemo(()=>order.map(id=>locations.find(loc=>loc.id===id)).filter((loc): loc is typeof locations[number]=>!!loc),[locations,order]);
   const q = useLocation().search || "";
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -69,13 +91,13 @@ export default function StoresPage() {
   const customCount = locations.filter((loc) => loc.differing.length > 0).length;
   const shown = useMemo(() => {
     const word = query.trim().toLowerCase();
-    return locations.filter((loc) => {
+    return orderedLocations.filter((loc) => {
       if (filter === "custom" && loc.differing.length === 0) return false;
       if (filter === "same" && loc.differing.length > 0) return false;
       if (!word) return true;
       return loc.name.toLowerCase().includes(word) || loc.shopifyName.toLowerCase().includes(word);
     });
-  }, [locations, query, filter]);
+  }, [orderedLocations, query, filter]);
   const allShownSelected = shown.length > 0 && shown.every((loc) => selected.includes(loc.id));
   const toggle = (id: string) => setSelected((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]));
   const toggleShown = () =>
@@ -84,7 +106,7 @@ export default function StoresPage() {
 
   return (
     <PolarisPageWrapper>
-      <Page title="店舗" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
+      <Page title="店舗一覧" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
         <TabGroupBar tabs={STORE_TABS} />
         <StoreBody>
         <AdminIntro>
@@ -118,9 +140,17 @@ export default function StoresPage() {
 
         <AdminBlock
           wide
-          title={`店舗の一覧（${locations.length} 店）`}
+          title={`店舗一覧（${locations.length} 店）`}
           description={customCount > 0 ? `${customCount} 店が、全店の決まりと違う設定です。` : "どの店も全店の決まりと同じです。"}
         >
+          <Form method="post">
+          <input type="hidden" name="order" value={JSON.stringify(order)} readOnly />
+          <input type="hidden" name="baselineSortOrder" value={JSON.stringify(baselineSort)} readOnly />
+          <SaveBar hasChanges={!saving && JSON.stringify(order)!==JSON.stringify(baseline)} failed={!saving && actionData?.ok===false && !dismissed}
+            onDiscard={()=>{setOrder(baseline);setPositions({});setDismissed(true);}} />
+          <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
+          {actionData?.ok===false && !dismissed ? <StatusBanner tone="critical" heading="表示順を保存できませんでした">{actionData.error}</StatusBanner> : null}
+          <p className="Admin-note">上下ボタン、または全{locations.length}店の中の表示位置を数字で変え、保存してください。数字は入力後に欄を離れると反映されます。</p>
           <div className="Admin-filters" data-not-form-value>
             <input
               type="search"
@@ -157,8 +187,8 @@ export default function StoresPage() {
             <p className="Admin-note">{locations.length === 0 ? "Shopify に使っている店（ロケーション）がありません。" : "条件に合う店はありません。"}</p>
           ) : (
             <div data-summary-rows="true">
-              {shown.map((loc) => (
-                <div key={loc.id} className="Admin-sum-row">
+              {shown.map((loc, visibleIndex) => (
+                <div key={loc.id} className="Admin-sum-row Store-order-row">
                   <input
                     type="checkbox"
                     className="Store-row-check"
@@ -178,11 +208,23 @@ export default function StoresPage() {
                     </div>
                     {loc.shopifyName !== loc.name ? <div className="Admin-sum-text">Shopify の名前: {loc.shopifyName}</div> : null}
                   </div>
-                  <SecondaryLink small to={withSearch(`/app/settings/store/${loc.id}`, q)}>編集</SecondaryLink>
+                  <div className="Store-row-order">
+                    <button type="button" className="Admin-secondary Admin-button-sm" aria-label={`${loc.name} を上へ`} disabled={visibleIndex===0 || saving}
+                      onClick={()=>{setOrder(moveStore(order,loc.id,order.indexOf(shown[visibleIndex-1].id)+1));setPositions({});}}>↑</button>
+                    <button type="button" className="Admin-secondary Admin-button-sm" aria-label={`${loc.name} を下へ`} disabled={visibleIndex===shown.length-1 || saving}
+                      onClick={()=>{setOrder(moveStore(order,loc.id,order.indexOf(shown[visibleIndex+1].id)+1));setPositions({});}}>↓</button>
+                    <input className="Admin-input" type="number" inputMode="numeric" min={1} max={locations.length} style={{width:72}} aria-label={`${loc.name} の表示位置`}
+                      value={positions[loc.id] ?? String(order.indexOf(loc.id)+1)} disabled={saving}
+                      onChange={(e)=>setPositions({...positions,[loc.id]:e.currentTarget.value})}
+                      onBlur={()=>{setOrder(moveStore(order,loc.id,Number(positions[loc.id] ?? order.indexOf(loc.id)+1)));setPositions(prev=>{const next={...prev};delete next[loc.id];return next;});}}
+                      onKeyDown={(e)=>{if(e.key==="Enter"){e.preventDefault();e.currentTarget.blur();}}} />
+                    <SecondaryLink small to={withSearch(`/app/settings/store/${loc.id}`, q)}>編集</SecondaryLink>
+                  </div>
                 </div>
               ))}
             </div>
           )}
+          </Form>
         </AdminBlock>
 
         {isDevStore ? (

@@ -30,21 +30,19 @@ export function TabGroupBar({ tabs }: TabGroupBarProps) {
   }, [tabs, location.pathname]);
 
   return (
+    <div className="Admin-group-tabs" style={{marginBottom:16}} aria-label="ページ内メニュー">
     <Tabs
       tabs={tabs.map((t, i) => ({ id: `tab-${i}`, content: t.label }))}
       selected={selected}
       onSelect={(index) => navigate(tabs[index].path + search)}
     />
+    </div>
   );
 }
 
 /** 1. レシート */
 export const RECEIPT_TABS: TabItem[] = [
-  { path: "/app/sales-receipt-layout", label: "販売レイアウト" },
-  { path: "/app/receipt-layouts", label: "レイアウト編集" },
-  { path: "/app/sales-receipt-settings", label: "販売レシート設定" },
-  { path: "/app/receipt-template", label: "領収書テンプレート" },
-  { path: "/app/receipt-print-layout", label: "領収書印字プレビュー" },
+  { path: "/app/receipt-layouts", label: "レシートのデザイン" },
   { path: "/app/receipt-history", label: "領収書履歴" },
   { path: "/app/print-settings", label: "印字設定" },
 ];
@@ -53,35 +51,35 @@ export const RECEIPT_TABS: TabItem[] = [
 export const SETTLEMENT_TABS: TabItem[] = [
   { path: "/app/settlement-settings", label: "精算設定" },
   { path: "/app/settlement-calc-settings", label: "精算の数え方" },
-  { path: "/app/settlement-print-layout", label: "精算印字プレビュー" },
   { path: "/app/settlement-history", label: "精算履歴" },
   { path: "/app/special-refund-settings", label: "特殊返金設定" },
-  { path: "/app/special-refund-history", label: "特殊返金履歴" },
+  { path: "/app/special-refund-history", label: "調整履歴" },
   { path: "/app/voucher-settings", label: "商品券設定" },
 ];
 
 /** 3. 店舗 */
 export const STORE_TABS: TabItem[] = [
-  { path: "/app/settings", label: "店舗" },
+  { path: "/app/settings", label: "店舗一覧" },
   { path: "/app/payment-methods", label: "支払方法マスタ" },
 ];
 
 /** 4. レポート */
 export const REPORTS_TABS: TabItem[] = [
+  { path: "/app/reports", label: "レポート一覧" },
   { path: "/app/sales-summary", label: "売上サマリー" },
+  { path: "/app/budget-management", label: "店舗予算" },
+  { path: "/app/channel-budget-management", label: "チャネル予算" },
   { path: "/app/sales-summary-settings", label: "サマリー設定" },
   { path: "/app/sales-channels", label: "チャネル管理" },
-  { path: "/app/budget-management", label: "予算管理" },
   { path: "/app/budget-settings", label: "予算設定" },
-  { path: "/app/channel-budget-management", label: "チャネル予算" },
 ];
 
 /** 5. システム（日常タブのみ。diagnostics / backfill は SystemAdvancedNav） */
 export function buildSystemTabs(memberCardEnabled: boolean): TabItem[] {
   const tabs: TabItem[] = [
-    { path: "/app/plan", label: "料金プラン" },
     { path: "/app/general-settings", label: "一般設定" },
     { path: "/app/loyalty-settings", label: "ポイント/会員施策" },
+    { path: "/app/plan", label: "料金プラン" },
   ];
   if (memberCardEnabled) {
     tabs.push({ path: "/app/member-card-admin", label: "会員証" });
@@ -106,6 +104,6 @@ export const SETTINGS_TABS: TabItem[] = [
 
 /** @deprecated 旧マスタ — RECEIPT + STORE へ分割 */
 export const MASTER_TABS: TabItem[] = [
-  { path: "/app/receipt-template", label: "領収書テンプレート" },
+  { path: "/app/receipt-layouts/receipt", label: "領収書のデザイン" },
   { path: "/app/payment-methods", label: "支払方法マスタ" },
 ];

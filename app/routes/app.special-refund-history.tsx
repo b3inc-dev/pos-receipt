@@ -1,6 +1,6 @@
 /**
- * /app/special-refund-history — 返金方法変更・商品券釣銭登録 履歴
- * 要件書 §19.3: 管理画面 - 特殊返金履歴一覧・取引別確認
+ * /app/special-refund-history — 調整履歴
+ * 要件書 §19.3: 管理画面 - 調整履歴一覧・取引別確認
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useActionData, useLoaderData, useLocation, useNavigate, useSearchParams } from "react-router";
@@ -261,12 +261,11 @@ export default function SpecialRefundHistoryPage() {
   return (
     <PolarisPageWrapper>
       <Page
-        title="返金方法変更・商品券釣銭登録 履歴"
+        title="調整履歴"
+        subtitle="返金方法変更・現金返金・商品券釣銭登録などの履歴です。"
         backAction={{ content: "戻る", onAction: to("/app") }}
       >
-        <Card padding="0">
-          <TabGroupBar tabs={SETTLEMENT_TABS} />
-        </Card>
+        <TabGroupBar tabs={SETTLEMENT_TABS} />
         <Layout>
           <SuccessToast message={actionData?.ok ? actionData.message : null} trigger={actionData} />
           {(() => {

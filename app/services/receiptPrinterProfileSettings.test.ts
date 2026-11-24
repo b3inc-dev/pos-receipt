@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 let saved: Record<string, unknown> = { receiptPrinterProfile: "standard", paperWidthMm: 58, cloudprntPaperWidth: "58mm" };
 const stored = new Map<string, unknown>();
+mock.module("../db.server", {defaultExport:{receiptTemplate:{findFirst:async()=>null}}});
 mock.module("../shopify.server", { namedExports: { authenticate: { admin: async () => ({ admin: {}, session: { shop: "test" } }) } } });
 mock.module("../utils/shopResolver.server", { namedExports: { resolveShop: async () => ({ id: "shop" }) } });
 mock.module("../utils/appSettings.server", { namedExports: {
