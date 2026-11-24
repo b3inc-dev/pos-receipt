@@ -31,6 +31,7 @@ import {
   blocksToCode,
   isSafeImageUrl,
   paperWidthPx,
+  previewViewportPx,
   renderReceiptLayout,
   textSettingProblem,
 } from "../services/receiptLayoutRender";
@@ -45,6 +46,7 @@ import {
   type ReceiptKind,
   type ReceiptLayout,
 } from "../services/receiptLayoutSchema";
+import { ReceiptLayoutPreview } from "./ReceiptLayoutPreview";
 import { readableSummaryText, TEMPLATE_VARIABLES } from "../services/receiptLayoutVariables";
 
 type Tab = "blocks" | "style" | "code";
@@ -85,7 +87,7 @@ function blockSummary(block: LayoutBlock): string {
  * 数の欄。打っている途中（空・「1.」など）は文字のまま持ち、数として読めたときだけ親へ渡す。
  * 範囲の外・空は欄の下に赤い文字で出す（保存の前の確認でも止まる）。
  */
-function NumField({
+export function NumField({
   label,
   value,
   min,
@@ -99,7 +101,7 @@ function NumField({
   value: number;
   min: number;
   max: number;
-  step?: number;
+  step?: number | "any";
   suffix?: string;
   helpText?: string;
   onChange: (v: number) => void;
@@ -120,7 +122,8 @@ function NumField({
       value={draft}
       min={min}
       max={max}
-      step={step}
+      // Polarisの型はnumberのみだが、HTML inputは小数精度を保持するstep="any"を受け取る。
+      step={step as number}
       suffix={suffix}
       helpText={helpText}
       error={error}
@@ -197,53 +200,6 @@ function SettingField({ def, value, onChange }: { def: SettingDef; value: BlockS
   }
 }
 
-function Preview({ html, widthPx }: { html: string; widthPx: number }) {
-  const frame = useRef<HTMLIFrameElement | null>(null);
-  const box = useRef<HTMLDivElement | null>(null);
-  const [height, setHeight] = useState(600);
-  // 幅の狭い画面（iPhone など）では、用紙の幅のまま縮めて全体を見せる（右が切れないように）
-  const [scale, setScale] = useState(1);
-  useEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const measure = () => {
-      const avail = el.clientWidth;
-      setScale(avail > 0 && avail < widthPx + 2 ? avail / (widthPx + 2) : 1);
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", measure);
-      return () => window.removeEventListener("resize", measure);
-    }
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [widthPx]);
-  const fit = () => {
-    // スクリプトは動かさない（sandbox に allow-scripts を付けない）。高さを読むため同じ origin だけ許す
-    const doc = frame.current?.contentDocument;
-    if (doc?.body) setHeight(Math.max(200, doc.documentElement.scrollHeight + 4));
-  };
-  return (
-    <div ref={box} className="RL-preview-box">
-      <div style={{ width: (widthPx + 2) * scale, height: height * scale, margin: "0 auto", overflow: "hidden" }}>
-        <div
-          className="RL-preview-paper"
-          style={{ width: widthPx + 2, transform: scale < 1 ? `scale(${scale})` : undefined, transformOrigin: "top left" }}
-        >
-          <iframe
-            ref={frame}
-            title="レシートのプレビュー"
-            sandbox="allow-same-origin"
-            srcDoc={html}
-            onLoad={fit}
-            style={{ width: widthPx, height, border: 0, display: "block", background: "#fff" }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 const EDITOR_CSS = `
 .RL-grid{display:grid;grid-template-columns:minmax(320px,420px) minmax(0,1fr);gap:16px;align-items:start}
@@ -287,7 +243,6 @@ export function ReceiptLayoutEditor({
   // 「破棄」などで親が initial を差し替えたら、編集中の値も戻す
   useEffect(() => {
     setLayout(initial);
-    setTab(initial.mode === "code" ? "code" : "blocks");
   }, [initial]);
 
   const update = (next: ReceiptLayout) => {
@@ -484,12 +439,11 @@ export function ReceiptLayoutEditor({
                 />
                 <Text as="p" tone="subdued">58mm・80mmごとの設定を保存できます。実際の用紙幅は印字設定または販売レシート設定で指定してください。</Text>
                 {layout.mode === "code" && !layout.code.includes("/* receipt-managed-paper-start */") ? (
-                  <Text as="p" tone="caution">手書きのコードでは下の設定は自動反映されません。コードの CSS を調整してください。</Text>
+                  <Text as="p" tone="caution">コードの固定値には下の設定は反映されません。paper変数を参照する項目だけに反映されます。既存コードは自動で上書きしません。</Text>
                 ) : null}
                 {([
                   ["fontSizePt", "本文の文字サイズ", "pt", 0.5],
                   ["amountFontSizePt", "金額・件数の文字サイズ", "pt", 0.5],
-                  ["logoWidthMm", "ロゴの最大横幅", "mm", 1],
                   ["marginXMm", "左右の余白（片側）", "mm", 0.5],
                   ["marginYMm", "上下の余白（片側）", "mm", 0.5],
                   ["lineHeight", "行間", "倍", 0.05],
@@ -498,6 +452,30 @@ export function ReceiptLayoutEditor({
                     min={PAPER_STYLE_LIMITS[key].min} max={PAPER_STYLE_LIMITS[key].max}
                     value={paperStyle[key]} onChange={(v) => updatePaperStyle(key, v)} />
                 ))}
+                <NumField label="ロゴの最大幅" suffix="%" min={15 / (layout.paperWidthMm === 58 ? 48 : 72) * 100}
+                  max={42 / (layout.paperWidthMm === 58 ? 48 : 72) * 100} step="any"
+                  value={paperStyle.logoWidthMm / (layout.paperWidthMm === 58 ? 48 : 72) * 100}
+                  onChange={(v) => updatePaperStyle("logoWidthMm", v / 100 * (layout.paperWidthMm === 58 ? 48 : 72))}
+                  helpText="印字領域に対する割合です。ブロックの「画像の幅」がこれより小さい場合は、ブロックの値を使います。" />
+                <Checkbox label="実測値でプレビューを補正する"
+                  checked={layout.previewCalibration?.[layout.paperWidthMm] !== undefined}
+                  onChange={(checked) => {
+                    const next = { ...layout.previewCalibration };
+                    if (checked) next[layout.paperWidthMm] = 100 * 25.4 / 96;
+                    else delete next[layout.paperWidthMm];
+                    update({ ...layout, previewCalibration: next });
+                  }} />
+                {layout.previewCalibration?.[layout.paperWidthMm] !== undefined ? (
+                  <NumField label="100px診断線の実測長" suffix="mm" min={5} max={60} step="any"
+                    value={layout.previewCalibration[layout.paperWidthMm]!}
+                    onChange={(v) => update({ ...layout, previewCalibration: { ...layout.previewCalibration, [layout.paperWidthMm]: v } })}
+                    helpText="診断印字の100pxの線を定規で測って入力します。この用紙幅のプレビューだけを補正し、印字サイズは変えません。" />
+                ) : null}
+                {layout.paperWidthMm === 58 ? (
+                  <Button onClick={() => update({ ...layout, previewCalibration: { ...layout.previewCalibration, 58: 12 } })}>
+                    mPOP・58mmの実測値でプレビューを補正
+                  </Button>
+                ) : null}
                 <Button onClick={() => update({ ...layout, paperStyles: {
                   ...layout.paperStyles, [layout.paperWidthMm]: defaultPaperPrintStyle(layout.paperWidthMm),
                 } })}>この用紙を推奨設定に戻す</Button>
@@ -589,12 +567,15 @@ export function ReceiptLayoutEditor({
 
         <div className="RL-preview" id="rl-preview" aria-label="プレビュー">
           <Text as="p" tone="subdued">{`プレビュー（見本のデータ・${layout.paperWidthMm}mm）`}</Text>
+          <Text as="p" tone="subdued">{layout.previewCalibration?.[layout.paperWidthMm] !== undefined
+            ? "実測値で文字の比率・折り返しを補正しています。画面上の実寸や書体・機種差は実紙面で確認してください。"
+            : "未補正の見本です。実印字と文字の比率・折り返しが違う場合は実測値で補正してください。"}</Text>
           {rendered.ok ? null : (
             <div role="alert" style={{ color: "#8e1f0b", maxWidth: paperWidthPx(layout.paperWidthMm) }}>
               {rendered.error}
             </div>
           )}
-          <Preview html={rendered.html} widthPx={paperWidthPx(layout.paperWidthMm)} />
+          <ReceiptLayoutPreview html={rendered.html} widthPx={paperWidthPx(layout.paperWidthMm)} viewportPx={previewViewportPx(layout)} />
         </div>
       </div>
     </div>

@@ -91,6 +91,8 @@ export type ReceiptLayout = {
   paperWidthMm: 58 | 80;
   style: LayoutStyle;
   paperStyles?: Partial<Record<58 | 80, PaperPrintStyle>>;
+  /** プレビュー用: 100 CSS pxの診断線を紙上で測った長さ。印字データは変更しない。 */
+  previewCalibration?: Partial<Record<58 | 80, number>>;
   blocks: LayoutBlock[];
   /** mode "code" のときのテンプレート（HTML 文書全体） */
   code: string;
@@ -130,6 +132,10 @@ export function canonicalLayout(l: ReceiptLayout): ReceiptLayout {
     kind: l.kind,
     mode: l.mode,
     paperWidthMm: l.paperWidthMm,
+    ...(l.previewCalibration && Object.keys(l.previewCalibration).length ? {
+      previewCalibration: Object.fromEntries(([58, 80] as const).flatMap((mm) =>
+        l.previewCalibration?.[mm] === undefined ? [] : [[mm, l.previewCalibration[mm]]])),
+    } : {}),
     style: {
       fontSizePx: l.style.fontSizePx,
       lineHeight: l.style.lineHeight,

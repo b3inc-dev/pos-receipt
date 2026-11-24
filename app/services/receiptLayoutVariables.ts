@@ -6,6 +6,11 @@ import type { ReceiptKind } from "./receiptLayoutSchema";
 export type TemplateVariable = { name: string; label: string };
 
 const COMMON: TemplateVariable[] = [
+  { name: "paper.width_mm", label: "印字用紙の幅（58/80）。実印字は印字設定を使用" },
+  { name: "paper.printable_width_mm", label: "印字領域の基準幅（48/72）。CSSのmm指定による紙上実寸は機種で異なる" },
+  { name: "paper.fontSizePt", label: "この用紙の本文サイズ" },
+  { name: "paper.amountFontSizePt", label: "この用紙の金額・件数サイズ" },
+  { name: "paper.logoWidthMm", label: "ロゴ幅の保存基準値。割合は logoWidthMm × 100 ÷ printable_width_mm" },
   { name: "shop.name", label: "ストア名" },
   { name: "shop.logo_url", label: "ストアのロゴの URL" },
   { name: "location.name", label: "ロケーション名" },

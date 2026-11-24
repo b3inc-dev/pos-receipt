@@ -3,13 +3,13 @@ import { test } from "node:test";
 import { baseCss, paperWidthPx, blocksToCode, renderReceiptLayout } from "./receiptLayoutRender";
 import { DEFAULT_LAYOUT_STYLE, defaultPaperPrintStyle, canonicalLayout, RECEIPT_KINDS } from "./receiptLayoutSchema";
 
-test("receipt layout uses physical printable width, not printer dot count", () => {
+test("receipt layout fills the printer viewport without assuming its dot count", () => {
   const narrow = baseCss({ paperWidthMm: 58, style: DEFAULT_LAYOUT_STYLE });
   const wide = baseCss({ paperWidthMm: 80, style: DEFAULT_LAYOUT_STYLE });
   assert.equal(paperWidthPx(58), 181);
   assert.equal(paperWidthPx(80), 272);
-  assert.match(narrow, /width:48mm;max-width:100%/);
-  assert.match(wide, /width:72mm;max-width:100%/);
+  assert.match(narrow, /width:100%;max-width:100%/);
+  assert.match(wide, /width:100%;max-width:100%/);
   for (const css of [narrow, wide]) {
     assert.match(css, /font-size:13px/);
     assert.match(css, /overflow-wrap:anywhere/);
@@ -39,7 +39,7 @@ test("each receipt retains both paper profiles through validation and storage", 
       const result = renderReceiptLayout({ ...valid.layout, paperWidthMm: width }, sampleTemplateData(kind));
       assert.ok(result.ok, kind);
       assert.ok(result.html.includes(`font-size:${layout.paperStyles[width].fontSizePt}pt`));
-      assert.ok(result.html.includes(`width:${width === 58 ? 48 : 72}mm`));
+      assert.ok(result.html.includes("width:100%;max-width:100%"));
       assert.ok(result.html.includes(`font-size:${layout.paperStyles[width].amountFontSizePt}pt`));
       assert.ok(result.html.includes(`padding:3mm ${width === 58 ? 1 : 1.5}mm`));
       assert.doesNotMatch(result.html, /transform\s*:\s*scale/);
@@ -47,7 +47,7 @@ test("each receipt retains both paper profiles through validation and storage", 
     const code = { ...layout, mode: "code" as const, code: blocksToCode({ ...layout, paperWidthMm: 80 }) };
     const narrow = renderReceiptLayout({ ...code, paperWidthMm: 58 }, sampleTemplateData(kind));
     assert.ok(narrow.ok);
-    assert.match(narrow.html, /width:48mm/);
+    assert.match(narrow.html, /width:100%;max-width:100%/);
     assert.match(narrow.html, /font-size:12pt/);
   }
 });

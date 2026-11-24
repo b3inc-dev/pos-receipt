@@ -1077,7 +1077,10 @@ export function SaveBar({
   tone = "success",
   onDiscard,
   failed = false,
+  hasChanges,
 }: {
+  /** Reactで管理する保存値がある画面は、表示用入力を含むDOMではなく保存値を比較する。 */
+  hasChanges?: boolean;
   status?: ReactNode;
   /** 直前の保存が失敗したか（失敗のあとは帯をもう一度出す） */
   failed?: boolean;
@@ -1089,7 +1092,8 @@ export function SaveBar({
 }) {
   const id = "save-" + useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const marker = useRef<HTMLSpanElement | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [detectedDirty, setDirty] = useState(false);
+  const dirty = hasChanges ?? detectedDirty;
   const shopify = useAppBridge();
   const lastStatus = useRef<ReactNode>(undefined);
   const form = () => marker.current?.closest("form") ?? null;

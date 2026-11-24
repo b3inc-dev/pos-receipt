@@ -100,12 +100,22 @@ export function normalizeLayout(raw: unknown, kind: ReceiptKind): ReceiptLayout 
     paperWidthMm: raw.paperWidthMm === 58 ? 58 : 80,
     style: normalizeStyle(raw.style),
     paperStyles: normalizePaperStyles(raw.paperStyles),
+    previewCalibration: normalizePreviewCalibration(raw.previewCalibration),
     blocks,
     code: typeof raw.code === "string" ? raw.code.slice(0, LAYOUT_LIMITS.maxCodeLength) : "",
   });
 }
 
 export type ValidateResult = { ok: true; layout: ReceiptLayout } | { ok: false; errors: string[] };
+
+function normalizePreviewCalibration(raw: unknown): ReceiptLayout["previewCalibration"] {
+  if (!isObj(raw)) return undefined;
+  const entries = ([58, 80] as const).flatMap((mm) => {
+    const v = raw[mm];
+    return typeof v === "number" && Number.isFinite(v) && v >= 5 && v <= 60 ? [[mm, v]] : [];
+  });
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
 
 function checkLiquid(text: string): string | null {
   try {
@@ -128,6 +138,13 @@ export function validateLayoutInput(raw: unknown, kind: ReceiptKind): ValidateRe
   if (raw.paperWidthMm !== 58 && raw.paperWidthMm !== 80) errors.push("用紙の幅は 58mm か 80mm にしてください。");
 
   const L = LAYOUT_LIMITS;
+  if (raw.previewCalibration !== undefined) {
+    if (!isObj(raw.previewCalibration)) errors.push("プレビュー補正値が正しくありません。");
+    else for (const [mm, v] of Object.entries(raw.previewCalibration)) {
+      if (!["58", "80"].includes(mm) || typeof v !== "number" || !Number.isFinite(v) || v < 5 || v > 60)
+        errors.push("診断線の実測は用紙幅ごとに5〜60mmで指定してください。");
+    }
+  }
   const st = isObj(raw.style) ? raw.style : null;
   if (!st) errors.push("見た目の設定がありません。");
   else {
@@ -230,6 +247,7 @@ export function validateLayoutInput(raw: unknown, kind: ReceiptKind): ValidateRe
     paperWidthMm: raw.paperWidthMm as 58 | 80,
     style: normalizeStyle(raw.style),
     paperStyles: normalizePaperStyles(raw.paperStyles),
+    previewCalibration: normalizePreviewCalibration(raw.previewCalibration),
     blocks,
     code: raw.code as string,
   });

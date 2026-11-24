@@ -18,7 +18,7 @@ import {
   textSettingProblem,
   textSettingToLiquid,
 } from "./receiptLayoutRender";
-import { canonicalLayout, RECEIPT_KINDS, type ReceiptLayout } from "./receiptLayoutSchema";
+import { canonicalLayout, defaultPaperPrintStyle, RECEIPT_KINDS, type ReceiptLayout } from "./receiptLayoutSchema";
 import { normalizeLayout, validateLayoutInput } from "./receiptLayoutValidate";
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -106,10 +106,10 @@ describe("receiptLayout: 描き方", () => {
     assert.match(t, /うち返金 1件 -¥4,950/);
   });
 
-  it("用紙の幅で本文の幅が変わる", () => {
+  it("どちらの用紙でも本文は印字領域を使う", () => {
     const l = defaultLayout("receipt");
-    assert.match(html(l), /width:72mm/);
-    assert.match(html({ ...l, paperWidthMm: 58 }), /width:48mm/);
+    assert.match(html(l), /width:100%;max-width:100%/);
+    assert.match(html({ ...l, paperWidthMm: 58 }), /width:100%;max-width:100%/);
   });
 
   it("include・render は使えず、理由を返す", () => {
@@ -272,6 +272,23 @@ describe("receiptLayout: 独立レビューの指摘（2026-11-22）", () => {
     const r = validateLayoutInput(JSON.parse(sent), "sales");
     assert.ok(r.ok);
     assert.equal(JSON.stringify(r.ok ? canonicalLayout(r.layout) : null), sent);
+  });
+
+  it("58/80mmの個別設定は保存応答と再読み込みで変わらない", () => {
+    for (const kind of RECEIPT_KINDS) {
+      const layout = clone(defaultLayout(kind));
+      layout.paperWidthMm = 58;
+      layout.paperStyles = {
+        58: { ...defaultPaperPrintStyle(58), fontSizePt: 9.5, logoWidthMm: 30 },
+        80: { ...defaultPaperPrintStyle(80), fontSizePt: 12, logoWidthMm: 36 },
+      };
+      const sent = JSON.stringify(canonicalLayout(layout));
+      const saved = validateLayoutInput(JSON.parse(sent), kind);
+      assert.ok(saved.ok);
+      if (!saved.ok) continue;
+      assert.equal(JSON.stringify(canonicalLayout(saved.layout)), sent);
+      assert.equal(JSON.stringify(normalizeLayout(saved.layout, kind)), sent);
+    }
   });
 
   it("読み込み: 使えない ID は付け直し、そのまま保存できる", () => {
