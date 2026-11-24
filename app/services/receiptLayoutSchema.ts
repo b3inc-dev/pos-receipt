@@ -79,8 +79,8 @@ export function defaultPaperPrintStyle(mm: 58 | 80): PaperPrintStyle {
 export function resolvePaperPrintStyle(layout: Pick<ReceiptLayout, "style" | "paperWidthMm" | "paperStyles">): PaperPrintStyle {
   return layout.paperStyles?.[layout.paperWidthMm] ?? {
     ...defaultPaperPrintStyle(layout.paperWidthMm),
-    fontSizePt: layout.style.fontSizePx * 0.75,
-    lineHeight: layout.style.lineHeight,
+    fontSizePt: Math.max(8, Math.min(24, layout.style.fontSizePx * 0.75)),
+    lineHeight: Math.max(1, Math.min(1.8, layout.style.lineHeight)),
   };
 }
 
