@@ -30,7 +30,7 @@ import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { ciaraBudgetSyncAvailable } from "../services/ciaraBudgetSync.server";
-import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
+import { TabGroupBar, BUDGET_TABS } from "../components/TabGroupBar";
 import { normalizeDateInput } from "../utils/budgetMonthGrid";
 
 const PAGE_SIZE = 50;
@@ -559,7 +559,7 @@ export default function BudgetManagementPage() {
           </Box>
         )}
 
-        <TabGroupBar tabs={REPORTS_TABS} />
+        <TabGroupBar tabs={BUDGET_TABS} />
         <Layout>
           {/* フィルター */}
           <Layout.Section>

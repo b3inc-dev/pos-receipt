@@ -1,6 +1,6 @@
 /**
- * 管理画面用の常時表示ナビゲーション（5グループ）。
- * レシート / 精算 / 店舗 / レポート / システム
+ * 管理画面用の常時表示ナビゲーション（6グループ）。
+ * レシート / 精算 / 店舗 / レポート / 予算 / システム
  * 見た目は共通の部品（admin-ui.tsx の AppNavBarView）。選択中は灰色の角丸、スマホは1行の横スライド（UI ルール v1.1 3章）。
  * グループの中の画面でも親を選択中にする（match）。共通の CSS（AdminStyle）は、レイアウトで1回だけ描かれるこのメニューと一緒に描く（13章）。
  */
@@ -32,11 +32,13 @@ const GROUP_PATHS: Record<string, string[]> = {
     "/app/location-profiles", // 前の「設定軸・一括反映」（店舗の一覧へ移す）
     "/app/payment-methods",
   ],
-  "/app/reports": [
+  "/app/sales-summary": [
     "/app/reports",
     "/app/sales-summary",
     "/app/sales-summary-settings",
     "/app/sales-channels",
+  ],
+  "/app/budget-management": [
     "/app/budget-management",
     "/app/budget-settings",
     "/app/channel-budget-management",
@@ -56,7 +58,8 @@ const NAV_ITEMS = [
   { path: "/app/receipt-layouts", label: "レシート" },
   { path: "/app/settlement-settings", label: "精算" },
   { path: "/app/settings", label: "店舗" },
-  { path: "/app/reports", label: "レポート" },
+  { path: "/app/sales-summary", label: "レポート" },
+  { path: "/app/budget-management", label: "予算" },
   { path: "/app/general-settings", label: "システム" },
 ];
 
