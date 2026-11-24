@@ -16,6 +16,7 @@ import qrcodeGenerator from "qrcode-generator";
 import { getBlockDef, type SettingDef } from "./receiptLayoutBlocks";
 import {
   LAYOUT_LIMITS,
+  resolvePaperPrintStyle,
   type FontFamily,
   type ReceiptLayout,
 } from "./receiptLayoutSchema";
@@ -164,13 +165,15 @@ export function isSafeImageUrl(url: string): boolean {
 }
 
 /** 画面の大きさ・文字の大きさなど、全部のレシートに共通の CSS */
-export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style">): string {
+export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style" | "paperStyles">): string {
   const st = layout.style;
+  const p = resolvePaperPrintStyle(layout);
+  const bodyFont = layout.paperStyles?.[layout.paperWidthMm] ? `${p.fontSizePt}pt` : `${st.fontSizePx}px`;
   return [
     `*{box-sizing:border-box}`,
     `@page{size:auto;margin:0}`,
     `html,body{margin:0;padding:0;background:#fff}`,
-    `body{padding:${st.paddingPx}px;width:${layout.paperWidthMm === 58 ? 48 : 72}mm;max-width:100%;overflow-wrap:anywhere;color:#000;font-family:${FONT_STACKS[st.fontFamily]};font-size:${st.fontSizePx}px;line-height:${st.lineHeight};font-weight:${st.fontWeight}}`,
+    `body{padding:${p.marginYMm}mm ${p.marginXMm}mm;width:${layout.paperWidthMm === 58 ? 48 : 72}mm;max-width:100%;overflow-wrap:anywhere;color:#000;font-family:${FONT_STACKS[st.fontFamily]};font-size:${bodyFont};line-height:${p.lineHeight};font-weight:${st.fontWeight}}`,
     `p{margin:0}`,
     `.blk{margin:6px 0}`,
     `.a-left{text-align:left}.a-center{text-align:center}.a-right{text-align:right}`,
@@ -179,9 +182,11 @@ export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style">): 
     `.row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin:2px 0}`,
     `.row>span:first-child{min-width:0;flex:1;overflow-wrap:anywhere}`,
     `.row>span:last-child{min-width:0;max-width:65%;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}`,
+    `.row .print-value{font-size:${p.amountFontSizePt}pt}`,
+    `.row .print-total{font-size:max(14pt,${p.amountFontSizePt}pt);font-weight:700}`,
     `.item{margin:6px 0}`,
     `.indent{padding-left:12px}`,
-    `.logo{display:inline-block;max-width:min(100%,${layout.paperWidthMm === 58 ? 30 : 36}mm);height:auto}`,
+    `.logo{display:inline-block;max-width:min(100%,${p.logoWidthMm}mm);height:auto}`,
     `.hr{border:0;margin:8px 0}`,
     `.hr-none{border-top:0}.hr-solid{border-top:1px solid #000}.hr-thick{border-top:3px solid #000}.hr-dashed{border-top:1px dashed #000}.hr-dotted{border-top:2px dotted #000}`,
     `.ul-solid{border-bottom:1px solid #000;padding-bottom:4px}.ul-thick{border-bottom:3px solid #000;padding-bottom:6px}.ul-dashed{border-bottom:1px dashed #000;padding-bottom:4px}.ul-dotted{border-bottom:2px dotted #000;padding-bottom:4px}`,
@@ -261,7 +266,9 @@ export function blocksToCode(layout: ReceiptLayout): string {
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>{{ document.title }}</title>
 <style>{% raw %}
-${baseCss(layout)}${css}
+/* receipt-managed-paper-start */
+${baseCss(layout)}
+/* receipt-managed-paper-end */${css}
 {% endraw %}</style>
 </head>
 <body>
@@ -280,12 +287,21 @@ export function layoutTemplate(layout: ReceiptLayout): string {
 
 /** レイアウトとデータから印字 HTML を作る。失敗したら理由と、理由を書いた HTML を返す */
 export function renderReceiptLayout(layout: ReceiptLayout, data: Record<string, unknown>): RenderResult {
-  const template = layoutTemplate(layout);
+  // 生成したコードの管理対象 CSS だけ、現在の用紙・設定で更新する。
+  // 手書きの CSS はそのまま。Liquid からも現在の用紙を参照できる。
+  const template = layoutTemplate(layout).replace(
+    /\/\* receipt-managed-paper-start \*\/[\s\S]*?\/\* receipt-managed-paper-end \*\//,
+    () => `/* receipt-managed-paper-start */\n${baseCss(layout)}\n/* receipt-managed-paper-end */`,
+  );
   if (template.length > LAYOUT_LIMITS.maxCodeLength * 2) {
     return errorResult("テンプレートが長すぎます。");
   }
   try {
-    const html = receiptLiquid().parseAndRenderSync(template, data);
+    const html = receiptLiquid().parseAndRenderSync(template, {
+      ...data,
+      paper: { width_mm: layout.paperWidthMm, printable_width_mm: layout.paperWidthMm === 58 ? 48 : 72,
+        ...resolvePaperPrintStyle(layout) },
+    });
     return { ok: true, html };
   } catch (e) {
     return errorResult(describeLiquidError(e));
