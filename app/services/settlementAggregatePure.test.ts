@@ -1172,3 +1172,197 @@ describe("isPointRedemption", () => {
     assert.equal(isPointRedemption("sp-point-ab12cd34", ""), true);
   });
 });
+
+describe("返金基準: 同じ注文・同じ日の店の付かない返金と、別の店の店付きの返金（#119 見直し P2-B）", () => {
+  // 店 100 で 1000 円売った注文。同じ日に、店の付かない返金 300（管理画面など）と、店 300 での POS 返金 300
+  const loc100 = "gid://shopify/Location/100";
+  const loc200 = "gid://shopify/Location/200";
+  const loc300 = "gid://shopify/Location/300";
+  const stores = [
+    { gid: loc100, raw: "100" },
+    { gid: loc200, raw: "200" },
+    { gid: loc300, raw: "300" },
+  ];
+
+  function ctxOf(
+    overrides: Partial<RefundAggregationContext> = {},
+  ): RefundAggregationContext {
+    return {
+      mode: "refund_transaction_pos_location",
+      nonPosRefundFallbackMode: "order_retail_location",
+      nonPosRefundTargetLocationGid: null,
+      ...overrides,
+    };
+  }
+
+  function mixedOrder(metafield: string | null): GasStyleOrder {
+    return saleOrder({
+      id: "o-mixed",
+      retailLocation: { id: loc100 },
+      refundAggregationLocationGid: metafield,
+      transactions: [
+        {
+          id: "o-mixed-sale",
+          createdAt: "2026-10-08T01:00:00Z",
+          kind: "SALE",
+          amountSet: money(1000),
+          gateway: "cash",
+          location: { id: loc100 },
+        },
+        {
+          id: "o-mixed-admin",
+          createdAt: "2026-10-08T03:00:00Z",
+          kind: "REFUND",
+          amountSet: money(300),
+          gateway: "cash",
+        },
+        {
+          id: "o-mixed-pos",
+          createdAt: "2026-10-08T04:00:00Z",
+          kind: "REFUND",
+          amountSet: money(300),
+          gateway: "cash",
+          location: { id: loc300 },
+        },
+      ],
+      refunds: [
+        {
+          createdAt: "2026-10-08T03:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            { id: "o-mixed-admin", kind: "REFUND", amountSet: money(300), gateway: "cash" },
+          ],
+        },
+        {
+          createdAt: "2026-10-08T04:00:00Z",
+          refundLineItems: [{ quantity: 1 }],
+          transactions: [
+            {
+              id: "o-mixed-pos",
+              kind: "REFUND",
+              amountSet: money(300),
+              gateway: "cash",
+              location: { id: loc300 },
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  /** 精算と同じ流れ: 売った店 100 は店舗の取得に入っている。ほかの店は返金の候補から足す */
+  function refundsByStore(order: GasStyleOrder, ctx: RefundAggregationContext) {
+    const out: Record<string, { sale: number; refund: number }> = {};
+    for (const s of stores) {
+      const storeOrders = s.gid === loc100 ? [order] : [];
+      const merged = mergeCrossLocationRefundOrders(
+        storeOrders,
+        [order],
+        alwaysInRange,
+        s.gid,
+        s.raw,
+        ctx,
+      );
+      const gas = aggregateGasStyleForOrders(merged, alwaysInRange, {
+        attributionCtx: ctx,
+        settlementLocationId: s.gid,
+        locIdRaw: s.raw,
+      });
+      out[s.raw] = {
+        sale: gas.pay["現金"]?.sale ?? 0,
+        refund: gas.pay["現金"]?.refund ?? 0,
+      };
+    }
+    return out;
+  }
+
+  it("metafield が店 200: 店の付かない 300 は店 200、店 300 の返金は店 300（合わせて 600）", () => {
+    const r = refundsByStore(mixedOrder(loc200), ctxOf());
+    assert.deepEqual(r["100"], { sale: 1000, refund: 0 });
+    assert.equal(r["200"].refund, 300);
+    assert.equal(r["300"].refund, 300);
+    assert.equal(r["200"].sale + r["300"].sale, 0);
+  });
+
+  it("metafield が店 300（Webhook が最後の店付きの返金の店を書いた）: 店 300 に 600、ほかは 0", () => {
+    const r = refundsByStore(mixedOrder(loc300), ctxOf());
+    assert.equal(r["100"].refund, 0);
+    assert.equal(r["200"].refund, 0);
+    assert.equal(r["300"].refund, 600);
+  });
+
+  it("metafield が売った店 100: 店の付かない 300 は店 100、店 300 の返金は店 300", () => {
+    const r = refundsByStore(mixedOrder(loc100), ctxOf());
+    assert.deepEqual(r["100"], { sale: 1000, refund: 300 });
+    assert.equal(r["200"].refund, 0);
+    assert.equal(r["300"].refund, 300);
+  });
+
+  it("metafield なし: 「POS 以外の返金の計上先」の店 200 → 無ければ売った店 100", () => {
+    const withTarget = refundsByStore(mixedOrder(null), ctxOf({ nonPosRefundTargetLocationGid: loc200 }));
+    assert.equal(withTarget["100"].refund, 0);
+    assert.equal(withTarget["200"].refund, 300);
+    assert.equal(withTarget["300"].refund, 300);
+
+    const retail = refundsByStore(mixedOrder(null), ctxOf());
+    assert.equal(retail["100"].refund, 300);
+    assert.equal(retail["200"].refund, 0);
+    assert.equal(retail["300"].refund, 300);
+  });
+
+  it("metafield なし・「数えない」: 店の付かない 300 はどの店にも載らず、店 300 の 300 だけ", () => {
+    const r = refundsByStore(mixedOrder(null), ctxOf({ nonPosRefundFallbackMode: "exclude" }));
+    assert.equal(r["100"].refund + r["200"].refund, 0);
+    assert.equal(r["300"].refund, 300);
+  });
+
+  it("注文基準（売った店で数える）は今までどおり: 600 とも店 100、ほかの店は 0", () => {
+    const ctx = ctxOf({ mode: "order_transaction" });
+    for (const mf of [loc200, loc300, null]) {
+      const r = refundsByStore(mixedOrder(mf), ctx);
+      assert.deepEqual(r["100"], { sale: 1000, refund: 600 });
+      assert.equal(r["200"].refund + r["300"].refund, 0);
+    }
+  });
+
+  it("店の付かない返金だけの日（直す前と同じ形）: metafield の店で 1 回だけ", () => {
+    const order = mixedOrder(loc200);
+    const onlyAdmin: GasStyleOrder = {
+      ...order,
+      transactions: order.transactions?.filter((tx) => tx.id !== "o-mixed-pos"),
+      refunds: order.refunds?.slice(0, 1),
+    };
+    const r = refundsByStore(onlyAdmin, ctxOf());
+    assert.deepEqual(r["100"], { sale: 1000, refund: 0 });
+    assert.equal(r["200"].refund, 300);
+    assert.equal(r["300"].refund, 0);
+  });
+
+  it("店付きの返金だけの日（直す前と同じ形）: 返金した店 300 で 1 回だけ", () => {
+    const order = mixedOrder(loc200);
+    const onlyPos: GasStyleOrder = {
+      ...order,
+      transactions: order.transactions?.filter((tx) => tx.id !== "o-mixed-admin"),
+      refunds: order.refunds?.slice(1),
+    };
+    const r = refundsByStore(onlyPos, ctxOf());
+    assert.equal(r["100"].refund, 0);
+    assert.equal(r["200"].refund, 0);
+    assert.equal(r["300"].refund, 300);
+  });
+
+  it("別の日の精算: その日の返金が無ければどの店にも載らない（過去の日の数字は変わらない）", () => {
+    const otherDay = (iso?: string) => !!iso && iso.startsWith("2026-10-07");
+    for (const s of stores) {
+      const merged = mergeCrossLocationRefundOrders(
+        [],
+        [mixedOrder(loc200)],
+        otherDay,
+        s.gid,
+        s.raw,
+        ctxOf(),
+      );
+      assert.equal(merged.length, 0);
+    }
+  });
+});

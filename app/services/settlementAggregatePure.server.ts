@@ -13,6 +13,7 @@ import {
   getPosLocationFromRefundTransactions,
   locationGidMatches,
   normalizeLocationGid,
+  resolveNonPosRefundFallbackGid,
   resolveRefundAggregationLocationGid,
   type RefundAggregationLocationMode,
   type RefundAggregationContext,
@@ -115,20 +116,50 @@ export interface GasStyleOrder {
 }
 
 /**
+ * 店の付かない返金（管理画面・外部・アプリの refundCreate）を数える店（返金基準のとき）。
+ * 注文の metafield → 「POS 以外の返金の計上先」の店 →（「数えない」なら null）→ 販売店。
+ * 返金 1 件ずつに使う。同じ注文・同じ日に店の付いた返金があっても、店の付かない返金はこの店で数える
+ * （#119 見直し P2-B。返金方法変更の nativeRefundCountLocationGid と同じ順）。
+ * ctx が無いとき（モードだけ渡された呼び出し）は metafield だけ。
+ */
+export function nonPosRefundCountLocationGid(
+  order: Pick<GasStyleOrder, "refundAggregationLocationGid" | "retailLocation">,
+  ctx?: RefundAggregationContext | null,
+): string | null {
+  const metafieldGid = normalizeLocationGid(order.refundAggregationLocationGid);
+  if (metafieldGid) return metafieldGid;
+  if (!ctx) return null;
+  return resolveNonPosRefundFallbackGid(order, ctx);
+}
+
+/**
  * 注文の販売店舗とは別の店舗で当日返金された注文を、返金だけの集計入力へ変換する。
  * 売上 TX を除外することで、元店舗の当日売上を返金店舗へ移さない。
+ *
+ * 残す返金は 2 種類:
+ * - 店の付いた返金 TX がこの店の返金（その TX だけ）
+ * - 店の付かない返金で、nonPosRefundCountLocationGid がこの店のもの（その返金の TX すべて）
+ *   販売店側は aggregateGasStyleForOrders が同じ店を見て数えないので、2 回は数えない。
  */
 export function buildCrossLocationRefundOnlyOrder(
   order: GasStyleOrder,
   inRange: (iso?: string) => boolean,
   settlementLocationId: string,
   locIdRaw: string,
-  attributionMode: RefundAggregationLocationMode,
+  attribution: RefundAggregationLocationMode | RefundAggregationContext,
 ): GasStyleOrder | null {
+  const ctx = typeof attribution === "string" ? null : attribution;
+  const attributionMode = typeof attribution === "string" ? attribution : attribution.mode;
   // 注文基準では、別店舗で処理した返金も販売店舗へ帰属させる。
   // 返金店舗向けの入力を追加すると同じ返金が両店舗へ二重計上されるため、
   // この補助入力は返金トランザクション基準のときだけ生成する。
   if (attributionMode !== "refund_transaction_pos_location") return null;
+
+  const nonPosHere = locationGidMatches(
+    nonPosRefundCountLocationGid(order, ctx),
+    settlementLocationId,
+    locIdRaw,
+  );
 
   const matchingTopLevelRefundTxIds = new Set(
     (order.transactions ?? [])
@@ -143,6 +174,15 @@ export function buildCrossLocationRefundOnlyOrder(
   const matchingRefundTxIds = new Set<string>(matchingTopLevelRefundTxIds);
   const refunds = (order.refunds ?? []).flatMap((refund) => {
     if (!inRange(refund.createdAt)) return [];
+    // 店が付いているかは aggregateGasStyleForOrders と同じ見方（返金の TX のどれかに店がある）
+    if (!(refund.transactions ?? []).some((tx) => tx.location?.id)) {
+      // 店の付かない返金: 数える店がこの店なら、その返金をそのまま残す
+      if (!nonPosHere) return [];
+      for (const tx of refund.transactions ?? []) {
+        if (tx.id) matchingRefundTxIds.add(tx.id);
+      }
+      return [refund];
+    }
     const matchingTransactions = (refund.transactions ?? []).filter(
       (tx) =>
         matchingTopLevelRefundTxIds.has(tx.id) ||
@@ -157,66 +197,20 @@ export function buildCrossLocationRefundOnlyOrder(
 
   const transactions = (order.transactions ?? []).filter((tx) => {
     if (String(tx.kind ?? "").toUpperCase() !== "REFUND") return false;
-    if (matchingRefundTxIds.has(tx.id)) return true;
-    return (
-      inRange(tx.createdAt) &&
-      locationGidMatches(tx.location?.id, settlementLocationId, locIdRaw)
-    );
+    if (tx.id && matchingRefundTxIds.has(tx.id)) return true;
+    if (!inRange(tx.createdAt)) return false;
+    if (tx.location?.id) return locationGidMatches(tx.location.id, settlementLocationId, locIdRaw);
+    // 返金に結び付かない、店の付かない返金 TX
+    return nonPosHere;
   });
 
-  if (refunds.length === 0 && transactions.length === 0) {
-    // 店の付いた返金 TX が当日 1 つも無い返金（管理画面・外部の返金）は、
-    // 注文の metafield（返金を数える店）が精算の店と同じときだけ、その返金を残す。
-    // 販売店側は decideRefundAttributionForSettlement が同じ metafield を見て数えないので、2 回は数えない。
-    return buildMetafieldAttributedRefundOnlyOrder(
-      order,
-      inRange,
-      settlementLocationId,
-      locIdRaw,
-    );
-  }
+  if (refunds.length === 0 && transactions.length === 0) return null;
   return {
     ...order,
     transactions,
     refunds,
-    // 注文単位の最新値ではなく、上で残した返金 TX の店舗を正本にする。
+    // 注文単位の最新値ではなく、上で残した返金の店（この店）を正本にする。
     refundAggregationLocationGid: settlementLocationId,
-  };
-}
-
-/**
- * 当日の返金に店の付いた返金 TX が 1 つも無く、注文の metafield が精算の店を指すとき、
- * 当日の返金だけを残した入力を作る（Shopify 管理画面で返金し、返金を数える店を別の店にした注文）。
- */
-function buildMetafieldAttributedRefundOnlyOrder(
-  order: GasStyleOrder,
-  inRange: (iso?: string) => boolean,
-  settlementLocationId: string,
-  locIdRaw: string,
-): GasStyleOrder | null {
-  if (getPosLocationFromRefundTransactions(order, inRange)) return null;
-  const metafieldGid = normalizeLocationGid(order.refundAggregationLocationGid);
-  if (!metafieldGid) return null;
-  if (!locationGidMatches(metafieldGid, settlementLocationId, locIdRaw)) return null;
-
-  const refunds = (order.refunds ?? []).filter((refund) => inRange(refund.createdAt));
-  if (refunds.length === 0) return null;
-  const refundTxIds = new Set<string>();
-  for (const refund of refunds) {
-    for (const tx of refund.transactions ?? []) {
-      if (tx.id) refundTxIds.add(tx.id);
-    }
-  }
-  const transactions = (order.transactions ?? []).filter((tx) => {
-    if (String(tx.kind ?? "").toUpperCase() !== "REFUND") return false;
-    if (tx.id && refundTxIds.has(tx.id)) return true;
-    return inRange(tx.createdAt) && !tx.location?.id;
-  });
-  return {
-    ...order,
-    transactions,
-    refunds,
-    refundAggregationLocationGid: metafieldGid,
   };
 }
 
@@ -234,7 +228,7 @@ export function mergeCrossLocationRefundOrders<T extends GasStyleOrder>(
   inRange: (iso?: string) => boolean,
   settlementLocationId: string,
   locIdRaw: string,
-  attributionMode: RefundAggregationLocationMode,
+  attribution: RefundAggregationLocationMode | RefundAggregationContext,
 ): T[] {
   const existingOrderIds = new Set(storeOrders.map((order) => order.id));
   const byId = new Map<string, T>();
@@ -246,7 +240,7 @@ export function mergeCrossLocationRefundOrders<T extends GasStyleOrder>(
       inRange,
       settlementLocationId,
       locIdRaw,
-      attributionMode,
+      attribution,
     );
     if (refundOnly) byId.set(order.id, refundOnly as T);
   }
@@ -392,6 +386,11 @@ export type RefundAttributionDecision = {
   usedGid: string | null;
   resolvedGid: string | null;
   metafieldGid: string | null;
+  /**
+   * 店の付かない返金を数える店（返金基準: metafield → 計上先の店 → 販売店。注文基準: usedGid と同じ）。
+   * 返金基準では、同じ日に店の付いた返金があっても、店の付かない返金は 1 件ずつこの店で数える。
+   */
+  nonPosGid: string | null;
 };
 
 /**
@@ -415,6 +414,7 @@ export function decideRefundAttributionForSettlement(
       usedGid: null,
       resolvedGid: null,
       metafieldGid: null,
+      nonPosGid: null,
     };
   }
   const metafieldGid = normalizeLocationGid(order.refundAggregationLocationGid);
@@ -432,12 +432,17 @@ export function decideRefundAttributionForSettlement(
     opts.attributionCtx.mode === "refund_transaction_pos_location"
       ? inRangeRefundPosGid ?? metafieldGid ?? resolvedGid
       : resolvedGid;
+  const nonPosGid =
+    opts.attributionCtx.mode === "refund_transaction_pos_location"
+      ? nonPosRefundCountLocationGid(order, opts.attributionCtx)
+      : usedGid;
   return {
     counts: locationGidMatches(usedGid, opts.settlementLocationId, opts.locIdRaw),
     mismatch,
     usedGid,
     resolvedGid,
     metafieldGid,
+    nonPosGid,
   };
 }
 
@@ -547,6 +552,17 @@ export function aggregateGasStyleForOrders(
     const attribution = decideRefundAttributionForSettlement(o, inRange, attributionOpts);
     if (attribution.mismatch) refundAttributionMismatchCount += 1;
     const countRefundsForThisLocation = attribution.counts;
+    const byRefundTransaction =
+      attributionOpts?.attributionCtx.mode === "refund_transaction_pos_location";
+    // 返金基準: 店の付かない返金は、同じ日に店の付いた返金があっても 1 件ずつ nonPosGid の店で数える（P2-B）。
+    // 当日の返金がすべて店の付かない返金なら nonPosGid は usedGid と同じなので、今までと変わらない。
+    const nonPosRefundCountsForLocation = byRefundTransaction
+      ? locationGidMatches(
+          attribution.nonPosGid,
+          attributionOpts!.settlementLocationId,
+          attributionOpts!.locIdRaw,
+        )
+      : countRefundsForThisLocation;
 
     const refundTxIdsInDay = new Set<string>();
     const refundTxCountsById = new Map<string, boolean>();
@@ -555,10 +571,10 @@ export function aggregateGasStyleForOrders(
       if (!inRange(r.createdAt)) continue;
       const refundTransactions = r.transactions ?? [];
       const locatedTransactions = refundTransactions.filter((tx) => tx.location?.id);
-      const splitByRefundTransaction =
-        attributionOpts?.attributionCtx.mode === "refund_transaction_pos_location" &&
-        locatedTransactions.length > 0;
-      let refundCountsForLocation = countRefundsForThisLocation;
+      const splitByRefundTransaction = byRefundTransaction && locatedTransactions.length > 0;
+      let refundCountsForLocation = byRefundTransaction
+        ? nonPosRefundCountsForLocation
+        : countRefundsForThisLocation;
       if (splitByRefundTransaction) {
         refundCountsForLocation = locatedTransactions.some((tx) =>
           locationGidMatches(
@@ -638,8 +654,12 @@ export function aggregateGasStyleForOrders(
         else if (keyInfo.kind === "voucher") voucherSaleKeys.add(gw);
         pay[gw].saleTx += 1;
       } else if (kind === "REFUND") {
+        // 返金に結び付かない REFUND TX: 返金基準で店が付かなければ店の付かない返金と同じ店で数える
         const txCountsForLocation =
-          refundTxCountsById.get(tx.id) ?? countRefundsForThisLocation;
+          refundTxCountsById.get(tx.id) ??
+          (byRefundTransaction && !tx.location?.id
+            ? nonPosRefundCountsForLocation
+            : countRefundsForThisLocation);
         if (!txCountsForLocation) continue;
         const r = Math.abs(amt);
         orderRefundToday += r;

@@ -34,6 +34,10 @@ if (typeof queueMicrotask !== "undefined") {
     import("./services/salesSummaryWebhookQueue.server")
       .then((m) => m.ensureSalesSummaryWebhookWorker())
       .catch(() => {});
+    // 売上サマリーの「店×日」を裏で数えるキュー（再起動の前に積んだ分を続ける）
+    import("./services/salesSummaryFillQueue.server")
+      .then((m) => m.ensureSalesSummaryFillWorker())
+      .catch(() => {});
     // ciara-system の予算の取り込み（自社用で鍵があるときだけ動く）
     import("./services/ciaraBudgetSync.server")
       .then((m) => m.ensureCiaraBudgetSyncScheduler())

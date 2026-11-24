@@ -29,7 +29,7 @@ import {
 } from "../utils/salesSummarySettingsSections";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { StoreBody } from "../components/StoreBody";
-import { AdminBlock, ConfirmAction, PickList, SaveBar, StateBadge, StatusBanner, SuccessToast, confirmLeave } from "../components/admin-ui";
+import { AdminBlock, ConfirmAction, PickList, SaveBar, SecondaryLink, StateBadge, StatusBanner, SuccessToast } from "../components/admin-ui";
 import { withSearch } from "../utils/withSearch";
 
 function sectionOf(value: string | undefined): SalesSummarySectionKey {
@@ -146,13 +146,10 @@ function Checks({ items, values }: { items: { key: string; label: string; help?:
 }
 
 function SettingsForm({ data, failed }: { data: Data; failed: boolean }) {
-  const navigate = useNavigate();
   const q = useLocation().search || "";
   const s = data.settings as unknown as Record<string, unknown> & SalesSummarySettings;
-  const [visible, setVisible] = useState<string[]>(data.settings.visibleLocationIds);
   const [footfall, setFootfall] = useState<string[]>(data.settings.footfallTargetLocationIds);
   const discard = () => {
-    setVisible(data.settings.visibleLocationIds);
     setFootfall(data.settings.footfallTargetLocationIds);
   };
   const stores = data.locations.map((l) => ({ id: l.id, name: l.name }));
@@ -181,8 +178,8 @@ function SettingsForm({ data, failed }: { data: Data; failed: boolean }) {
           <AdminBlock title="出す行" description={SECTION_DESCRIPTIONS.display}>
             <Checks items={DISPLAY_CHECKS} values={s} />
           </AdminBlock>
-          <AdminBlock title="出す店" description="選んだ店だけを出します。「すべての店」なら、あとから足した店も出ます。">
-            <PickList label="出す店" items={stores} value={visible} onChange={setVisible} allLabel="すべての店" name="visibleLocationIds" />
+          <AdminBlock title="出す店" description="出す店は、店舗の設定の「売上サマリーで集計する」で決めます。">
+            <SecondaryLink to={withSearch("/app/settings", q)}>店舗の設定を開く</SecondaryLink>
           </AdminBlock>
         </>
       ) : null}
@@ -210,9 +207,9 @@ function SettingsForm({ data, failed }: { data: Data; failed: boolean }) {
           {data.ciaraVisitSync ? (
             <AdminBlock title="ciara-system と見せ合う" description="POS と ciara-system のどちらで報告しても、あとから入れた入店数が両方に出るようにします。">
               <div>
-                <button type="button" className="Admin-secondary" onClick={() => void confirmLeave().then(() => navigate(withSearch("/app/footfall-sync", q)))}>
+                <SecondaryLink to={withSearch("/app/footfall-sync", q)}>
                   見せ合う設定
-                </button>
+                </SecondaryLink>
               </div>
             </AdminBlock>
           ) : null}

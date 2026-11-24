@@ -84,6 +84,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
     console.error("[settings/store] save failed", error);
     return { ok: false as const, error: "保存できませんでした。少し待ってからもう一度保存してください。" };
   }
+  // 売上サマリーをオンにしたら、当月分を裏で数え始める（POS で初めて開いたときに待たせない）
+  if (values.salesSummaryEnabled === true && !location.salesSummaryEnabled) {
+    const { enqueueSalesSummaryFillForTurnedOn } = await import("../services/salesSummaryFillQueue.server");
+    void enqueueSalesSummaryFillForTurnedOn(shop.id, [{ shopifyLocationGid: location.id, name: location.name }]);
+  }
   return { ok: true as const, at: Date.now() };
 }
 

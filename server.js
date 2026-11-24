@@ -10,6 +10,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import compression from "compression";
 import morgan from "morgan";
+import { redactLogUrl } from "./scripts/lib/redactLogUrl.mjs";
 import { createRequestHandler } from "@react-router/express";
 import { validateServerStartupEnv } from "./scripts/lib/deployGuard.mjs";
 
@@ -73,7 +74,10 @@ async function main() {
   const app = express();
   app.disable("x-powered-by");
   app.use(compression());
-  app.use(morgan("tiny"));
+  // リクエストのログに、管理画面の URL に付く id_token・session・hmac などを出さない（2026-11-24）。
+  // 日付や loadId など調べものに要る値は残す
+  morgan.token("safe-url", (req) => redactLogUrl(String(req.originalUrl || req.url || "")));
+  app.use(morgan(":method :safe-url :status :res[content-length] - :response-time ms"));
 
   // 静的ファイル（react-router-serve と同様）
   const assetsDir = path.join(__dirname, "build", "client", "assets");

@@ -835,7 +835,7 @@ async function buildSettlementPreviewImpl(
     inDay,
     locationId,
     locIdRaw,
-    attributionCtx.mode,
+    attributionCtx,
   );
 
   // GAS fetchAllOrdersSmart ③: 0件のとき processed_at（店舗TZの暦日）でフォールバック

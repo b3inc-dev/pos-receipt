@@ -93,10 +93,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return corsJson({ rows: [], displayOptions: merged, year, month });
     }
 
-    if (merged.visibleLocationIds.length > 0 && !merged.visibleLocationIds.includes(locationGid)) {
-      return corsJson({ rows: [], displayOptions: merged, year, month });
-    }
-
     const today = await getShopCalendarToday(admin, shop.id);
     const ym = `${year}-${String(month).padStart(2, "0")}`;
     const dateFrom = `${ym}-01`;
