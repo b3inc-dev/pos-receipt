@@ -183,7 +183,7 @@ export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style" | "
     `.row>span:first-child{min-width:0;flex:1;overflow-wrap:anywhere}`,
     `.row>span:last-child{min-width:0;max-width:65%;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}`,
     `.row .print-value{font-size:${p.amountFontSizePt}pt}`,
-    `.row .print-total{font-size:max(14pt,${p.amountFontSizePt}pt);font-weight:700}`,
+    `.print-total,.row .print-total{font-size:max(14pt,${p.amountFontSizePt}pt);font-weight:700}`,
     `.item{margin:6px 0}`,
     `.indent{padding-left:12px}`,
     `.logo{display:inline-block;max-width:min(100%,${p.logoWidthMm}mm);height:auto}`,
@@ -194,7 +194,7 @@ export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style" | "
     `.stamp{display:inline-flex;align-items:center;justify-content:center;border:1px solid #000;font-size:.85em}`,
     `.stamps{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:8px}`,
     `.stamp{max-width:100%}`,
-    `.qr{margin:0 auto}.qr svg{width:100%;height:auto;display:block}`,
+    `.qr{margin:0 auto;max-width:100%}.qr svg{width:100%;height:auto;display:block}`,
     `.thin{font-weight:300}.muted{opacity:.8}.strike{text-decoration:line-through}`,
     `.lines>div+div{margin-top:2px}`,
   ].join("\n");
