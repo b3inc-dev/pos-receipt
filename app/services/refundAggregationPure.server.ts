@@ -28,6 +28,8 @@ export interface OrderForRefundAggregation {
     location?: { id: string } | null;
   }>;
   refunds?: Array<{
+    /** 返金の GID（Shopify の refund.id）。特殊返金の登録と照らすのに使う */
+    id?: string;
     createdAt?: string;
     transactions?: Array<{
       id?: string;
@@ -124,15 +126,81 @@ export function resolveRefundAggregationLocationGid(
   }
 
   // POS ロケーションが付かない返金（管理画面等）
+  return resolveNonPosRefundFallbackGid(order, ctx);
+}
+
+/**
+ * 店の付かない返金（管理画面・外部・アプリの refundCreate）を、注文の metafield が無いときに数える店。
+ * 「POS 以外の返金の計上先」の店 → （「数えない」なら null）→ 販売店。
+ */
+export function resolveNonPosRefundFallbackGid(
+  order: Pick<OrderForRefundAggregation, "retailLocation">,
+  ctx: RefundAggregationContext,
+): string | null {
   if (ctx.nonPosRefundTargetLocationGid) {
     return ctx.nonPosRefundTargetLocationGid;
   }
-
   if (ctx.nonPosRefundFallbackMode === "exclude") {
     return null;
   }
+  return normalizeLocationGid(order.retailLocation?.id);
+}
 
-  return retailGid;
+type RefundTxLike = { kind?: string; location?: { id: string } | null };
+
+/** 返金に、店の付いた返金 TX（REFUND）が 1 つでもあるか */
+export function refundHasPosLocation(refund: {
+  transactions?: RefundTxLike[] | { nodes?: RefundTxLike[] } | null;
+}): boolean {
+  const txs = refund.transactions ?? [];
+  const nodes = Array.isArray(txs) ? txs : (txs.nodes ?? []);
+  return nodes.some((tx) => String(tx.kind ?? "").toUpperCase() === "REFUND" && !!tx.location?.id);
+}
+
+/** 特殊返金の登録のうち、Shopify で返金した記録（返金の照合に使う分だけ） */
+export interface SpecialRefundForAggregation {
+  locationId: string;
+  shopifyRefundId: string | null;
+  createdAt?: Date | string | null;
+}
+
+function refundNumericId(id: string | null | undefined): string | null {
+  const m = String(id ?? "").match(/(\d+)\s*$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * 注文の「店の付かない返金」のうち一番新しいものが、このアプリの特殊返金で Shopify に作った返金なら、
+ * その特殊返金を登録した店を返す（metafield に書く値。#119 見直し P2-A）。
+ * それ以外（POS の返金だけ・管理画面の返金が最後・特殊返金の照合ができない）は null（今までどおり resolve）。
+ *
+ * 特殊返金を登録した店は登録の API が metafield に書くが、そのあとの orders/updated の同期が resolve
+ * （店の付かない返金なら「POS 以外の返金の計上先」か販売店）で書き戻すと、返金した店で数えなくなるため。
+ * 無効にした行・「変更」で置き換えた行も、同じ返金 ID なら返金した店は同じなので照合に使う。
+ */
+export function specialRefundLocationForLatestNonPosRefund(
+  order: Pick<OrderForRefundAggregation, "refunds">,
+  events: readonly SpecialRefundForAggregation[],
+): string | null {
+  let latest: { ts: number; id: string } | null = null;
+  for (const refund of order.refunds ?? []) {
+    if (refundHasPosLocation(refund)) continue;
+    const id = refundNumericId(refund.id);
+    if (!id) continue;
+    const ts = refund.createdAt ? new Date(refund.createdAt).getTime() : 0;
+    if (!latest || ts >= latest.ts) latest = { ts, id };
+  }
+  if (!latest) return null;
+
+  let picked: { ts: number; gid: string } | null = null;
+  for (const e of events) {
+    if (refundNumericId(e.shopifyRefundId) !== latest.id) continue;
+    const gid = normalizeLocationGid(e.locationId);
+    if (!gid) continue;
+    const ts = e.createdAt ? new Date(e.createdAt).getTime() : 0;
+    if (!picked || ts >= picked.ts) picked = { ts, gid };
+  }
+  return picked?.gid ?? null;
 }
 
 /** ロケーション保存時: nonPosRefundAttributionEnabled はショップ内1件のみ */

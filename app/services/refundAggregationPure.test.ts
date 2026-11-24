@@ -7,7 +7,9 @@ import {
   locationGidMatches,
   normalizeLocationGid,
   orderHasRefundInDay,
+  resolveNonPosRefundFallbackGid,
   resolveRefundAggregationLocationGid,
+  specialRefundLocationForLatestNonPosRefund,
   type OrderForRefundAggregation,
   type RefundAggregationContext,
 } from "./refundAggregationPure.server";
@@ -125,6 +127,87 @@ describe("orderHasRefundInDay", () => {
         inDay,
       ),
       false,
+    );
+  });
+});
+
+describe("specialRefundLocationForLatestNonPosRefund（#119 見直し P2-A）", () => {
+  const L = (n: number) => `gid://shopify/Location/${n}`;
+  const refund = (id: string | undefined, at: string, loc: number | null) => ({
+    id,
+    createdAt: at,
+    transactions: [{ kind: "REFUND", location: loc ? { id: L(loc) } : null }],
+  });
+
+  it("返金 ID が数字だけ・GID のどちらでも照らせる", () => {
+    const order = { refunds: [refund("gid://shopify/Refund/55", "2026-11-24T03:00:00Z", null)] };
+    assert.equal(
+      specialRefundLocationForLatestNonPosRefund(order, [{ locationId: "200", shopifyRefundId: "55" }]),
+      L(200),
+    );
+    assert.equal(
+      specialRefundLocationForLatestNonPosRefund(order, [
+        { locationId: L(200), shopifyRefundId: "gid://shopify/Refund/55" },
+      ]),
+      L(200),
+    );
+  });
+
+  it("返金 ID が取れない・特殊返金と合わない・店の付いた返金だけ: null（今までどおり resolve）", () => {
+    const ev = [{ locationId: L(200), shopifyRefundId: "55" }];
+    assert.equal(
+      specialRefundLocationForLatestNonPosRefund({ refunds: [refund(undefined, "2026-11-24T03:00:00Z", null)] }, ev),
+      null,
+    );
+    assert.equal(
+      specialRefundLocationForLatestNonPosRefund({ refunds: [refund("56", "2026-11-24T03:00:00Z", null)] }, ev),
+      null,
+    );
+    assert.equal(
+      specialRefundLocationForLatestNonPosRefund({ refunds: [refund("55", "2026-11-24T03:00:00Z", 300)] }, ev),
+      null,
+    );
+    assert.equal(specialRefundLocationForLatestNonPosRefund({ refunds: [] }, ev), null);
+  });
+
+  it("同じ返金 ID の行が 2 つ（変更で置き換えた）: 新しい行の店", () => {
+    const order = { refunds: [refund("55", "2026-11-24T03:00:00Z", null)] };
+    assert.equal(
+      specialRefundLocationForLatestNonPosRefund(order, [
+        { locationId: L(200), shopifyRefundId: "55", createdAt: "2026-11-24T03:00:00Z" },
+        { locationId: L(400), shopifyRefundId: "55", createdAt: "2026-11-24T04:00:00Z" },
+      ]),
+      L(400),
+    );
+  });
+});
+
+describe("resolveNonPosRefundFallbackGid", () => {
+  const order = { retailLocation: { id: "gid://shopify/Location/100" } };
+  it("計上先の店 → 数えない → 販売店", () => {
+    assert.equal(
+      resolveNonPosRefundFallbackGid(order, {
+        mode: "refund_transaction_pos_location",
+        nonPosRefundFallbackMode: "exclude",
+        nonPosRefundTargetLocationGid: "gid://shopify/Location/300",
+      }),
+      "gid://shopify/Location/300",
+    );
+    assert.equal(
+      resolveNonPosRefundFallbackGid(order, {
+        mode: "refund_transaction_pos_location",
+        nonPosRefundFallbackMode: "exclude",
+        nonPosRefundTargetLocationGid: null,
+      }),
+      null,
+    );
+    assert.equal(
+      resolveNonPosRefundFallbackGid(order, {
+        mode: "refund_transaction_pos_location",
+        nonPosRefundFallbackMode: "order_retail_location",
+        nonPosRefundTargetLocationGid: null,
+      }),
+      "gid://shopify/Location/100",
     );
   });
 });
