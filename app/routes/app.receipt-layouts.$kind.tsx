@@ -133,6 +133,7 @@ export default function ReceiptLayoutEdit() {
               <input ref={enabledInput} type="hidden" name="printEnabled" value={printEnabled ? "1" : "0"} readOnly />
               <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
               <SaveBar
+                hasChanges={JSON.stringify(canonicalLayout(current)) !== JSON.stringify(canonicalLayout(baseline)) || printEnabled !== enabledBaseline}
                 failed={Boolean(errors) && !saving}
                 tone={errors ? "critical" : "success"}
                 onDiscard={onDiscard}

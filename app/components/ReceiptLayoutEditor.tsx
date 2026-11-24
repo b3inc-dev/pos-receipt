@@ -287,7 +287,6 @@ export function ReceiptLayoutEditor({
   // 「破棄」などで親が initial を差し替えたら、編集中の値も戻す
   useEffect(() => {
     setLayout(initial);
-    setTab(initial.mode === "code" ? "code" : "blocks");
   }, [initial]);
 
   const update = (next: ReceiptLayout) => {
