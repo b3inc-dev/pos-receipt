@@ -14,7 +14,8 @@
  */
 import prisma from "../db.server";
 import { createCiaraSyncScheduler, type CiaraSchedulerStatus } from "./ciaraSyncScheduler.server";
-import { getAppSetting, setAppSetting } from "../utils/appSettings.server";
+import { getAppSetting } from "../utils/appSettings.server";
+import { patchSyncSettings } from "./ciaraSyncSettingsPersistence.server";
 import { isInhouseMode } from "../utils/planFeatures.server";
 import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import {
@@ -57,8 +58,8 @@ export async function getCiaraVisitSyncSettings(shopId: string): Promise<CiaraVi
   return { ...DEFAULT_CIARA_VISIT_SYNC, ...saved };
 }
 
-export async function saveCiaraVisitSyncSettings(shopId: string, settings: CiaraVisitSyncSettings) {
-  await setAppSetting(shopId, CIARA_VISIT_SYNC_KEY, settings);
+export async function saveCiaraVisitSyncSettings(shopId: string, settings: Partial<CiaraVisitSyncSettings>) {
+  await patchSyncSettings(prisma.appSetting, shopId, CIARA_VISIT_SYNC_KEY, DEFAULT_CIARA_VISIT_SYNC, settings);
 }
 
 /**
@@ -86,8 +87,7 @@ export async function runCiaraVisitSync(shopId: string, admin: AdminClient): Pro
   const settings = await getCiaraVisitSyncSettings(shopId);
   const base: CiaraVisitSyncLastRun = { at: new Date().toISOString(), ok: false, message: "", changed: 0, unmatched: [] };
   const finish = async (lastRun: CiaraVisitSyncLastRun) => {
-    const latest = await getCiaraVisitSyncSettings(shopId);
-    await saveCiaraVisitSyncSettings(shopId, { ...latest, lastRun });
+    await saveCiaraVisitSyncSettings(shopId, { lastRun });
     return lastRun;
   };
 
