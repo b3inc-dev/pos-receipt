@@ -16,6 +16,7 @@ import qrcodeGenerator from "qrcode-generator";
 import { getBlockDef, type SettingDef } from "./receiptLayoutBlocks";
 import {
   LAYOUT_LIMITS,
+  resolvePaperPrintStyle,
   type FontFamily,
   type ReceiptLayout,
 } from "./receiptLayoutSchema";
@@ -27,7 +28,8 @@ const FONT_STACKS: Record<FontFamily, string> = {
 };
 
 export function paperWidthPx(mm: 58 | 80): number {
-  return mm === 58 ? 384 : 576;
+  // CSS px は 96dpi。プリンターの 203dpi のドット数とは別。
+  return Math.round((mm === 58 ? 48 : 72) * 96 / 25.4);
 }
 
 function formatNumber(v: unknown): string {
@@ -163,29 +165,41 @@ export function isSafeImageUrl(url: string): boolean {
 }
 
 /** 画面の大きさ・文字の大きさなど、全部のレシートに共通の CSS */
-export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style">): string {
+export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style" | "paperStyles">): string {
   const st = layout.style;
+  const p = resolvePaperPrintStyle(layout);
+  const bodyFont = layout.paperStyles?.[layout.paperWidthMm] ? `${p.fontSizePt}pt` : `${st.fontSizePx}px`;
   return [
     `*{box-sizing:border-box}`,
+    `@page{size:auto;margin:0}`,
     `html,body{margin:0;padding:0;background:#fff}`,
-    `body{padding:${st.paddingPx}px;width:${paperWidthPx(layout.paperWidthMm)}px;max-width:100%;color:#000;font-family:${FONT_STACKS[st.fontFamily]};font-size:${st.fontSizePx}px;line-height:${st.lineHeight};font-weight:${st.fontWeight}}`,
+    `body{padding:${p.marginYMm}mm ${p.marginXMm}mm;width:${layout.paperWidthMm === 58 ? 48 : 72}mm;max-width:100%;overflow-wrap:anywhere;color:#000;font-family:${FONT_STACKS[st.fontFamily]};font-size:${bodyFont};line-height:${p.lineHeight};font-weight:${st.fontWeight}}`,
     `p{margin:0}`,
     `.blk{margin:6px 0}`,
     `.a-left{text-align:left}.a-center{text-align:center}.a-right{text-align:right}`,
     `.b{font-weight:700}`,
-    `.fs-s{font-size:.85em}.fs-m{font-size:1em}.fs-l{font-size:1.3em}.fs-xl{font-size:1.8em}`,
+    // Keep explicit block sizes as multipliers of the paper-specific total size.
+    `.fs-s{font-size:.85em;--receipt-font-scale:.85}.fs-m{font-size:1em;--receipt-font-scale:1}.fs-l{font-size:1.3em;--receipt-font-scale:1.3}.fs-xl{font-size:1.8em;--receipt-font-scale:1.8}`,
     `.row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin:2px 0}`,
-    `.row>span:last-child{text-align:right;white-space:nowrap}`,
+    `.row>span:first-child{min-width:0;flex:1;overflow-wrap:anywhere}`,
+    `.row>span:last-child{min-width:0;max-width:65%;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}`,
+    `.print-value,.row .print-value{font-size:${p.amountFontSizePt}pt}`,
+    // The standard total/receipt amount block uses l (1.3): normalize it to
+    // the recommended 14pt total. Other sizes retain their relative ratios.
+    // Do not force bold here: totals inherit total_bold from their row;
+    // receipt amounts retain their own .b class.
+    `.print-total,.row .print-total{font-size:calc(max(14pt,${p.amountFontSizePt}pt) * var(--receipt-font-scale,1.3) / 1.3)}`,
     `.item{margin:6px 0}`,
     `.indent{padding-left:12px}`,
-    `.logo{display:inline-block;max-width:100%;height:auto}`,
+    `.logo{display:inline-block;max-width:min(100%,${p.logoWidthMm}mm);height:auto}`,
     `.hr{border:0;margin:8px 0}`,
     `.hr-none{border-top:0}.hr-solid{border-top:1px solid #000}.hr-thick{border-top:3px solid #000}.hr-dashed{border-top:1px dashed #000}.hr-dotted{border-top:2px dotted #000}`,
     `.ul-solid{border-bottom:1px solid #000;padding-bottom:4px}.ul-thick{border-bottom:3px solid #000;padding-bottom:6px}.ul-dashed{border-bottom:1px dashed #000;padding-bottom:4px}.ul-dotted{border-bottom:2px dotted #000;padding-bottom:4px}`,
     `.amount{padding:8px 0}`,
     `.stamp{display:inline-flex;align-items:center;justify-content:center;border:1px solid #000;font-size:.85em}`,
-    `.stamps{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}`,
-    `.qr{margin:0 auto}.qr svg{width:100%;height:auto;display:block}`,
+    `.stamps{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:8px}`,
+    `.stamp{max-width:100%}`,
+    `.qr{margin:0 auto;max-width:100%}.qr svg{width:100%;height:auto;display:block}`,
     `.thin{font-weight:300}.muted{opacity:.8}.strike{text-decoration:line-through}`,
     `.lines>div+div{margin-top:2px}`,
   ].join("\n");
@@ -257,7 +271,9 @@ export function blocksToCode(layout: ReceiptLayout): string {
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>{{ document.title }}</title>
 <style>{% raw %}
-${baseCss(layout)}${css}
+/* receipt-managed-paper-start */
+${baseCss(layout)}
+/* receipt-managed-paper-end */${css}
 {% endraw %}</style>
 </head>
 <body>
@@ -276,12 +292,21 @@ export function layoutTemplate(layout: ReceiptLayout): string {
 
 /** レイアウトとデータから印字 HTML を作る。失敗したら理由と、理由を書いた HTML を返す */
 export function renderReceiptLayout(layout: ReceiptLayout, data: Record<string, unknown>): RenderResult {
-  const template = layoutTemplate(layout);
+  // 生成したコードの管理対象 CSS だけ、現在の用紙・設定で更新する。
+  // 手書きの CSS はそのまま。Liquid からも現在の用紙を参照できる。
+  const template = layoutTemplate(layout).replace(
+    /\/\* receipt-managed-paper-start \*\/[\s\S]*?\/\* receipt-managed-paper-end \*\//,
+    () => `/* receipt-managed-paper-start */\n${baseCss(layout)}\n/* receipt-managed-paper-end */`,
+  );
   if (template.length > LAYOUT_LIMITS.maxCodeLength * 2) {
     return errorResult("テンプレートが長すぎます。");
   }
   try {
-    const html = receiptLiquid().parseAndRenderSync(template, data);
+    const html = receiptLiquid().parseAndRenderSync(template, {
+      ...data,
+      paper: { width_mm: layout.paperWidthMm, printable_width_mm: layout.paperWidthMm === 58 ? 48 : 72,
+        ...resolvePaperPrintStyle(layout) },
+    });
     return { ok: true, html };
   } catch (e) {
     return errorResult(describeLiquidError(e));

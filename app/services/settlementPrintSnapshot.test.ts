@@ -161,8 +161,8 @@ describe("synthetic first print vs reprint after settings change", () => {
 
     assert.equal(at80.model.paperWidthMm, 80);
     assert.equal(at58.model.paperWidthMm, 58);
-    assert.match(at80.html, /width:\s*576px/);
-    assert.match(at58.html, /width:\s*384px/);
+    assert.match(at80.html, /width:\s*72mm/);
+    assert.match(at58.html, /width:\s*48mm/);
     assert.equal(contentFingerprint(at80.html), contentFingerprint(at58.html));
     assert.equal(at80.model.locationName, ISSUED_NAME);
     assert.equal(at58.model.locationName, ISSUED_NAME);

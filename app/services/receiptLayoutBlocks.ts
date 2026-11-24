@@ -220,7 +220,7 @@ export const BLOCK_DEFS: BlockDef[] = [
       { key: "show_discounts", label: "商品ごとの割引を出す", type: "checkbox", default: true },
     ],
     template:
-      `<div class="blk">{% if s_show_header %}<div class="row b ul-{{ s_header_line }}"><span>{{ s_header_left | raw }}</span><span>{{ s_header_right | raw }}</span></div>{% endif %}{% for item in order.line_items %}<div class="item"><div class="row"><span{% if s_title_bold %} class="b"{% endif %}>{{ item.title }}</span><span{% if s_title_bold %} class="b"{% endif %}>{{ item.line_total | money }}</span></div>{% if s_show_variant and item.variant_title != blank %}<div>{{ item.variant_title }}</div>{% endif %}{% if s_show_sku and item.sku != blank %}<div>{{ item.sku }}</div>{% endif %}{% if s_quantity == "always" or s_quantity == "multiple" and item.quantity > 1 %}<div>{% if s_quantity_parens %}({% endif %}{{ item.quantity }} x {{ item.unit_price | money }}{% if s_quantity_parens %}){% endif %}</div>{% endif %}{% if s_show_compare_at and item.compare_at_price > 0 %}<div class="row muted"><span>{{ s_compare_at_label | raw }}</span><span class="strike">{{ item.compare_at_price | money }}</span></div>{% endif %}{% if s_show_discounts and item.discount > 0 %}<div class="row"><span>{{ item.discount_label }}</span><span>-{{ item.discount | money }}</span></div>{% endif %}{% if s_show_properties %}{% for p in item.properties %}<div class="indent fs-s">{{ p.key }}: {{ p.value }}</div>{% endfor %}{% endif %}</div>{% endfor %}</div>`,
+      `<div class="blk">{% if s_show_header %}<div class="row b ul-{{ s_header_line }}"><span>{{ s_header_left | raw }}</span><span>{{ s_header_right | raw }}</span></div>{% endif %}{% for item in order.line_items %}<div class="item"><div class="row"><span{% if s_title_bold %} class="b"{% endif %}>{{ item.title }}</span><span class="print-value{% if s_title_bold %} b{% endif %}">{{ item.line_total | money }}</span></div>{% if s_show_variant and item.variant_title != blank %}<div>{{ item.variant_title }}</div>{% endif %}{% if s_show_sku and item.sku != blank %}<div>{{ item.sku }}</div>{% endif %}{% if s_quantity == "always" or s_quantity == "multiple" and item.quantity > 1 %}<div class="print-value">{% if s_quantity_parens %}({% endif %}{{ item.quantity }} x {{ item.unit_price | money }}{% if s_quantity_parens %}){% endif %}</div>{% endif %}{% if s_show_compare_at and item.compare_at_price > 0 %}<div class="row muted"><span>{{ s_compare_at_label | raw }}</span><span class="print-value strike">{{ item.compare_at_price | money }}</span></div>{% endif %}{% if s_show_discounts and item.discount > 0 %}<div class="row"><span>{{ item.discount_label }}</span><span class="print-value">-{{ item.discount | money }}</span></div>{% endif %}{% if s_show_properties %}{% for p in item.properties %}<div class="indent fs-s">{{ p.key }}: {{ p.value }}</div>{% endfor %}{% endif %}</div>{% endfor %}</div>`,
   },
   {
     type: "totals",
@@ -242,7 +242,7 @@ export const BLOCK_DEFS: BlockDef[] = [
       { key: "total_bold", label: "合計を太字", type: "checkbox", default: true },
     ],
     template:
-      `<div class="blk">{% if s_show_subtotal %}<div class="row"><span>{{ s_subtotal_label | raw }}</span><span>{{ order.subtotal | money }}</span></div>{% endif %}{% if s_show_discounts and order.discounts > 0 %}<div class="row"><span>{{ s_discount_label | raw }}</span><span>-{{ order.discounts | money }}</span></div>{% endif %}{% if s_show_shipping and order.is_shipping_order %}<div class="row"><span>{{ s_shipping_label | raw }}</span><span>{{ order.shipping | money }}</span></div>{% endif %}{% if s_show_tax %}{% for t in order.tax_lines %}<div class="row"><span>{{ s_tax_label | raw }} ({{ t.rate_label }}){% if s_tax_note != blank %}<br/>{{ s_tax_note | raw }}{% endif %}</span><span>{{ t.amount | money }}</span></div>{% endfor %}{% endif %}<div class="row fs-{{ s_total_size }}{% if s_total_bold %} b{% endif %}"><span>{{ s_total_label | raw }}</span><span>{{ order.total | money }}</span></div></div>`,
+      `<div class="blk">{% if s_show_subtotal %}<div class="row"><span>{{ s_subtotal_label | raw }}</span><span class="print-value">{{ order.subtotal | money }}</span></div>{% endif %}{% if s_show_discounts and order.discounts > 0 %}<div class="row"><span>{{ s_discount_label | raw }}</span><span class="print-value">-{{ order.discounts | money }}</span></div>{% endif %}{% if s_show_shipping and order.is_shipping_order %}<div class="row"><span>{{ s_shipping_label | raw }}</span><span class="print-value">{{ order.shipping | money }}</span></div>{% endif %}{% if s_show_tax %}{% for t in order.tax_lines %}<div class="row"><span>{{ s_tax_label | raw }} ({{ t.rate_label }}){% if s_tax_note != blank %}<br/>{{ s_tax_note | raw }}{% endif %}</span><span class="print-value">{{ t.amount | money }}</span></div>{% endfor %}{% endif %}<div class="row fs-{{ s_total_size }}{% if s_total_bold %} b{% endif %}"><span>{{ s_total_label | raw }}</span><span class="print-value print-total">{{ order.total | money }}</span></div></div>`,
   },
   {
     type: "payments",
@@ -255,7 +255,7 @@ export const BLOCK_DEFS: BlockDef[] = [
       { key: "change_label", label: "お釣りの名前", type: "text", default: "お釣り" },
     ],
     template:
-      `<div class="blk{% if s_bold %} b{% endif %}">{% for p in order.payments %}<div class="row"><span>{{ p.label }}</span><span>{{ p.amount | money }}</span></div>{% endfor %}{% if s_show_change and order.change > 0 %}<div class="row"><span>{{ s_change_label | raw }}</span><span>{{ order.change | money }}</span></div>{% endif %}</div>`,
+      `<div class="blk{% if s_bold %} b{% endif %}">{% for p in order.payments %}<div class="row"><span>{{ p.label }}</span><span class="print-value">{{ p.amount | money }}</span></div>{% endfor %}{% if s_show_change and order.change > 0 %}<div class="row"><span>{{ s_change_label | raw }}</span><span class="print-value">{{ order.change | money }}</span></div>{% endif %}</div>`,
   },
   {
     type: "order_attributes",
@@ -316,7 +316,7 @@ export const BLOCK_DEFS: BlockDef[] = [
       { key: "show_quantity", label: "数量を出す", type: "checkbox", default: true },
     ],
     template:
-      `<div class="blk">{% for item in order.line_items %}<div class="item"><div class="row"><span{% if s_title_bold %} class="b"{% endif %}>{{ item.title }}</span>{% if s_show_quantity %}<span>×{{ item.quantity }}</span>{% endif %}</div>{% if s_show_variant and item.variant_title != blank %}<div>{{ item.variant_title }}</div>{% endif %}</div>{% endfor %}</div>`,
+      `<div class="blk">{% for item in order.line_items %}<div class="item"><div class="row"><span{% if s_title_bold %} class="b"{% endif %}>{{ item.title }}</span>{% if s_show_quantity %}<span class="print-value">×{{ item.quantity }}</span>{% endif %}</div>{% if s_show_variant and item.variant_title != blank %}<div>{{ item.variant_title }}</div>{% endif %}</div>{% endfor %}</div>`,
   },
 
   // ── 精算・点検 ─────────────────────────────────────────
@@ -358,7 +358,7 @@ export const BLOCK_DEFS: BlockDef[] = [
       format: SETTLEMENT_FIELDS.find((f) => f.value === s.field)?.format ?? "money",
     }),
     template:
-      `{% assign s__v = settlement[s_field] | default: 0 %}{% unless s_hide_zero and s__v == 0 %}<div class="row{% if s_bold %} b{% endif %}"><span>{{ s_label | raw }}</span><span>{% if s_format == "money" %}{{ s__v | money }}{% else %}{{ s__v | number }}{{ s_unit | raw }}{% endif %}</span></div>{% endunless %}`,
+      `{% assign s__v = settlement[s_field] | default: 0 %}{% unless s_hide_zero and s__v == 0 %}<div class="row{% if s_bold %} b{% endif %}"><span>{{ s_label | raw }}</span><span class="print-value{% if s_field == "total" or s_field == "total_including_returns" %} print-total{% endif %}">{% if s_format == "money" %}{{ s__v | money }}{% else %}{{ s__v | number }}{{ s_unit | raw }}{% endif %}</span></div>{% endunless %}`,
     summaryKey: "label",
   },
   {
@@ -373,7 +373,7 @@ export const BLOCK_DEFS: BlockDef[] = [
       { key: "bold", label: "太字", type: "checkbox", default: false },
     ],
     template:
-      `<div class="blk item"><div class="row{% if s_bold %} b{% endif %}"><span>{{ s_label | raw }}</span><span>{{ settlement.cash_deposit | money }}</span></div>{% if s_show_voucher_change and settlement.voucher_change > 0 %}<div class="row indent"><span>{{ s_voucher_label | raw }}</span><span>-{{ settlement.voucher_change | money }}</span></div>{% endif %}</div>`,
+      `<div class="blk item"><div class="row{% if s_bold %} b{% endif %}"><span>{{ s_label | raw }}</span><span class="print-value">{{ settlement.cash_deposit | money }}</span></div>{% if s_show_voucher_change and settlement.voucher_change > 0 %}<div class="row indent"><span>{{ s_voucher_label | raw }}</span><span class="print-value">-{{ settlement.voucher_change | money }}</span></div>{% endif %}</div>`,
   },
   {
     type: "settlement_payments",
@@ -402,7 +402,7 @@ export const BLOCK_DEFS: BlockDef[] = [
       { key: "refund_count_label", label: "4 行: 返金件数の名前", type: "text", default: "返金件数" },
     ],
     template:
-      `<div class="blk">{% if s_heading != blank %}<div class="b">{{ s_heading | raw }}</div>{% endif %}{% for p in settlement.payments %}{% if s_style == "detailed" %}<div class="item"><div class="row"><span>{{ p.label }}</span><span></span></div><div class="row indent"><span>{{ s_net_label | raw }}</span><span>{{ p.net | money }}</span></div><div class="row indent"><span>{{ s_refund_amount_label | raw }}</span><span>{{ p.refund | money }}</span></div><div class="row indent"><span>{{ s_count_label | raw }}</span><span>{{ p.count | number }}{{ s_count_unit | raw }}</span></div><div class="row indent"><span>{{ s_refund_count_label | raw }}</span><span>{{ p.refund_count | number }}{{ s_count_unit | raw }}</span></div></div>{% else %}<div class="row"><span>{{ p.label }}{% if s_show_count %} ({{ p.count | number }}{{ s_count_unit | raw }}){% endif %}</span><span>{{ p.net | money }}</span></div>{% if s_show_refund and p.refund > 0 %}<div class="row indent fs-s"><span>{{ s_refund_label | raw }} {{ p.refund_count | number }}{{ s_count_unit | raw }}</span><span>-{{ p.refund | money }}</span></div>{% endif %}{% endif %}{% endfor %}</div>`,
+      `<div class="blk">{% if s_heading != blank %}<div class="b">{{ s_heading | raw }}</div>{% endif %}{% for p in settlement.payments %}{% if s_style == "detailed" %}<div class="item"><div class="row"><span>{{ p.label }}</span><span></span></div><div class="row indent"><span>{{ s_net_label | raw }}</span><span class="print-value">{{ p.net | money }}</span></div><div class="row indent"><span>{{ s_refund_amount_label | raw }}</span><span class="print-value">{{ p.refund | money }}</span></div><div class="row indent"><span>{{ s_count_label | raw }}</span><span class="print-value">{{ p.count | number }}{{ s_count_unit | raw }}</span></div><div class="row indent"><span>{{ s_refund_count_label | raw }}</span><span class="print-value">{{ p.refund_count | number }}{{ s_count_unit | raw }}</span></div></div>{% else %}<div class="row"><span>{{ p.label }}{% if s_show_count %} (<span class="print-value">{{ p.count | number }}{{ s_count_unit | raw }}</span>){% endif %}</span><span class="print-value">{{ p.net | money }}</span></div>{% if s_show_refund and p.refund > 0 %}<div class="row indent fs-s"><span>{{ s_refund_label | raw }} <span class="print-value">{{ p.refund_count | number }}{{ s_count_unit | raw }}</span></span><span class="print-value">-{{ p.refund | money }}</span></div>{% endif %}{% endif %}{% endfor %}</div>`,
   },
 
   // ── 領収書 ──────────────────────────────────────────
@@ -433,7 +433,7 @@ export const BLOCK_DEFS: BlockDef[] = [
       align(),
     ],
     template:
-      `<div class="blk a-{{ s_align }} fs-{{ s_size }} b ul-{{ s_underline }}" style="padding:{{ s_padding }}px 0">{{ s_prefix | raw }}{{ receipt.amount | money }}{{ s_suffix | raw }}</div>`,
+      `<div class="blk print-total a-{{ s_align }} fs-{{ s_size }} b ul-{{ s_underline }}" style="padding:{{ s_padding }}px 0">{{ s_prefix | raw }}{{ receipt.amount | money }}{{ s_suffix | raw }}</div>`,
   },
   {
     type: "receipt_breakdown",
@@ -448,7 +448,7 @@ export const BLOCK_DEFS: BlockDef[] = [
       align("right"),
     ],
     template:
-      `<div class="blk a-{{ s_align }}">{% if s_show_tax %}{% for t in receipt.tax_lines %}<div>{{ s_tax_label | raw }} ({{ t.rate_label }}){{ s_separator | raw }}{{ t.amount | money }}</div>{% endfor %}{% endif %}{% if s_show_payments %}{% for p in receipt.payments %}<div>{{ p.label }}{{ s_separator | raw }}{{ p.amount | money }}</div>{% endfor %}{% endif %}</div>`,
+      `<div class="blk a-{{ s_align }}">{% if s_show_tax %}{% for t in receipt.tax_lines %}<div>{{ s_tax_label | raw }} ({{ t.rate_label }}){{ s_separator | raw }}<span class="print-value">{{ t.amount | money }}</span></div>{% endfor %}{% endif %}{% if s_show_payments %}{% for p in receipt.payments %}<div>{{ p.label }}{{ s_separator | raw }}<span class="print-value">{{ p.amount | money }}</span></div>{% endfor %}{% endif %}</div>`,
   },
   {
     type: "receipt_proviso",
