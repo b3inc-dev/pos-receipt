@@ -38,14 +38,14 @@ describe("printReceiptHtml", () => {
     const at58 = renderPrintReceiptHtml({ ...common, paperWidthMm: 58 });
 
     assert.match(at80, /@page \{ size: auto;/);
-    assert.match(at80, /@media print \{\s*html, body \{ width: 100%; max-width: 80mm;/);
-    assert.match(at58, /@media print \{\s*html, body \{ width: 100%; max-width: 58mm;/);
+    assert.match(at80, /@media print \{\s*html, body \{ width: 100%; max-width: 72mm;/);
+    assert.match(at58, /@media print \{\s*html, body \{ width: 100%; max-width: 48mm;/);
     assert.match(at80, /class="paper-80" data-paper-width-mm="80"/);
     assert.match(at58, /class="paper-58" data-paper-width-mm="58"/);
-    assert.match(at80, /font-size: 13px/);
-    assert.match(at58, /font-size: 13px/);
-    assert.match(at80, /grid-template-columns: minmax\(7em, 1fr\) minmax\(0, 68%\)/);
-    assert.match(at58, /grid-template-columns: minmax\(5em, 1fr\) minmax\(0, 55%\)/);
+    assert.match(at80, /font-size: 10pt/);
+    assert.match(at58, /font-size: 10pt/);
+    assert.match(at80, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 65%\)/);
+    assert.match(at58, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 60%\)/);
     assert.match(at58, /overflow-wrap: anywhere/);
     assert.doesNotMatch(at58, /transform\s*:\s*scale/i);
     assert.match(at58, /とても長い商品名/);
@@ -87,7 +87,7 @@ describe("printReceiptHtml", () => {
     });
 
     for (const html of [settlement, receipt]) {
-      assert.match(html, /@media print \{\s*html, body \{ width: 100%; max-width: 58mm;/);
+      assert.match(html, /@media print \{\s*html, body \{ width: 100%; max-width: 48mm;/);
       assert.match(html, /class="paper-58" data-paper-width-mm="58"/);
       assert.doesNotMatch(html, /transform\s*:\s*scale/i);
       assert.match(html, /class="amount"/);

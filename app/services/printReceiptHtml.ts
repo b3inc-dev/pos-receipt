@@ -114,8 +114,8 @@ function attrsHtml(attrs: PrintAttr[] | undefined, indent = false): string {
 }
 
 function shell(widthMm: 58 | 80, body: string, title: string): string {
-  const maxW = widthMm === 58 ? 384 : 576;
-  const pagePadding = widthMm === 58 ? 4 : 8;
+  const printableWidthMm = widthMm === 58 ? 48 : 72;
+  const pagePadding = widthMm === 58 ? 1 : 1.5;
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -126,28 +126,28 @@ function shell(widthMm: 58 | 80, body: string, title: string): string {
   @page { size: auto; margin: 0; }
   * { box-sizing: border-box; }
   html {
-    width: ${widthMm}mm;
+    width: ${printableWidthMm}mm;
     max-width: 100%;
     background: #fff;
   }
   body {
     margin: 0;
-    padding: ${pagePadding}px;
+    padding: 3mm ${pagePadding}mm;
     font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
-    font-size: 13px;
+    font-size: 10pt;
     line-height: 1.35;
     color: #000;
     background: #fff;
-    width: ${maxW}px;
+    width: ${printableWidthMm}mm;
     max-width: 100%;
     overflow-wrap: anywhere;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
-  h1 { font-size: 16px; margin: 0 0 8px; text-align: center; }
+  h1 { font-size: 13pt; margin: 0 0 8px; text-align: center; }
   .row {
     display: grid;
-    grid-template-columns: minmax(7em, 1fr) minmax(0, 68%);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 65%);
     align-items: start;
     column-gap: 8px;
     margin: 2px 0;
@@ -157,18 +157,18 @@ function shell(widthMm: 58 | 80, body: string, title: string): string {
   .amount {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
   .muted { color: #333; font-size: 12px; }
   .attr { font-size: 11px; color: #222; margin: 1px 0; }
   .hr { border: 0; border-top: 1px dashed #000; margin: 8px 0; }
   .item { break-inside: avoid; page-break-inside: avoid; }
   .item-title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
-  .total { font-size: 15px; font-weight: 700; margin-top: 4px; }
+  .total { font-size: 14pt; font-weight: 700; margin-top: 4px; }
   .center { text-align: center; }
   .footer { margin-top: 12px; font-size: 11px; text-align: center; }
   body.paper-58 .row {
-    grid-template-columns: minmax(5em, 1fr) minmax(0, 55%);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 60%);
     column-gap: 5px;
   }
   body.paper-58 .item-meta {
@@ -178,7 +178,7 @@ function shell(widthMm: 58 | 80, body: string, title: string): string {
     white-space: normal;
   }
   @media print {
-    html, body { width: 100%; max-width: ${widthMm}mm; }
+    html, body { width: 100%; max-width: ${printableWidthMm}mm; }
   }
 </style>
 </head>

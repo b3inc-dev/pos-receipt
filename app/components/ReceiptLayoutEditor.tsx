@@ -36,6 +36,10 @@ import {
 } from "../services/receiptLayoutRender";
 import {
   LAYOUT_LIMITS,
+  PAPER_STYLE_LIMITS,
+  defaultPaperPrintStyle,
+  resolvePaperPrintStyle,
+  type PaperPrintStyle,
   type BlockSettingValue,
   type LayoutBlock,
   type ReceiptKind,
@@ -303,6 +307,11 @@ export function ReceiptLayoutEditor({
   }, [layout]);
   const rendered = useMemo(() => renderReceiptLayout(renderTarget, sampleData ?? sampleTemplateData(kind)), [renderTarget, kind, sampleData]);
 
+  const paperStyle = resolvePaperPrintStyle(layout);
+  const updatePaperStyle = (key: keyof PaperPrintStyle, value: number) => {
+    const next = { ...paperStyle, [key]: value };
+    update({ ...layout, paperStyles: { ...layout.paperStyles, [layout.paperWidthMm]: next } });
+  };
   const defs = blockDefsForKind(kind);
   const setBlocks = (blocks: LayoutBlock[]) => update({ ...layout, blocks });
   const move = (i: number, d: -1 | 1) => {
@@ -473,14 +482,25 @@ export function ReceiptLayoutEditor({
                   selected={[String(layout.paperWidthMm)]}
                   onChange={(v) => update({ ...layout, paperWidthMm: v[0] === "58" ? 58 : 80 })}
                 />
-                <NumField
-                  label="文字の大きさ"
-                  suffix="px"
-                  min={LAYOUT_LIMITS.fontSizePx.min}
-                  max={LAYOUT_LIMITS.fontSizePx.max}
-                  value={layout.style.fontSizePx}
-                  onChange={(v) => update({ ...layout, style: { ...layout.style, fontSizePx: v } })}
-                />
+                <Text as="p" tone="subdued">58mm・80mmごとの設定を保存できます。実際の用紙幅は印字設定または販売レシート設定で指定してください。</Text>
+                {layout.mode === "code" && !layout.code.includes("/* receipt-managed-paper-start */") ? (
+                  <Text as="p" tone="caution">手書きのコードでは下の設定は自動反映されません。コードの CSS を調整してください。</Text>
+                ) : null}
+                {([
+                  ["fontSizePt", "本文の文字サイズ", "pt", 0.5],
+                  ["amountFontSizePt", "金額・件数の文字サイズ", "pt", 0.5],
+                  ["logoWidthMm", "ロゴの最大横幅", "mm", 1],
+                  ["marginXMm", "左右の余白（片側）", "mm", 0.5],
+                  ["marginYMm", "上下の余白（片側）", "mm", 0.5],
+                  ["lineHeight", "行間", "倍", 0.05],
+                ] as const).map(([key, label, suffix, step]) => (
+                  <NumField key={layout.paperWidthMm + key} label={label} suffix={suffix} step={step}
+                    min={PAPER_STYLE_LIMITS[key].min} max={PAPER_STYLE_LIMITS[key].max}
+                    value={paperStyle[key]} onChange={(v) => updatePaperStyle(key, v)} />
+                ))}
+                <Button onClick={() => update({ ...layout, paperStyles: {
+                  ...layout.paperStyles, [layout.paperWidthMm]: defaultPaperPrintStyle(layout.paperWidthMm),
+                } })}>この用紙を推奨設定に戻す</Button>
                 <ChoiceList
                   title="文字の太さ"
                   choices={[
@@ -500,23 +520,6 @@ export function ReceiptLayoutEditor({
                   ]}
                   selected={[layout.style.fontFamily]}
                   onChange={(v) => update({ ...layout, style: { ...layout.style, fontFamily: v[0] as ReceiptLayout["style"]["fontFamily"] } })}
-                />
-                <NumField
-                  label="行の高さ"
-                  
-                  step={0.05}
-                  min={LAYOUT_LIMITS.lineHeight.min}
-                  max={LAYOUT_LIMITS.lineHeight.max}
-                  value={layout.style.lineHeight}
-                  onChange={(v) => update({ ...layout, style: { ...layout.style, lineHeight: v } })}
-                />
-                <NumField
-                  label="余白"
-                  suffix="px"
-                  min={LAYOUT_LIMITS.paddingPx.min}
-                  max={LAYOUT_LIMITS.paddingPx.max}
-                  value={layout.style.paddingPx}
-                  onChange={(v) => update({ ...layout, style: { ...layout.style, paddingPx: v } })}
                 />
                 <TextField
                   label="追加の CSS"

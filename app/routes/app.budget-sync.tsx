@@ -14,9 +14,13 @@ import {
   getCiaraBudgetSyncSettings,
   runCiaraBudgetSync,
   saveCiaraBudgetSyncSettings,
+  ensureCiaraBudgetSyncScheduler,
+  ciaraBudgetSyncSchedulerStatus,
 } from "../services/ciaraBudgetSync.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SaveBar, SuccessToast, confirmLeave } from "../components/admin-ui";
+
+import { syncConnectionState } from "../utils/ciaraSyncConnection";
 
 type ActionResult = { ok: boolean; intent: string; message: string };
 
@@ -35,7 +39,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const shop = await resolveShop(session.shop, admin);
   const settings = await getCiaraBudgetSyncSettings(shop.id);
-  return { settings, hasSecret: ciaraSyncServerReady() };
+  // 定期の仕事が止まっていたら、開いたときにもう一度始める（待たずに今の状態を出す）
+  const previousState = ciaraBudgetSyncSchedulerStatus().state;
+  void ensureCiaraBudgetSyncScheduler();
+  return { settings, hasSecret: ciaraSyncServerReady(), schedulerState: previousState === "failed" ? previousState : ciaraBudgetSyncSchedulerStatus().state };
 }
 
 export async function action({ request }: ActionFunctionArgs): Promise<Response> {
@@ -52,14 +59,14 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
     return Response.json({ ok: Boolean(lastRun?.ok), intent, message: lastRun?.message ?? "" } satisfies ActionResult);
   }
 
-  const enabled = formData.get("enabled") === "on";
-  const current = await getCiaraBudgetSyncSettings(shop.id);
-  await saveCiaraBudgetSyncSettings(shop.id, { ...current, enabled });
+  // Polaris の Checkbox は値を空で送るので、隠し入力の true / false で受ける（ほかの設定画面と同じ形）
+  const enabled = formData.get("enabled") === "true";
+  await saveCiaraBudgetSyncSettings(shop.id, { enabled });
   return Response.json({ ok: true, intent, message: "保存しました" } satisfies ActionResult);
 }
 
 export default function BudgetSyncPage() {
-  const { settings, hasSecret } = useLoaderData<typeof loader>();
+  const { settings, hasSecret, schedulerState } = useLoaderData<typeof loader>();
   const actionData = useActionData<ActionResult>();
   const navigation = useNavigation();
   const navigate = useNavigate();
@@ -76,16 +83,24 @@ export default function BudgetSyncPage() {
     notice = { tone: "critical", title: actionData.intent === "run" ? "取り込めませんでした" : "保存できませんでした", text: actionData.message };
   }
   // つながりの状態（サーバーの設定の名前は出さない）
-  const connected = hasSecret && settings.enabled && Boolean(last?.ok);
-  const connectionNote = connected
-    ? "1 時間ごとに取り込んでいます。"
-    : !settings.enabled
-      ? "取り込みをオンにして保存すると、つながりを確かめます。"
-      : !hasSecret
-        ? "サーバーの準備がまだです。準備ができると 1 時間ごとに取り込みます。"
-        : last && !last.ok
-          ? last.message
-          : "「今すぐ取り込む」を押すと、つながりを確かめます。";
+  // 定期の仕事が止まっているときは「つながっています」にしない（黙って止まらない）
+  const connectionState = syncConnectionState(settings.enabled, hasSecret, schedulerState, Boolean(last?.ok));
+  const jobStopped = connectionState === "failed";
+  const jobStarting = connectionState === "starting";
+  const connected = connectionState === "connected";
+  const connectionNote = jobStopped
+    ? "1 時間ごとの取り込みが止まっています。5 分ほどで自動でもう一度始めます。続くときは連絡してください。"
+    : jobStarting
+      ? "1 時間ごとの取り込みを始めています。少しして再読み込みしてください。"
+      : connected
+        ? "1 時間ごとに取り込んでいます。"
+        : !settings.enabled
+          ? "取り込みをオンにして保存すると、つながりを確かめます。"
+          : connectionState === "off"
+            ? "サーバーの準備がまだです。準備ができると 1 時間ごとに取り込みます。"
+            : last && !last.ok
+              ? last.message
+              : "「今すぐ取り込む」を押すと、つながりを確かめます。";
 
   return (
     <PolarisPageWrapper>
@@ -121,10 +136,10 @@ export default function BudgetSyncPage() {
                   }}
                 />
                 <BlockStack gap="300">
+                  <input type="hidden" name="enabled" value={enabled ? "true" : "false"} />
                   <Checkbox
                     label="ciara-system から予算を取り込む"
                     helpText="オンの間、取り込んだ店の予算はこのアプリでは見るだけになります（入力は ciara-system で行います）。"
-                    name="enabled"
                     checked={enabled}
                     onChange={setEnabled}
                   />
@@ -138,7 +153,7 @@ export default function BudgetSyncPage() {
               <BlockStack gap="300">
                 <InlineStack gap="200" blockAlign="center">
                   <Text as="span" variant="headingSm">ciara-system とのつながり</Text>
-                  <Badge tone={connected ? "success" : "attention"}>{connected ? "つながっています" : "まだです"}</Badge>
+                  <Badge tone={jobStopped ? "critical" : connected ? "success" : "attention"}>{jobStopped ? "止まっています" : connected ? "つながっています" : jobStarting ? "準備しています" : connectionState === "disabled" ? "停止中" : "まだです"}</Badge>
                 </InlineStack>
                 <Text as="p" tone="subdued">{connectionNote}</Text>
                 <InlineStack align="space-between" blockAlign="center" gap="200">
