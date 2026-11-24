@@ -22,7 +22,7 @@ import {
 } from "../utils/salesSummaryBudgetFromDb.server";
 import { sumOptionalBudgetColumn } from "../utils/salesSummaryTotals";
 import { getShopTimezoneForDaily, getCalendarDateStringInTimeZone } from "../utils/shopTimezone.server";
-import { shareWithinLoad } from "../utils/salesSummaryLoadShare.server";
+import { shareSalesSummaryCompute } from "../utils/salesSummaryLoadShare.server";
 import type { Shop } from "@prisma/client";
 
 type SalesSummaryAdmin = Parameters<typeof computeAndCacheDailySummary>[0];
@@ -128,7 +128,7 @@ export async function buildDailySalesSummaryPayload(
     });
   }
 
-  let targetLocations: SalesSummaryLocationRow[] =
+  const targetLocations: SalesSummaryLocationRow[] =
     locationIdsParam.length > 0
       ? allLocations.filter((l: SalesSummaryLocationRow) => {
           const lNum = l.shopifyLocationGid.replace("gid://shopify/Location/", "");
@@ -140,11 +140,8 @@ export async function buildDailySalesSummaryPayload(
         })
       : allLocations;
 
-  if (merged.visibleLocationIds.length > 0) {
-    targetLocations = targetLocations.filter((l: SalesSummaryLocationRow) =>
-      merged.visibleLocationIds.includes(l.shopifyLocationGid),
-    );
-  }
+  // 出す店は店舗設定（Location.salesSummaryEnabled）だけで決める。
+  // 売上サマリー設定の「出す店」（visibleLocationIds）は読まない（T さん 2026-11-24 のカード）。
 
   if (targetLocations.length === 0) {
     return emptyPayload();
@@ -203,7 +200,7 @@ export async function buildDailySalesSummaryPayload(
       }
     }
 
-    const row = await shareWithinLoad(loadId, `loc|${shop.id}|${locationGid}|${targetDate}`, () =>
+    const row = await shareSalesSummaryCompute(loadId, `loc|${shop.id}|${locationGid}|${targetDate}`, () =>
       computeAndCacheDailySummary(admin, shop.id, locationGid, loc.name, targetDate),
     );
     return {
@@ -260,7 +257,7 @@ export async function buildDailySalesSummaryPayload(
         };
       }
     }
-    return shareWithinLoad(loadId, `ch|${shop.id}|${ch.id}|${targetDate}`, () =>
+    return shareSalesSummaryCompute(loadId, `ch|${shop.id}|${ch.id}|${targetDate}`, () =>
       computeAndCacheChannelDailySummary(admin, shop.id, ch.id, ch.displayName, ch.sourceNames, targetDate),
     );
   };

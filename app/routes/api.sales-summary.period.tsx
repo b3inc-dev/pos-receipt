@@ -10,6 +10,7 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import { parseSalesSummaryLoadId } from "../utils/salesSummaryLoadShare.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import { buildPeriodSalesSummaryPayload } from "../services/salesSummaryPeriodPayload.server";
+import { getSalesSummaryPosPeriodTimeBudgetMs } from "../utils/salesSummaryPeriodCache.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -36,6 +37,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       skipChannels: locationIdsParam.length > 0,
       // 保存済みの数字だけを返す（全店表示で「○時○分時点」を先に出す用。数え直さない）
       cachedOnly: url.searchParams.get("cachedOnly") === "1",
+      // POS の待ち時間に収まるだけ数え、残りは裏で数える（開き直しで同じ分を重ねて数えない）
+      computeTimeBudgetMs: getSalesSummaryPosPeriodTimeBudgetMs(),
+      signal: request.signal,
+      backgroundShopDomain: shop.shopDomain,
     });
 
     return corsJson(payload);

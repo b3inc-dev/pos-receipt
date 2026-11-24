@@ -101,6 +101,15 @@ export async function writeLocationUpdates(shopId: string, locations: StoreLocat
       }),
     ),
   );
+  // 売上サマリーをオンにした店は、当月分を裏で数え始める（POS で初めて開いたときに待たせない）
+  const before = new Map(locations.map((loc) => [loc.id, loc.salesSummaryEnabled]));
+  const turnedOn = updates
+    .filter((u) => u.data.salesSummaryEnabled === true && before.get(u.id) !== true)
+    .map((u) => ({ shopifyLocationGid: u.id, name: names.get(u.id) ?? "" }));
+  if (turnedOn.length > 0) {
+    const { enqueueSalesSummaryFillForTurnedOn } = await import("../services/salesSummaryFillQueue.server");
+    void enqueueSalesSummaryFillForTurnedOn(shopId, turnedOn);
+  }
 }
 
 export async function saveStoredDefaults(shopId: string, defaults: LocationDefaults, locationIds: string[]): Promise<void> {

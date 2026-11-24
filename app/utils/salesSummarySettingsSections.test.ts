@@ -29,8 +29,9 @@ test("区分の保存は、その区分の項目だけを返す（ほかの区�
 });
 
 test("店の選択: 全部選んだら空（すべての店）、知らない id は捨てる", () => {
-  const all = readSectionForm("display", form(ids.map((id) => ["visibleLocationIds", id])), ids);
-  assert.deepEqual(all.visibleLocationIds, []);
+  // 「出す店」は店舗設定だけで決める（売上サマリー設定では保存しない。前に保存した値は残す）
+  const display = readSectionForm("display", form(ids.map((id) => ["visibleLocationIds", id])), ids);
+  assert.equal("visibleLocationIds" in display, false);
   const some = readSectionForm("footfall", form([["footfallTargetLocationIds", ids[0]], ["footfallTargetLocationIds", "gid://shopify/Location/99"], ["footfallReportingEnabled", "on"]]), ids);
   assert.deepEqual(some.footfallTargetLocationIds, [ids[0]]);
   assert.equal(some.footfallReportingEnabled, true);
@@ -45,7 +46,7 @@ test("要約の行は今の設定を店の言葉で 1 行にする", () => {
   const s = { ...DEFAULT_SALES_SUMMARY_SETTINGS };
   const link = { active: false, passwordSet: false };
   assert.equal(sectionSummary("basic", s, locs, link), "使う・1日と期間で見られる・週は月曜始まり");
-  assert.match(sectionSummary("display", s, locs, link), /出す店: すべての店（3 店）$/);
+  assert.doesNotMatch(sectionSummary("display", s, locs, link), /出す店/);
   assert.equal(sectionSummary("numbers", s, locs, link), "すべて出す（16 個）");
   assert.equal(sectionSummary("footfall", { ...s, footfallTargetLocationIds: [ids[1]] }, locs, link), "報告する・心斎橋・送る前に確かめる");
   assert.equal(sectionSummary("link", s, locs, link), "まだ発行していません");

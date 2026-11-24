@@ -63,3 +63,42 @@ export function shareWithinLoad<T>(
 export function __resetSalesSummaryLoadShareForTest() {
   shared.clear();
 }
+
+/**
+ * 読み込み（loadId）が違っても、いま数えている途中の同じ計算には相乗りする。
+ * 開き直しで並んだ期間の読み込みが、同じ「店×日」を重ねて数えないため（Ciara 2026-11-24）。
+ * 終わったら（成功・失敗とも）すぐ外すので、終わった計算の結果を使い回すことはない。
+ * key には shopId を必ず含めること。
+ */
+const inFlight = new Map<string, Promise<unknown>>();
+
+export function shareInFlight<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const hit = inFlight.get(key);
+  if (hit) return hit as Promise<T>;
+  const promise = fn();
+  inFlight.set(key, promise);
+  const clear = () => {
+    if (inFlight.get(key) === promise) inFlight.delete(key);
+  };
+  promise.then(clear, clear);
+  return promise;
+}
+
+/** 同じ読み込みの中での共有と、読み込みをまたいだ「数えている途中」への相乗りの両方 */
+export function shareSalesSummaryCompute<T>(
+  loadId: string | null | undefined,
+  key: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return shareWithinLoad(loadId, key, () => shareInFlight(key, fn));
+}
+
+/** 試験用 */
+export function __resetSalesSummaryInFlightForTest() {
+  inFlight.clear();
+}
+
+/** いま数えている途中なら、その Promise（無ければ null） */
+export function getInFlight<T>(key: string): Promise<T> | null {
+  return (inFlight.get(key) as Promise<T> | undefined) ?? null;
+}
