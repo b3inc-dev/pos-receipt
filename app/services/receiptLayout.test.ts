@@ -108,8 +108,8 @@ describe("receiptLayout: 描き方", () => {
 
   it("用紙の幅で本文の幅が変わる", () => {
     const l = defaultLayout("receipt");
-    assert.match(html(l), /width:576px/);
-    assert.match(html({ ...l, paperWidthMm: 58 }), /width:384px/);
+    assert.match(html(l), /width:72mm/);
+    assert.match(html({ ...l, paperWidthMm: 58 }), /width:48mm/);
   });
 
   it("include・render は使えず、理由を返す", () => {
