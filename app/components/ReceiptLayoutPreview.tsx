@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export function ReceiptLayoutPreview({ html, widthPx, viewportPx }: { html: string; widthPx: number; viewportPx: number }) {
+export function ReceiptLayoutPreview({ html, widthPx, viewportPx, horizontalScale = 1 }: { html: string; widthPx: number; viewportPx: number; horizontalScale?: number }) {
   const frame = useRef<HTMLIFrameElement | null>(null);
   const box = useRef<HTMLDivElement | null>(null);
   const [height, setHeight] = useState(600);
@@ -26,18 +26,23 @@ export function ReceiptLayoutPreview({ html, widthPx, viewportPx }: { html: stri
     // スクリプトは動かさない（sandbox に allow-scripts を付けない）。高さを読むため同じ origin だけ許す
     const doc = frame.current?.contentDocument;
     // documentElementのscrollHeightは以前のiframe高さを含み、短く戻せないためbodyを測る。
-    if (doc?.body) setHeight(Math.max(200, doc.body.scrollHeight + 4));
+    if (doc?.body) {
+      // 先頭見出しのmarginがbodyの外へ相殺される場合も末尾を欠かさない。
+      const bottom = (doc.body.getBoundingClientRect?.().bottom || 0) + (doc.documentElement?.scrollTop || 0);
+      setHeight(Math.max(200, doc.body.scrollHeight, bottom) + 4);
+    }
   }, []);
   useEffect(() => {
     const id = window.requestAnimationFrame(fit);
     return () => window.cancelAnimationFrame(id);
   }, [viewportPx, fit]);
+  const uniformScale = widthPx / (viewportPx * horizontalScale) * scale;
   return (
     <div ref={box} className="RL-preview-box">
-      <div style={{ width: (widthPx + 2) * scale, height: height * (widthPx / viewportPx) * scale, margin: "0 auto", overflow: "hidden" }}>
+      <div style={{ width: (widthPx + 2) * scale, height: height * uniformScale, margin: "0 auto", overflow: "hidden" }}>
         <div
           className="RL-preview-paper"
-          style={{ width: viewportPx, transform: `scale(${widthPx / viewportPx * scale})`, transformOrigin: "top left" }}
+          style={{ width: viewportPx, transform: horizontalScale === 1 ? `scale(${uniformScale})` : `scale(${uniformScale * horizontalScale}, ${uniformScale})`, transformOrigin: "top left" }}
         >
           <iframe
             ref={frame}

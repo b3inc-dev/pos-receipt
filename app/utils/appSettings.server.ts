@@ -476,6 +476,8 @@ export const DEFAULT_SETTLEMENT_SETTINGS: SettlementSettings = {
 export const PRINT_SETTINGS_KEY = "print_settings";
 
 export interface PrintSettings {
+  /** 全帳票共通。58mmだけに適用し、既存店は標準のまま。 */
+  receiptPrinterProfile?: "standard" | "mpop_58" | "mcp31lb_58";
   /** 実行時は常に shopify_printing。旧値は互換読み取りのみ */
   defaultPrintMode: "shopify_printing" | "cloudprnt_direct" | "order_based";
   locationPrintModeOverrideEnabled: boolean;

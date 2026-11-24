@@ -1,3 +1,4 @@
+import { applyPrinterProfile, printerGeometry, PRINTER_PROFILE_OPTIONS, type ReceiptPrinterProfile } from "../services/receiptPrinterProfile";
 /**
  * レシートのブロックエディタ＋コード編集＋印字と同じプレビュー
  * （Shopify の POS レシートのブロックエディタを手本にした形）
@@ -224,8 +225,10 @@ export function ReceiptLayoutEditor({
   initial,
   onLayoutChange,
   sampleData,
+  printerProfile = "standard",
 }: {
   kind: ReceiptKind;
+  printerProfile?: ReceiptPrinterProfile;
   /** プレビューの見本のデータ。無ければ receiptLayoutData.ts の見本（精算は店の並び順の設定を入れたもの） */
   sampleData?: ReturnType<typeof sampleTemplateData>;
   /** 開いた時点（保存した時点）のレイアウト。「破棄」でここに戻す */
@@ -262,6 +265,8 @@ export function ReceiptLayoutEditor({
   }, [layout]);
   const rendered = useMemo(() => renderReceiptLayout(renderTarget, sampleData ?? sampleTemplateData(kind)), [renderTarget, kind, sampleData]);
 
+  const geometry = printerGeometry(printerProfile, layout.paperWidthMm);
+  const previewHtml = applyPrinterProfile(rendered.html, printerProfile, layout.paperWidthMm);
   const paperStyle = resolvePaperPrintStyle(layout);
   const updatePaperStyle = (key: keyof PaperPrintStyle, value: number) => {
     const next = { ...paperStyle, [key]: value };
@@ -457,6 +462,9 @@ export function ReceiptLayoutEditor({
                   value={paperStyle.logoWidthMm / (layout.paperWidthMm === 58 ? 48 : 72) * 100}
                   onChange={(v) => updatePaperStyle("logoWidthMm", v / 100 * (layout.paperWidthMm === 58 ? 48 : 72))}
                   helpText="印字領域に対する割合です。ブロックの「画像の幅」がこれより小さい場合は、ブロックの値を使います。" />
+                <Text as="p" tone="subdued">プリンター補正：{PRINTER_PROFILE_OPTIONS.find((p) => p.value === printerProfile)?.label}。全帳票共通の選択は「印字設定」で変更します。</Text>
+                <details><summary>プレビューの個別調整</summary>
+                <Text as="p" tone="subdued">共通のプリンター補正が有効な58mmでは、以下の個別値より共通設定を優先します。</Text>
                 <Checkbox label="実測値でプレビューを補正する"
                   checked={layout.previewCalibration?.[layout.paperWidthMm] !== undefined}
                   onChange={(checked) => {
@@ -476,6 +484,7 @@ export function ReceiptLayoutEditor({
                     mPOP・58mmの実測値でプレビューを補正
                   </Button>
                 ) : null}
+                </details>
                 <Button onClick={() => update({ ...layout, paperStyles: {
                   ...layout.paperStyles, [layout.paperWidthMm]: defaultPaperPrintStyle(layout.paperWidthMm),
                 } })}>この用紙を推奨設定に戻す</Button>
@@ -567,7 +576,9 @@ export function ReceiptLayoutEditor({
 
         <div className="RL-preview" id="rl-preview" aria-label="プレビュー">
           <Text as="p" tone="subdued">{`プレビュー（見本のデータ・${layout.paperWidthMm}mm）`}</Text>
-          <Text as="p" tone="subdued">{layout.previewCalibration?.[layout.paperWidthMm] !== undefined
+          <Text as="p" tone="subdued">{geometry.viewportPx !== undefined
+            ? "プリンター共通設定で印字後の縦横比・折り返しを再現しています。画面上の実寸・書体は実紙面で確認してください。"
+            : layout.previewCalibration?.[layout.paperWidthMm] !== undefined
             ? "実測値で文字の比率・折り返しを補正しています。画面上の実寸や書体・機種差は実紙面で確認してください。"
             : "未補正の見本です。実印字と文字の比率・折り返しが違う場合は実測値で補正してください。"}</Text>
           {rendered.ok ? null : (
@@ -575,7 +586,7 @@ export function ReceiptLayoutEditor({
               {rendered.error}
             </div>
           )}
-          <ReceiptLayoutPreview html={rendered.html} widthPx={paperWidthPx(layout.paperWidthMm)} viewportPx={previewViewportPx(layout)} />
+          <ReceiptLayoutPreview html={previewHtml} widthPx={paperWidthPx(layout.paperWidthMm)} viewportPx={geometry.viewportPx ?? previewViewportPx(layout)} horizontalScale={geometry.horizontalScale} />
         </div>
       </div>
     </div>
