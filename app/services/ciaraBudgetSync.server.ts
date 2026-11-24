@@ -7,8 +7,8 @@
  * - 今月と来月の分を読み、Shopify のロケーションが同じ店の予算を ciara-system の値に合わせる
  * - 読むのは ciara-system・書くのはこのアプリの DB だけ。Shopify・ciara-system には書かない
  */
-import PgBoss from "pg-boss";
 import prisma from "../db.server";
+import { createCiaraSyncScheduler, type CiaraSchedulerStatus } from "./ciaraSyncScheduler.server";
 import { getAppSetting, setAppSetting } from "../utils/appSettings.server";
 import { isInhouseMode } from "../utils/planFeatures.server";
 import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
@@ -161,44 +161,35 @@ export async function runCiaraBudgetSync(shopId: string, admin: AdminClient): Pr
   );
 }
 
-let startPromise: Promise<PgBoss | null> | null = null;
+const scheduler = createCiaraSyncScheduler({
+  tag: "ciara-budget-sync",
+  queue: CIARA_BUDGET_SYNC_QUEUE,
+  // 1 時間ごとの取り込み（毎時 7 分・日本時間）
+  cron: "7 * * * *",
+  ready: () => ciaraBudgetSyncAvailable() && Boolean(ciaraBudgetSyncSecret()) && Boolean(ciaraSystemUrl(CIARA_BUDGETS_PATH)) && Boolean(process.env.DATABASE_URL?.trim()),
+  work: async () => {
+    const { unauthenticated } = await import("../shopify.server");
+    const shops = await prisma.shop.findMany({ select: { id: true, shopDomain: true } });
+    for (const shop of shops) {
+      try {
+        const s = await getCiaraBudgetSyncSettings(shop.id);
+        if (!s.enabled) continue;
+        const { admin } = await unauthenticated.admin(shop.shopDomain);
+        const result = await runCiaraBudgetSync(shop.id, admin);
+        console.log(`[ciara-budget-sync] shop=${shop.shopDomain} ok=${result?.ok} ${result?.message}`);
+      } catch (e) {
+        console.error(`[ciara-budget-sync] shop=${shop.shopDomain} failed`, e);
+      }
+    }
+  },
+});
 
-/** 1 時間ごとの取り込みを始める（自社用で、鍵があるときだけ。1 プロセス 1 回） */
-export function ensureCiaraBudgetSyncScheduler(): Promise<PgBoss | null> {
-  if (!ciaraBudgetSyncAvailable() || !ciaraBudgetSyncSecret() || !ciaraSystemUrl(CIARA_BUDGETS_PATH) || !process.env.DATABASE_URL?.trim()) {
-    return Promise.resolve(null);
-  }
-  if (!startPromise) {
-    startPromise = (async () => {
-      const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, application_name: "pos-receipt-ciara-budget-sync" });
-      boss.on("error", (err: Error) => console.error("[ciara-budget-sync]", err));
-      await boss.start();
-      await boss.createQueue(CIARA_BUDGET_SYNC_QUEUE, { name: CIARA_BUDGET_SYNC_QUEUE, retryLimit: 0 }).catch(() => {});
-      // 毎時 7 分（日本時間）。pg-boss の schedule は複数のサーバーでも 1 回だけ動く
-      await boss.schedule(CIARA_BUDGET_SYNC_QUEUE, "7 * * * *", {}, { tz: "Asia/Tokyo" });
-      await boss.work(CIARA_BUDGET_SYNC_QUEUE, async () => {
-        const { unauthenticated } = await import("../shopify.server");
-        const shops = await prisma.shop.findMany({ select: { id: true, shopDomain: true } });
-        for (const shop of shops) {
-          try {
-            const s = await getCiaraBudgetSyncSettings(shop.id);
-            if (!s.enabled) continue;
-            const { admin } = await unauthenticated.admin(shop.shopDomain);
-            const result = await runCiaraBudgetSync(shop.id, admin);
-            console.log(`[ciara-budget-sync] shop=${shop.shopDomain} ok=${result?.ok} ${result?.message}`);
-          } catch (e) {
-            console.error(`[ciara-budget-sync] shop=${shop.shopDomain} failed`, e);
-          }
-        }
-      });
-      const stop = () => void boss.stop({ timeout: 20000 }).catch(() => {});
-      process.once("SIGTERM", stop);
-      process.once("SIGINT", stop);
-      return boss;
-    })().catch((e) => {
-      console.error("[ciara-budget-sync] start failed:", e);
-      return null;
-    });
-  }
-  return startPromise;
+/** 定期の仕事を始める（自社用で、サーバーの準備ができているときだけ。始まらなければ記録に出し、あとでもう一度始める） */
+export function ensureCiaraBudgetSyncScheduler() {
+  return scheduler.ensure();
+}
+
+/** 定期の仕事の今の状態（管理画面の「つながり」に出す） */
+export function ciaraBudgetSyncSchedulerStatus(): CiaraSchedulerStatus {
+  return scheduler.status();
 }
