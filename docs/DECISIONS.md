@@ -137,3 +137,17 @@ T さんの決定（決定カード「青い帯ひとつに揃える」と追加
 - 欄の中など一部だけの読み込みの文字は「読み込み中…」だけ（「精算の数を」「月一覧を」などの前置きを付けない）。
 - 共通部品: `extensions/pos-smart-grid/src/LoadingNotice.jsx`（`LoadingNotice` / `LoadingPage`）、決まりは `extensions/common/loadingNotice.js`。見張り: `scripts/lib/loadingNotice.test.mjs`。
 - 「印刷中…」「発行中…」など、押したボタンの処理中の表示はこの決まりの外（UI_RULES の「押してから終わるまで」）。
+
+## 12. 予算と入店数を ciara-system と見せ合う（2026-11-24。Ciara のカスタムアプリだけ）
+
+T さんの決定（予算は 11/23、入店数は 11/24 のカード）:
+
+- **どちらも相手を読みにいくだけで、相手には書かない。** 公開アプリ（`APP_DISTRIBUTION=inhouse` でない）では、画面・定期の読み込み・読む口のどれも動かない。管理画面のスイッチは既定オフ。
+- **読む先はサーバーの環境変数で決める。** `CIARA_SYSTEM_ORIGIN`（https だけ。管理画面からは変えられない。転送先へは行かない）。合言葉は `CIARA_BUDGET_SYNC_SECRET`（ciara-system の `POS_RECEIPT_BUDGET_SECRET` と同じ値）。ヘッダー `X-Cron-Secret` で送り、時間一定で比べる。`CIARA_SYSTEM_ORIGIN` が無いと、予算の取り込みも「サーバーの準備がまだです」で止まる（予算の数は消えない）。
+- **予算**: 1 時間ごとに ciara-system の `/api/external/pos-receipt/budgets` を読み、今月と来月の日別予算を合わせる（`app/services/ciaraBudgetSync.server.ts`）。
+- **入店数**（`app/services/ciaraVisitSync.server.ts`・`app/services/footfallWrite.server.ts`）:
+  - 5 分ごとと、POS で売上サマリーを開いたとき（1 分に 1 回まで・待たせない）に、ciara-system の `/api/external/pos-receipt/visits` から今日を含めた前の 35 日を読む。
+  - 読んだ数は別の表 `CiaraFootfallDaily` に写すだけ。**POS で入れた入店数（`FootfallReport`）は書き変えない。**
+  - 売上サマリー（買上率も）に出す数は、店 × 日ごとに人があとから入れたほう。POS は `FootfallReport.enteredAt`、ciara-system は人が入れた時刻 `reportedAt`（CSV の取込などで入った数は時刻が空で、POS の数より古いとみなす）。同じ時刻なら ciara-system の数（ciara-system 側と同じ決まり）。
+  - スイッチをオフにすると写しは使わず、POS で入れた数だけに戻る（日次の控えもその場で直す）。写しの表が変わった日は、前の数 → 新しい数を前回の結果とログに残す。
+  - ciara-system は `/api/external/ciara/footfall` を読みにくる。渡すのは POS で入れた数（`FootfallReport`）だけで、写しは渡さない（行ったり来たりしない）。

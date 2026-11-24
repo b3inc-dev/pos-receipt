@@ -41,7 +41,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const section = sectionOf(params.section);
   const { admin, session } = await authenticate.admin(request);
   const { settings, locations, link } = await loadSalesSummarySettingsPage(admin, session.shop);
-  return { section, settings, locations, link };
+  // ciara-system と入店数を見せ合う（Ciara のカスタムアプリだけ）
+  const { ciaraVisitSyncAvailable } = await import("../services/ciaraVisitSync.server");
+  return { section, settings, locations, link, ciaraVisitSync: section === "footfall" && ciaraVisitSyncAvailable() };
 }
 
 type ActionResult =
@@ -202,6 +204,15 @@ function SettingsForm({ data, failed }: { data: Data; failed: boolean }) {
           <AdminBlock title="報告する店" description="選んだ店の POS だけで報告できます。「すべての店」なら、あとから足した店も報告できます。">
             <PickList label="報告する店" items={stores} value={footfall} onChange={setFootfall} allLabel="すべての店" name="footfallTargetLocationIds" />
           </AdminBlock>
+          {data.ciaraVisitSync ? (
+            <AdminBlock title="ciara-system と見せ合う" description="POS と ciara-system のどちらで報告しても、あとから入れた入店数が両方に出るようにします。">
+              <div>
+                <SecondaryLink to={withSearch("/app/footfall-sync", q)}>
+                  見せ合う設定
+                </SecondaryLink>
+              </div>
+            </AdminBlock>
+          ) : null}
         </>
       ) : null}
       <SaveBar failed={failed} onDiscard={discard} />

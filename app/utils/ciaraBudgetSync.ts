@@ -17,7 +17,8 @@ export type CiaraBudgetSyncLastRun = {
 
 export type CiaraBudgetSyncSettings = {
   enabled: boolean;
-  endpointUrl: string;
+  /** 使わない（読む先はサーバーの環境変数 CIARA_SYSTEM_ORIGIN で決める）。前に保存した値を読めるよう残す */
+  endpointUrl?: string;
   /** 前回の取り込みで ciara-system の値を入れた店（この店は手入力を見るだけにする） */
   syncedLocationIds: string[];
   lastRun: CiaraBudgetSyncLastRun | null;
@@ -25,7 +26,6 @@ export type CiaraBudgetSyncSettings = {
 
 export const DEFAULT_CIARA_BUDGET_SYNC: CiaraBudgetSyncSettings = {
   enabled: false,
-  endpointUrl: "",
   syncedLocationIds: [],
   lastRun: null,
 };

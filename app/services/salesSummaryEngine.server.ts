@@ -8,6 +8,7 @@
  */
 import prisma from "../db.server";
 import { expandLocationIdsForBudgetQuery } from "../utils/salesSummaryBudgetFromDb.server";
+import { getDisplayedVisitors } from "./footfallWrite.server";
 import {
   buildSettlementPreview,
   type SettlementPreviewDTO,
@@ -65,9 +66,7 @@ export async function upsertDailySummaryCacheFromPreview(
     prisma.budget.findFirst({
       where: { shopId, locationId: { in: idVariants }, targetDate },
     }),
-    prisma.footfallReport.findFirst({
-      where: { shopId, locationId: { in: idVariants }, targetDate },
-    }),
+    getDisplayedVisitors(prisma, shopId, idVariants, targetDate),
   ]);
 
   const budgetAmount = budget ? Number(budget.amount) : null;
@@ -148,9 +147,7 @@ export async function computeAndCacheDailySummary(
   const budget = await prisma.budget.findFirst({
     where: { shopId, locationId: { in: idVariants }, targetDate },
   });
-  const footfall = await prisma.footfallReport.findFirst({
-    where: { shopId, locationId: { in: idVariants }, targetDate },
-  });
+  const footfall = await getDisplayedVisitors(prisma, shopId, idVariants, targetDate);
   const budgetAmount = budget ? Number(budget.amount) : null;
   const visitors = footfall?.visitors ?? null;
   const budgetRatio = budgetAmount && budgetAmount > 0 ? actual / budgetAmount : null;

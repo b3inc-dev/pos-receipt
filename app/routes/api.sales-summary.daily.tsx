@@ -9,6 +9,7 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import { parseSalesSummaryLoadId } from "../utils/salesSummaryLoadShare.server";
 import { checkPlanAccess, getFullAccess } from "../utils/planFeatures.server";
 import { buildDailySalesSummaryPayload } from "../services/salesSummaryDailyPayload.server";
+import { kickCiaraVisitSyncOnOpen } from "../services/ciaraVisitSync.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -21,6 +22,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (!access.allowed) {
       return corsJson({ ok: false, error: access.message }, { status: 403 });
     }
+
+    // Ciara のカスタムアプリで ciara-system と入店数を見せ合うときは、開いたときにも読む（待たせない・1 分に 1 回まで）
+    kickCiaraVisitSyncOnOpen(shop.id, admin);
 
     const url = new URL(request.url);
     const locationIdsParam = url.searchParams.getAll("locationIds[]");
