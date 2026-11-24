@@ -41,6 +41,8 @@ const orders = [mkOrder(0, "cash", 1000), mkOrder(1, "shopify_payments", 2000)];
 
 /** 注文の純正の返金（OrderRefundsForReassign の答え）。"error" なら読めない */
 let nativeRefundsMock: unknown[] | "error" = [];
+/** 注文の販売店・返金を数える店のメタフィールド（OrderRefundsForReassign の答えに足す） */
+let nativeOrderExtraMock: Record<string, unknown> = {};
 
 function opName(q: string) {
   return /(query|mutation)\s+(\w+)/.exec(q)?.[2] ?? "anon";
@@ -67,7 +69,7 @@ const admin = {
         if (nativeRefundsMock === "error") {
           return { json: async () => ({ errors: [{ message: "Throttled" }] }) };
         }
-        data = { order: { id: v.id, refunds: nativeRefundsMock } };
+        data = { order: { id: v.id, refunds: nativeRefundsMock, ...nativeOrderExtraMock } };
         break;
       case "LegacyGiftCards":
       case "LegacyGiftCardsFb":
@@ -446,4 +448,62 @@ test("登録 API: レシートの現金を直すは初めはオフ（設定で�
   });
   assert.ok(status >= 400, `status ${status}`);
   assert.equal(store.specialRefundEvent.length, 0);
+});
+
+
+test("返金方法変更（純正の返金）: 「返品があった店で集計」なら返品した店に、「注文の店で集計」なら販売店に付ける", async () => {
+  const OTHER = "gid://shopify/Location/2002";
+  store.paymentMethodMaster = [
+    { shopId: SHOP_ID, enabled: true, selectableForSpecialRefund: true, rawGatewayPattern: "cash", displayLabel: "現金" },
+    { shopId: SHOP_ID, enabled: true, selectableForSpecialRefund: true, rawGatewayPattern: "credit", displayLabel: "クレジット" },
+  ];
+  const setCalc = (mode: string) => {
+    store.appSetting = store.appSetting.filter((r) => r.key !== "settlement_settings");
+    store.appSetting.push({ shopId: SHOP_ID, key: "settlement_settings", valueJson: JSON.stringify({ refundAggregationLocationMode: mode }) });
+  };
+  const body = {
+    sourceOrderId: "gid://shopify/Order/5001",
+    sourceOrderName: "#5001",
+    locationId: LOC_GID, // POS は注文の店（販売店）を送る
+    eventType: "payment_method_override",
+    amount: 500,
+    originalPaymentMethod: "cash",
+    actualRefundMethod: "credit",
+    nativeRefundId: "gid://shopify/Refund/88",
+  };
+  try {
+    setSpecialRefundSettings({ refundProcessingMode: "record_only" });
+    nativeOrderExtraMock = { retailLocation: { id: LOC_GID }, refundAggregation: { value: OTHER } };
+    nativeRefundsMock = [
+      {
+        id: "gid://shopify/Refund/88",
+        createdAt: "2026-11-23T03:00:00Z",
+        note: null,
+        transactions: {
+          nodes: [
+            { kind: "REFUND", status: "SUCCESS", gateway: "cash", formattedGateway: "Cash", amountSet: { shopMoney: { amount: "500" } }, location: { id: OTHER } },
+          ],
+        },
+      },
+    ];
+
+    // 注文の店で集計（初めの値）: 今までどおり販売店
+    store.specialRefundEvent = [];
+    setCalc("order_transaction");
+    const a = await postSpecialRefund(body);
+    assert.equal(a.status, 201, JSON.stringify(a.json));
+    assert.equal(store.specialRefundEvent[0].locationId, LOC_GID);
+
+    // 返品があった店で集計: 返品した店
+    store.specialRefundEvent = [];
+    setCalc("refund_transaction_pos_location");
+    const b = await postSpecialRefund(body);
+    assert.equal(b.status, 201, JSON.stringify(b.json));
+    assert.equal(store.specialRefundEvent[0].locationId, OTHER);
+  } finally {
+    nativeRefundsMock = [];
+    nativeOrderExtraMock = {};
+    store.specialRefundEvent = [];
+    store.appSetting = store.appSetting.filter((r) => r.key !== "settlement_settings");
+  }
 });
