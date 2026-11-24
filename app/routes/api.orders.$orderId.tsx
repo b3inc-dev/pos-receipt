@@ -37,7 +37,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // 保護された顧客データ（名前・メール）の許可が無いアプリでは、名前なしで読み直す
     const json = await graphqlWithCustomerFallback(admin, ORDER_DETAIL_QUERY, ORDER_DETAIL_QUERY_NO_CUSTOMER_PII, {
       id: gid,
-    });
+    }, shop.shopDomain);
     if (json.errors?.length) {
       return corsJson(
         { ok: false, error: "GraphQL error", details: json.errors },

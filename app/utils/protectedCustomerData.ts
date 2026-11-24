@@ -27,6 +27,8 @@ export async function graphqlWithCustomerFallback(
   query: string,
   fallbackQuery: string,
   variables: Record<string, unknown>,
+  /** 記録（ログ）に残す店の名前（ドメイン）。顧客の値は残さない */
+  shopDomain?: string,
 ): Promise<{ data?: any; errors?: unknown[] }> {
   try {
     const response = await admin.graphql(query, { variables });
@@ -39,6 +41,8 @@ export async function graphqlWithCustomerFallback(
     const msg = e instanceof Error ? e.message : String(e);
     if (!isProtectedCustomerDataError(list) && !isProtectedCustomerDataError([{ message: msg }])) throw e;
   }
+  // 公開アプリで許可が外れたときに気づけるよう、店の名前だけ 1 行残す（見直し P3、2026-11-24）
+  console.info(`[protected-customer-data] 顧客の名前を読む許可が無いため、名前なしで読み直しました shop=${shopDomain ?? "?"}`);
   const response = await admin.graphql(fallbackQuery, { variables });
   return (await response.json()) as { data?: any; errors?: unknown[] };
 }

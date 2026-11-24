@@ -133,7 +133,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const variables = { first: limit, after: cursor || null, query: query || null };
     // 保護された顧客データ（名前）の許可が無いアプリでは、名前なしで読み直す
-    const json = await graphqlWithCustomerFallback(admin, ORDERS_SEARCH_QUERY, ORDERS_SEARCH_QUERY_NO_CUSTOMER, variables);
+    const json = await graphqlWithCustomerFallback(admin, ORDERS_SEARCH_QUERY, ORDERS_SEARCH_QUERY_NO_CUSTOMER, variables, shop.shopDomain);
     if (json.errors?.length) {
       return corsJson(
         { ok: false, error: "GraphQL error", details: json.errors },
@@ -171,6 +171,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             ORDERS_REFUNDED_AT_LOCATION_QUERY,
             ORDERS_REFUNDED_AT_LOCATION_QUERY_NO_CUSTOMER,
             { first: 50, after, query: refundQuery },
+            shop.shopDomain,
           );
           if (r.errors?.length) break;
           found.push(...((r.data?.orders?.nodes ?? []) as Record<string, unknown>[]));

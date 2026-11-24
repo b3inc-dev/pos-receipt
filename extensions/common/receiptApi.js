@@ -79,13 +79,14 @@ export async function issueReceipt({ orderId, recipientName, proviso, isReissue 
 }
 
 /** 領収書履歴 */
-export async function getReceiptHistory({ orderId, dateFrom, dateTo, limit = 10, locationId, q } = {}) {
+export async function getReceiptHistory({ orderId, dateFrom, dateTo, limit = 10, locationId, q, cursor } = {}) {
   const params = new URLSearchParams();
   if (orderId) params.set("orderId", orderId);
   if (locationId) params.set("locationId", String(locationId));
   if (q) params.set("q", q);
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
+  if (cursor) params.set("cursor", String(cursor));
   params.set("limit", String(limit));
   return apiFetch(`/api/receipts/history?${params.toString()}`);
 }

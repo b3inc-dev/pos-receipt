@@ -562,7 +562,8 @@ function ReprintView({ item, onBack }) {
 /**
  * 発行履歴も、取引を選ぶ一覧と同じ見た目・作りにする（T 2026-11-23）。
  * 上に検索欄・年月日・「店名・時刻 に更新」を固定、行は「#1017 • 宛名 様」と金額、灰色の発行日時、再発行のバッジ。
- * 出すのは POS の今の店で発行したものだけ。行は押せない（前と同じ）。
+ * 出すのは POS の今の店で売った注文の領収書（発行の記録には注文の店が入る）。行を押すと再印刷の画面を開く。
+ * 50 件を超えるときは「さらに読み込む」で続きを読む。
  */
 async function fetchReceiptHistoryPage(params) {
   const res = await getReceiptHistory({
@@ -570,11 +571,12 @@ async function fetchReceiptHistoryPage(params) {
     q: params.q,
     dateFrom: params.dateFrom,
     dateTo: params.dateTo,
+    cursor: params.cursor,
     limit: 50,
   });
   return {
     items: res.items ?? [],
-    nextCursor: null,
+    nextCursor: res.nextCursor ?? null,
     todayLocalDate: res.todayLocalDate ?? "",
     fetchedAtTime: res.fetchedAtTime ?? "",
   };
