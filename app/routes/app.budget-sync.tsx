@@ -20,6 +20,8 @@ import {
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SaveBar, SuccessToast, confirmLeave } from "../components/admin-ui";
 
+import { syncConnectionState } from "../utils/ciaraSyncConnection";
+
 type ActionResult = { ok: boolean; intent: string; message: string };
 
 function fmtJst(iso: string) {
@@ -38,8 +40,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shop = await resolveShop(session.shop, admin);
   const settings = await getCiaraBudgetSyncSettings(shop.id);
   // 定期の仕事が止まっていたら、開いたときにもう一度始める（待たずに今の状態を出す）
+  const previousState = ciaraBudgetSyncSchedulerStatus().state;
   void ensureCiaraBudgetSyncScheduler();
-  return { settings, hasSecret: ciaraSyncServerReady(), schedulerState: ciaraBudgetSyncSchedulerStatus().state };
+  return { settings, hasSecret: ciaraSyncServerReady(), schedulerState: previousState === "failed" ? previousState : ciaraBudgetSyncSchedulerStatus().state };
 }
 
 export async function action({ request }: ActionFunctionArgs): Promise<Response> {
@@ -82,18 +85,19 @@ export default function BudgetSyncPage() {
   }
   // つながりの状態（サーバーの設定の名前は出さない）
   // 定期の仕事が止まっているときは「つながっています」にしない（黙って止まらない）
-  const jobStopped = hasSecret && settings.enabled && schedulerState === "failed";
-  const jobStarting = hasSecret && settings.enabled && schedulerState === "starting";
-  const connected = hasSecret && settings.enabled && Boolean(last?.ok) && !jobStopped;
+  const connectionState = syncConnectionState(settings.enabled, hasSecret, schedulerState, Boolean(last?.ok));
+  const jobStopped = connectionState === "failed";
+  const jobStarting = connectionState === "starting";
+  const connected = connectionState === "connected";
   const connectionNote = jobStopped
     ? "1 時間ごとの取り込みが止まっています。5 分ほどで自動でもう一度始めます。続くときは連絡してください。"
-    : jobStarting && !connected
+    : jobStarting
       ? "1 時間ごとの取り込みを始めています。少しして再読み込みしてください。"
       : connected
         ? "1 時間ごとに取り込んでいます。"
         : !settings.enabled
           ? "取り込みをオンにして保存すると、つながりを確かめます。"
-          : !hasSecret
+          : connectionState === "off"
             ? "サーバーの準備がまだです。準備ができると 1 時間ごとに取り込みます。"
             : last && !last.ok
               ? last.message
@@ -150,7 +154,7 @@ export default function BudgetSyncPage() {
               <BlockStack gap="300">
                 <InlineStack gap="200" blockAlign="center">
                   <Text as="span" variant="headingSm">ciara-system とのつながり</Text>
-                  <Badge tone={jobStopped ? "critical" : connected ? "success" : "attention"}>{jobStopped ? "止まっています" : connected ? "つながっています" : "まだです"}</Badge>
+                  <Badge tone={jobStopped ? "critical" : connected ? "success" : "attention"}>{jobStopped ? "止まっています" : connected ? "つながっています" : jobStarting ? "準備しています" : connectionState === "disabled" ? "停止中" : "まだです"}</Badge>
                 </InlineStack>
                 <Text as="p" tone="subdued">{connectionNote}</Text>
                 <InlineStack align="space-between" blockAlign="center" gap="200">
