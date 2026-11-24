@@ -28,7 +28,7 @@ import {
   type BudgetSettings,
 } from "../utils/appSettings.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
+import { TabGroupBar, BUDGET_TABS } from "../components/TabGroupBar";
 
 const INPUT_UNIT_OPTIONS = [
   { label: "日別", value: "daily" },
@@ -93,7 +93,7 @@ export default function BudgetSettingsPage() {
         title="予算設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
       >
-        <TabGroupBar tabs={REPORTS_TABS} />
+        <TabGroupBar tabs={BUDGET_TABS} />
         {/* 保存は Shopify の保存の帯（値が保存したときと違うときだけ「破棄」「保存」）。画面の中に保存ボタンを置かない（UI ルール v1.1 7章） */}
         <StateSaveForm values={form} onSave={handleSave} onDiscard={(saved) => setForm(saved)} result={actionData}>
           <Layout>
@@ -101,7 +101,7 @@ export default function BudgetSettingsPage() {
             <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />
             <Layout.Section>
               {/* 画面全体の説明は AdminIntro（1〜2文）。お知らせ枠は1画面に1つまでにする（2章・5章） */}
-              <AdminIntro><p>予算の入力単位・適用モード・CSV操作・手動編集・一括編集の有無を設定します。実際の予算データは「レポート・履歴」の予算管理で登録・編集します。</p></AdminIntro>
+              <AdminIntro><p>予算の入力単位・適用モード・CSV操作・手動編集・一括編集の有無を設定します。実際の予算データは「予算」の店舗予算・チャネル予算で登録・編集します。</p></AdminIntro>
             </Layout.Section>
 
             <Layout.AnnotatedSection title="CSV操作">

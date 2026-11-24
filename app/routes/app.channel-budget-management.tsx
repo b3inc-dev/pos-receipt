@@ -26,7 +26,7 @@ import prisma from "../db.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import { getFullAccess, checkPlanAccess } from "../utils/planFeatures.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
-import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
+import { TabGroupBar, BUDGET_TABS } from "../components/TabGroupBar";
 
 const PAGE_SIZE = 50;
 
@@ -467,7 +467,7 @@ export default function ChannelBudgetManagementPage() {
           </Box>
         )}
 
-        <TabGroupBar tabs={REPORTS_TABS} />
+        <TabGroupBar tabs={BUDGET_TABS} />
 
         <Layout>
           <Layout.Section>

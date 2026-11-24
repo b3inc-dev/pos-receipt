@@ -106,10 +106,16 @@ export default function AppIndex() {
               <Button onClick={to("/app/print-settings")}>プリンター・印字設定</Button>
               <Button onClick={to("/app/receipt-history")}>領収書履歴</Button>
             </HomeCard>
-            <HomeCard title="レポート" description="売上サマリー・店舗予算・販売チャネルの管理を選びます。">
-              <Button onClick={to("/app/reports")} variant="primary">レポート一覧を開く</Button>
+            <HomeCard title="売上サマリー" description="日次・月次の売上実績を確認します。">
+              <Button onClick={to("/app/sales-summary")} variant="primary">売上サマリーを開く</Button>
               <Button onClick={to("/app/sales-summary-settings")}>サマリー設定</Button>
               <Button onClick={to("/app/sales-channels")}>チャネル管理</Button>
+            </HomeCard>
+
+            <HomeCard title="予算" description="店舗・販売チャネルの予算を登録・編集します。">
+              <Button onClick={to("/app/budget-management")} variant="primary">店舗予算</Button>
+              <Button onClick={to("/app/channel-budget-management")}>チャネル予算</Button>
+              <Button onClick={to("/app/budget-settings")}>予算設定</Button>
             </HomeCard>
 
             <HomeCard

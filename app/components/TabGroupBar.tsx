@@ -65,12 +65,15 @@ export const STORE_TABS: TabItem[] = [
 
 /** 4. レポート */
 export const REPORTS_TABS: TabItem[] = [
-  { path: "/app/reports", label: "レポート一覧" },
   { path: "/app/sales-summary", label: "売上サマリー" },
-  { path: "/app/budget-management", label: "店舗予算" },
-  { path: "/app/channel-budget-management", label: "チャネル予算" },
   { path: "/app/sales-summary-settings", label: "サマリー設定" },
   { path: "/app/sales-channels", label: "チャネル管理" },
+];
+
+/** 予算 */
+export const BUDGET_TABS: TabItem[] = [
+  { path: "/app/budget-management", label: "店舗予算" },
+  { path: "/app/channel-budget-management", label: "チャネル予算" },
   { path: "/app/budget-settings", label: "予算設定" },
 ];
 
@@ -97,6 +100,7 @@ export const SETTINGS_TABS: TabItem[] = [
   ...STORE_TABS,
   ...SETTLEMENT_TABS.filter((t) => t.path.includes("settings")),
   ...RECEIPT_TABS.filter((t) => t.path === "/app/print-settings"),
+  ...BUDGET_TABS.filter((t) => t.path.includes("settings")),
   ...REPORTS_TABS.filter((t) => t.path.includes("settings") || t.path === "/app/sales-channels"),
   { path: "/app/loyalty-settings", label: "ポイント/会員施策" },
   { path: "/app/general-settings", label: "一般設定" },

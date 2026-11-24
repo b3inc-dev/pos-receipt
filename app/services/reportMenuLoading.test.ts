@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {mock,test} from "node:test";
 import React from "react";
 import {renderToString} from "react-dom/server";
+import {AppProvider} from "@shopify/polaris";
 import {MemoryRouter} from "react-router";
 let computed=0;let release:()=>void=()=>{};
 const gate=new Promise<void>(resolve=>release=resolve);
@@ -17,12 +18,23 @@ mock.module("../utils/salesSummaryBudgetFromDb.server",{namedExports:{getLocatio
 const reports=await import("../routes/app.reports");
 const page=await import("../routes/app.sales-summary");
 const resource=await import("../routes/app.sales-summary-data");
-test("レポート入口/サマリー画面は売上計算を待たず返り、待機中も設定/チャネル管理を描画",async()=>{
+test("レポート入口/サマリー画面は売上計算を待たず返り、待機中も条件・集計カード・設定メニューを描画",async()=>{
  const args={request:new Request("https://test.local/app/sales-summary?showChannels=0"),context:{},params:{}} as never;
- await reports.loader(args);await page.loader(args);assert.equal(computed,0);
+ const redirect = await reports.loader(args);assert.equal(redirect.status,302);assert.equal(redirect.headers.get("Location"),"/app/sales-summary?showChannels=0");await page.loader(args);assert.equal(computed,0);
  const resultPromise=resource.loader(args);
  await new Promise(resolve=>setImmediate(resolve));assert.equal(computed,1);
  const html=renderToString(React.createElement(MemoryRouter,null,React.createElement(page.SalesSummaryPending)));
  assert.ok(html.includes("集計しています"));assert.ok(html.includes("サマリー設定"));assert.ok(html.includes("チャネル管理"));
- release();const data=await resultPromise;assert.ok(!(data instanceof Response));assert.equal(data.rows[0].actual,1000);assert.equal(data.rows[0].budget,2000);assert.equal(data.rows[0].budgetRatio,.5);assert.equal(data.rows[0].orders,2);
+ for(const label of ["売上実績","予算","件数","点数","対象日","ロケーション","店舗・チャネル別実績"])assert.ok(html.includes(label),label);
+ assert.ok(!html.includes("レポート一覧"));assert.ok(!html.includes("¥1,000"));
+ const monthHtml=renderToString(React.createElement(MemoryRouter,{initialEntries:["/app/sales-summary?view=period&targetMonth=2026-10"]},React.createElement(page.SalesSummaryPending)));
+ assert.ok(monthHtml.includes("月実績"));assert.ok(monthHtml.includes("月予算"));assert.ok(monthHtml.includes('value="2026-10"'));
+ release();const data=await resultPromise;assert.ok(!(data instanceof Response));assert.equal((data.rows[0] as Record<string,unknown>).actual,1000);assert.equal((data.rows[0] as Record<string,unknown>).budget,2000);assert.equal((data.rows[0] as Record<string,unknown>).budgetRatio,.5);assert.equal(data.rows[0].orders,2);assert.equal(data.requestKey,"?showChannels=0");
+});
+
+test("集計カードは結果が来るまでは金額を出さず、来た値で置き換える",()=>{
+ const render=(values?:string[])=>renderToString(React.createElement(AppProvider,{i18n:{}},React.createElement(page.SummaryCards,{period:false,values})));
+ assert.ok(render().includes("集計中"));assert.ok(!render().includes("¥0"));
+ const html=render(["¥1,000","¥2,000","2件","3点"]);
+ for(const text of ["¥1,000","¥2,000","2件","3点"])assert.ok(html.includes(text));assert.ok(!html.includes("集計中"));
 });

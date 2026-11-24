@@ -46,7 +46,8 @@ export default function AppLayout() {
         <s-link href="/app/receipt-layouts">レシート</s-link>
         <s-link href="/app/settlement-settings">精算</s-link>
         <s-link href="/app/settings">店舗</s-link>
-        <s-link href="/app/reports">レポート</s-link>
+        <s-link href="/app/sales-summary">売上サマリー</s-link>
+        <s-link href="/app/budget-management">予算</s-link>
         <s-link href="/app/general-settings">システム</s-link>
       </s-app-nav>
       {/* 上部メニュー（s-app-nav が表示されない環境用・常に表示） */}

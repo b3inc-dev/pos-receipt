@@ -2,9 +2,9 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLocation, useSearchParams, useRouteError } from "react-router";
 import { useEffect, useMemo } from "react";
-import { Page, Layout, Card, Text, Banner, BlockStack, InlineStack, Select, Box, DataTable, Button } from "@shopify/polaris";
+import { Page, Layout, Card, Text, Banner, BlockStack, InlineStack, Select, Box, DataTable, Button, InlineGrid, SkeletonBodyText, SkeletonDisplayText } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
-import type { loadAdminSalesSummary } from "../services/salesSummaryAdmin.server";
+import type { loader as loadSummaryData } from "./app.sales-summary-data";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, REPORTS_TABS } from "../components/TabGroupBar";
 import { sumOptionalBudgetColumn } from "../utils/salesSummaryTotals";
@@ -101,32 +101,48 @@ function buildPeriodTotalRowCells(rows: Array<Record<string, unknown>>, label = 
 }
 
 export default function SalesSummaryAdminPage() {
-  const fetcher = useFetcher<typeof loadAdminSalesSummary>();
+  const fetcher = useFetcher<typeof loadSummaryData>();
   const location = useLocation();
   const target = "/app/sales-summary-data" + location.search;
   useEffect(() => { fetcher.load(target); }, [target]);
-  if (!fetcher.data || fetcher.state !== "idle") return <SalesSummaryPending />;
+  if (!fetcher.data || fetcher.state !== "idle" || fetcher.data.requestKey !== location.search) return <SalesSummaryPending />;
   return <SalesSummaryContent data={{...fetcher.data, rows: fetcher.data.rows.map(row=>({...row})), channelRows: fetcher.data.channelRows.map(row=>({...row}))}} />;
 }
 
 export function SalesSummaryPending() {
-  return <PolarisPageWrapper><Page title="売上サマリー（管理画面）" backAction={{content:"レポート",url:"/app/reports"}}>
+  const [params] = useSearchParams();
+  const period = params.get("view") === "period";
+  return <PolarisPageWrapper><Page title="売上サマリー">
     <TabGroupBar tabs={REPORTS_TABS} />
-    <Card><BlockStack gap="300"><Text as="p"><span role="status">集計しています。店舗数や期間によって時間がかかります。</span></Text>
-      <Text as="p" tone="subdued">集計中も上のメニューから設定やチャネル管理へ移動できます。</Text>
-    </BlockStack></Card>
+    <Layout>
+      <Layout.Section><SalesSummaryFilters /></Layout.Section>
+      <Layout.Section><SummaryCards period={period} /></Layout.Section>
+      <Layout.Section><Card><BlockStack gap="400">
+        <Text as="h2" variant="headingMd">{period ? "月次" : "日次"}の店舗・チャネル別実績</Text>
+        <Text as="p"><span role="status">集計しています。数字は集計後に表示されます。</span></Text>
+        <div aria-hidden="true"><SkeletonBodyText lines={6}/></div>
+      </BlockStack></Card></Layout.Section>
+    </Layout>
   </Page></PolarisPageWrapper>;
+}
+
+export function SummaryCards({period, values}: {period: boolean; values?: string[]}) {
+  const labels = [period ? "月実績" : "売上実績", period ? "月予算" : "予算", "件数", "点数"];
+  return <InlineGrid columns={{xs: 2, md: 4}} gap="400">{labels.map((label,index)=><Card key={label}><BlockStack gap="300">
+    <Text as="h2" variant="headingSm">{label}</Text>
+    {values ? <Text as="p" variant="headingLg">{values[index]}</Text> : <div aria-label={`${label}を集計中`}><SkeletonDisplayText size="small" /></div>}
+  </BlockStack></Card>)}</InlineGrid>;
 }
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  return <PolarisPageWrapper><Page title="売上サマリー（管理画面）" backAction={{content:"レポート",url:"/app/reports"}}>
+  return <PolarisPageWrapper><Page title="売上サマリー">
     <TabGroupBar tabs={REPORTS_TABS} />
     <Banner tone="critical">集計結果を読み込めませんでした。上のメニューから別の画面へ移動できます。{error instanceof Error ? error.message : "時間をおいてもう一度お試しください。"}</Banner>
   </Page></PolarisPageWrapper>;
 }
 
-type SummaryData = Omit<Exclude<Awaited<ReturnType<typeof loadAdminSalesSummary>>, Response>, "rows" | "channelRows"> & { rows: Array<Record<string, unknown>>; channelRows: Array<Record<string, unknown>> };
+type SummaryData = Omit<Exclude<Awaited<ReturnType<typeof loadSummaryData>>, Response>, "rows" | "channelRows"> & { rows: Array<Record<string, unknown>>; channelRows: Array<Record<string, unknown>> };
 
 function SalesSummaryContent({data}: {data: SummaryData}) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -135,13 +151,6 @@ function SalesSummaryContent({data}: {data: SummaryData}) {
     | { locations?: Array<any>; channels?: Array<any> };
   const recomputeDebugLocations = recomputeDebug?.locations ?? [];
   const recomputeDebugChannels = recomputeDebug?.channels ?? [];
-
-  const setParam = (key: string, value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    setSearchParams(next);
-  };
 
   const tableRows = useMemo(() => {
     if (!data.hasAccess) return [];
@@ -281,7 +290,7 @@ function SalesSummaryContent({data}: {data: SummaryData}) {
 
   return (
     <PolarisPageWrapper>
-      <Page title="売上サマリー（管理画面）">
+      <Page title="売上サマリー">
         <TabGroupBar tabs={REPORTS_TABS} />
         <Layout>
           {data.loadError && (
@@ -372,80 +381,14 @@ function SalesSummaryContent({data}: {data: SummaryData}) {
           {data.hasAccess && (
             <>
               <Layout.Section>
-                <Card>
-                  <BlockStack gap="300">
-                    <InlineStack gap="300" wrap>
-                      <Select
-                        label="表示"
-                        options={[
-                          { label: "日次", value: "daily" },
-                          { label: "月次", value: "period" },
-                        ]}
-                        value={data.view}
-                        onChange={(v) => setParam("view", v)}
-                      />
-                      {data.view === "daily" ? (
-                        <Box minWidth="220px">
-                          <input
-                            type="date"
-                            value={data.targetDate}
-                            onChange={(e) => setParam("targetDate", e.currentTarget.value)}
-                            style={{ width: "100%", padding: 8 }}
-                          />
-                        </Box>
-                      ) : (
-                        <Box minWidth="220px">
-                          <input
-                            type="month"
-                            value={data.targetMonth}
-                            onChange={(e) => setParam("targetMonth", e.currentTarget.value)}
-                            style={{ width: "100%", padding: 8 }}
-                          />
-                        </Box>
-                      )}
-                      <Select
-                        label="ロケーション"
-                        options={[
-                          { label: "全ロケーション", value: "" },
-                          ...data.locations.map((l) => ({ label: l.name, value: l.id })),
-                        ]}
-                        value={data.selectedLocationId}
-                        onChange={(v) => setParam("locationId", v)}
-                      />
-                      <Select
-                        label="チャネル行"
-                        options={[
-                          { label: "表示する", value: "1" },
-                          { label: "非表示", value: "0" },
-                        ]}
-                        value={data.showChannels ? "1" : "0"}
-                        onChange={(v) => setParam("showChannels", v)}
-                      />
-                      {data.view === "daily" && data.targetDate < data.calendarToday && (
-                        <Button
-                          variant="secondary"
-                          onClick={() => setParam("recompute", "1")}
-                        >
-                          この日を再取得（古い保存を使わない）
-                        </Button>
-                      )}
-                      {data.view === "period" && data.showChannels && (
-                        <Button
-                          variant="secondary"
-                          onClick={() => setParam("recomputeChannelMonth", "1")}
-                        >
-                          この月のチャネルだけ保存を消してやり直す
-                        </Button>
-                      )}
-                    </InlineStack>
-                    <Text tone="subdued" as="p">
-                      管理画面では閲覧専用です（入店数報告入力はPOSタイル側で実施）。
-                    </Text>
-                  </BlockStack>
-                </Card>
+                <SalesSummaryFilters data={data} />
+              </Layout.Section>
+              <Layout.Section>
+                <SummaryCards period={data.view === "period"} values={tableRows.length ? [tableRows[0][1],tableRows[0][2],tableRows[0][data.view === "daily" ? 4 : 8],tableRows[0][data.view === "daily" ? 9 : 13]] : ["-","-","-","-"]} />
               </Layout.Section>
               <Layout.Section>
                 <Card>
+                  <Box paddingBlockEnd="400"><Text as="h2" variant="headingMd">{data.view === "period" ? "月次" : "日次"}の店舗・チャネル別実績</Text></Box>
                   {tableRows.length === 0 ? (
                     <Text tone="subdued" as="p">表示対象データがありません。</Text>
                   ) : (
@@ -471,3 +414,97 @@ function SalesSummaryContent({data}: {data: SummaryData}) {
   );
 }
 
+
+function SalesSummaryFilters({data}: {data?: SummaryData}) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const model = data ?? {
+    view: searchParams.get("view") === "period" ? "period" : "daily",
+    targetDate: searchParams.get("targetDate") ?? "",
+    targetMonth: searchParams.get("targetMonth") ?? searchParams.get("targetDate")?.slice(0,7) ?? "",
+    selectedLocationId: searchParams.get("locationId") ?? "",
+    showChannels: searchParams.get("showChannels") !== "0",
+    locations: searchParams.get("locationId") ? [{id: searchParams.get("locationId")!, name: "選択中のロケーション（読み込み中）"}] : [], calendarToday: "",
+  };
+  const setParam = (key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if(value) next.set(key,value); else next.delete(key);
+    // 一度きりの再取得指定を別の条件へ引き継がない。
+    next.delete("recompute"); next.delete("recomputeChannelMonth");
+    if(key === "recompute" || key === "recomputeChannelMonth") next.set(key,value);
+    setSearchParams(next);
+  };
+  return (<Card>
+                  <BlockStack gap="300">
+                    <InlineStack gap="300" wrap>
+                      <Select
+                        label="表示"
+                        options={[
+                          { label: "日次", value: "daily" },
+                          { label: "月次", value: "period" },
+                        ]}
+                        value={model.view}
+                        onChange={(v) => setParam("view", v)}
+                      />
+                      {model.view === "daily" ? (
+                        <Box minWidth="220px">
+                          <input
+                            aria-label="対象日"
+                            type="date"
+                            value={model.targetDate}
+                            onChange={(e) => setParam("targetDate", e.currentTarget.value)}
+                            style={{ width: "100%", padding: 8 }}
+                          />
+                        </Box>
+                      ) : (
+                        <Box minWidth="220px">
+                          <input
+                            aria-label="対象月"
+                            type="month"
+                            value={model.targetMonth}
+                            onChange={(e) => setParam("targetMonth", e.currentTarget.value)}
+                            style={{ width: "100%", padding: 8 }}
+                          />
+                        </Box>
+                      )}
+                      <Select
+                        disabled={!data}
+                        label="ロケーション"
+                        options={[
+                          { label: "全ロケーション", value: "" },
+                          ...model.locations.map((l) => ({ label: l.name, value: l.id })),
+                        ]}
+                        value={model.selectedLocationId}
+                        onChange={(v) => setParam("locationId", v)}
+                      />
+                      <Select
+                        label="チャネル行"
+                        options={[
+                          { label: "表示する", value: "1" },
+                          { label: "非表示", value: "0" },
+                        ]}
+                        value={model.showChannels ? "1" : "0"}
+                        onChange={(v) => setParam("showChannels", v)}
+                      />
+                      {data && model.view === "daily" && model.targetDate < model.calendarToday && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => setParam("recompute", "1")}
+                        >
+                          この日を再取得（古い保存を使わない）
+                        </Button>
+                      )}
+                      {data && model.view === "period" && model.showChannels && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => setParam("recomputeChannelMonth", "1")}
+                        >
+                          この月のチャネルだけ保存を消してやり直す
+                        </Button>
+                      )}
+                    </InlineStack>
+                    <Text tone="subdued" as="p">
+                      {!data && !model.targetDate ? "対象期間・店舗は読み込み後に表示されます。集計中も条件やメニューを変更できます。" : "管理画面では閲覧専用です（入店数報告入力はPOSタイル側で実施）。"}
+                    </Text>
+                  </BlockStack>
+                </Card>);
+}
