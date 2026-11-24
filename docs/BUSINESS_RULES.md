@@ -93,8 +93,10 @@
 精算集計で使う計上先（`decideRefundAttributionForSettlement`）:
 
 - 注文基準（`order_transaction`・既定）: 上の解決順の結果だけを使う。注文の metafield `pos.refund_aggregation_location_gid` は不一致のログ（`refundAttributionMismatchCount`）にだけ使う。別の店で登録した特殊返金が metafield を書き換えても、通常の返品の計上先は変わらない
-- 返金基準（`refund_transaction_pos_location`）: 当日の返金 TX の POS ロケーション → metafield → 上の解決順
+- 返金基準（`refund_transaction_pos_location`）: 返金 1 件ずつに決める。店の付いた返金 TX はその TX の店。店の付かない返金（管理画面・外部・アプリの refundCreate）は metafield → 「POS 以外の返金の計上先」の店 →（「数えない」なら載せない）→ 販売店（`nonPosRefundCountLocationGid`）。同じ注文・同じ日に店の付いた返金があっても、店の付かない返金はこの順で数える（#119 見直し P2-B。前は店の付いた返金の店に引っぱられ、別の店のときはどの店にも載らなかった）。返金方法変更の `nativeRefundCountLocationGid`（D31）と同じ順
   - 別の店で売った注文の、この店での返金も拾う（`mergeCrossLocationRefundOrders`）。ただし **この店の注文取得（`location_id`）にすでに入っている注文は足さない**。足すと、売上を持った元の注文が返金だけの入力で上書きされ、その日の売上が消える（#11 の見直し P1-1。合成データで 9,000 円が −1,000 円）。元の注文は返金 TX ごとに店を見て数えるので、それで足りる
+
+注文の metafield を書く処理（orders/updated の同期 `syncRefundAggregationMetafieldForOrder`）: 注文の一番新しい「店の付かない返金」が、このアプリの特殊返金で Shopify に作った返金（`SpecialRefundEvent.shopifyRefundId` が同じ・`shopifyRefundStatus=success`・純正の付け替えではない）なら、その特殊返金を登録した店を書く。それ以外は上の解決順（#119 見直し P2-A。前は特殊返金の登録で書いた店を、あとの orders/updated が販売店などで書き戻すおそれがあった）。
 
 精算集計では、計上先が精算対象ロケーションと一致しない返金は **件数・金額とも加算しない**。  
 照合は `locationGidMatches` で **数値ロケーション ID 同士**（GID / 数値 / 末尾パスの表記ゆれを吸収）。

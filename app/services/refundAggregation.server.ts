@@ -13,7 +13,9 @@ import { adminGraphqlWithRetry } from "../lib/shopifyGraphqlThrottle.server";
 import {
   normalizeLocationGid,
   resolveRefundAggregationLocationGid,
+  specialRefundLocationForLatestNonPosRefund,
   type OrderForRefundAggregation,
+  type SpecialRefundForAggregation,
   type RefundAggregationContext,
 } from "./refundAggregationPure.server";
 
@@ -31,6 +33,9 @@ export {
   getPosLocationFromRefundTransactions,
   orderHasRefundInDay,
   resolveRefundAggregationLocationGid,
+  resolveNonPosRefundFallbackGid,
+  refundHasPosLocation,
+  specialRefundLocationForLatestNonPosRefund,
   validateNonPosRefundAttributionLocations,
 } from "./refundAggregationPure.server";
 
@@ -50,6 +55,7 @@ const ORDER_FOR_REFUND_AGGREGATION_QUERY = `#graphql
         location { id }
       }
       refunds(first: 20) {
+        id
         createdAt
         transactions(first: 20) {
           nodes {
@@ -92,6 +98,7 @@ export async function fetchOrderForRefundAggregation(
         retailLocation?: { id: string } | null;
         transactions?: OrderForRefundAggregation["transactions"];
         refunds?: Array<{
+          id?: string;
           createdAt?: string;
           transactions?: { nodes?: unknown[] };
         }>;
@@ -108,6 +115,7 @@ export async function fetchOrderForRefundAggregation(
   if (!node) return null;
 
   const refunds = (node.refunds ?? []).map((r) => ({
+    id: r.id,
     createdAt: r.createdAt,
     transactions: (r.transactions?.nodes ?? []) as NonNullable<
       OrderForRefundAggregation["refunds"]
@@ -134,7 +142,33 @@ function orderGidFromWebhookPayload(payload: unknown): string | null {
   return null;
 }
 
-/** Webhook 等: 注文の pos.refund_aggregation_location_gid を再計算して保存 */
+/**
+ * 注文の特殊返金のうち、Shopify で返金した登録（返金 ID つき）。無効にした行も含める（返金した店は同じ）。
+ * POS 純正の返金の付け替え（refundSource=native）は、純正の返金の店で数えるので外す。
+ */
+export async function loadSpecialRefundsForAggregation(
+  shopId: string,
+  orderGid: string,
+): Promise<SpecialRefundForAggregation[]> {
+  const digits = orderGid.replace(/\D/g, "");
+  const variants = [...new Set([orderGid, digits].filter(Boolean))];
+  return prisma.specialRefundEvent.findMany({
+    where: {
+      shopId,
+      sourceOrderId: { in: variants },
+      shopifyRefundStatus: "success",
+      shopifyRefundId: { not: null },
+      OR: [{ refundSource: null }, { refundSource: { not: "native" } }],
+    },
+    select: { locationId: true, shopifyRefundId: true, createdAt: true },
+  });
+}
+
+/**
+ * Webhook 等: 注文の pos.refund_aggregation_location_gid を再計算して保存。
+ * 一番新しい「店の付かない返金」がこのアプリの特殊返金なら、特殊返金を登録した店のままにする
+ * （orders/updated が販売店などで書き戻さない。#119 見直し P2-A）。それ以外は resolve。
+ */
 export async function syncRefundAggregationMetafieldForOrder(
   admin: AdminClient,
   shopId: string,
@@ -144,7 +178,10 @@ export async function syncRefundAggregationMetafieldForOrder(
   if (!order) return;
 
   const ctx = await loadRefundAggregationContext(shopId);
-  const gid = resolveRefundAggregationLocationGid(order, ctx);
+  const events = await loadSpecialRefundsForAggregation(shopId, order.id || orderGid);
+  const gid =
+    specialRefundLocationForLatestNonPosRefund(order, events) ??
+    resolveRefundAggregationLocationGid(order, ctx);
   await setOrderRefundAggregationLocationGid(admin, orderGid, gid);
 }
 
