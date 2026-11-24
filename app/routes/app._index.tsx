@@ -106,7 +106,7 @@ export default function AppIndex() {
               <Button onClick={to("/app/print-settings")}>プリンター・印字設定</Button>
               <Button onClick={to("/app/receipt-history")}>領収書履歴</Button>
             </HomeCard>
-            <HomeCard title="レポート" description="日次・月次の売上実績を確認します。">
+            <HomeCard title="売上サマリー" description="日次・月次の売上実績を確認します。">
               <Button onClick={to("/app/sales-summary")} variant="primary">売上サマリーを開く</Button>
               <Button onClick={to("/app/sales-summary-settings")}>サマリー設定</Button>
               <Button onClick={to("/app/sales-channels")}>チャネル管理</Button>
