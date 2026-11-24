@@ -18,6 +18,9 @@ import {
   DEFAULT_LAYOUT_STYLE,
   LAYOUT_LIMITS,
   RECEIPT_KIND_LABELS,
+  PAPER_STYLE_LIMITS,
+  defaultPaperPrintStyle,
+  type PaperPrintStyle,
   type BlockSettingValue,
   type LayoutBlock,
   type LayoutStyle,
@@ -50,6 +53,23 @@ function normalizeStyle(raw: unknown): LayoutStyle {
  * 保存してあるレイアウトを読む。壊れていたら初めの値に戻し、知らないブロックは外す。
  * （保存のときは validateLayoutInput で断るので、ここで外すのは古い版・手で壊した値だけ）
  */
+function normalizePaperStyles(raw: unknown): ReceiptLayout["paperStyles"] {
+  if (!isObj(raw)) return undefined;
+  const profiles: NonNullable<ReceiptLayout["paperStyles"]> = {};
+  for (const mm of [58, 80] as const) {
+    const saved = raw[mm];
+    if (!isObj(saved)) continue;
+    const defaults = defaultPaperPrintStyle(mm);
+    const p = {} as PaperPrintStyle;
+    for (const key of Object.keys(PAPER_STYLE_LIMITS) as (keyof PaperPrintStyle)[]) {
+      const range = PAPER_STYLE_LIMITS[key];
+      p[key] = clamp(saved[key], range.min, range.max, defaults[key]);
+    }
+    profiles[mm] = p;
+  }
+  return Object.keys(profiles).length ? profiles : undefined;
+}
+
 export function normalizeLayout(raw: unknown, kind: ReceiptKind): ReceiptLayout {
   if (!isObj(raw) || raw.kind !== kind || !Array.isArray(raw.blocks)) return defaultLayout(kind);
   const allowed = new Set(blockDefsForKind(kind).map((d) => d.type));
@@ -79,6 +99,7 @@ export function normalizeLayout(raw: unknown, kind: ReceiptKind): ReceiptLayout 
     mode: raw.mode === "code" ? "code" : "blocks",
     paperWidthMm: raw.paperWidthMm === 58 ? 58 : 80,
     style: normalizeStyle(raw.style),
+    paperStyles: normalizePaperStyles(raw.paperStyles),
     blocks,
     code: typeof raw.code === "string" ? raw.code.slice(0, LAYOUT_LIMITS.maxCodeLength) : "",
   });
@@ -122,6 +143,25 @@ export function validateLayoutInput(raw: unknown, kind: ReceiptKind): ValidateRe
     if (typeof st.customCss !== "string") errors.push("追加の CSS が正しくありません。");
     else if (st.customCss.length > L.maxCssLength) errors.push(`追加の CSS は ${L.maxCssLength.toLocaleString()} 文字までです。`);
     else if (!isSafeCss(st.customCss)) errors.push("追加の CSS に </style>・endraw・@import・外の url() は書けません。");
+  }
+
+  if (raw.paperStyles !== undefined) {
+    if (!isObj(raw.paperStyles)) errors.push("用紙別の見た目が正しくありません。");
+    else {
+      for (const [mm, profile] of Object.entries(raw.paperStyles)) {
+        if ((mm !== "58" && mm !== "80") || !isObj(profile)) {
+          errors.push("用紙別の見た目は 58mm・80mm の設定だけを受け取れます。");
+          continue;
+        }
+        for (const key of Object.keys(PAPER_STYLE_LIMITS) as (keyof PaperPrintStyle)[]) {
+          const value = profile[key];
+          const range = PAPER_STYLE_LIMITS[key];
+          if (typeof value !== "number" || !Number.isFinite(value) || value < range.min || value > range.max) {
+            errors.push(`${mm}mm の見た目の数値は範囲内で入力してください（${range.min}〜${range.max}）。`);
+          }
+        }
+      }
+    }
   }
 
   const allowed = new Set(blockDefsForKind(kind).map((d) => d.type));
@@ -189,6 +229,7 @@ export function validateLayoutInput(raw: unknown, kind: ReceiptKind): ValidateRe
     mode: raw.mode as ReceiptLayout["mode"],
     paperWidthMm: raw.paperWidthMm as 58 | 80,
     style: normalizeStyle(raw.style),
+    paperStyles: normalizePaperStyles(raw.paperStyles),
     blocks,
     code: raw.code as string,
   });
