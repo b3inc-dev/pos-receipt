@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import {
   checkNativeReassign,
   isAppExecutedRefundNote,
+  nativeRefundCountLocationGid,
   nativeRefundLines,
   NATIVE_REFUND_AMOUNT_EXCEEDED_CODE,
   NATIVE_REFUND_NOT_FOUND_CODE,
@@ -115,5 +116,32 @@ describe("精算での数え方（分けて付け替えた純正の返金）", (
     assert.equal(totals.refundTotal, 4000);
     assert.equal(sections.find((s) => s.gateway === "points")!.refund, 1500);
     assert.equal(sections.find((s) => s.gateway === "cash")!.refund, 2500);
+  });
+});
+
+describe("返金方法変更を付ける店（nativeRefundCountLocationGid）", () => {
+  const A = "gid://shopify/Location/1";
+  const B = "gid://shopify/Location/2";
+  const T = "gid://shopify/Location/9";
+  const base = { nonPosRefundTargetLocationGid: null, nonPosRefundFallbackMode: "order_retail_location" as const, retailLocationGid: A, aggregationMetafieldGid: null };
+  it("注文の店で集計: 他店で返品しても販売店（今までどおり）", () => {
+    assert.equal(nativeRefundCountLocationGid({ posLocationGid: B }, { ...base, mode: "order_transaction" }), A);
+    assert.equal(nativeRefundCountLocationGid({ posLocationGid: A }, { ...base, mode: "order_transaction" }), A);
+  });
+  it("返品があった店で集計: 返品した店", () => {
+    assert.equal(nativeRefundCountLocationGid({ posLocationGid: B }, { ...base, mode: "refund_transaction_pos_location" }), B);
+  });
+  it("店の付かない返金: 返品基準はメタフィールドの店、無ければ店舗設定の店、無ければ販売店", () => {
+    const m = "refund_transaction_pos_location" as const;
+    assert.equal(nativeRefundCountLocationGid({ posLocationGid: null }, { ...base, mode: m, aggregationMetafieldGid: B }), B);
+    assert.equal(nativeRefundCountLocationGid({ posLocationGid: null }, { ...base, mode: m, nonPosRefundTargetLocationGid: T }), T);
+    assert.equal(nativeRefundCountLocationGid({ posLocationGid: null }, { ...base, mode: m }), A);
+    assert.equal(nativeRefundCountLocationGid({ posLocationGid: null }, { ...base, mode: m, nonPosRefundFallbackMode: "exclude" }), null);
+  });
+  it("返金の取引の店を行に入れる", () => {
+    const lines = nativeRefundLines([
+      { id: "r1", createdAt: "2026-11-23T03:00:00Z", transactions: [{ kind: "REFUND", status: "SUCCESS", gateway: "cash", amountSet: { shopMoney: { amount: "100" } }, location: { id: B } }] },
+    ]);
+    assert.equal(lines[0].posLocationGid, B);
   });
 });

@@ -123,13 +123,24 @@ export function OrderDayListScreen({
   searchHint = "注文番号は数字だけでも探せます。顧客名は 2 文字以上入れてください。",
   /** 行を押したあと、呼び出し側が注文を読み込んでいるあいだ true（同じ青い帯を出す） */
   busy = false,
+  /**
+   * 一覧の店舗を切り替えられるようにする（返金の一覧。T 2026-11-24: POS Stock の「出庫元」と同じ形）。
+   * 初めはログインしている店舗。開き直すとログインしている店舗に戻る
+   */
+  storeSwitch = false,
 }) {
   const t0 = useMemo(() => todayYmd(), []);
   const {
-    locationGid,
-    locationIdParam,
+    locationGid: sessionLocationGid,
+    locationIdParam: sessionLocationIdParam,
     isReady: sessionReady,
   } = useSessionLocation();
+  // 店舗の切り替え（storeSwitch のときだけ）。null はログインしている店舗
+  const [pickedStore, setPickedStore] = useState(null);
+  const [storeMenuOpen, setStoreMenuOpen] = useState(false);
+  const [storeChoices, setStoreChoices] = useState([]);
+  const locationGid = pickedStore?.gid ?? sessionLocationGid;
+  const locationIdParam = pickedStore?.idParam ?? sessionLocationIdParam;
 
   const [selectedYear, setSelectedYear] = useState(t0.y);
   const [selectedMonth, setSelectedMonth] = useState(t0.m);
@@ -192,9 +203,15 @@ export function OrderDayListScreen({
       setLocationName("");
       return;
     }
+    if (pickedStore?.name) {
+      setLocationName(pickedStore.name);
+      setLocLoadError("");
+      return;
+    }
     getLocationsFromShopify(80)
       .then((res) => {
         const locs = res.locations ?? [];
+        setStoreChoices(locs);
         const hit = locs.find(
           (l) =>
             l.locationId === locationGid ||
@@ -209,7 +226,19 @@ export function OrderDayListScreen({
         );
         setLocLoadError("");
       });
-  }, [sessionReady, locationGid, locationIdParam]);
+  }, [sessionReady, locationGid, locationIdParam, pickedStore]);
+
+  const chooseStore = (loc) => {
+    const gid = String(loc?.locationId ?? "");
+    const idParam = gid.match(/(\d+)$/)?.[1] ?? "";
+    setStoreMenuOpen(false);
+    setListError("");
+    if (!idParam || gid === sessionLocationGid) {
+      setPickedStore(null);
+      return;
+    }
+    setPickedStore({ gid, idParam, name: loc.locationName || `店舗 #${idParam}` });
+  };
 
   useEffect(() => {
     if (selectedMonth > 0 && !availableMonths.includes(selectedMonth)) {
@@ -226,12 +255,14 @@ export function OrderDayListScreen({
   const buildSearchParams = useCallback(
     (cursor) => {
       const base = { locationId: locationIdParam, limit: 50, cursor };
+      // 返金のタイルの一覧だけ、ほかの店舗で売ってこの店舗で返品した注文も足す
+      if (storeSwitch) base.includeRefundedHere = true;
       if (isSearchMode) {
         return { ...base, q: searchQuery.trim() };
       }
       return { ...base, dateFrom: dateStr, dateTo: dateStr };
     },
-    [locationIdParam, isSearchMode, searchQuery, dateStr],
+    [locationIdParam, isSearchMode, searchQuery, dateStr, storeSwitch],
   );
 
   const reloadList = useCallback(async () => {
@@ -354,6 +385,38 @@ export function OrderDayListScreen({
           }}
         >
           <s-stack gap="small">
+            {/* 店舗の切り替え（POS Stock の「出庫元: … 変更」と同じ形。T 2026-11-24: 頭の「店舗:」は無し） */}
+            {storeSwitch ? (
+              <s-stack gap="small-300">
+                <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
+                  <s-text>{sessionReady ? locationName || INLINE_LOADING_TEXT : INLINE_LOADING_TEXT}</s-text>
+                  <s-button
+                    variant={storeMenuOpen ? "primary" : "secondary"}
+                    onClick={() => setStoreMenuOpen((v) => !v)}
+                    disabled={!sessionReady || storeChoices.length === 0}
+                  >
+                    変更
+                  </s-button>
+                </s-stack>
+                {storeMenuOpen ? (
+                  <s-stack gap="small-300">
+                    {storeChoices.map((loc) => {
+                      const current = loc.locationId === locationGid;
+                      const mine = loc.locationId === sessionLocationGid;
+                      return (
+                        <s-button
+                          key={loc.locationId}
+                          variant={current ? "primary" : "secondary"}
+                          onClick={() => chooseStore(loc)}
+                        >
+                          {mine ? `${loc.locationName}（この端末の店舗）` : loc.locationName}
+                        </s-button>
+                      );
+                    })}
+                  </s-stack>
+                ) : null}
+              </s-stack>
+            ) : null}
             <s-search-field
               placeholder={searchPlaceholder}
               value={searchDraft}

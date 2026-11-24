@@ -25,6 +25,7 @@ import { TabGroupBar, RECEIPT_TABS } from "../components/TabGroupBar";
 import { DateFilter } from "../components/DateFilter";
 import { getAppSetting } from "../utils/appSettings.server";
 import { formatReceiptIssuer, parseStaffNameMap, STAFF_DISPLAY_NAMES_SETTING_KEY } from "../utils/receiptIssuer";
+import { receiptIdsIssuedWithoutReissue } from "../utils/receiptReissue";
 
 const PAGE_SIZE = 30;
 
@@ -82,6 +83,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ]);
   const staffNames = parseStaffNameMap(staffNameSetting);
 
+  // 前に発行した注文なのに「再発行」を外して発行したもの（POS は自動でオンにする。外したことを見えるように）
+  const newIssueOrderIds = [...new Set(items.filter((r) => !r.isReissue).map((r) => r.orderId))];
+  const earlier = newIssueOrderIds.length
+    ? await prisma.receiptIssue.findMany({
+        where: {
+          shopId: shop.id,
+          orderId: { in: newIssueOrderIds },
+          createdAt: { lte: items.reduce((m, r) => (r.createdAt > m ? r.createdAt : m), items[0].createdAt) },
+        },
+        select: { id: true, orderId: true, createdAt: true },
+      })
+    : [];
+  const withoutReissue = receiptIdsIssuedWithoutReissue(items, earlier);
+
   return {
     items: items.map((r) => ({
       id: r.id,
@@ -94,6 +109,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       currency: r.currency ?? "JPY",
       templateVersion: r.templateVersion,
       isReissue: r.isReissue,
+      issuedWithoutReissue: withoutReissue.has(r.id),
       issuerLabel: formatReceiptIssuer(r.createdBy, r.createdByStaffId, staffNames),
       createdAt: r.createdAt.toISOString(),
     })),
@@ -209,7 +225,9 @@ export default function ReceiptHistoryPage() {
                           <td data-label="種別" className="History-keep">
                             {item.isReissue
                               ? <Badge tone="attention">再発行</Badge>
-                              : <Badge tone="success">新規発行</Badge>}
+                              : item.issuedWithoutReissue
+                                ? <Badge tone="warning">再発行を外して発行</Badge>
+                                : <Badge tone="success">新規発行</Badge>}
                           </td>
                           <td data-label="発行者">
                             <Text as="span" variant="bodySm" tone="subdued">

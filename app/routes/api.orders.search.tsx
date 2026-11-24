@@ -8,12 +8,19 @@ import { authenticatePosRequestOrCorsError, corsErrorJson, corsPreflightResponse
 import {
   formatTimeHmInTimeZone,
   getCalendarDateStringInTimeZone,
+  getDayRangeInUtc,
   getShopTimezoneForDaily,
 } from "../utils/shopTimezone.server";
 import { buildSearchQuery, normalizeLocationIdForQuery } from "../utils/orderSearchQuery";
 import { hasVoucherLikeGatewayHeuristic, matchPaymentMethodMaster } from "../utils/paymentMethodMatch.server";
 import { graphqlWithCustomerFallback } from "../utils/protectedCustomerData";
 import { isShopifyRefundPending } from "../services/specialRefundOverlayPure.server";
+import {
+  pickOrdersRefundedAtLocation,
+  shouldAddOrdersRefundedAtLocation,
+  type RefundedAtLocationOrder,
+} from "../utils/ordersRefundedAtLocation";
+import { searchDateRange } from "../utils/shopifySearchDate";
 
 const ORDERS_SEARCH_QUERY_TEMPLATE = `#graphql
   query OrdersSearch($first: Int!, $after: String, $query: String) {
@@ -48,6 +55,44 @@ const ORDERS_SEARCH_QUERY_TEMPLATE = `#graphql
 const ORDERS_SEARCH_QUERY = ORDERS_SEARCH_QUERY_TEMPLATE.replace("__CUSTOMER__", "customer { displayName }");
 /** 顧客の名前を読まない版（保護された顧客データの「名前」の許可が無いアプリ用） */
 const ORDERS_SEARCH_QUERY_NO_CUSTOMER = ORDERS_SEARCH_QUERY_TEMPLATE.replace("__CUSTOMER__", "");
+
+/**
+ * ほかの店舗で売って、この店舗で返品した注文を探す（その日に更新された注文の返金の取引の店を見る）。
+ * 精算の「返品があった店で集計」と同じ探し方（settlementEngine の qRefundUpdated）
+ */
+const ORDERS_REFUNDED_AT_LOCATION_QUERY_TEMPLATE = `#graphql
+  query OrdersRefundedAtLocation($first: Int!, $after: String, $query: String) {
+    orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
+      nodes {
+        id
+        name
+        createdAt
+        cancelledAt
+        note
+        totalPriceSet { shopMoney { amount } }
+        displayFinancialStatus
+        __CUSTOMER__
+        retailLocation { id name }
+        transactions(first: 20) { gateway formattedGateway kind }
+        refunds {
+          createdAt
+          transactions(first: 20) { nodes { kind location { id } } }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+const ORDERS_REFUNDED_AT_LOCATION_QUERY = ORDERS_REFUNDED_AT_LOCATION_QUERY_TEMPLATE.replace(
+  "__CUSTOMER__",
+  "customer { displayName }",
+);
+const ORDERS_REFUNDED_AT_LOCATION_QUERY_NO_CUSTOMER = ORDERS_REFUNDED_AT_LOCATION_QUERY_TEMPLATE.replace(
+  "__CUSTOMER__",
+  "",
+);
+/** 1 日に読む上限（多すぎる日は先頭の分だけ。精算は別に全部読む） */
+const REFUNDED_AT_LOCATION_MAX_PAGES = 4;
 
 function normalizeOrderIdKey(id: string): string {
   return String(id).replace(/^gid:\/\/shopify\/Order\//, "");
@@ -99,7 +144,49 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo ?? {};
 
-    let items = nodes.map((node: Record<string, unknown>) => {
+    // ほかの店舗で売って、この店舗で返品した注文（返金のタイルの一覧が印を送ったときの、日付の一覧の 1 ページ目だけ足す。
+    // 印の無い一覧（領収書・商品券釣銭登録・返金前登録・今の版の POS）・検索・続きの読み込みでは足さない）
+    let refundedHere: RefundedAtLocationOrder[] = [];
+    const locRawForRefund = normalizeLocationIdForQuery(locationId);
+    if (
+      shouldAddOrdersRefundedAtLocation({
+        includeRefundedHere: url.searchParams.get("includeRefundedHere"),
+        locationRaw: locRawForRefund,
+        q,
+        cursor,
+        dateFrom,
+        dateTo,
+      })
+    ) {
+      try {
+        const start = getDayRangeInUtc(dateFrom as string, timezone).startUtcIso;
+        const end = getDayRangeInUtc(dateTo as string, timezone).endUtcIso;
+        // 返金のある注文だけ（その日に更新）。販売店で絞らず、返金の取引の店で選ぶ
+        const refundQuery = `${searchDateRange("updated_at", start, end)} AND (financial_status:refunded OR financial_status:partially_refunded)`;
+        const found: Record<string, unknown>[] = [];
+        let after: string | null = null;
+        for (let page = 0; page < REFUNDED_AT_LOCATION_MAX_PAGES; page++) {
+          const r = await graphqlWithCustomerFallback(
+            admin,
+            ORDERS_REFUNDED_AT_LOCATION_QUERY,
+            ORDERS_REFUNDED_AT_LOCATION_QUERY_NO_CUSTOMER,
+            { first: 50, after, query: refundQuery },
+          );
+          if (r.errors?.length) break;
+          found.push(...((r.data?.orders?.nodes ?? []) as Record<string, unknown>[]));
+          if (!r.data?.orders?.pageInfo?.hasNextPage) break;
+          after = r.data.orders.pageInfo.endCursor ?? null;
+          if (!after) break;
+        }
+        refundedHere = pickOrdersRefundedAtLocation(found as RefundedAtLocationOrder[], locRawForRefund as string, start, end);
+      } catch (e) {
+        // 読めなくても、この店舗で売った注文の一覧は出す
+        console.warn("[orders/search] refunded-at-location read failed", e);
+      }
+    }
+    const refundedHereIds = new Set(refundedHere.map((o) => o.id));
+
+    let items = [...nodes, ...refundedHere.filter((o) => !nodes.some((n: { id?: string }) => n.id === o.id))].map((node: Record<string, unknown>) => {
       const n = node as {
         id: string;
         name: string;
@@ -141,6 +228,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           hasVoucherLike: voucherLike,
         },
         posBadges: {
+          otherStoreSale: refundedHereIds.has(n.id),
           refundedShopify: isRefunded,
           cancelled: isCancelled,
           voucherLikeGateway: voucherLike,
@@ -158,6 +246,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (requestedLocRaw) {
       const locationGid = `gid://shopify/Location/${requestedLocRaw}`;
       items = items.filter((item) => {
+        if (item.posBadges.otherStoreSale) return true;
         const rid = item.locationId?.trim();
         if (!rid) return false;
         return rid === locationGid || rid === requestedLocRaw || rid.endsWith(`/${requestedLocRaw}`);

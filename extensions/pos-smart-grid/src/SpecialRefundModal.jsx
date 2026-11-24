@@ -617,6 +617,7 @@ export function SpecialRefundModal({ initialListSegment = "refunded", listNote =
         badgeMode={initialListSegment === "voucher_change" ? "voucherTile" : initialListSegment === "refunded" ? "refundTile" : "specialRefund"}
         onSelectOrderId={handleOrderSelect}
         busy={loading}
+        storeSwitch={!reserveMode && initialListSegment !== "voucher_change"}
         noticeError={bootstrapError}
         onDismissNotice={() => setBootstrapError("")}
         initialSegment={reserveMode ? "all" : initialListSegment}

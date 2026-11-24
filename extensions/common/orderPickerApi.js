@@ -56,11 +56,12 @@ async function apiPost(path, body = {}) {
 
 /**
  * GET /api/orders/search
- * @param {Object} opts - q, locationId, dateFrom, dateTo, cursor, limit
+ * @param {Object} opts - q, locationId, dateFrom, dateTo, cursor, limit, includeRefundedHere
+ *   includeRefundedHere: true のときだけ、ほかの店舗で売ってこの店舗で返品した注文も足す（返金のタイルの一覧）
  * @returns {{ items: Array, nextCursor: string|null, todayLocalDate: string, fetchedAtTime: string }}
  */
 export async function searchOrders(opts = {}) {
-  const { q, locationId, dateFrom, dateTo, cursor, limit } = opts;
+  const { q, locationId, dateFrom, dateTo, cursor, limit, includeRefundedHere } = opts;
   const data = await apiGet("/api/orders/search", {
     q: q ?? undefined,
     locationId: locationId ?? undefined,
@@ -68,6 +69,7 @@ export async function searchOrders(opts = {}) {
     dateTo: dateTo ?? undefined,
     cursor: cursor ?? undefined,
     limit: limit ?? 20,
+    includeRefundedHere: includeRefundedHere ? "1" : undefined,
   });
   return {
     items: data.items ?? [],
