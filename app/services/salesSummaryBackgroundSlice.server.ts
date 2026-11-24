@@ -1,3 +1,4 @@
+import { runAsSettlementBackground } from "../lib/shopifyGraphqlThrottle.server";
 /**
  * 日次売上のバックグラウンド再計算をスライス単位で進める。
  * 1 件が throw しても他スライスは続行し、失敗スライスの run は途中で例外にするため
@@ -10,7 +11,7 @@ export async function runBackgroundDailySlices(
   const errors: string[] = [];
   for (const slice of slices) {
     try {
-      await slice.run();
+      await runAsSettlementBackground(slice.run);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       errors.push(`${slice.label}: ${message}`);
