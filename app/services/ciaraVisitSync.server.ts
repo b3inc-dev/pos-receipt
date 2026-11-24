@@ -12,9 +12,10 @@
  * - 合言葉は予算と同じ CIARA_BUDGET_SYNC_SECRET、読む先は CIARA_SYSTEM_ORIGIN（管理画面からは変えられない）
  * - 管理画面で「見せ合う」をオンにしたショップだけ動く（既定オフ）
  */
-import PgBoss from "pg-boss";
 import prisma from "../db.server";
-import { getAppSetting, setAppSetting } from "../utils/appSettings.server";
+import { createCiaraSyncScheduler, type CiaraSchedulerStatus } from "./ciaraSyncScheduler.server";
+import { getAppSetting } from "../utils/appSettings.server";
+import { patchSyncSettings } from "./ciaraSyncSettingsPersistence.server";
 import { isInhouseMode } from "../utils/planFeatures.server";
 import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import {
@@ -34,7 +35,7 @@ import {
 } from "../utils/ciaraVisitSync";
 import { ciaraBudgetSyncSecret } from "./ciaraBudgetSync.server";
 import { CIARA_VISITS_PATH, ciaraSystemUrl } from "./ciaraSystemOrigin.server";
-import { refreshCachedVisitors } from "./footfallWrite.server";
+import { refreshCiaraVisitCache } from "./ciaraVisitCache.server";
 
 export const CIARA_VISIT_SYNC_QUEUE = "pos-receipt-ciara-visit-sync";
 const FETCH_TIMEOUT_MS = 20_000;
@@ -57,20 +58,20 @@ export async function getCiaraVisitSyncSettings(shopId: string): Promise<CiaraVi
   return { ...DEFAULT_CIARA_VISIT_SYNC, ...saved };
 }
 
-export async function saveCiaraVisitSyncSettings(shopId: string, settings: CiaraVisitSyncSettings) {
-  await setAppSetting(shopId, CIARA_VISIT_SYNC_KEY, settings);
+export async function saveCiaraVisitSyncSettings(shopId: string, settings: Partial<CiaraVisitSyncSettings>) {
+  await patchSyncSettings(prisma.appSetting, shopId, CIARA_VISIT_SYNC_KEY, DEFAULT_CIARA_VISIT_SYNC, settings);
 }
 
 /**
  * 見せ合うのオン・オフを変えたとき、ciara-system の数がある日の控え（売上サマリーの日次）を、出す数で直す。
  * オフにすると POS で入れた数だけに戻る（写しの表は消さない。オンに戻せばまた使う）。
  */
-export async function refreshCachedVisitorsForCiaraDays(shopId: string, shown: boolean) {
+export async function refreshCachedVisitorsForCiaraDays(shopId: string) {
   const rows = await prisma.ciaraFootfallDaily.findMany({
     where: { shopId },
     select: { locationId: true, targetDate: true },
   });
-  for (const r of rows) await refreshCachedVisitors(prisma, shopId, r.locationId, r.targetDate, shown);
+  for (const r of rows) await refreshCiaraVisitCache(shopId, r.locationId, r.targetDate);
 }
 
 const LOCATIONS_QUERY = `#graphql
@@ -86,8 +87,7 @@ export async function runCiaraVisitSync(shopId: string, admin: AdminClient): Pro
   const settings = await getCiaraVisitSyncSettings(shopId);
   const base: CiaraVisitSyncLastRun = { at: new Date().toISOString(), ok: false, message: "", changed: 0, unmatched: [] };
   const finish = async (lastRun: CiaraVisitSyncLastRun) => {
-    const latest = await getCiaraVisitSyncSettings(shopId);
-    await saveCiaraVisitSyncSettings(shopId, { ...latest, lastRun });
+    await saveCiaraVisitSyncSettings(shopId, { lastRun });
     return lastRun;
   };
 
@@ -163,13 +163,13 @@ export async function runCiaraVisitSync(shopId: string, admin: AdminClient): Pro
       update: { visitors: u.visitCount, reportedAt, fetchedAt: now },
       create: { shopId, locationId: locationGid, targetDate: date, visitors: u.visitCount, reportedAt, fetchedAt: now },
     });
-    await refreshCachedVisitors(prisma, shopId, locationGid, date, true);
+    await refreshCiaraVisitCache(shopId, locationGid, date);
     if (u.before !== u.visitCount) changes.push({ storeName: nameOf(locationGid), date, before: u.before, after: u.visitCount });
   }
   for (const d of plan.deletes) {
     const { locationGid, date } = splitVisitKey(d.key);
     await prisma.ciaraFootfallDaily.deleteMany({ where: { shopId, locationId: locationGid, targetDate: date } });
-    await refreshCachedVisitors(prisma, shopId, locationGid, date, true);
+    await refreshCiaraVisitCache(shopId, locationGid, date);
     changes.push({ storeName: nameOf(locationGid), date, before: d.before, after: null });
   }
   if (changes.length > 0) {
@@ -205,44 +205,35 @@ export function kickCiaraVisitSyncOnOpen(shopId: string, admin: AdminClient): vo
   })().catch((e) => console.warn("[ciara-visit-sync] open kick failed", e));
 }
 
-let startPromise: Promise<PgBoss | null> | null = null;
+const scheduler = createCiaraSyncScheduler({
+  tag: "ciara-visit-sync",
+  queue: CIARA_VISIT_SYNC_QUEUE,
+  // 5 分ごとに読む（2 分・7 分…）
+  cron: "2-59/5 * * * *",
+  ready: () => ciaraVisitSyncAvailable() && ciaraVisitSyncServerReady() && Boolean(process.env.DATABASE_URL?.trim()),
+  work: async () => {
+    const { unauthenticated } = await import("../shopify.server");
+    const shops = await prisma.shop.findMany({ select: { id: true, shopDomain: true } });
+    for (const shop of shops) {
+      try {
+        const s = await getCiaraVisitSyncSettings(shop.id);
+        if (!s.enabled) continue;
+        const { admin } = await unauthenticated.admin(shop.shopDomain);
+        const result = await runCiaraVisitSync(shop.id, admin);
+        console.log(`[ciara-visit-sync] shop=${shop.shopDomain} ok=${result.ok} ${result?.message}`);
+      } catch (e) {
+        console.error(`[ciara-visit-sync] shop=${shop.shopDomain} failed`, e);
+      }
+    }
+  },
+});
 
-/** 5 分ごとに読む（自社用で、サーバーの準備ができているときだけ。1 プロセス 1 回） */
-export function ensureCiaraVisitSyncScheduler(): Promise<PgBoss | null> {
-  if (!ciaraVisitSyncAvailable() || !ciaraVisitSyncServerReady() || !process.env.DATABASE_URL?.trim()) {
-    return Promise.resolve(null);
-  }
-  if (!startPromise) {
-    startPromise = (async () => {
-      const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, application_name: "pos-receipt-ciara-visit-sync" });
-      boss.on("error", (err: Error) => console.error("[ciara-visit-sync]", err));
-      await boss.start();
-      await boss.createQueue(CIARA_VISIT_SYNC_QUEUE, { name: CIARA_VISIT_SYNC_QUEUE, retryLimit: 0 }).catch(() => {});
-      // 5 分ごと（2 分・7 分…）。pg-boss の schedule は複数のサーバーでも 1 回だけ動く
-      await boss.schedule(CIARA_VISIT_SYNC_QUEUE, "2-59/5 * * * *", {}, { tz: "Asia/Tokyo" });
-      await boss.work(CIARA_VISIT_SYNC_QUEUE, async () => {
-        const { unauthenticated } = await import("../shopify.server");
-        const shops = await prisma.shop.findMany({ select: { id: true, shopDomain: true } });
-        for (const shop of shops) {
-          try {
-            const s = await getCiaraVisitSyncSettings(shop.id);
-            if (!s.enabled) continue;
-            const { admin } = await unauthenticated.admin(shop.shopDomain);
-            const result = await runCiaraVisitSync(shop.id, admin);
-            console.log(`[ciara-visit-sync] shop=${shop.shopDomain} ok=${result.ok} ${result.message}`);
-          } catch (e) {
-            console.error(`[ciara-visit-sync] shop=${shop.shopDomain} failed`, e);
-          }
-        }
-      });
-      const stop = () => void boss.stop({ timeout: 20000 }).catch(() => {});
-      process.once("SIGTERM", stop);
-      process.once("SIGINT", stop);
-      return boss;
-    })().catch((e) => {
-      console.error("[ciara-visit-sync] start failed:", e);
-      return null;
-    });
-  }
-  return startPromise;
+/** 定期の仕事を始める（自社用で、サーバーの準備ができているときだけ。始まらなければ記録に出し、あとでもう一度始める） */
+export function ensureCiaraVisitSyncScheduler() {
+  return scheduler.ensure();
+}
+
+/** 定期の仕事の今の状態（管理画面の「つながり」に出す） */
+export function ciaraVisitSyncSchedulerStatus(): CiaraSchedulerStatus {
+  return scheduler.status();
 }
