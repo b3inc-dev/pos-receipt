@@ -27,7 +27,8 @@ const FONT_STACKS: Record<FontFamily, string> = {
 };
 
 export function paperWidthPx(mm: 58 | 80): number {
-  return mm === 58 ? 384 : 576;
+  // CSS px は 96dpi。プリンターの 203dpi のドット数とは別。
+  return Math.round((mm === 58 ? 48 : 72) * 96 / 25.4);
 }
 
 function formatNumber(v: unknown): string {
@@ -167,24 +168,27 @@ export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style">): 
   const st = layout.style;
   return [
     `*{box-sizing:border-box}`,
+    `@page{size:auto;margin:0}`,
     `html,body{margin:0;padding:0;background:#fff}`,
-    `body{padding:${st.paddingPx}px;width:${paperWidthPx(layout.paperWidthMm)}px;max-width:100%;color:#000;font-family:${FONT_STACKS[st.fontFamily]};font-size:${st.fontSizePx}px;line-height:${st.lineHeight};font-weight:${st.fontWeight}}`,
+    `body{padding:${st.paddingPx}px;width:${layout.paperWidthMm === 58 ? 48 : 72}mm;max-width:100%;overflow-wrap:anywhere;color:#000;font-family:${FONT_STACKS[st.fontFamily]};font-size:${st.fontSizePx}px;line-height:${st.lineHeight};font-weight:${st.fontWeight}}`,
     `p{margin:0}`,
     `.blk{margin:6px 0}`,
     `.a-left{text-align:left}.a-center{text-align:center}.a-right{text-align:right}`,
     `.b{font-weight:700}`,
     `.fs-s{font-size:.85em}.fs-m{font-size:1em}.fs-l{font-size:1.3em}.fs-xl{font-size:1.8em}`,
     `.row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin:2px 0}`,
-    `.row>span:last-child{text-align:right;white-space:nowrap}`,
+    `.row>span:first-child{min-width:0;flex:1;overflow-wrap:anywhere}`,
+    `.row>span:last-child{min-width:0;max-width:65%;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}`,
     `.item{margin:6px 0}`,
     `.indent{padding-left:12px}`,
-    `.logo{display:inline-block;max-width:100%;height:auto}`,
+    `.logo{display:inline-block;max-width:min(100%,${layout.paperWidthMm === 58 ? 30 : 36}mm);height:auto}`,
     `.hr{border:0;margin:8px 0}`,
     `.hr-none{border-top:0}.hr-solid{border-top:1px solid #000}.hr-thick{border-top:3px solid #000}.hr-dashed{border-top:1px dashed #000}.hr-dotted{border-top:2px dotted #000}`,
     `.ul-solid{border-bottom:1px solid #000;padding-bottom:4px}.ul-thick{border-bottom:3px solid #000;padding-bottom:6px}.ul-dashed{border-bottom:1px dashed #000;padding-bottom:4px}.ul-dotted{border-bottom:2px dotted #000;padding-bottom:4px}`,
     `.amount{padding:8px 0}`,
     `.stamp{display:inline-flex;align-items:center;justify-content:center;border:1px solid #000;font-size:.85em}`,
-    `.stamps{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}`,
+    `.stamps{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:8px}`,
+    `.stamp{max-width:100%}`,
     `.qr{margin:0 auto}.qr svg{width:100%;height:auto;display:block}`,
     `.thin{font-weight:300}.muted{opacity:.8}.strike{text-decoration:line-through}`,
     `.lines>div+div{margin-top:2px}`,
