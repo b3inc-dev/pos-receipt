@@ -17,6 +17,8 @@ export type CiaraSchedulerStatus = {
   error?: string;
   /** 状態が変わった時刻 */
   at?: string;
+  /** 前に始まらなかったことがあり、そのあとまだ動いていない（もう一度始めている途中でも「止まっている」と出すため） */
+  hadFailure?: boolean;
 };
 
 /** テストで差し替える部分（pg-boss のうち使うものだけ） */
@@ -100,7 +102,9 @@ export function createCiaraSyncScheduler(opts: CiaraSchedulerOptions) {
   let current: SchedulerBoss | null = null;
 
   const setStatus = (state: CiaraSchedulerState, error?: string) => {
-    status = { state, error, at: now().toISOString() };
+    // 失敗の理由は、動き出すまで残す（もう一度始めている途中でも理由を出せるように）
+    const hadFailure = state === "failed" || (state !== "running" && Boolean(status.hadFailure));
+    status = { state, error: error ?? (hadFailure ? status.error : undefined), at: now().toISOString(), hadFailure };
   };
 
   const ensure = (): Promise<SchedulerBoss | null> => {

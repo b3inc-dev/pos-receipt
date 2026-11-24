@@ -94,12 +94,20 @@ describe("createCiaraSyncScheduler", () => {
     const s = createCiaraSyncScheduler({ ...base, ready: () => true, queueAttempts: 2, createBoss: () => bosses.shift()! });
     assert.equal(await s.ensure(), null);
     assert.equal(s.status().state, "failed");
+    assert.equal(s.status().hadFailure, true);
     assert.match(s.status().error ?? "", /could not be created/);
     assert.ok(first.calls.includes("stop"), "失敗した pg-boss は止める");
     assert.ok(!first.calls.includes("schedule"), "列が無いまま schedule しない");
     // 前は startPromise が null で決まって二度と始まらなかった
-    assert.equal(await s.ensure(), second.boss);
+    const again = s.ensure();
+    // もう一度始めている途中も、前に止まっていたことと理由を残す（画面で「止まっていた」と出すため）
+    assert.equal(s.status().state, "starting");
+    assert.equal(s.status().hadFailure, true);
+    assert.match(s.status().error ?? "", /could not be created/);
+    assert.equal(await again, second.boss);
     assert.equal(s.status().state, "running");
+    assert.equal(s.status().hadFailure, false);
+    assert.equal(s.status().error, undefined);
   }));
 
   it("schedule が失敗しても failed にして、やり直せる", quiet(async () => {

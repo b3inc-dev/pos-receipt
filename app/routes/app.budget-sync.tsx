@@ -17,6 +17,7 @@ import {
   ensureCiaraBudgetSyncScheduler,
   ciaraBudgetSyncSchedulerStatus,
 } from "../services/ciaraBudgetSync.server";
+import { ciaraConnectionView } from "../utils/ciaraSyncConnection";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { SaveBar, SuccessToast, confirmLeave } from "../components/admin-ui";
 
@@ -39,7 +40,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const settings = await getCiaraBudgetSyncSettings(shop.id);
   // 定期の仕事が止まっていたら、開いたときにもう一度始める（待たずに今の状態を出す）
   void ensureCiaraBudgetSyncScheduler();
-  return { settings, hasSecret: ciaraSyncServerReady(), schedulerState: ciaraBudgetSyncSchedulerStatus().state };
+  return { settings, hasSecret: ciaraSyncServerReady(), scheduler: ciaraBudgetSyncSchedulerStatus() };
 }
 
 export async function action({ request }: ActionFunctionArgs): Promise<Response> {
@@ -64,7 +65,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
 }
 
 export default function BudgetSyncPage() {
-  const { settings, hasSecret, schedulerState } = useLoaderData<typeof loader>();
+  const { settings, hasSecret, scheduler } = useLoaderData<typeof loader>();
   const actionData = useActionData<ActionResult>();
   const navigation = useNavigation();
   const navigate = useNavigate();
@@ -81,23 +82,21 @@ export default function BudgetSyncPage() {
     notice = { tone: "critical", title: actionData.intent === "run" ? "取り込めませんでした" : "保存できませんでした", text: actionData.message };
   }
   // つながりの状態（サーバーの設定の名前は出さない）
-  // 定期の仕事が止まっているときは「つながっています」にしない（黙って止まらない）
-  const jobStopped = hasSecret && settings.enabled && schedulerState === "failed";
-  const jobStarting = hasSecret && settings.enabled && schedulerState === "starting";
-  const connected = hasSecret && settings.enabled && Boolean(last?.ok) && !jobStopped;
-  const connectionNote = jobStopped
-    ? "1 時間ごとの取り込みが止まっています。5 分ほどで自動でもう一度始めます。続くときは連絡してください。"
-    : jobStarting && !connected
-      ? "1 時間ごとの取り込みを始めています。少しして再読み込みしてください。"
-      : connected
-        ? "1 時間ごとに取り込んでいます。"
-        : !settings.enabled
-          ? "取り込みをオンにして保存すると、つながりを確かめます。"
-          : !hasSecret
-            ? "サーバーの準備がまだです。準備ができると 1 時間ごとに取り込みます。"
-            : last && !last.ok
-              ? last.message
-              : "「今すぐ取り込む」を押すと、つながりを確かめます。";
+  // 定期の仕事が動いているときだけ「つながっています」にする（止まっていれば黙らずに出す）
+  const view = ciaraConnectionView({
+    hasSecret,
+    enabled: settings.enabled,
+    last,
+    scheduler,
+    texts: {
+      job: "1 時間ごとの取り込み",
+      running: "1 時間ごとに取り込んでいます。",
+      turnOn: "取り込みをオンにして保存すると、つながりを確かめます。",
+      notReady: "サーバーの準備がまだです。準備ができると 1 時間ごとに取り込みます。",
+      tryNow: "「今すぐ取り込む」を押すと、つながりを確かめます。",
+    },
+  });
+  const connectionNote = view.note;
 
   return (
     <PolarisPageWrapper>
@@ -150,7 +149,7 @@ export default function BudgetSyncPage() {
               <BlockStack gap="300">
                 <InlineStack gap="200" blockAlign="center">
                   <Text as="span" variant="headingSm">ciara-system とのつながり</Text>
-                  <Badge tone={jobStopped ? "critical" : connected ? "success" : "attention"}>{jobStopped ? "止まっています" : connected ? "つながっています" : "まだです"}</Badge>
+                  <Badge tone={view.badge.tone}>{view.badge.label}</Badge>
                 </InlineStack>
                 <Text as="p" tone="subdued">{connectionNote}</Text>
                 <InlineStack align="space-between" blockAlign="center" gap="200">
