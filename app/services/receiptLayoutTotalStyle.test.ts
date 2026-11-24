@@ -116,3 +116,33 @@ describe("推奨初期値の合計サイズ", () => {
     }
   }
 });
+
+describe("精算・点検の合計サイズ", () => {
+  for (const paperWidthMm of [58, 80] as const) {
+    for (const mode of ["blocks", "code"] as const) {
+      it(`${paperWidthMm}mm/${mode}: 総売上は14pt、件数は用紙別金額設定`, () => {
+        const layout: ReceiptLayout = {
+          ...defaultLayout("settlement"), paperWidthMm,
+          paperStyles: { [paperWidthMm]: defaultPaperPrintStyle(paperWidthMm) },
+        };
+        if (mode === "code") {
+          layout.code = blocksToCode(layout);
+          layout.mode = "code";
+        }
+        for (const isInspection of [false, true]) {
+          const data = sampleTemplateData("settlement");
+          if (data.kind !== "settlement") throw new Error("kind");
+          const result = renderReceiptLayout(layout, {
+            ...data,
+            settlement: { ...data.settlement, is_inspection: isInspection, kind_label: isInspection ? "点検" : "精算" },
+          });
+          assert.ok(result.ok, result.ok ? "" : result.error);
+          assert.match(result.html, /総売上<\/span><span class="print-value print-total">¥128,400<\/span>/);
+          assert.match(result.html, /<span class="print-value">42件<\/span>/);
+          assert.ok(result.html.includes("var(--receipt-font-scale,1.3) / 1.3"));
+          assert.ok(result.html.includes(".print-value,.row .print-value{font-size:11pt}"));
+        }
+      });
+    }
+  }
+});
