@@ -32,7 +32,7 @@ describe("合計ブロックと用紙別の文字設定の優先順位", () => {
           assert.ok(html.includes(`<div class="row fs-${size}"><span>合計</span><span class="print-value print-total">`));
           assert.ok(html.includes(`--receipt-font-scale:${scale}}`));
           const totalRule = html.match(/\.print-total,\.row \.print-total\{([^}]+)\}/)?.[1] ?? "";
-          assert.ok(totalRule.includes("calc(max(14pt,16pt) * var(--receipt-font-scale,1))"), totalRule);
+          assert.ok(totalRule.includes("calc(max(14pt,16pt) * var(--receipt-font-scale,1.3) / 1.3)"), totalRule);
           assert.ok(!totalRule.includes("font-weight"), "太字を強制するとtotal_bold=falseが効かなくなる");
           layout.mode = "blocks";
           layout.blocks[0].settings.total_bold = true;
@@ -93,6 +93,25 @@ describe("金額・件数設定は各帳票の数値要素に届く", () => {
             assert.match(html, /うち返金 <span class="print-value">1件<\/span>/);
           }
         }
+      });
+    }
+  }
+});
+
+describe("推奨初期値の合計サイズ", () => {
+  for (const paperWidthMm of [58, 80] as const) {
+    for (const kind of ["sales", "receipt"] as const) {
+      it(`${paperWidthMm}mm/${kind}: 既定lは14pt基準で、サイズ変更の相対比を保持する`, () => {
+        const layout: ReceiptLayout = {
+          ...defaultLayout(kind), paperWidthMm,
+          paperStyles: { [paperWidthMm]: defaultPaperPrintStyle(paperWidthMm) },
+        };
+        const total = layout.blocks.find((block) => block.type === (kind === "sales" ? "totals" : "receipt_amount"))!;
+        assert.equal(total.settings[kind === "sales" ? "total_size" : "size"], "l");
+        const html = render(layout);
+        assert.ok(html.includes("calc(max(14pt,11pt) * var(--receipt-font-scale,1.3) / 1.3)"));
+        assert.ok(html.includes(".fs-l{font-size:1.3em;--receipt-font-scale:1.3}"));
+        assert.ok(html.includes(".fs-xl{font-size:1.8em;--receipt-font-scale:1.8}"));
       });
     }
   }

@@ -184,9 +184,11 @@ export function baseCss(layout: Pick<ReceiptLayout, "paperWidthMm" | "style" | "
     `.row>span:first-child{min-width:0;flex:1;overflow-wrap:anywhere}`,
     `.row>span:last-child{min-width:0;max-width:65%;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}`,
     `.print-value,.row .print-value{font-size:${p.amountFontSizePt}pt}`,
+    // The standard total/receipt amount block uses l (1.3): normalize it to
+    // the recommended 14pt total. Other sizes retain their relative ratios.
     // Do not force bold here: totals inherit total_bold from their row;
     // receipt amounts retain their own .b class.
-    `.print-total,.row .print-total{font-size:calc(max(14pt,${p.amountFontSizePt}pt) * var(--receipt-font-scale,1))}`,
+    `.print-total,.row .print-total{font-size:calc(max(14pt,${p.amountFontSizePt}pt) * var(--receipt-font-scale,1.3) / 1.3)}`,
     `.item{margin:6px 0}`,
     `.indent{padding-left:12px}`,
     `.logo{display:inline-block;max-width:min(100%,${p.logoWidthMm}mm);height:auto}`,
