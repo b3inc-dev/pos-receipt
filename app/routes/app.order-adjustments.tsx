@@ -1,6 +1,6 @@
 /**
  * /app/order-adjustments?orderId=… — 1 件の注文の返金方法変更・商品券釣銭登録（③④）を見て、「変更」「無効化」「書き直す」
- * 特殊返金履歴の行の「変更」と、Shopify の注文ページのブロック（order-adjustments-block）の「変更」から開く。
+ * 調整履歴の行の「変更」と、Shopify の注文ページのブロック（order-adjustments-block）の「変更」から開く。
  * 記録は注文メタフィールド pos.adjustments（docs/ORDER_ADJUSTMENTS_METAFIELD.md）。直すと前の行は無効にして残す。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
@@ -51,7 +51,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const orderIdRaw = (url.searchParams.get("orderId") ?? "").trim();
   if (!orderIdRaw) {
-    return { ok: false as const, message: "注文が指定されていません。特殊返金履歴から開いてください。" };
+    return { ok: false as const, message: "注文が指定されていません。調整履歴から開いてください。" };
   }
   const orderGid = toOrderGid(orderIdRaw);
   const digits = orderGid.replace(/\D/g, "");
@@ -268,7 +268,7 @@ export default function OrderAdjustmentsPage() {
   if (!data.ok) {
     return (
       <PolarisPageWrapper>
-        <Page title="返金方法変更・商品券釣銭登録" backAction={{ content: "特殊返金履歴", onAction: back }}>
+        <Page title="返金方法変更・商品券釣銭登録" backAction={{ content: "調整履歴", onAction: back }}>
           <StatusBanner tone="critical" heading="注文を開けませんでした">{data.message}</StatusBanner>
         </Page>
       </PolarisPageWrapper>
@@ -317,7 +317,7 @@ export default function OrderAdjustmentsPage() {
     <PolarisPageWrapper>
       <Page
         title={`${data.orderName} の返金方法変更・商品券釣銭登録`}
-        backAction={{ content: "特殊返金履歴", onAction: back }}
+        backAction={{ content: "調整履歴", onAction: back }}
       >
         <SuccessToast message={actionData?.ok ? actionData.message : null} trigger={actionData} />
         <Layout>

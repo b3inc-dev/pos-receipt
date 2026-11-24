@@ -61,6 +61,7 @@ test("保存の成功は消えるお知らせ枠でなくトーストで出す�
   ];
   for (const file of screens) {
     const source = readFileSync(`app/routes/${file}`, "utf8");
+    if (source.includes("function ReceiptDesignRedirect")) continue; // GETは統合画面へ。表示・保存は統合画面で検証。
     assert.match(source, /<SuccessToast message=\{actionData\?\.ok \? "保存しました" : null\} trigger=\{actionData\} \/>/, file);
     assert.equal(/<Banner tone="success">保存しました/.test(source), false, `${file} に保存の成功の枠が残っている`);
     assert.equal(/<Banner tone="info">/.test(source.slice(0, source.indexOf("<Layout.AnnotatedSection"))), false, `${file} の画面の説明がお知らせ枠のまま`);
@@ -84,6 +85,7 @@ const SAVE_BAR_SCREENS = [
 test("設定の画面は Shopify の保存の帯で保存し、画面の上に保存ボタンを置かない（7章）", () => {
   for (const file of SAVE_BAR_SCREENS) {
     const source = readFileSync(`app/routes/${file}`, "utf8");
+    if (source.includes("function ReceiptDesignRedirect")) continue;
     assert.match(source, /<StateSaveForm values=\{[^}]+\}+ onSave=\{handleSave\} onDiscard=\{/, `${file} に保存の帯がない`);
     assert.equal((source.match(/<StateSaveForm\b/g) ?? []).length, 1, `${file} の保存の帯は 1 つ`);
     assert.equal(/primaryAction=\{\{ content: "保存"/.test(source), false, `${file} に画面の上の保存ボタンが残っている`);

@@ -223,9 +223,7 @@ export default function SettlementSettingsPage() {
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
         primaryAction={{ content: "保存", onAction: handleSave }}
       >
-        <Card padding="0">
-          <TabGroupBar tabs={SETTLEMENT_TABS} />
-        </Card>
+        <TabGroupBar tabs={SETTLEMENT_TABS} />
         <Layout>
           {saved && <Layout.Section><Banner tone="success">保存しました。</Banner></Layout.Section>}
           <Layout.Section>

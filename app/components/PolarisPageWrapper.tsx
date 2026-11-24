@@ -6,10 +6,10 @@
 import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
 import jaTranslations from "@shopify/polaris/locales/ja.json";
 
-export function PolarisPageWrapper({ children }: { children: React.ReactNode }) {
+export function PolarisPageWrapper({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
   return (
     <PolarisAppProvider i18n={jaTranslations}>
-      {children}
+      <div style={wide ? {maxWidth:1200,margin:"0 auto"} : undefined}>{children}</div>
     </PolarisAppProvider>
   );
 }

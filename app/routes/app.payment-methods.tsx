@@ -238,9 +238,7 @@ export default function PaymentMethodsPage() {
         backAction={{ content: "ホーム", onAction: to("/app") }}
         primaryAction={{ content: "追加", onAction: openCreate }}
       >
-        <Card padding="0">
-          <TabGroupBar tabs={STORE_TABS} />
-        </Card>
+        <TabGroupBar tabs={STORE_TABS} />
         <Layout>
           <Layout.Section>
             {/* 画面全体の説明は AdminIntro（1〜2文）。自動登録の知らせはトースト（UI ルール v1.1 5章・7章） */}

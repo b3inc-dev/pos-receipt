@@ -9,7 +9,7 @@ import { AdminStyle, AppNavBarView } from "./admin-ui";
 
 /** グループに属するパス（アクティブ判定用） */
 const GROUP_PATHS: Record<string, string[]> = {
-  "/app/sales-receipt-layout": [
+  "/app/receipt-layouts": [
     "/app/sales-receipt-layout",
     "/app/receipt-layouts",
     "/app/sales-receipt-settings",
@@ -32,7 +32,8 @@ const GROUP_PATHS: Record<string, string[]> = {
     "/app/location-profiles", // 前の「設定軸・一括反映」（店舗の一覧へ移す）
     "/app/payment-methods",
   ],
-  "/app/sales-summary": [
+  "/app/reports": [
+    "/app/reports",
     "/app/sales-summary",
     "/app/sales-summary-settings",
     "/app/sales-channels",
@@ -40,7 +41,7 @@ const GROUP_PATHS: Record<string, string[]> = {
     "/app/budget-settings",
     "/app/channel-budget-management",
   ],
-  "/app/plan": [
+  "/app/general-settings": [
     "/app/plan",
     "/app/general-settings",
     "/app/loyalty-settings",
@@ -52,11 +53,11 @@ const GROUP_PATHS: Record<string, string[]> = {
 
 const NAV_ITEMS = [
   { path: "/app", label: "ホーム" },
-  { path: "/app/sales-receipt-layout", label: "レシート" },
+  { path: "/app/receipt-layouts", label: "レシート" },
   { path: "/app/settlement-settings", label: "精算" },
   { path: "/app/settings", label: "店舗" },
-  { path: "/app/sales-summary", label: "レポート" },
-  { path: "/app/plan", label: "システム" },
+  { path: "/app/reports", label: "レポート" },
+  { path: "/app/general-settings", label: "システム" },
 ];
 
 export function AppNavBar() {

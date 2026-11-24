@@ -286,7 +286,7 @@ export default function BudgetDailyPage() {
   const formKey = `${selectedIds.join(",")}|${data.month}|${JSON.stringify(data.saved)}`;
 
   return (
-    <PolarisPageWrapper>
+    <PolarisPageWrapper wide>
       <Page
         title="予算を日別に入力"
         fullWidth

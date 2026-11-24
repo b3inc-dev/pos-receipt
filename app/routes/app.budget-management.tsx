@@ -559,9 +559,7 @@ export default function BudgetManagementPage() {
           </Box>
         )}
 
-        <Card padding="0">
-          <TabGroupBar tabs={REPORTS_TABS} />
-        </Card>
+        <TabGroupBar tabs={REPORTS_TABS} />
         <Layout>
           {/* フィルター */}
           <Layout.Section>

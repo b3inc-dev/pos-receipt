@@ -1,5 +1,5 @@
 /**
- * /app/receipt-layouts — 4 種のレシートのレイアウト（一覧）
+ * /app/receipt-layouts — 4 種のレシートのデザイン（一覧）
  * 1 行 = 1 種類。押すとブロックエディタ（/app/receipt-layouts/:kind）へ。
  * 「このレイアウトで印字する」を入れた種類だけ、印字がこのレイアウトになる（入れていなければ今までの印字）。
  */
@@ -55,13 +55,13 @@ export default function ReceiptLayoutsIndex() {
   const q = useLocation().search;
   return (
     <PolarisPageWrapper>
-      <Page title="レシートのレイアウト" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
+      <Page title="レシートのデザイン" backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}>
         <Layout>
           <Layout.Section>
             <TabGroupBar tabs={RECEIPT_TABS} />
           </Layout.Section>
           <Layout.Section>
-            <AdminIntro>ブロックを並べ替えて、印字と同じプレビューを見ながらレシートの見た目を作ります。細かく作り込むときはコードでも編集できます。「このレイアウトで印字する」を入れた種類だけ、印字がこのレイアウトになります。</AdminIntro>
+            <AdminIntro>編集したい帳票を選びます。基本設定・デザイン・プレビューを一か所で確認して保存できます。今使っているデザインと設定はそのまま引き継ぎます。</AdminIntro>
           </Layout.Section>
           <Layout.Section>
             <Card padding="0">
@@ -79,7 +79,7 @@ export default function ReceiptLayoutsIndex() {
                         <Text as="p" tone="subdued">{DESCRIPTIONS[row.kind]}</Text>
                       </BlockStack>
                       <InlineStack gap="200" wrap={false} blockAlign="center">
-                        {row.printing ? <Badge tone="success">印字に使用中</Badge> : <Badge>今までの印字</Badge>}
+                        {row.printing ? <Badge tone="success">作成したデザイン</Badge> : <Badge>標準デザイン</Badge>}
                         {row.saved ? null : <Badge>標準</Badge>}
                         <Badge tone={row.mode === "code" ? "attention" : "info"}>
                           {row.mode === "code" ? "コード" : `ブロック ${row.blockCount}`}

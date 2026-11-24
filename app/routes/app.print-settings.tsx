@@ -176,9 +176,7 @@ export default function PrintSettingsPage() {
           disabled: saving,
         }}
       >
-        <Card padding="0">
-          <TabGroupBar tabs={RECEIPT_TABS} />
-        </Card>
+        <TabGroupBar tabs={RECEIPT_TABS} />
         <Layout>
           {/* 保存できたかはトーストで、保存のたびに出す（UI ルール v1.1 7章） */}
           <SuccessToast message={actionData?.ok ? "保存しました" : null} trigger={actionData} />

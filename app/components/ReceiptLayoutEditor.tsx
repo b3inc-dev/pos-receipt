@@ -226,9 +226,13 @@ export function ReceiptLayoutEditor({
   onLayoutChange,
   sampleData,
   printerProfile = "standard",
+  paperWidthMm,
+  active = true,
 }: {
   kind: ReceiptKind;
   printerProfile?: ReceiptPrinterProfile;
+  paperWidthMm?: 58 | 80;
+  active?: boolean;
   /** プレビューの見本のデータ。無ければ receiptLayoutData.ts の見本（精算は店の並び順の設定を入れたもの） */
   sampleData?: ReturnType<typeof sampleTemplateData>;
   /** 開いた時点（保存した時点）のレイアウト。「破棄」でここに戻す */
@@ -245,8 +249,12 @@ export function ReceiptLayoutEditor({
 
   // 「破棄」などで親が initial を差し替えたら、編集中の値も戻す
   useEffect(() => {
-    setLayout(initial);
+    setLayout(paperWidthMm ? { ...initial, paperWidthMm } : initial);
   }, [initial]);
+
+  useEffect(() => {
+    if (paperWidthMm) setLayout((prev) => prev.paperWidthMm === paperWidthMm ? prev : { ...prev, paperWidthMm });
+  }, [paperWidthMm]);
 
   const update = (next: ReceiptLayout) => {
     setLayout(next);
@@ -433,6 +441,7 @@ export function ReceiptLayoutEditor({
           {tab === "style" ? (
             <Card>
               <BlockStack gap="300">
+                {paperWidthMm ? <Text as="p" tone="subdued">用紙幅は上の基本設定で変更します。</Text> : <>
                 <ChoiceList
                   title="用紙の幅"
                   choices={[
@@ -443,6 +452,7 @@ export function ReceiptLayoutEditor({
                   onChange={(v) => update({ ...layout, paperWidthMm: v[0] === "58" ? 58 : 80 })}
                 />
                 <Text as="p" tone="subdued">58mm・80mmごとの設定を保存できます。実際の用紙幅は印字設定または販売レシート設定で指定してください。</Text>
+                </>}
                 {layout.mode === "code" && !layout.code.includes("/* receipt-managed-paper-start */") ? (
                   <Text as="p" tone="caution">コードの固定値には下の設定は反映されません。paper変数を参照する項目だけに反映されます。既存コードは自動で上書きしません。</Text>
                 ) : null}
@@ -586,7 +596,7 @@ export function ReceiptLayoutEditor({
               {rendered.error}
             </div>
           )}
-          <ReceiptLayoutPreview html={previewHtml} widthPx={paperWidthPx(layout.paperWidthMm)} viewportPx={geometry.viewportPx ?? previewViewportPx(layout)} horizontalScale={geometry.horizontalScale} />
+          <ReceiptLayoutPreview html={previewHtml} widthPx={paperWidthPx(layout.paperWidthMm)} viewportPx={geometry.viewportPx ?? previewViewportPx(layout)} horizontalScale={geometry.horizontalScale} refreshKey={active} />
         </div>
       </div>
     </div>

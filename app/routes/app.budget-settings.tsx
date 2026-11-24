@@ -93,9 +93,7 @@ export default function BudgetSettingsPage() {
         title="予算設定"
         backAction={{ content: "ホーム", onAction: () => navigate("/app" + q) }}
       >
-        <Card padding="0">
-          <TabGroupBar tabs={REPORTS_TABS} />
-        </Card>
+        <TabGroupBar tabs={REPORTS_TABS} />
         {/* 保存は Shopify の保存の帯（値が保存したときと違うときだけ「破棄」「保存」）。画面の中に保存ボタンを置かない（UI ルール v1.1 7章） */}
         <StateSaveForm values={form} onSave={handleSave} onDiscard={(saved) => setForm(saved)} result={actionData}>
           <Layout>

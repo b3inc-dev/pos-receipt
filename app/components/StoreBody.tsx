@@ -11,7 +11,10 @@ const storeCss = `
   .Store-body .Store-bulk .Admin-secondary { margin-left: auto; }
   .Store-body .Store-bulk .Admin-secondary:disabled { opacity: .5; cursor: not-allowed; }
   .Store-body .Store-row-check { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; }
+  .Store-body .Store-row-order { display:flex;gap:4px;align-items:center;flex-wrap:wrap; }
   @media (max-width: 640px) {
+    .Store-body .Store-order-row { flex-wrap:wrap; }
+    .Store-body .Store-row-order { margin-left:24px;flex-basis:calc(100% - 24px); }
     .Store-body { padding: 0 16px 16px; }
     .Store-body .Store-bulk .Admin-secondary { margin-left: 0; width: 100%; justify-content: center; }
   }

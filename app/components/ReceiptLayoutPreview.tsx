@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export function ReceiptLayoutPreview({ html, widthPx, viewportPx, horizontalScale = 1 }: { html: string; widthPx: number; viewportPx: number; horizontalScale?: number }) {
+export function ReceiptLayoutPreview({ html, widthPx, viewportPx, horizontalScale = 1, refreshKey }: { html: string; widthPx: number; viewportPx: number; horizontalScale?: number; refreshKey?: boolean }) {
   const frame = useRef<HTMLIFrameElement | null>(null);
   const box = useRef<HTMLDivElement | null>(null);
   const [height, setHeight] = useState(600);
@@ -35,7 +35,7 @@ export function ReceiptLayoutPreview({ html, widthPx, viewportPx, horizontalScal
   useEffect(() => {
     const id = window.requestAnimationFrame(fit);
     return () => window.cancelAnimationFrame(id);
-  }, [viewportPx, fit]);
+  }, [viewportPx, fit, refreshKey]);
   const uniformScale = widthPx / (viewportPx * horizontalScale) * scale;
   return (
     <div ref={box} className="RL-preview-box">

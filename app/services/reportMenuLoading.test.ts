@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import {mock,test} from "node:test";
+import React from "react";
+import {renderToString} from "react-dom/server";
+import {MemoryRouter} from "react-router";
+let computed=0;let release:()=>void=()=>{};
+const gate=new Promise<void>(resolve=>release=resolve);
+const sample={locationId:"gid://shopify/Location/1",locationName:"店舗A",actual:1000,orders:2,items:3,visitors:4,budget:null,budgetRatio:null,conv:.5,atv:500,setRate:1.5,unit:1000/3};
+mock.module("../shopify.server",{namedExports:{authenticate:{admin:async()=>({session:{shop:"test"},admin:{graphql:async()=>({json:async()=>({data:{locations:{nodes:[],pageInfo:{hasNextPage:false}}}})})}})}}});
+mock.module("../utils/shopResolver.server",{namedExports:{resolveShop:async()=>({id:"shop",planCode:"pro"})}});
+mock.module("../utils/planFeatures.server",{namedExports:{getFullAccess:async()=>true,checkPlanAccess:()=>({allowed:true})}});
+mock.module("../utils/shopTimezone.server",{namedExports:{getShopTimezoneForDaily:async()=>"Asia/Tokyo",getCalendarDateStringInTimeZone:()=>"2026-11-24",addCalendarDaysToIsoDate:(s:string)=>s}});
+mock.module("../db.server",{defaultExport:{location:{findMany:async()=>[{shopifyLocationGid:sample.locationId,name:sample.locationName}],upsert:async()=>{}},salesSummaryCacheDaily:{findFirst:async()=>null}}});
+mock.module("./salesSummaryEngine.server",{namedExports:{computeAndCacheDailySummary:async()=>{computed++;await gate;return sample;}}});
+mock.module("./salesChannelEngine.server",{namedExports:{autoDiscoverChannels:async()=>{},computeAndCacheChannelDailySummary:async()=>{},getEnabledSalesChannels:async()=>[]}});
+mock.module("../utils/salesSummaryBudgetFromDb.server",{namedExports:{getLocationBudgetAmountsForDayBatch:async()=>new Map([[sample.locationId,2000]]),sumLocationBudgetsForPeriodBatch:async()=>new Map()}});
+const reports=await import("../routes/app.reports");
+const page=await import("../routes/app.sales-summary");
+const resource=await import("../routes/app.sales-summary-data");
+test("レポート入口/サマリー画面は売上計算を待たず返り、待機中も設定/チャネル管理を描画",async()=>{
+ const args={request:new Request("https://test.local/app/sales-summary?showChannels=0"),context:{},params:{}} as never;
+ await reports.loader(args);await page.loader(args);assert.equal(computed,0);
+ const resultPromise=resource.loader(args);
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(computed,1);
+ const html=renderToString(React.createElement(MemoryRouter,null,React.createElement(page.SalesSummaryPending)));
+ assert.ok(html.includes("集計しています"));assert.ok(html.includes("サマリー設定"));assert.ok(html.includes("チャネル管理"));
+ release();const data=await resultPromise;assert.ok(!(data instanceof Response));assert.equal(data.rows[0].actual,1000);assert.equal(data.rows[0].budget,2000);assert.equal(data.rows[0].budgetRatio,.5);assert.equal(data.rows[0].orders,2);
+});

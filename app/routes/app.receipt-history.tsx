@@ -156,9 +156,7 @@ export default function ReceiptHistoryPage() {
         title="領収書発行履歴"
         backAction={{ content: "戻る", onAction: to("/app") }}
       >
-        <Card padding="0">
-          <TabGroupBar tabs={RECEIPT_TABS} />
-        </Card>
+        <TabGroupBar tabs={RECEIPT_TABS} />
         <Layout>
           {/* フィルター */}
           <Layout.Section>
