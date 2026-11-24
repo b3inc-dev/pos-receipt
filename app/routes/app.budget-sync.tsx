@@ -61,8 +61,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
 
   // Polaris の Checkbox は値を空で送るので、隠し入力の true / false で受ける（ほかの設定画面と同じ形）
   const enabled = formData.get("enabled") === "true";
-  const current = await getCiaraBudgetSyncSettings(shop.id);
-  await saveCiaraBudgetSyncSettings(shop.id, { ...current, enabled });
+  await saveCiaraBudgetSyncSettings(shop.id, { enabled });
   return Response.json({ ok: true, intent, message: "保存しました" } satisfies ActionResult);
 }
 

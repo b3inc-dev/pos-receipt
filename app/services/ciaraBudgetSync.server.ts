@@ -9,7 +9,8 @@
  */
 import prisma from "../db.server";
 import { createCiaraSyncScheduler, type CiaraSchedulerStatus } from "./ciaraSyncScheduler.server";
-import { getAppSetting, setAppSetting } from "../utils/appSettings.server";
+import { getAppSetting } from "../utils/appSettings.server";
+import { patchSyncSettings } from "./ciaraSyncSettingsPersistence.server";
 import { isInhouseMode } from "../utils/planFeatures.server";
 import { getCalendarDateStringInTimeZone, getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import {
@@ -47,8 +48,8 @@ export async function getCiaraBudgetSyncSettings(shopId: string): Promise<CiaraB
   return { ...DEFAULT_CIARA_BUDGET_SYNC, ...saved };
 }
 
-export async function saveCiaraBudgetSyncSettings(shopId: string, settings: CiaraBudgetSyncSettings) {
-  await setAppSetting(shopId, CIARA_BUDGET_SYNC_KEY, settings);
+export async function saveCiaraBudgetSyncSettings(shopId: string, settings: Partial<CiaraBudgetSyncSettings>) {
+  await patchSyncSettings(prisma.appSetting, shopId, CIARA_BUDGET_SYNC_KEY, DEFAULT_CIARA_BUDGET_SYNC, settings);
 }
 
 /** 取り込みがオンで、手入力を見るだけにする店（日別一覧・予算管理で使う） */
@@ -71,9 +72,8 @@ export async function runCiaraBudgetSync(shopId: string, admin: AdminClient): Pr
   const settings = await getCiaraBudgetSyncSettings(shopId);
   const finish = async (lastRun: NonNullable<CiaraBudgetSyncSettings["lastRun"]>, synced?: string[]) => {
     await saveCiaraBudgetSyncSettings(shopId, {
-      ...settings,
       lastRun,
-      syncedLocationIds: synced ?? settings.syncedLocationIds,
+      ...(synced === undefined ? {} : { syncedLocationIds: synced }),
     });
     return lastRun;
   };
