@@ -318,18 +318,18 @@ export async function loadAdminSalesSummary({ request }: LoaderFunctionArgs) {
       for (const loc of validTargetLocations) {
         try {
           const candidates = buildLocationIdCandidates(loc.shopifyLocationGid);
-          const cached = await prisma.salesSummaryCacheDaily.findFirst({
+          const cached = targetDate < today && !forceRecomputeDaily ? await prisma.salesSummaryCacheDaily.findFirst({
             where: {
               shopId: shop.id,
               locationId: { in: candidates },
               targetDate,
             },
             orderBy: { updatedAt: "desc" },
-          });
+          }) : null;
           // 過去日のみ DB キャッシュを読む。当日は常に再計算（以前は「当日かつキャッシュあり」で再計算に到達せず数値が永遠に更新されない不具合があった）
           const useLocationDailyCache =
             Boolean(cached) && !forceRecomputeDaily && targetDate < today;
-          if (useLocationDailyCache) {
+          if (useLocationDailyCache && cached) {
             rowsRaw.push(toDailyRowFromCache(loc.shopifyLocationGid, loc.name, targetDate, cached));
             continue;
           }

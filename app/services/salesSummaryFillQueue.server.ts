@@ -1,3 +1,4 @@
+import { runAsSettlementBackground } from "../lib/shopifyGraphqlThrottle.server";
 /**
  * 売上サマリー: 保存（SalesSummaryCacheDaily）の無い「店×日」を裏で数えて保存するキュー（pg-boss / PostgreSQL）。
  *
@@ -77,7 +78,7 @@ export async function processSalesSummaryFillJob(
   if (isPast && hasCache) return "skipped";
   const key = salesSummaryComputeKey(shopId, locationGid, day);
   try {
-    await shareInFlight(key, () => deps.compute(admin, shopId, locationGid, locationName, day));
+    await shareInFlight(key, () => runAsSettlementBackground(() => deps.compute(admin, shopId, locationGid, locationName, day)));
     clearSalesSummaryComputeFailed(key);
     return "done";
   } catch (e) {

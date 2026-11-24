@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { createSettlementWorkQueue } from "../utils/settlementWorkQueue.server";
 /**
  * Shopify Admin GraphQL の Throttled 対策（リトライ・バックオフ）
  * GAS 精算スクリプトの graphqlFetch 相当。会員カード customer.server と同方針。
@@ -104,23 +106,14 @@ export async function adminGraphqlWithRetry<TJson = unknown>(
   throw new ThrottledExhaustedError();
 }
 
-/** ショップ単位で精算系 GraphQL を直列化（同時プレビューで枠を使い切らない） */
-const shopSettlementGraphqlQueue = new Map<string, Promise<unknown>>();
-
-export async function runSettlementGraphqlSerial<T>(
-  shopId: string,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const prev = shopSettlementGraphqlQueue.get(shopId) ?? Promise.resolve();
-  const task = prev
-    .then(() => fn())
-    .finally(() => {
-      if (shopSettlementGraphqlQueue.get(shopId) === task) {
-        shopSettlementGraphqlQueue.delete(shopId);
-      }
-    });
-  shopSettlementGraphqlQueue.set(shopId, task);
-  return task as Promise<T>;
+/** 画面は優先。バックグラウンドも8件ごとに進め、同時実行は常に1件。 */
+const settlementQueue = createSettlementWorkQueue();
+const backgroundContext = new AsyncLocalStorage<boolean>();
+export function runAsSettlementBackground<T>(fn: () => Promise<T>): Promise<T> {
+  return backgroundContext.run(true, fn);
+}
+export function runSettlementGraphqlSerial<T>(shopId: string, fn: () => Promise<T>): Promise<T> {
+  return settlementQueue.run(shopId, backgroundContext.getStore() === true, fn);
 }
 
 export const SETTLEMENT_THROTTLED_USER_MESSAGE =

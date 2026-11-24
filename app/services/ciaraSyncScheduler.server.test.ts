@@ -120,3 +120,12 @@ describe("createCiaraSyncScheduler", () => {
     assert.equal(s.status().state, "running");
   }));
 });
+
+it("失敗後の再起動中も原因を保持し、起動成功後に解除する", quiet(async () => {
+ let count=0;
+ const scheduler=createCiaraSyncScheduler({tag:"retry-state",queue:"q",cron:"* * * * *",ready:()=>true,work:async()=>{},restartDelayMs:0,queueAttempts:1,sleep:noSleep,
+ createBoss:()=>fakeBoss({createFails:count++===0?1:0}).boss});
+ await scheduler.ensure();assert.equal(scheduler.status().hadFailure,true);const reason=scheduler.status().error;assert.ok(reason);
+ const retry=scheduler.ensure();assert.equal(scheduler.status().state,"starting");assert.equal(scheduler.status().hadFailure,true);assert.equal(scheduler.status().error,reason);
+ await retry;assert.equal(scheduler.status().state,"running");assert.equal(scheduler.status().hadFailure,false);assert.equal(scheduler.status().error,undefined);
+}));
