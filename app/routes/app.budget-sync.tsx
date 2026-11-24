@@ -4,13 +4,13 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Form, redirect, useActionData, useLoaderData, useLocation, useNavigate, useNavigation } from "react-router";
-import { Page, Layout, Card, Text, BlockStack, InlineStack, Banner, Badge, Button, TextField, Checkbox } from "@shopify/polaris";
+import { Page, Layout, Card, Text, BlockStack, InlineStack, Banner, Badge, Button, Checkbox } from "@shopify/polaris";
 import { useState } from "react";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
 import {
   ciaraBudgetSyncAvailable,
-  ciaraBudgetSyncSecret,
+  ciaraSyncServerReady,
   getCiaraBudgetSyncSettings,
   runCiaraBudgetSync,
   saveCiaraBudgetSyncSettings,
@@ -35,7 +35,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const shop = await resolveShop(session.shop, admin);
   const settings = await getCiaraBudgetSyncSettings(shop.id);
-  return { settings, hasSecret: Boolean(ciaraBudgetSyncSecret()) };
+  return { settings, hasSecret: ciaraSyncServerReady() };
 }
 
 export async function action({ request }: ActionFunctionArgs): Promise<Response> {
@@ -52,16 +52,9 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
     return Response.json({ ok: Boolean(lastRun?.ok), intent, message: lastRun?.message ?? "" } satisfies ActionResult);
   }
 
-  const endpointUrl = String(formData.get("endpointUrl") ?? "").trim();
   const enabled = formData.get("enabled") === "on";
-  if (endpointUrl && !/^https:\/\//.test(endpointUrl)) {
-    return Response.json({ ok: false, intent, message: "ciara-system の URL は https:// で始めてください" } satisfies ActionResult, { status: 400 });
-  }
-  if (enabled && !endpointUrl) {
-    return Response.json({ ok: false, intent, message: "取り込むときは ciara-system の URL を入れてください" } satisfies ActionResult, { status: 400 });
-  }
   const current = await getCiaraBudgetSyncSettings(shop.id);
-  await saveCiaraBudgetSyncSettings(shop.id, { ...current, enabled, endpointUrl });
+  await saveCiaraBudgetSyncSettings(shop.id, { ...current, enabled });
   return Response.json({ ok: true, intent, message: "保存しました" } satisfies ActionResult);
 }
 
@@ -72,7 +65,6 @@ export default function BudgetSyncPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [enabled, setEnabled] = useState(settings.enabled);
-  const [endpointUrl, setEndpointUrl] = useState(settings.endpointUrl);
   const running = navigation.state === "submitting" && navigation.formData?.get("intent") === "run";
   const last = settings.lastRun;
 
@@ -126,7 +118,6 @@ export default function BudgetSyncPage() {
                   failed={Boolean(actionData && !actionData.ok && actionData.intent === "save")}
                   onDiscard={() => {
                     setEnabled(settings.enabled);
-                    setEndpointUrl(settings.endpointUrl);
                   }}
                 />
                 <BlockStack gap="300">
@@ -136,14 +127,6 @@ export default function BudgetSyncPage() {
                     name="enabled"
                     checked={enabled}
                     onChange={setEnabled}
-                  />
-                  <TextField
-                    label="ciara-system の予算の URL"
-                    name="endpointUrl"
-                    value={endpointUrl}
-                    onChange={setEndpointUrl}
-                    autoComplete="off"
-                    placeholder="https://…/api/external/pos-receipt/budgets"
                   />
                 </BlockStack>
               </Form>

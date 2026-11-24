@@ -41,7 +41,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const section = sectionOf(params.section);
   const { admin, session } = await authenticate.admin(request);
   const { settings, locations, link } = await loadSalesSummarySettingsPage(admin, session.shop);
-  // ciara-system と入店数をそろえる（Ciara のカスタムアプリだけ）
+  // ciara-system と入店数を見せ合う（Ciara のカスタムアプリだけ）
   const { ciaraVisitSyncAvailable } = await import("../services/ciaraVisitSync.server");
   return { section, settings, locations, link, ciaraVisitSync: section === "footfall" && ciaraVisitSyncAvailable() };
 }
@@ -208,10 +208,10 @@ function SettingsForm({ data, failed }: { data: Data; failed: boolean }) {
             <PickList label="報告する店" items={stores} value={footfall} onChange={setFootfall} allLabel="すべての店" name="footfallTargetLocationIds" />
           </AdminBlock>
           {data.ciaraVisitSync ? (
-            <AdminBlock title="ciara-system とそろえる" description="POS と ciara-system のどちらで報告しても、あとから入れた入店数が両方に出るようにします。">
+            <AdminBlock title="ciara-system と見せ合う" description="POS と ciara-system のどちらで報告しても、あとから入れた入店数が両方に出るようにします。">
               <div>
                 <button type="button" className="Admin-secondary" onClick={() => void confirmLeave().then(() => navigate(withSearch("/app/footfall-sync", q)))}>
-                  そろえる設定
+                  見せ合う設定
                 </button>
               </div>
             </AdminBlock>

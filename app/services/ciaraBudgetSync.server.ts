@@ -2,7 +2,7 @@
  * ciara-system の日別予算を 1 時間ごとに取り込む（Ciara のカスタムアプリだけ。T 2026-11-23）。
  *
  * - 自社用（APP_DISTRIBUTION=inhouse）でないときは何もしない。公開アプリでは設定も画面も出さない
- * - 鍵は環境変数 CIARA_BUDGET_SYNC_SECRET（ciara-system の POS_RECEIPT_BUDGET_SECRET と同じ値）。無ければ止まっている
+ * - 鍵は環境変数 CIARA_BUDGET_SYNC_SECRET（ciara-system の POS_RECEIPT_BUDGET_SECRET と同じ値）、読む先は CIARA_SYSTEM_ORIGIN。無ければ止まっている
  * - 管理画面の設定で「取り込む」をオンにした店（ショップ）だけ動く
  * - 今月と来月の分を読み、Shopify のロケーションが同じ店の予算を ciara-system の値に合わせる
  * - 読むのは ciara-system・書くのはこのアプリの DB だけ。Shopify・ciara-system には書かない
@@ -21,6 +21,7 @@ import {
   type CiaraBudgetSyncSettings,
 } from "../utils/ciaraBudgetSync";
 import { applyBudgetDayChanges } from "./budgetWrite.server";
+import { CIARA_BUDGETS_PATH, ciaraSystemUrl } from "./ciaraSystemOrigin.server";
 import { expandLocationIdsForBudgetQuery } from "../utils/salesSummaryBudgetFromDb.server";
 
 export const CIARA_BUDGET_SYNC_QUEUE = "pos-receipt-ciara-budget-sync";
@@ -34,6 +35,11 @@ export function ciaraBudgetSyncAvailable(): boolean {
 
 export function ciaraBudgetSyncSecret(): string {
   return process.env.CIARA_BUDGET_SYNC_SECRET?.trim() ?? "";
+}
+
+/** サーバーの準備（合言葉と読む先）ができているか */
+export function ciaraSyncServerReady(): boolean {
+  return Boolean(ciaraBudgetSyncSecret() && ciaraSystemUrl(CIARA_BUDGETS_PATH));
 }
 
 export async function getCiaraBudgetSyncSettings(shopId: string): Promise<CiaraBudgetSyncSettings> {
@@ -60,15 +66,6 @@ const LOCATIONS_QUERY = `#graphql
   }
 `;
 
-function isAllowedEndpoint(url: string): boolean {
-  try {
-    const u = new URL(url);
-    return u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
 /** 1 回取り込む。結果は設定の lastRun に残す（失敗しても前の予算は変えない） */
 export async function runCiaraBudgetSync(shopId: string, admin: AdminClient): Promise<CiaraBudgetSyncSettings["lastRun"]> {
   const settings = await getCiaraBudgetSyncSettings(shopId);
@@ -85,14 +82,12 @@ export async function runCiaraBudgetSync(shopId: string, admin: AdminClient): Pr
   if (!ciaraBudgetSyncAvailable()) return finish({ ...base, ok: false, message: "このアプリでは使えません" });
   if (!settings.enabled) return finish({ ...base, ok: false, message: "取り込みがオフです" });
   const secret = ciaraBudgetSyncSecret();
-  if (!secret) return finish({ ...base, ok: false, message: "サーバーの準備がまだです" });
-  if (!isAllowedEndpoint(settings.endpointUrl)) {
-    return finish({ ...base, ok: false, message: "ciara-system の URL が正しくありません（https:// で始まる URL）" });
-  }
+  const endpoint = ciaraSystemUrl(CIARA_BUDGETS_PATH);
+  if (!secret || !endpoint) return finish({ ...base, ok: false, message: "サーバーの準備がまだです" });
 
   const timezone = await getShopTimezoneForDaily(admin, shopId);
   const dates = syncDateRange(getCalendarDateStringInTimeZone(new Date(), timezone));
-  const url = new URL(settings.endpointUrl);
+  const url = endpoint;
   url.searchParams.set("from", dates[0]);
   url.searchParams.set("to", dates[dates.length - 1]);
 
@@ -100,6 +95,8 @@ export async function runCiaraBudgetSync(shopId: string, admin: AdminClient): Pr
   try {
     const res = await fetch(url, {
       headers: { "X-Cron-Secret": secret, Accept: "application/json" },
+      // 転送先へ合言葉を持っていかない
+      redirect: "error",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (res.status === 401) return finish({ ...base, ok: false, message: "ciara-system につなげませんでした（合言葉が合いません）" });
@@ -168,7 +165,7 @@ let startPromise: Promise<PgBoss | null> | null = null;
 
 /** 1 時間ごとの取り込みを始める（自社用で、鍵があるときだけ。1 プロセス 1 回） */
 export function ensureCiaraBudgetSyncScheduler(): Promise<PgBoss | null> {
-  if (!ciaraBudgetSyncAvailable() || !ciaraBudgetSyncSecret() || !process.env.DATABASE_URL?.trim()) {
+  if (!ciaraBudgetSyncAvailable() || !ciaraBudgetSyncSecret() || !ciaraSystemUrl(CIARA_BUDGETS_PATH) || !process.env.DATABASE_URL?.trim()) {
     return Promise.resolve(null);
   }
   if (!startPromise) {

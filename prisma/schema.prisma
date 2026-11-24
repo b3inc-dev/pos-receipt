@@ -338,12 +338,10 @@ model FootfallReport {
   createdBy  String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
-  /// 人が入店数を入れた時刻（POS で入れた時刻、または ciara-system で入れた時刻）。ciara-system とそろえるとき、あとから入れたほうを採る
+  /// 人が入店数を入れた時刻（POS で入れた時刻、または ciara-system で人が入れた時刻）。ciara-system と見せ合うとき、あとから入れたほうを出す
   enteredAt  DateTime @default(now())
-  /// どこで入れた数か（"pos" = POS で報告、"ciara" = ciara-system から取り込み）
+  /// どこで入れた数か（"pos" = POS で報告、"ciara" = ciara-system で入れた数を読んで入れた）。ciara-system が読みにくるのは "pos" だけ
   source     String   @default("pos")
-  /// ciara-system へ送り終えた時刻（POS で入れた数だけ。null = まだ送っていない）
-  pushedAt   DateTime?
 
   @@unique([shopId, locationId, targetDate])
   @@index([shopId])

@@ -1,16 +1,16 @@
 /**
- * /app/footfall-sync — 入店数を ciara-system とそろえる（Ciara のカスタムアプリだけ）
+ * /app/footfall-sync — 入店数を ciara-system と見せ合う（Ciara のカスタムアプリだけ）
  * 公開アプリ（自社用でない）では開けない（売上サマリー設定へ戻す）。
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Form, redirect, useActionData, useLoaderData, useLocation, useNavigate, useNavigation } from "react-router";
-import { Page, Layout, Card, Text, BlockStack, InlineStack, Banner, Badge, Button, TextField, Checkbox } from "@shopify/polaris";
+import { Page, Layout, Card, Text, BlockStack, InlineStack, Banner, Badge, Button, Checkbox } from "@shopify/polaris";
 import { useState } from "react";
 import { authenticate } from "../shopify.server";
 import { resolveShop } from "../utils/shopResolver.server";
-import { ciaraBudgetSyncSecret } from "../services/ciaraBudgetSync.server";
 import {
   ciaraVisitSyncAvailable,
+  ciaraVisitSyncServerReady,
   getCiaraVisitSyncSettings,
   runCiaraVisitSync,
   saveCiaraVisitSyncSettings,
@@ -37,7 +37,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const shop = await resolveShop(session.shop, admin);
   const settings = await getCiaraVisitSyncSettings(shop.id);
-  return { settings, hasSecret: Boolean(ciaraBudgetSyncSecret()) };
+  return { settings, hasSecret: ciaraVisitSyncServerReady() };
 }
 
 export async function action({ request }: ActionFunctionArgs): Promise<Response> {
@@ -54,16 +54,9 @@ export async function action({ request }: ActionFunctionArgs): Promise<Response>
     return Response.json({ ok: lastRun.ok, intent, message: lastRun.message } satisfies ActionResult);
   }
 
-  const endpointUrl = String(formData.get("endpointUrl") ?? "").trim();
   const enabled = formData.get("enabled") === "on";
-  if (endpointUrl && !/^https:\/\//.test(endpointUrl)) {
-    return Response.json({ ok: false, intent, message: "ciara-system の URL は https:// で始めてください" } satisfies ActionResult, { status: 400 });
-  }
-  if (enabled && !endpointUrl) {
-    return Response.json({ ok: false, intent, message: "そろえるときは ciara-system の URL を入れてください" } satisfies ActionResult, { status: 400 });
-  }
   const current = await getCiaraVisitSyncSettings(shop.id);
-  await saveCiaraVisitSyncSettings(shop.id, { ...current, enabled, endpointUrl });
+  await saveCiaraVisitSyncSettings(shop.id, { ...current, enabled });
   return Response.json({ ok: true, intent, message: "保存しました" } satisfies ActionResult);
 }
 
@@ -74,7 +67,6 @@ export default function FootfallSyncPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [enabled, setEnabled] = useState(settings.enabled);
-  const [endpointUrl, setEndpointUrl] = useState(settings.endpointUrl);
   const running = navigation.state === "submitting" && navigation.formData?.get("intent") === "run";
   const last = settings.lastRun;
 
@@ -83,26 +75,24 @@ export default function FootfallSyncPage() {
   // お知らせ枠は 1 つ（失敗のときだけ）
   let notice: { title: string; text: string } | null = null;
   if (actionData && !actionData.ok) {
-    notice = { title: actionData.intent === "run" ? "そろえられませんでした" : "保存できませんでした", text: actionData.message };
+    notice = { title: actionData.intent === "run" ? "読めませんでした" : "保存できませんでした", text: actionData.message };
   }
   // つながりの状態（サーバーの設定の名前は出さない）
   const connected = hasSecret && settings.enabled && Boolean(last?.ok);
   const connectionNote = connected
-    ? last?.receiveOff
-      ? "ciara-system の入店数はこちらに入ります。ciara-system で受け取りがオフなので、POS で入れた数は ciara-system にはまだ送っていません。"
-      : "10 分ごとにそろえています。POS で報告した数は、その場で ciara-system にも送ります。"
+    ? "ciara-system で入れた入店数を 5 分ごとと、POS で売上サマリーを開いたときに読んでいます。"
     : !settings.enabled
-      ? "そろえるをオンにして保存すると、つながりを確かめます。"
+      ? "見せ合うをオンにして保存すると、つながりを確かめます。"
       : !hasSecret
-        ? "サーバーの準備がまだです。準備ができると 10 分ごとにそろえます。"
+        ? "サーバーの準備がまだです。準備ができると 5 分ごとに読みます。"
         : last && !last.ok
           ? last.message
-          : "「今すぐそろえる」を押すと、つながりを確かめます。";
+          : "「今すぐ読む」を押すと、つながりを確かめます。";
 
   return (
     <PolarisPageWrapper>
       <Page
-        title="ciara-system と入店数をそろえる"
+        title="ciara-system と入店数を見せ合う"
         subtitle="POS と ciara-system のどちらで入店数を報告しても、あとから入れた数が両方に出るようにします。"
         backAction={{ content: "入店数の報告", onAction: back }}
       >
@@ -120,8 +110,8 @@ export default function FootfallSyncPage() {
           )}
 
           <Layout.AnnotatedSection
-            title="そろえる設定"
-            description="今日を含めた前の 35 日の入店数を、Shopify のロケーションが同じ店どうしでそろえます。同じ店・同じ日は、あとから入れた数を採ります。"
+            title="見せ合う設定"
+            description="今日を含めた前の 35 日の入店数を、Shopify のロケーションが同じ店どうしで見せ合います。同じ店・同じ日は、あとから入れた数を出します。どちらも相手の数を読むだけで、相手には書きません。"
           >
             <Card>
               <Form method="post" className="Admin-form">
@@ -130,31 +120,22 @@ export default function FootfallSyncPage() {
                   failed={Boolean(actionData && !actionData.ok && actionData.intent === "save")}
                   onDiscard={() => {
                     setEnabled(settings.enabled);
-                    setEndpointUrl(settings.endpointUrl);
                   }}
                 />
                 <BlockStack gap="300">
                   <Checkbox
-                    label="ciara-system と入店数をそろえる"
-                    helpText="オンの間も、POS からいつもどおり入店数を報告できます。ciara-system で入れた数も POS の売上サマリーに出ます。"
+                    label="ciara-system と入店数を見せ合う"
+                    helpText="オンの間も、POS からいつもどおり入店数を報告できます。ciara-system で入れた数も POS の売上サマリーに出ます。POS で入れた数は ciara-system が読みにきます。"
                     name="enabled"
                     checked={enabled}
                     onChange={setEnabled}
-                  />
-                  <TextField
-                    label="ciara-system の入店数の URL"
-                    name="endpointUrl"
-                    value={endpointUrl}
-                    onChange={setEndpointUrl}
-                    autoComplete="off"
-                    placeholder="https://…/api/external/pos-receipt/visits"
                   />
                 </BlockStack>
               </Form>
             </Card>
           </Layout.AnnotatedSection>
 
-          <Layout.AnnotatedSection title="前回のそろえ" description="10 分ごとに動きます。すぐにそろえたいときは「今すぐそろえる」を押します。">
+          <Layout.AnnotatedSection title="前回の読み込み" description="5 分ごとに動きます。すぐに読みたいときは「今すぐ読む」を押します。">
             <Card>
               <BlockStack gap="300">
                 <InlineStack gap="200" blockAlign="center">
@@ -169,12 +150,12 @@ export default function FootfallSyncPage() {
                       <Text as="span">{fmtJst(last.at)}</Text>
                     </InlineStack>
                   ) : (
-                    <Text as="span" tone="subdued">まだそろえていません</Text>
+                    <Text as="span" tone="subdued">まだ読んでいません</Text>
                   )}
                   <Form method="post">
                     <input type="hidden" name="intent" value="run" />
                     <Button submit loading={running} disabled={!settings.enabled || !hasSecret}>
-                      今すぐそろえる
+                      今すぐ読む
                     </Button>
                   </Form>
                 </InlineStack>
@@ -183,12 +164,7 @@ export default function FootfallSyncPage() {
                     <Text as="p">{last.message}</Text>
                     {last.unmatched.length > 0 && (
                       <Text as="p" tone="caution">
-                        このストアに同じロケーションが無いのでそろえなかった店: {last.unmatched.join("・")}
-                      </Text>
-                    )}
-                    {last.skipped.length > 0 && (
-                      <Text as="p" tone="caution">
-                        ciara-system で入店数報告の店になっていないので送れなかった店: {last.skipped.join("・")}
+                        このストアに同じロケーションが無いので入れなかった店: {last.unmatched.join("・")}
                       </Text>
                     )}
                   </BlockStack>
