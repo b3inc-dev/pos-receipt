@@ -52,12 +52,45 @@ export type LayoutStyle = {
   customCss: string;
 };
 
+/** 用紙別の見た目。未保存の幅は従来の本文サイズ・行間を引き継ぐ。 */
+export type PaperPrintStyle = {
+  fontSizePt: number;
+  amountFontSizePt: number;
+  logoWidthMm: number;
+  marginXMm: number;
+  marginYMm: number;
+  lineHeight: number;
+};
+
+export const PAPER_STYLE_LIMITS = {
+  fontSizePt: { min: 8, max: 24 },
+  amountFontSizePt: { min: 9, max: 24 },
+  logoWidthMm: { min: 15, max: 42 },
+  marginXMm: { min: 0.5, max: 4 },
+  marginYMm: { min: 0, max: 8 },
+  lineHeight: { min: 1, max: 1.8 },
+} as const;
+
+export function defaultPaperPrintStyle(mm: 58 | 80): PaperPrintStyle {
+  return { fontSizePt: 10, amountFontSizePt: 11, logoWidthMm: mm === 58 ? 30 : 36,
+    marginXMm: mm === 58 ? 1 : 1.5, marginYMm: 3, lineHeight: 1.35 };
+}
+
+export function resolvePaperPrintStyle(layout: Pick<ReceiptLayout, "style" | "paperWidthMm" | "paperStyles">): PaperPrintStyle {
+  return layout.paperStyles?.[layout.paperWidthMm] ?? {
+    ...defaultPaperPrintStyle(layout.paperWidthMm),
+    fontSizePt: layout.style.fontSizePx * 0.75,
+    lineHeight: layout.style.lineHeight,
+  };
+}
+
 export type ReceiptLayout = {
   version: 1;
   kind: ReceiptKind;
   mode: "blocks" | "code";
   paperWidthMm: 58 | 80;
   style: LayoutStyle;
+  paperStyles?: Partial<Record<58 | 80, PaperPrintStyle>>;
   blocks: LayoutBlock[];
   /** mode "code" のときのテンプレート（HTML 文書全体） */
   code: string;
@@ -105,6 +138,13 @@ export function canonicalLayout(l: ReceiptLayout): ReceiptLayout {
       paddingPx: l.style.paddingPx,
       customCss: l.style.customCss,
     },
+    ...(l.paperStyles && Object.keys(l.paperStyles).length ? {
+      paperStyles: Object.fromEntries(([58, 80] as const).flatMap((mm) => {
+        const p = l.paperStyles?.[mm];
+        return p ? [[mm, { fontSizePt: p.fontSizePt, amountFontSizePt: p.amountFontSizePt,
+          logoWidthMm: p.logoWidthMm, marginXMm: p.marginXMm, marginYMm: p.marginYMm, lineHeight: p.lineHeight }]] : [];
+      })) as ReceiptLayout["paperStyles"],
+    } : {}),
     blocks: l.blocks.map((b) => ({ id: b.id, type: b.type, hidden: b.hidden === true, settings: Object.fromEntries(Object.keys(b.settings).sort().map((k) => [k, b.settings[k]])) })),
     code: l.code,
   };
