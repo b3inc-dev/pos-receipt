@@ -35,7 +35,7 @@ import {
 } from "../utils/ciaraVisitSync";
 import { ciaraBudgetSyncSecret } from "./ciaraBudgetSync.server";
 import { CIARA_VISITS_PATH, ciaraSystemUrl } from "./ciaraSystemOrigin.server";
-import { refreshCachedVisitors } from "./footfallWrite.server";
+import { refreshCiaraVisitCache } from "./ciaraVisitCache.server";
 
 export const CIARA_VISIT_SYNC_QUEUE = "pos-receipt-ciara-visit-sync";
 const FETCH_TIMEOUT_MS = 20_000;
@@ -66,12 +66,12 @@ export async function saveCiaraVisitSyncSettings(shopId: string, settings: Parti
  * 見せ合うのオン・オフを変えたとき、ciara-system の数がある日の控え（売上サマリーの日次）を、出す数で直す。
  * オフにすると POS で入れた数だけに戻る（写しの表は消さない。オンに戻せばまた使う）。
  */
-export async function refreshCachedVisitorsForCiaraDays(shopId: string, shown: boolean) {
+export async function refreshCachedVisitorsForCiaraDays(shopId: string) {
   const rows = await prisma.ciaraFootfallDaily.findMany({
     where: { shopId },
     select: { locationId: true, targetDate: true },
   });
-  for (const r of rows) await refreshCachedVisitors(prisma, shopId, r.locationId, r.targetDate, shown);
+  for (const r of rows) await refreshCiaraVisitCache(shopId, r.locationId, r.targetDate);
 }
 
 const LOCATIONS_QUERY = `#graphql
@@ -163,13 +163,13 @@ export async function runCiaraVisitSync(shopId: string, admin: AdminClient): Pro
       update: { visitors: u.visitCount, reportedAt, fetchedAt: now },
       create: { shopId, locationId: locationGid, targetDate: date, visitors: u.visitCount, reportedAt, fetchedAt: now },
     });
-    await refreshCachedVisitors(prisma, shopId, locationGid, date, true);
+    await refreshCiaraVisitCache(shopId, locationGid, date);
     if (u.before !== u.visitCount) changes.push({ storeName: nameOf(locationGid), date, before: u.before, after: u.visitCount });
   }
   for (const d of plan.deletes) {
     const { locationGid, date } = splitVisitKey(d.key);
     await prisma.ciaraFootfallDaily.deleteMany({ where: { shopId, locationId: locationGid, targetDate: date } });
-    await refreshCachedVisitors(prisma, shopId, locationGid, date, true);
+    await refreshCiaraVisitCache(shopId, locationGid, date);
     changes.push({ storeName: nameOf(locationGid), date, before: d.before, after: null });
   }
   if (changes.length > 0) {
