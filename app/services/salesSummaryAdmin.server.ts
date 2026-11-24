@@ -775,4 +775,3 @@ export async function loadAdminSalesSummary({ request }: LoaderFunctionArgs) {
     };
   }
 }
-

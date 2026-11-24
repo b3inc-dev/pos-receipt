@@ -47,4 +47,3 @@ export function normalizeTemplateData(partial: Record<string, unknown> | null): 
   data.showDate = data.showIssueDate;
   return data;
 }
-
