@@ -158,35 +158,50 @@ export async function ensureSalesSummaryFillWorker(): Promise<PgBoss | null> {
   return bossStartPromise;
 }
 
+export type EnqueueFillResult = {
+  /** キューが使えたか（false = キューが起きない・送るときに失敗した） */
+  usable: boolean;
+  /** 新しく積めた数 */
+  queued: number;
+  /** 同じ「店×日」がもう待っていたので積まなかった数（使えないのとは違う） */
+  alreadyQueued: number;
+};
+
 /**
- * 「店×日」を裏で数えるよう積む。積めた数を返す（キューが使えなければ 0）。
- * 同じ「店×日」が待っていれば積まない。
+ * 「店×日」を裏で数えるよう積む。同じ「店×日」が待っていれば積まない。
+ * today を渡すと、今日の分を先に数える（priority）。店をオンにした直後の過去の日の後ろに並ばないため。
  */
 export async function enqueueSalesSummaryFill(
   shopDomain: string,
   shopId: string,
   items: SalesSummaryFillItem[],
-): Promise<number> {
-  if (items.length === 0) return 0;
+  opts: { today?: string | null } = {},
+): Promise<EnqueueFillResult> {
+  if (items.length === 0) return { usable: true, queued: 0, alreadyQueued: 0 };
   const boss = await ensureSalesSummaryFillWorker();
-  if (!boss) return 0;
+  if (!boss) return { usable: false, queued: 0, alreadyQueued: 0 };
   let queued = 0;
+  let alreadyQueued = 0;
+  let failed = 0;
   for (const item of items) {
     const data: SalesSummaryFillJobData = { shopDomain, shopId, ...item };
-    const id = await boss
-      .send(SALES_SUMMARY_FILL_QUEUE_NAME, data, {
+    try {
+      const id = await boss.send(SALES_SUMMARY_FILL_QUEUE_NAME, data, {
         singletonKey: fillSingletonKey(shopId, item.locationGid, item.day),
+        priority: opts.today && item.day >= opts.today ? 10 : 0,
         retryLimit: 2,
         retryDelay: 60,
         retryBackoff: true,
-      })
-      .catch((e) => {
-        console.warn("[sales-summary fill] enqueue failed", computeFailureReason(e));
-        return null;
       });
-    if (id) queued += 1;
+      // policy short: 同じ鍵が待っているときは何も積まず null が返る
+      if (id) queued += 1;
+      else alreadyQueued += 1;
+    } catch (e) {
+      failed += 1;
+      console.warn("[sales-summary fill] enqueue failed", computeFailureReason(e));
+    }
   }
-  return queued;
+  return { usable: failed === 0, queued, alreadyQueued };
 }
 
 /** 店の当月 1 日〜昨日（保存の無い日だけ）を積む。店舗設定で売上サマリーをオンにしたとき用 */
@@ -218,7 +233,7 @@ export async function enqueueSalesSummaryFillForMonth(
       if (!have.has(`${raw}|${day}`)) items.push({ locationGid: loc.shopifyLocationGid, locationName: loc.name, day });
     }
   }
-  return enqueueSalesSummaryFill(shopDomain, shopId, items);
+  return (await enqueueSalesSummaryFill(shopDomain, shopId, items, { today })).queued;
 }
 
 // サーバーが立ち上がったら、すぐワーカーを起こす（再起動の前に積んだジョブを続ける）

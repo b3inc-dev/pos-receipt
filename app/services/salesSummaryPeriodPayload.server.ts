@@ -82,6 +82,8 @@ export type PeriodSalesSummaryPayload = {
   pendingFailedCount?: number;
   /** 数えきれなかった販売チャネル×日（保存が無いもの）の数 */
   pendingChannelCount?: number;
+  /** 今日の分で数え直せず保存の数字を使った店・チャネルがあるとき、そのいちばん古い保存の時刻（ISO） */
+  staleTodayAsOf?: string;
   /** cachedOnly のときだけ付く。false = 保存済みが足りず rows は空（画面は数え直しを待つ） */
   cacheComplete?: boolean;
 };
@@ -213,6 +215,7 @@ export async function buildPeriodSalesSummaryPayload(
   let pendingLocations: PendingLocation[] = [];
   let pendingFailedCount = 0;
   let pendingChannelCount = 0;
+  let staleTodayAsOf: string | null = null;
 
   if (dateFrom && dateTo) {
     const start = new Date(dateFrom + "T00:00:00Z").getTime();
@@ -229,7 +232,7 @@ export async function buildPeriodSalesSummaryPayload(
         locationId: { in: locationIdsForQuery },
         targetDate: { gte: dateFrom, lte: dateTo },
       },
-      select: { locationId: true, targetDate: true },
+      select: { locationId: true, targetDate: true, updatedAt: true },
     });
     const locationCacheSet = buildLocationDayCacheSet(
       prefetchLocationCaches,
@@ -267,7 +270,7 @@ export async function buildPeriodSalesSummaryPayload(
               channelId: { in: enabledChannels.map((c) => c.id) },
               targetDate: { gte: dateFrom, lte: dateTo },
             },
-            select: { channelId: true, targetDate: true },
+            select: { channelId: true, targetDate: true, updatedAt: true },
           });
     const channelCachePresence = new Set(
       prefetchChannelCaches.map((r) => `${r.channelId}|${r.targetDate}`),
@@ -338,58 +341,101 @@ export async function buildPeriodSalesSummaryPayload(
     const deferred: Array<{ day: string; loc: SalesSummaryLocationRow }> = [];
     /** そのうち保存がまったく無い（数字が欠けている）もの。POS の「数え終わっていない」はこれだけ */
     const missing: Array<{ day: string; loc: SalesSummaryLocationRow; failed: boolean }> = [];
-    const hasLocCache = (loc: SalesSummaryLocationRow, day: string) =>
-      locationCacheSet.has(`${loc.shopifyLocationGid}|${day}`);
-    const deferLoc = (item: { day: string; loc: SalesSummaryLocationRow }, failed: boolean) => {
-      deferred.push(item);
-      if (!hasLocCache(item.loc, item.day)) missing.push({ ...item, failed });
-    };
-    for (const item of locationWork) {
-      const { day, loc } = item;
-      const key = `loc|${shop.id}|${loc.shopifyLocationGid}|${day}`;
-      // 少し前に失敗した「店×日」は、開くたびに数え直さない（裏で数え直す）
-      if (isSalesSummaryComputeRecentlyFailed(key)) {
-        deferLoc(item, true);
-        continue;
-      }
-      if (outOfTime()) {
-        // 時間切れでも、ほかの読み込みが数えている途中の分は待って使う（もう走っているので増えない）
-        const running = getInFlight(key);
-        if (running && options.signal?.aborted !== true) {
-          try {
-            await running;
-            continue;
-          } catch {
-            /* 下で裏に回す */
-          }
-        }
-        deferLoc(item, false);
-        continue;
-      }
-      try {
-        await shareSalesSummaryCompute(loadId, key, () =>
-          computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, day),
-        );
-        clearSalesSummaryComputeFailed(key);
-      } catch (e) {
-        markSalesSummaryComputeFailed(key);
-        deferLoc(item, true);
-        console.warn(
-          `[sales-summary period] compute failed shop=${shop.id} location=${loc.shopifyLocationGid.replace("gid://shopify/Location/", "")} day=${day} reason=${computeFailureReason(e)}`,
-        );
-      }
-      budget -= 1;
+    /** 保存がある分を数え直せなかったときの、その保存の時刻（POS に「◯時◯分時点」と出す） */
+    let staleOldest: Date | null = null;
+    let staleFailedCount = 0;
+    const locCacheAt = new Map<string, Date>();
+    for (const r of prefetchLocationCaches as Array<{ locationId: string; targetDate: string; updatedAt?: Date }>) {
+      const canon = resolveCanonicalLocationGid(targetLocations, r.locationId);
+      if (canon && r.updatedAt) locCacheAt.set(`${canon}|${r.targetDate}`, new Date(r.updatedAt));
     }
-    // 裏で数えるとき（POS）は、保存が無い分だけを「数え終わっていない」に数える（今日の分は保存の数字で出す）。
-    // そうでないとき（管理画面・公開リンク）は今まで通り、数えなかった分をすべて数える
-    const skippedLoc = canDefer ? missing.length : deferred.length;
+    const chCacheAt = new Map<string, Date>();
+    for (const r of prefetchChannelCaches as Array<{ channelId: string; targetDate: string; updatedAt?: Date }>) {
+      if (r.updatedAt) chCacheAt.set(`${r.channelId}|${r.targetDate}`, new Date(r.updatedAt));
+    }
+    const noteStale = (at: Date | undefined, failed: boolean) => {
+      if (failed) staleFailedCount += 1;
+      if (at && (!staleOldest || at < staleOldest)) staleOldest = at;
+    };
+
+    type Task =
+      | { kind: "loc"; day: string; loc: SalesSummaryLocationRow; hasCache: boolean }
+      | { kind: "ch"; day: string; ch: EnabledCh; hasCache: boolean };
+    const locTasks: Task[] = locationWork.map(({ day, loc }) => ({
+      kind: "loc",
+      day,
+      loc,
+      hasCache: locationCacheSet.has(`${loc.shopifyLocationGid}|${day}`),
+    }));
+    const chTasks: Task[] = channelWork.map(({ day, ch }) => ({
+      kind: "ch",
+      day,
+      ch,
+      hasCache: channelCachePresence.has(`${ch.id}|${day}`),
+    }));
+    // 裏で数えられるとき（POS）は、保存の無い分（店→チャネル）を先に、保存がある今日の分をあとに数える。
+    // 忙しい時間に今日の数え直しだけで時間を使い切り、欠けた日がいつまでも埋まらないのを防ぐ。
+    // そうでないときは今まで通り（店の分を古い日から、そのあとチャネル）
+    const tasks: Task[] = canDefer
+      ? [
+          ...locTasks.filter((t) => !t.hasCache),
+          ...chTasks.filter((t) => !t.hasCache),
+          ...locTasks.filter((t) => t.hasCache),
+          ...chTasks.filter((t) => t.hasCache),
+        ]
+      : [...locTasks, ...chTasks];
 
     let skippedCh = 0;
-    for (const { day, ch } of channelWork) {
-      const hasCache = channelCachePresence.has(`${ch.id}|${day}`);
+    for (const t of tasks) {
+      if (t.kind === "loc") {
+        const { day, loc } = t;
+        const item = { day, loc };
+        const key = `loc|${shop.id}|${loc.shopifyLocationGid}|${day}`;
+        const defer = (failed: boolean) => {
+          deferred.push(item);
+          if (!t.hasCache) missing.push({ ...item, failed });
+          else noteStale(locCacheAt.get(`${loc.shopifyLocationGid}|${day}`), failed);
+        };
+        // 少し前に失敗した「店×日」は、開くたびに数え直さない（裏で数え直す）
+        if (isSalesSummaryComputeRecentlyFailed(key)) {
+          defer(true);
+          continue;
+        }
+        if (outOfTime()) {
+          // 時間切れでも、ほかの読み込みが数えている途中の分は待って使う（もう走っているので増えない）
+          const running = getInFlight(key);
+          if (running && options.signal?.aborted !== true) {
+            try {
+              await running;
+              continue;
+            } catch {
+              /* 下で裏に回す */
+            }
+          }
+          defer(false);
+          continue;
+        }
+        try {
+          await shareSalesSummaryCompute(loadId, key, () =>
+            computeAndCacheDailySummary(admin, shop.id, loc.shopifyLocationGid, loc.name, day),
+          );
+          clearSalesSummaryComputeFailed(key);
+        } catch (e) {
+          markSalesSummaryComputeFailed(key);
+          defer(true);
+          console.warn(
+            `[sales-summary period] compute failed shop=${shop.id} location=${loc.shopifyLocationGid.replace("gid://shopify/Location/", "")} day=${day} reason=${computeFailureReason(e)}`,
+          );
+        }
+        budget -= 1;
+        continue;
+      }
+
+      const { day, ch, hasCache } = t;
       if (outOfTime()) {
         // 保存がある今日の分は保存の数字を使う。保存が無い分だけ「数え終わっていない」に数える
         if (!hasCache || !canDefer) skippedCh += 1;
+        else noteStale(chCacheAt.get(`${ch.id}|${day}`), false);
         continue;
       }
       const key = `ch|${shop.id}|${ch.id}|${day}`;
@@ -406,12 +452,16 @@ export async function buildPeriodSalesSummaryPayload(
         );
       } catch (e) {
         if (!hasCache) skippedCh += 1;
+        else noteStale(chCacheAt.get(`${ch.id}|${day}`), true);
         console.warn(
           `[sales-summary period] channel compute failed shop=${shop.id} channel=${ch.id} day=${day} reason=${computeFailureReason(e)}`,
         );
       }
       budget -= 1;
     }
+    // 裏で数えるとき（POS）は、保存が無い分だけを「数え終わっていない」に数える（今日の分は保存の数字で出す）。
+    // そうでないとき（管理画面・公開リンク）は今まで通り、数えなかった分をすべて数える
+    const skippedLoc = canDefer ? missing.length : deferred.length;
 
     // 数えきれなかった「店×日」は裏で数える（積めなければ、しばらくは古い日から数える形に戻す）
     if (deferred.length > 0 && canDefer && options.backgroundShopDomain) {
@@ -422,9 +472,10 @@ export async function buildPeriodSalesSummaryPayload(
       }));
       const shopDomain = options.backgroundShopDomain;
       void import("./salesSummaryFillQueue.server")
-        .then(({ enqueueSalesSummaryFill }) => enqueueSalesSummaryFill(shopDomain, shop.id, items))
-        .then((queued) => {
-          if (queued === 0) markSalesSummaryFillQueueUnavailable();
+        .then(({ enqueueSalesSummaryFill }) => enqueueSalesSummaryFill(shopDomain, shop.id, items, { today }))
+        .then((result) => {
+          // 「もう待っているので積まなかった」は使えるまま。キューが起きない・送れないときだけ戻す
+          if (!result.usable) markSalesSummaryFillQueueUnavailable();
         })
         .catch((e) => {
           markSalesSummaryFillQueueUnavailable();
@@ -445,6 +496,8 @@ export async function buildPeriodSalesSummaryPayload(
     pendingLocations = [...byLoc.values()];
     pendingFailedCount = missing.filter((m) => m.failed).length;
     pendingChannelCount = skippedCh;
+    pendingFailedCount += staleFailedCount;
+    staleTodayAsOf = canDefer && staleOldest ? (staleOldest as Date).toISOString() : null;
 
     pendingComputeEstimate = skippedLoc + skippedCh;
     periodCachePartial = pendingComputeEstimate > 0;
@@ -686,9 +739,10 @@ export async function buildPeriodSalesSummaryPayload(
     displayOptions: merged,
     periodCachePartial,
     pendingComputeEstimate,
-    ...(pendingLocations.length > 0 || pendingChannelCount > 0
+    ...(pendingLocations.length > 0 || pendingChannelCount > 0 || pendingFailedCount > 0
       ? { pendingLocations, pendingFailedCount, pendingChannelCount }
       : {}),
+    ...(staleTodayAsOf ? { staleTodayAsOf } : {}),
     ...(cachedOnly ? { cacheComplete: true } : {}),
   };
 }

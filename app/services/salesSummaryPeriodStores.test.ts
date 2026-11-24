@@ -19,6 +19,7 @@ delete process.env.SALES_SUMMARY_FILL_QUEUE;
 const SHOP_ID = "shop1";
 const TODAY = "2026-11-24";
 const gid = (n: number) => `gid://shopify/Location/${n}`;
+const CACHED_AT = new Date("2026-11-24T01:23:00Z");
 
 type Loc = { id: string; shopId: string; shopifyLocationGid: string; name: string; salesSummaryEnabled: boolean };
 let locations: Loc[] = [];
@@ -125,7 +126,9 @@ mock.module(new URL("./salesSummaryFillQueue.server.ts", import.meta.url).href, 
   namedExports: {
     enqueueSalesSummaryFill: async (shopDomain: string, _shopId: string, items: Array<{ locationGid: string; day: string }>) => {
       enqueued.push({ shopDomain, items });
-      return enqueueResult ?? items.length;
+      if (enqueueResult === 0) return { usable: false, queued: 0, alreadyQueued: 0 };
+      if (enqueueResult === -1) return { usable: true, queued: 0, alreadyQueued: items.length };
+      return { usable: true, queued: items.length, alreadyQueued: 0 };
     },
   },
 });
@@ -182,7 +185,7 @@ function reset(nLoc: number) {
 
 function cacheAll(locs: Loc[], from: string, to: string) {
   for (const l of locs) for (const d of days(from, to)) {
-    cacheRows.push({ shopId: SHOP_ID, locationId: l.shopifyLocationGid, targetDate: d, actual: 1000, orders: 1, items: 1, visitors: null, budget: null });
+    cacheRows.push({ shopId: SHOP_ID, locationId: l.shopifyLocationGid, targetDate: d, actual: 1000, orders: 1, items: 1, visitors: null, budget: null, updatedAt: CACHED_AT } as (typeof cacheRows)[number]);
   }
 }
 
@@ -383,4 +386,36 @@ test("販売チャネルの分が時間で数えきれないときも、保存�
   assert.ok(channelCalls.length < 5);
   assert.equal(p.periodCachePartial, true);
   assert.equal(p.pendingChannelCount, 5 - channelCalls.length);
+});
+
+test("同じ「店×日」がもう積んであるだけなら、キューは使えるまま（続けて開いても時間で区切る）", async () => {
+  await settle();
+  reset(1);
+  cacheAll(locations, "2026-11-01", "2026-11-10");
+  enqueueResult = -1; // 2 回目以降: 前の読み込みが積んだ分がまだ待っている
+  computeDelayMs = 20;
+  for (let i = 0; i < 2; i++) {
+    await buildPeriodSalesSummaryPayload(admin, shop, { dateFrom: "2026-11-01", dateTo: TODAY, ...POS });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(isSalesSummaryFillQueueUsable(), true, `${i + 1} 回目のあとも使える`);
+  }
+  assert.ok(computeCalls.length < 2 * 14, `時間で区切っている（数えたのは ${computeCalls.length} 個）`);
+});
+
+test("保存の無いチャネル×日を、保存がある今日の店の分より先に数える。数え直せなかった今日の分は保存の時刻を返す", async () => {
+  await settle();
+  reset(4);
+  cacheAll(locations, "2026-11-01", TODAY);
+  channels = [{ id: "ch1", displayName: "オンライン", sourceNames: ["web"] }];
+  computeDelayMs = 25;
+  const p = await buildPeriodSalesSummaryPayload(admin, shop, {
+    dateFrom: "2026-11-22",
+    dateTo: TODAY,
+    computeTimeBudgetMs: 60,
+    backgroundShopDomain: "x.myshopify.com",
+  });
+  assert.equal(channelCalls[0], "ch1|2026-11-22", "チャネルの欠けた日を先に");
+  assert.ok(computeCalls.length < 4, "今日の店の分は時間の残りで");
+  assert.equal(p.staleTodayAsOf, CACHED_AT.toISOString());
+  await new Promise((r) => setTimeout(r, 50));
 });

@@ -164,22 +164,35 @@ function pendingCountNotice(period) {
   if (!period) return "";
   const list = Array.isArray(period.pendingLocations) ? period.pendingLocations.filter((p) => p && p.days > 0) : [];
   const failed = Number(period.pendingFailedCount) || 0;
-  const where = (() => {
+  const names = (() => {
     if (list.length === 0) return "";
-    const first = list[0];
     const more = list.length > 1 ? ` ほか${list.length - 1}店` : "";
-    return `（${String(first.locationName || "店")} あと${first.days}日分${more}）`;
+    return `${String(list[0].locationName || "店")}${more}`;
   })();
+  const staleAt = staleTodayLabel(period.staleTodayAsOf);
+  const stale = staleAt ? `今日の分は ${staleAt} 時点の数字の店があります。` : "";
   if (failed > 0) {
-    return `数えられなかった日があります${where}。少したってから「更新」を押してください。何度押しても消えないときは、管理者に知らせてください。`;
+    // 失敗した日の数と、数え終わっていない日の数は違うので、日数は出さない
+    return `数えられなかった分があります${names ? `（${names}）` : ""}。${stale}少したってから「更新」を押してください。何度押しても消えないときは、管理者に知らせてください。`;
   }
   if (list.length > 0) {
-    return `まだ数え終わっていない日があります${where}。少したってから「更新」を押すと、数字がそろいます。`;
+    const first = list[0];
+    const more = list.length > 1 ? ` ほか${list.length - 1}店` : "";
+    return `まだ数え終わっていない日があります（${String(first.locationName || "店")} あと${first.days}日分${more}）。${stale}少したってから「更新」を押すと、数字がそろいます。`;
   }
   if (period.periodCachePartial === true) {
-    return "まだ数え終わっていない分があります。少したってから「更新」を押すと、数字がそろいます。";
+    return `まだ数え終わっていない分があります。${stale}少したってから「更新」を押すと、数字がそろいます。`;
   }
+  if (stale) return `${stale}少したってから「更新」を押すと、最新の数字になります。`;
   return "";
+}
+
+/** 保存の時刻（ISO）を店の言葉の「HH:MM」に（端末の時刻で。日次の「◯時◯分時点」と同じ） */
+function staleTodayLabel(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 function cachedAsOfLabel(cached) {
