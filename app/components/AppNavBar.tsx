@@ -41,6 +41,7 @@ const GROUP_PATHS: Record<string, string[]> = {
   "/app/budget-management": [
     "/app/budget-management",
     "/app/budget-settings",
+    "/app/budget-sync",
     "/app/channel-budget-management",
   ],
   "/app/general-settings": [
