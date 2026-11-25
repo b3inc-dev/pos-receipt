@@ -103,7 +103,7 @@ describe("receiptLayout: 描き方", () => {
     assert.match(t, /総売上 ¥128,400/);
     assert.match(t, /件数 42件/);
     assert.match(t, /現金 \( 18件 \) ¥45,300/);
-    assert.match(t, /うち返金 1件 -¥4,950/);
+    assert.match(t, /うち返金 1件 ¥4,950/);
   });
 
   it("どちらの用紙でも本文は印字領域を使う", () => {

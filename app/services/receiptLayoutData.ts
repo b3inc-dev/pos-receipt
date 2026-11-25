@@ -74,6 +74,7 @@ export type OrderData = {
 
 export type SettlementPayment = {
   label: string;
+  /** 返金後の取引額。refundは内訳なので、ここからもう一度引かない。 */
   net: number;
   count: number;
   refund: number;
@@ -104,7 +105,7 @@ export type SettlementData = {
   item_count: number;
   /** 合計額（返品含む）= total + refund_total（Ciara の gift-receipt.liquid と同じ） */
   total_including_returns: number;
-  /** 納金額（現金の取引額 − 特例の返金 − 商品券釣り ＋ 事後調整）。計算は精算エンジン */
+  /** 納金額（現金売上 − 現金返金 − 特例の返金 − 商品券釣り）。事後調整は支払方法別の保存値に反映済み */
   cash_deposit: number;
   /** 表示する順に並べた支払方法（電子マネーの合計などの行も精算側で入れる） */
   payments: SettlementPayment[];

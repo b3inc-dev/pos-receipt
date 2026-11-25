@@ -69,7 +69,7 @@ export const TEMPLATE_VARIABLES: Record<ReceiptKind, TemplateVariable[]> = {
     { name: "settlement.item_count", label: "点数" },
     { name: "settlement.total_including_returns", label: "合計額（返品含む）" },
     { name: "settlement.cash_deposit", label: "納金額" },
-    { name: "settlement.payments", label: "支払方法別の一覧（label・net・count・refund・refund_count）" },
+    { name: "settlement.payments", label: "支払方法別の一覧（netは返金後の取引額。返金額refundは内訳として別表示）" },
     { name: "settlement.is_resettlement", label: "確定し直した精算（再精算）なら true" },
   ],
   receipt: [

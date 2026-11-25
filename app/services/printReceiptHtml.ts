@@ -1,3 +1,4 @@
+import { paymentAmountAfterRefund } from "./receiptLayoutSettlementCalc";
 /**
  * 印字用 HTML レンダラ（販売・精算・領収書で共有）
  * Shopify Printing API は text/html をレシートプリンタへ直送する。
@@ -258,7 +259,7 @@ function renderSettlement(m: SettlementReceiptPrintModel): string {
         s.refund && s.refund > 0
           ? ` 返金${s.refundCount ?? 0}件 ${yen(s.refund, m.currency)}`
           : "";
-      return `<div class="row"><span>${esc(s.label)}</span><span><span class="amount">${esc(yen(s.net, m.currency))}</span> (${esc(s.txCount ?? 0)}件)${esc(extra)}</span></div>`;
+      return `<div class="row"><span>${esc(s.label)}</span><span><span class="amount">${esc(yen(paymentAmountAfterRefund(s), m.currency))}</span> (${esc(s.txCount ?? 0)}件)${esc(extra)}</span></div>`;
     })
     .join("");
 
