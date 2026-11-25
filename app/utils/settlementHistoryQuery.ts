@@ -140,3 +140,60 @@ export function buildSettlementHistoryWhere(filter: SettlementHistoryFilter) {
     ...kindWhere,
   };
 }
+
+/** 照合用 CSV（`/api/settlements/export-csv`）の対象期間の上限。サーバー側の SETTLEMENT_CSV_MAX_DAYS と同じ値。 */
+export const SETTLEMENT_CSV_EXPORT_MAX_DAYS = 366;
+
+export type SettlementCsvExportRequest =
+  | { ok: true; path: string }
+  | { ok: false; reason: string };
+
+/**
+ * 精算履歴の絞り込みから、照合用 CSV の取得先を作る。
+ * CSV は開始日と終了日の両方が要る。区分（点検）は CSV 側で常に除くので渡さない。
+ */
+export function buildSettlementCsvExportRequest(filter: {
+  dateFrom: string;
+  dateTo: string;
+  locationId: string;
+}): SettlementCsvExportRequest {
+  const dateFrom = normalizeHistoryDate(filter.dateFrom);
+  const dateTo = normalizeHistoryDate(filter.dateTo);
+  if (!dateFrom || !dateTo) {
+    return { ok: false, reason: "開始日と終了日を入れると書き出せます。" };
+  }
+  const days =
+    Math.round(
+      (Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`)) / 86_400_000,
+    ) + 1;
+  if (!Number.isFinite(days) || days < 1) {
+    return { ok: false, reason: "開始日を終了日より前にすると書き出せます。" };
+  }
+  if (days > SETTLEMENT_CSV_EXPORT_MAX_DAYS) {
+    return {
+      ok: false,
+      reason: `書き出せるのは ${SETTLEMENT_CSV_EXPORT_MAX_DAYS} 日までです。期間を短くしてください。`,
+    };
+  }
+  const params = new URLSearchParams({ dateFrom, dateTo });
+  const locationId = filter.locationId.trim();
+  if (locationId) params.set("locationId", locationId);
+  return { ok: true, path: `/api/settlements/export-csv?${params.toString()}` };
+}
+
+/** Content-Disposition から保存するファイル名を取る（filename* を優先）。取れなければ fallback。 */
+export function csvFilenameFromDisposition(header: string | null | undefined, fallback: string): string {
+  const text = header ?? "";
+  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(text);
+  if (star) {
+    try {
+      const decoded = decodeURIComponent(star[1].trim());
+      if (decoded) return decoded;
+    } catch {
+      // 壊れた filename* は filename にまかせる
+    }
+  }
+  const plain = /filename\s*=\s*"([^"]+)"/i.exec(text) ?? /filename\s*=\s*([^;]+)/i.exec(text);
+  const name = plain?.[1]?.trim();
+  return name || fallback;
+}

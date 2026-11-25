@@ -3,7 +3,9 @@
  * 日付・ロケーション・金額を並べて比較する。
  */
 import type { LoaderFunctionArgs } from "react-router";
+import { useState } from "react";
 import { useLoaderData, useLocation, useNavigate, useSearchParams } from "react-router";
+import { ExportIcon } from "@shopify/polaris-icons";
 import {
   Page,
   Layout,
@@ -27,7 +29,9 @@ import { getShopTimezoneForDaily } from "../utils/shopTimezone.server";
 import { PolarisPageWrapper } from "../components/PolarisPageWrapper";
 import { TabGroupBar, SETTLEMENT_TABS } from "../components/TabGroupBar";
 import {
+  buildSettlementCsvExportRequest,
   buildSettlementHistoryWhere,
+  csvFilenameFromDisposition,
   dateRangeWarning,
   findSettlementLocation,
   formatExecutedAt,
@@ -159,18 +163,28 @@ export default function SettlementHistoryPage() {
   const q = location.search || "";
   const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
   const hasFilter = Boolean(data.dateFrom || data.dateTo || data.locationId || data.kind !== "all");
+  const [csvExporting, setCsvExporting] = useState(false);
+  const [csvError, setCsvError] = useState<string | null>(null);
+  const [csvDone, setCsvDone] = useState<string | null>(null);
+
+  const resetCsvMessages = () => {
+    setCsvError(null);
+    setCsvDone(null);
+  };
 
   const handleFilter = (key: string, value: string) => {
     const params = new URLSearchParams(location.search);
     if (value) params.set(key, value);
     else params.delete(key);
     params.set("page", "1");
+    resetCsvMessages();
     setSearchParams(params);
   };
 
   const clearFilters = () => {
     const params = new URLSearchParams(location.search);
     for (const key of ["dateFrom", "dateTo", "locationId", "kind", "page"]) params.delete(key);
+    resetCsvMessages();
     setSearchParams(params);
   };
 
@@ -187,6 +201,70 @@ export default function SettlementHistoryPage() {
   if (data.locationId && !data.locations.some((row) => row.id === data.locationId)) {
     locationOptions.push({ label: "未登録のロケーション", value: data.locationId });
   }
+
+  const csvRequest = buildSettlementCsvExportRequest({
+    dateFrom: data.dateFrom,
+    dateTo: data.dateTo,
+    locationId: data.locationId,
+  });
+
+  const handleCsvExport = async () => {
+    if (!csvRequest.ok || csvExporting) return;
+    setCsvExporting(true);
+    setCsvError(null);
+    setCsvDone(null);
+    try {
+      // 埋め込み画面の fetch には App Bridge がセッショントークンを付ける（支払方法・過去データ取込と同じ）
+      const res = await fetch(csvRequest.path);
+      if (!res.ok) {
+        let reason = `サーバーが ${res.status} を返しました。`;
+        try {
+          const body = (await res.json()) as { error?: unknown };
+          if (typeof body.error === "string" && body.error) reason = body.error;
+        } catch {
+          // JSON でない応答は状態コードだけを出す
+        }
+        setCsvError(reason);
+        return;
+      }
+      const blob = await res.blob();
+      const filename = csvFilenameFromDisposition(
+        res.headers.get("Content-Disposition"),
+        `精算照合_${data.dateFrom}_${data.dateTo}.csv`,
+      );
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 0);
+      const count = Number(res.headers.get("X-Settlement-Count") ?? "");
+      setCsvDone(
+        Number.isFinite(count) && count === 0
+          ? "対象の精算がないため、見出しだけの CSV を書き出しました。"
+          : Number.isFinite(count)
+            ? `精算 ${count} 件を CSV に書き出しました。`
+            : "CSV を書き出しました。",
+      );
+    } catch (error) {
+      setCsvError(
+        error instanceof Error && error.message
+          ? `通信できませんでした（${error.message}）。もう一度お試しください。`
+          : "通信できませんでした。もう一度お試しください。",
+      );
+    } finally {
+      setCsvExporting(false);
+    }
+  };
+
+  // お知らせ枠は 1 つだけ（失敗 → 注意の順）
+  const notice = csvError
+    ? { tone: "critical" as const, title: "CSV を書き出せませんでした", body: csvError }
+    : data.rangeWarning
+      ? { tone: "warning" as const, title: undefined, body: data.rangeWarning }
+      : null;
 
   const emptyHeading = hasFilter ? "条件に一致する履歴がありません" : "精算履歴がありません";
 
@@ -237,13 +315,37 @@ export default function SettlementHistoryPage() {
             <Layout.Section>
               <Card>
                 <BlockStack gap="300">
-                  <Text variant="headingSm" as="h2">
-                    絞り込み
-                  </Text>
+                  <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
+                    <Text variant="headingSm" as="h2">
+                      絞り込み
+                    </Text>
+                    <Button
+                      icon={ExportIcon}
+                      onClick={handleCsvExport}
+                      loading={csvExporting}
+                      disabled={!csvRequest.ok}
+                    >
+                      CSVを書き出す
+                    </Button>
+                  </InlineStack>
                   <Text as="p" tone="subdued">
                     日付、ロケーション、総売上、純売上、返金を比較できます。実行日時は {data.timeZone} です。
                   </Text>
-                  {data.rangeWarning ? <Banner tone="warning">{data.rangeWarning}</Banner> : null}
+                  <Text as="p" tone="subdued">
+                    {csvRequest.ok
+                      ? "CSV は照合用で、店舗・日ごとの最新の精算を支払方法ごとに出します（点検は含みません）。"
+                      : csvRequest.reason}
+                  </Text>
+                  {csvDone ? (
+                    <Text as="p" tone="success">
+                      <span role="status">{csvDone}</span>
+                    </Text>
+                  ) : null}
+                  {notice ? (
+                    <Banner tone={notice.tone} title={notice.title}>
+                      {notice.body}
+                    </Banner>
+                  ) : null}
                   <div className="AdminHistory-filters">
                     <TextField
                       label="開始日"
