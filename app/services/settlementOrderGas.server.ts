@@ -529,13 +529,29 @@ async function resolveOrderFromDraftWithBackoff(
   return null;
 }
 
-async function completeDraftOrder(admin: AdminClient, draftId: string): Promise<void> {
+/**
+ * 下書きを確定し、できた注文（draftOrderComplete の draftOrder.order）を返す。
+ * 返りに注文が無いときだけ null（呼び出し側で下書き → 注文の読み直し・タグ検索に回す）。
+ *
+ * 確定のあとすぐタグで探すと、Shopify の検索の反映が遅れて見つからないことがある
+ * （2026-11-23 開発ストア: 点検の注文はできたのに「確定後に注文を検索できませんでした」で失敗）。
+ * そのため、まず確定の返りの注文をそのまま使う。
+ */
+async function completeDraftOrder(
+  admin: AdminClient,
+  draftId: string,
+): Promise<{ id: string; name: string } | null> {
   let completeRes = await admin.graphql(DRAFT_ORDER_COMPLETE, {
     variables: { id: draftId, paymentPending: true },
   });
   let completeJson = (await completeRes.json()) as {
     errors?: { message: string }[];
-    data?: { draftOrderComplete?: { userErrors: { message: string }[] } };
+    data?: {
+      draftOrderComplete?: {
+        draftOrder?: { id?: string; order?: { id?: string; name?: string } | null } | null;
+        userErrors: { message: string }[];
+      };
+    };
   };
 
   const gqlErrMsg = completeJson.errors?.map((e) => e.message).join(", ") ?? "";
@@ -551,12 +567,38 @@ async function completeDraftOrder(admin: AdminClient, draftId: string): Promise<
   if (ue.length > 0) {
     throw new Error(`精算注文の確定に失敗しました: ${ue.map((e) => e.message).join(", ")}`);
   }
+  const order = completeJson.data?.draftOrderComplete?.draftOrder?.order;
+  if (order?.id) return { id: order.id, name: String(order.name ?? "") };
+  return null;
+}
+
+/**
+ * 確定した下書きからできた注文を決める。
+ * 1. 確定の返りの注文 → 2. 下書きを読み直して order → 3. 一意タグで検索（反映待ちで少し待つ）
+ */
+async function resolveCompletedOrder(
+  admin: AdminClient,
+  draftId: string,
+  uniq: string,
+  fromComplete: { id: string; name: string } | null,
+): Promise<{ id: string; name: string } | null> {
+  if (fromComplete?.id && fromComplete.name) return fromComplete;
+  const fromDraft = await resolveOrderFromDraftWithBackoff(admin, draftId);
+  if (fromDraft) return fromDraft;
+  let order = await searchOrderByUniqTag(admin, uniq);
+  if (!order) {
+    await sleep(1500);
+    order = await searchOrderByUniqTag(admin, uniq);
+  }
+  if (order) return order;
+  // 名前だけ取れなかったときは、id だけでも先へ進める（印字の案内に名前が出ないだけ）
+  return fromComplete?.id ? fromComplete : null;
 }
 
 /**
  * GAS createSettlementOrderAlways
  */
-async function createSettlementOrderAlwaysGas(
+export async function createSettlementOrderAlwaysGas(
   admin: AdminClient,
   targetDateYmd: string,
   locationName: string,
@@ -602,16 +644,8 @@ async function createSettlementOrderAlwaysGas(
     throw new Error(`精算下書き注文の作成に失敗しました: ${ue.map((e) => e.message).join(", ")}`);
   }
 
-  await completeDraftOrder(admin, draftId);
-
-  let order = await resolveOrderFromDraftWithBackoff(admin, draftId);
-  if (!order) {
-    order = await searchOrderByUniqTag(admin, uniq);
-  }
-  if (!order) {
-    await sleep(1500);
-    order = await searchOrderByUniqTag(admin, uniq);
-  }
+  const completed = await completeDraftOrder(admin, draftId);
+  const order = await resolveCompletedOrder(admin, draftId, uniq, completed);
   if (!order) {
     throw new Error("精算注文の確定後に注文を検索できませんでした（GAS uniq フォールバック後）");
   }
@@ -643,7 +677,7 @@ async function createSettlementOrderAlwaysGas(
 /**
  * GAS createZeroInspectionOrder
  */
-async function createZeroInspectionOrderGas(
+export async function createZeroInspectionOrderGas(
   admin: AdminClient,
   locationName: string,
 ): Promise<{ orderId: string; orderName: string; uniqTag: string }> {
@@ -695,17 +729,8 @@ async function createZeroInspectionOrderGas(
     throw new Error(`点検下書き注文の作成に失敗しました: ${ue.map((e) => e.message).join(", ")}`);
   }
 
-  await completeDraftOrder(admin, draftId);
-
-  let order = await searchOrderByUniqTag(admin, uniq);
-  if (!order) {
-    await sleep(1200);
-    order = await searchOrderByUniqTag(admin, uniq);
-  }
-  if (!order) {
-    await sleep(1500);
-    order = await searchOrderByUniqTag(admin, uniq);
-  }
+  const completed = await completeDraftOrder(admin, draftId);
+  const order = await resolveCompletedOrder(admin, draftId, uniq, completed);
   if (!order) {
     throw new Error("点検注文の確定後に注文を検索できませんでした");
   }
