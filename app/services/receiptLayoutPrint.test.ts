@@ -215,7 +215,7 @@ describe("精算: 支払方法の並びとまとめの行（Ciara の gift-recei
     ]);
     const sum = rows[2];
     assert.equal(sum.is_group, true);
-    assert.deepEqual([sum.net, sum.count, sum.refund, sum.refund_count], [2700, 3, 100, 1]);
+    assert.deepEqual([sum.net, sum.count, sum.refund, sum.refund_count], [2600, 3, 100, 1]);
   });
   it("電子マネーが 1 種類だけならまとめの行を出さない", () => {
     const rows = orderSettlementPayments(SECTIONS.filter((s) => s.label !== "交通系ICカード決済"), CIARA_SETTLEMENT_CALC);
@@ -234,14 +234,14 @@ describe("精算: 支払方法の並びとまとめの行（Ciara の gift-recei
 describe("精算: 納金額", () => {
   const calc = { ...CIARA_SETTLEMENT_CALC, refundDeductLocations: ["Ciara梅田エスト店", "84233453814"] };
   it("ふつうの店は 現金の取引額 − 商品券釣り", () => {
-    assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "gid://shopify/Location/1", locationName: "渋谷店", voucherChange: 200 }), 7800);
+    assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "gid://shopify/Location/1", locationName: "渋谷店", voucherChange: 200 }), 7300);
   });
   it("特例の店は wespo などの返金も引く（名前でも ID でも）", () => {
-    assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "x", locationName: "ciara梅田エスト店", voucherChange: 0 }), 7700);
-    assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "gid://shopify/Location/84233453814", locationName: "", voucherChange: 0 }), 7700);
+    assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "x", locationName: "ciara梅田エスト店", voucherChange: 0 }), 7200);
+    assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "gid://shopify/Location/84233453814", locationName: "", voucherChange: 0 }), 7200);
   });
   it("事後調整は足さない（現金の取引額にもう入っている）", () => {
-    assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "", locationName: "", voucherChange: 0 }), 8000);
+    assert.equal(settlementCashDeposit(SECTIONS, { calc, locationId: "", locationName: "", voucherChange: 0 }), 7500);
   });
 });
 
@@ -268,14 +268,14 @@ describe("精算レシートのデータとレイアウトの印字", () => {
     assert.equal(d.settlement.total_including_returns, 17610);
     assert.equal(d.settlement.kind_label, "点検");
     assert.equal(d.settlement.as_of, "2026年11月22日 21:05");
-    assert.equal(d.settlement.cash_deposit, 8000);
+    assert.equal(d.settlement.cash_deposit, 7500);
   });
   it("Ciara 風の精算レシート: 電子マネー(合計)・納金額が出る", () => {
     const html = renderLayoutForPrint(ciaraSettlementLayout(), settlementTemplateData({ ...base, isInspection: false }), 80);
     assert.ok(html);
     assert.ok(html!.includes("電子マネー(合計)"));
     assert.ok(html!.includes("納金額"));
-    assert.ok(html!.includes("¥8,000"));
+    assert.ok(html!.includes("¥7,500"));
     assert.ok(html!.indexOf("現金") < html!.indexOf("クレジットカード"));
   });
   it("売上に含めない送料等: ある日だけ行が出る（標準・Ciara 風）", () => {

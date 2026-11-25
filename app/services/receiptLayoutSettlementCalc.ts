@@ -118,6 +118,7 @@ export function normalizeSettlementCalc(raw: unknown): SettlementCalcSettings {
 
 export type SettlementSectionInput = {
   label: string;
+  /** 保存値のnetは返金前の売上額。集計エンジンの形式を維持する。 */
   net: number;
   refund: number;
   txCount: number;
@@ -137,10 +138,15 @@ export type SettlementPaymentRow = {
 const lc = (s: string) => s.trim().toLowerCase();
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+/** 支払方法別の保存値（返金前）から、印字する返金後の取引額へ変換する。 */
+export function paymentAmountAfterRefund(s: { net?: unknown; refund?: unknown }): number {
+  return num(s.net) - num(s.refund);
+}
+
 function toRow(s: SettlementSectionInput): SettlementPaymentRow {
   return {
     label: s.label,
-    net: num(s.net),
+    net: paymentAmountAfterRefund(s),
     count: num(s.txCount),
     refund: num(s.refund),
     refund_count: num(s.refundCount),
@@ -155,7 +161,7 @@ function groupRow(rule: PaymentGroupRule, sections: SettlementSectionInput[]): S
   if (active < rule.minActive) return null;
   return {
     label: rule.label,
-    net: hits.reduce((a, s) => a + num(s.net), 0),
+    net: hits.reduce((a, s) => a + paymentAmountAfterRefund(s), 0),
     count: hits.reduce((a, s) => a + num(s.txCount), 0),
     refund: hits.reduce((a, s) => a + num(s.refund), 0),
     refund_count: hits.reduce((a, s) => a + num(s.refundCount), 0),
@@ -216,7 +222,7 @@ function locationMatches(calc: SettlementCalcSettings, locationId: string, locat
 
 /**
  * 納金額。Ciara の gift-receipt.liquid と同じ式:
- * 現金の取引額 − （特例の店なら）指定した支払方法の返金 − 商品券釣り
+ * 現金売上 − 現金返金 − （特例の店なら）現金以外の指定支払方法の返金 − 商品券釣り
  */
 export function settlementCashDeposit(
   sections: SettlementSectionInput[],
@@ -234,8 +240,10 @@ export function settlementCashDeposit(
   let refundAdjust = 0;
   for (const s of sections) {
     const label = lc(s.label);
-    if (cashKeys.some((k) => label.includes(k))) cash += num(s.net);
-    if (special && deductKeys.some((k) => label.includes(k))) refundAdjust += num(s.refund);
+    const isCash = cashKeys.some((k) => label.includes(k));
+    if (isCash) cash += paymentAmountAfterRefund(s);
+    // 現金返金は上で引いている。特例の支払方法にも現金があっても二度引かない。
+    else if (special && deductKeys.some((k) => label.includes(k))) refundAdjust += num(s.refund);
   }
   // Ciara の liquid にあった「事後調整」（receipt_cash_manual_delta）は足さない。
   // このアプリでは「レシートの現金を直す」は精算エンジンが支払方法別の内訳（現金の取引額）にもう入れているので、足すと二重になる

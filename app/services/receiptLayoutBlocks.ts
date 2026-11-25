@@ -378,7 +378,7 @@ export const BLOCK_DEFS: BlockDef[] = [
   {
     type: "settlement_payments",
     label: "支払方法別",
-    description: "支払方法ごとの金額・件数・返金です。",
+    description: "支払方法ごとの返金後の取引額・件数と、返金の内訳です。",
     kinds: ["settlement"],
     settings: [
       { key: "heading", label: "見出し", type: "text", default: "" },
@@ -402,7 +402,7 @@ export const BLOCK_DEFS: BlockDef[] = [
       { key: "refund_count_label", label: "4 行: 返金件数の名前", type: "text", default: "返金件数" },
     ],
     template:
-      `<div class="blk">{% if s_heading != blank %}<div class="b">{{ s_heading | raw }}</div>{% endif %}{% for p in settlement.payments %}{% if s_style == "detailed" %}<div class="item"><div class="row"><span>{{ p.label }}</span><span></span></div><div class="row indent"><span>{{ s_net_label | raw }}</span><span class="print-value">{{ p.net | money }}</span></div><div class="row indent"><span>{{ s_refund_amount_label | raw }}</span><span class="print-value">{{ p.refund | money }}</span></div><div class="row indent"><span>{{ s_count_label | raw }}</span><span class="print-value">{{ p.count | number }}{{ s_count_unit | raw }}</span></div><div class="row indent"><span>{{ s_refund_count_label | raw }}</span><span class="print-value">{{ p.refund_count | number }}{{ s_count_unit | raw }}</span></div></div>{% else %}<div class="row"><span>{{ p.label }}{% if s_show_count %} (<span class="print-value">{{ p.count | number }}{{ s_count_unit | raw }}</span>){% endif %}</span><span class="print-value">{{ p.net | money }}</span></div>{% if s_show_refund and p.refund > 0 %}<div class="row indent fs-s"><span>{{ s_refund_label | raw }} <span class="print-value">{{ p.refund_count | number }}{{ s_count_unit | raw }}</span></span><span class="print-value">-{{ p.refund | money }}</span></div>{% endif %}{% endif %}{% endfor %}</div>`,
+      `<div class="blk">{% if s_heading != blank %}<div class="b">{{ s_heading | raw }}</div>{% endif %}{% for p in settlement.payments %}{% if s_style == "detailed" %}<div class="item"><div class="row"><span>{{ p.label }}</span><span></span></div><div class="row indent"><span>{{ s_net_label | raw }}</span><span class="print-value">{{ p.net | money }}</span></div><div class="row indent"><span>{{ s_refund_amount_label | raw }}</span><span class="print-value">{{ p.refund | money }}</span></div><div class="row indent"><span>{{ s_count_label | raw }}</span><span class="print-value">{{ p.count | number }}{{ s_count_unit | raw }}</span></div><div class="row indent"><span>{{ s_refund_count_label | raw }}</span><span class="print-value">{{ p.refund_count | number }}{{ s_count_unit | raw }}</span></div></div>{% else %}<div class="row"><span>{{ p.label }}{% if s_show_count %} (<span class="print-value">{{ p.count | number }}{{ s_count_unit | raw }}</span>){% endif %}</span><span class="print-value">{{ p.net | money }}</span></div>{% if s_show_refund and p.refund > 0 %}<div class="row indent fs-s"><span>{{ s_refund_label | raw }} <span class="print-value">{{ p.refund_count | number }}{{ s_count_unit | raw }}</span></span><span class="print-value">{{ p.refund | money }}</span></div>{% endif %}{% endif %}{% endfor %}</div>`,
   },
 
   // ── 領収書 ──────────────────────────────────────────
