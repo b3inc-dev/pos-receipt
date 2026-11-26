@@ -54,4 +54,21 @@ jobs:
               source.write_bytes(fixed)
           assert source.read_bytes() == fixed
           PY
-      - run: node --test --test-concurrency=1 --test-reporter=tap tests/isolated-pg-guard.test.mjs tests/settlement-lock.pg-acceptance.mjs tests/settlement-route.pg-acceptance.mjs
+      - name: Prove old cursor cycle is silently accepted
+        run: |
+          python3 - <<'PY'
+          import pathlib, subprocess
+          p = pathlib.Path("app/services/settlementUpstreamPage.server.ts")
+          fixed = p.read_bytes()
+          try:
+              p.write_bytes(subprocess.check_output(["git", "show", "49231ad89eb09a8c93e9fa8b2ab35f1a6bf19dad:app/services/settlementUpstreamPage.server.ts"]))
+              r = subprocess.run(["node", "--test", "--test-reporter=tap", "--test-name-pattern=RECEIPT-CURSOR-CYCLE-001", "tests/settlement-cursor-acceptance.mjs"], capture_output=True, text=True)
+              print(r.stdout)
+              if r.returncode != 1 or "repeated nonterminal cursor must reject" not in r.stdout or "# fail 1" not in r.stdout.splitlines():
+                  raise SystemExit("Baseline failed for an unexpected reason")
+              print("BASELINE_EXPECTED_FAILURE=1")
+          finally:
+              p.write_bytes(fixed)
+          assert p.read_bytes() == fixed
+          PY
+      - run: node --test --test-concurrency=1 --test-reporter=tap tests/isolated-pg-guard.test.mjs tests/settlement-lock.pg-acceptance.mjs tests/settlement-route.pg-acceptance.mjs tests/settlement-cursor-acceptance.mjs
