@@ -71,4 +71,4 @@ jobs:
               p.write_bytes(fixed)
           assert p.read_bytes() == fixed
           PY
-      - run: node --test --test-concurrency=1 --test-reporter=tap tests/isolated-pg-guard.test.mjs tests/settlement-lock.pg-acceptance.mjs tests/settlement-route.pg-acceptance.mjs tests/settlement-cursor-acceptance.mjs
+      - run: node --test --test-concurrency=1 --test-reporter=tap tests/isolated-pg-guard.test.mjs tests/settlement-lock.pg-acceptance.mjs tests/settlement-route.pg-acceptance.mjs tests/settlement-cursor-acceptance.mjs tests/settlement-engine-stream-acceptance.mjs
