@@ -48,7 +48,7 @@ function readGraphqlErrors(json: unknown): GraphqlErrorShape[] | null {
  * GraphQL errors、orders 欠落、pageInfo 欠落、次ページなのに cursor がない場合は throw する。
  * 呼び出し側は throw 時にそれまで積んだ注文を確定してはならない。
  */
-export function readOrdersPageOrThrow(json: unknown, context: string): OrdersConnectionPage {
+export function readOrdersPageOrThrow(json: unknown, context: string, seenCursors?: Set<string>): OrdersConnectionPage {
   const errors = readGraphqlErrors(json);
   if (!json || typeof json !== "object" || errors == null) {
     return reject(context, "invalid-payload");
@@ -72,6 +72,12 @@ export function readOrdersPageOrThrow(json: unknown, context: string): OrdersCon
   }
   if (pageInfo.hasNextPage && (typeof pageInfo.endCursor !== "string" || pageInfo.endCursor.length === 0)) {
     return reject(context, "missing-cursor");
+  }
+
+  if (pageInfo.hasNextPage && seenCursors) {
+    const cursor = pageInfo.endCursor as string;
+    if (seenCursors.has(cursor)) return reject(context, "repeated-cursor");
+    seenCursors.add(cursor);
   }
 
   const nodes = (orders as { nodes?: unknown }).nodes;

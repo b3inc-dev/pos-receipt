@@ -482,6 +482,7 @@ async function fetchAllOrders(
   const orders: ShopifyOrder[] = [];
   let cursor: string | null = null;
   let hasNextPage = true;
+  const seenCursors = new Set<string>();
 
   while (hasNextPage) {
     const json = await adminGraphqlWithRetry<{
@@ -499,7 +500,7 @@ async function fetchAllOrders(
       { variables: { first: 100, after: cursor, query, sortKey } },
       "settlementOrders",
     );
-    readOrdersPageOrThrow(json, "settlementOrders");
+    readOrdersPageOrThrow(json, "settlementOrders", seenCursors);
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
@@ -564,6 +565,7 @@ async function fetchOrdersUpdatedInDayRange(
   const orders: OrderWithRefundsCreatedAt[] = [];
   let cursor: string | null = null;
   let hasNextPage = true;
+  const seenCursors = new Set<string>();
 
   while (hasNextPage) {
     const json = await adminGraphqlWithRetry<{
@@ -581,7 +583,7 @@ async function fetchOrdersUpdatedInDayRange(
       { variables: { first: 100, after: cursor, query } },
       "refundsOrders",
     );
-    readOrdersPageOrThrow(json, "refundsOrders");
+    readOrdersPageOrThrow(json, "refundsOrders", seenCursors);
 
     const nodes = json.data?.orders?.nodes ?? [];
     const pageInfo = json.data?.orders?.pageInfo;
