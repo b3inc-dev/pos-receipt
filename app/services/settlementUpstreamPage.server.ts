@@ -85,6 +85,19 @@ export function readOrdersPageOrThrow(json: unknown, context: string, seenCursor
     return reject(context, "invalid-nodes");
   }
 
+  // A truncated nested refund connection must not be counted as complete.
+  for (const node of nodes ?? []) {
+    const refunds = (node as { refunds?: unknown } | null)?.refunds;
+    if (!Array.isArray(refunds)) continue;
+    for (const refund of refunds) {
+      for (const field of ["transactions", "refundLineItems"] as const) {
+        if (refund?.[field]?.pageInfo?.hasNextPage === true) {
+          return reject(context, "nested-refund-connection-incomplete");
+        }
+      }
+    }
+  }
+
   return {
     nodes: nodes ?? [],
     hasNextPage: pageInfo.hasNextPage,
