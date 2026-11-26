@@ -71,4 +71,19 @@ jobs:
               p.write_bytes(fixed)
           assert p.read_bytes() == fixed
           PY
-      - run: node --test --test-concurrency=1 --test-reporter=tap tests/isolated-pg-guard.test.mjs tests/settlement-lock.pg-acceptance.mjs tests/settlement-route.pg-acceptance.mjs tests/settlement-cursor-acceptance.mjs tests/settlement-engine-stream-acceptance.mjs
+      - name: Verify incomplete nested refund parent sensitivity and restore
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          p=Path("app/services/settlementUpstreamPage.server.ts")
+          fixed=p.read_bytes()
+          try:
+              p.write_bytes(subprocess.check_output(["git","show","fac41d8221a12a6598eae4f2fc29c0287f18e3c7:app/services/settlementUpstreamPage.server.ts"]))
+              r=subprocess.run(["node","--test","--test-reporter=tap","--test-name-pattern=RECEIPT-NESTED-REFUND-001","tests/settlement-nested-refund-acceptance.mjs"],capture_output=True,text=True)
+              print(r.stdout)
+              if r.returncode!=1 or "incomplete refund connections must reject" not in r.stdout or "# fail 1" not in r.stdout.splitlines(): raise SystemExit("Unexpected parent failure")
+          finally: p.write_bytes(fixed)
+          if p.read_bytes()!=fixed: raise SystemExit("Not restored")
+          PY
+      - run: node --test --test-concurrency=1 --test-reporter=tap tests/isolated-pg-guard.test.mjs tests/settlement-lock.pg-acceptance.mjs tests/settlement-route.pg-acceptance.mjs tests/settlement-cursor-acceptance.mjs tests/settlement-engine-stream-acceptance.mjs tests/settlement-nested-refund-acceptance.mjs

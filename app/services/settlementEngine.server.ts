@@ -405,6 +405,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
           id
           createdAt
           refundLineItems(first: 250) {
+            pageInfo { hasNextPage }
             nodes {
               quantity
               lineItem { id sku originalUnitPriceSet { shopMoney { amount } } }
@@ -414,6 +415,7 @@ const SETTLEMENT_ORDERS_QUERY = `#graphql
           }
           totalRefundedSet { shopMoney { amount currencyCode } }
           transactions(first: 50) {
+            pageInfo { hasNextPage }
             nodes {
               id
               kind
@@ -458,6 +460,7 @@ const REFUNDS_ORDERS_QUERY = `#graphql
           createdAt
           totalRefundedSet { shopMoney { amount currencyCode } }
           transactions(first: 50) {
+            pageInfo { hasNextPage }
             nodes {
               id
               kind
