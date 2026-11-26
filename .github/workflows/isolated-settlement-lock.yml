@@ -54,4 +54,4 @@ jobs:
               source.write_bytes(fixed)
           assert source.read_bytes() == fixed
           PY
-      - run: node --test --test-concurrency=1 --test-reporter=tap tests/isolated-pg-guard.test.mjs tests/settlement-lock.pg-acceptance.mjs
+      - run: node --test --test-concurrency=1 --test-reporter=tap tests/isolated-pg-guard.test.mjs tests/settlement-lock.pg-acceptance.mjs tests/settlement-route.pg-acceptance.mjs
