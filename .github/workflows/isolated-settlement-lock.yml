@@ -86,4 +86,4 @@ jobs:
           finally: p.write_bytes(fixed)
           if p.read_bytes()!=fixed: raise SystemExit("Not restored")
           PY
-      - run: node --test --test-concurrency=1 --test-reporter=tap tests/isolated-pg-guard.test.mjs tests/settlement-lock.pg-acceptance.mjs tests/settlement-route.pg-acceptance.mjs tests/settlement-cursor-acceptance.mjs tests/settlement-engine-stream-acceptance.mjs tests/settlement-nested-refund-acceptance.mjs tests/refund-overlay-day.pg-acceptance.mjs
+      - run: node --test --test-concurrency=1 --test-reporter=tap tests/isolated-pg-guard.test.mjs tests/settlement-lock.pg-acceptance.mjs tests/settlement-route.pg-acceptance.mjs tests/settlement-cursor-acceptance.mjs tests/settlement-engine-stream-acceptance.mjs tests/settlement-nested-refund-acceptance.mjs tests/refund-overlay-day.pg-acceptance.mjs tests/summary-actual-refund.pg-acceptance.mjs
