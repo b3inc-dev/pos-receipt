@@ -48,3 +48,29 @@ test("30-second deadline rejects after a real lock conflict without deleting ano
     assert.equal(ran,false);assert.equal(await db.settlementOperationLock.count({where:{lockKey:key}}),1);
   }finally{Date.now=originalNow;onConflict=null;await db.settlementOperationLock.deleteMany({where:{lockKey:key}});}
 });
+
+test("RECEIPT-LOCK-OWNER-001: an expired owner's finally keeps the successor lease",async()=>{
+  const key=prefix+"expired-owner",RealDate=Date;
+  let offset=0,firstEntered,releaseFirst,secondEntered,releaseSecond;
+  const firstReady=new Promise(r=>{firstEntered=r}),firstGate=new Promise(r=>{releaseFirst=r});
+  const secondReady=new Promise(r=>{secondEntered=r}),secondGate=new Promise(r=>{releaseSecond=r});
+  class VirtualDate extends RealDate {
+    constructor(...args){if(args.length)super(...args);else super(RealDate.now()+offset);}
+    static now(){return RealDate.now()+offset;}
+  }
+  globalThis.Date=VirtualDate;let first,second;
+  try{
+    first=withLock(key,async()=>{firstEntered();await firstGate;});await firstReady;
+    const firstRow=await db.settlementOperationLock.findUniqueOrThrow({where:{lockKey:key}});
+    offset=61000;
+    second=withLock(key,async()=>{secondEntered();await secondGate;});await secondReady;
+    const secondRow=await db.settlementOperationLock.findUniqueOrThrow({where:{lockKey:key}});
+    assert.notEqual(secondRow.expiresAt.getTime(),firstRow.expiresAt.getTime());
+    releaseFirst();await first;
+    const surviving=await db.settlementOperationLock.findUnique({where:{lockKey:key}});
+    assert.ok(surviving,"old owner's finally must retain the successor row");
+    assert.equal(surviving.expiresAt.getTime(),secondRow.expiresAt.getTime());
+    releaseSecond();await second;
+    assert.equal(await db.settlementOperationLock.count({where:{lockKey:key}}),0);
+  }finally{releaseFirst();releaseSecond();await Promise.allSettled([first,second]);globalThis.Date=RealDate;}
+});
