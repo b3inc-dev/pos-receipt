@@ -31,7 +31,7 @@ export function buildSettlementLockKey(
   return `${shopId}:${loc}:${targetDate}:${operation}`;
 }
 
-async function tryAcquireLock(lockKey: string): Promise<boolean> {
+async function tryAcquireLock(lockKey: string): Promise<Date | null> {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + LOCK_TTL_MS);
 
@@ -43,15 +43,17 @@ async function tryAcquireLock(lockKey: string): Promise<boolean> {
     await prisma.settlementOperationLock.create({
       data: { lockKey, expiresAt },
     });
-    return true;
+    return expiresAt;
   } catch (err) {
     if (!isUniqueConstraintError(err)) throw err;
-    return false;
+    return null;
   }
 }
 
-async function releaseLock(lockKey: string): Promise<void> {
-  await prisma.settlementOperationLock.deleteMany({ where: { lockKey } });
+async function releaseLock(lockKey: string, expiresAt: Date): Promise<void> {
+  // A previous callback may finish after expiry and another operation has acquired
+  // this key. Only remove the lease acquired by this invocation.
+  await prisma.settlementOperationLock.deleteMany({ where: { lockKey, expiresAt } });
 }
 
 /**
@@ -62,11 +64,12 @@ export async function withSettlementOperationLock<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const deadline = Date.now() + LOCK_WAIT_MS;
-  let acquired = false;
+  let acquired: Date | null = null;
 
   while (Date.now() < deadline) {
-    if (await tryAcquireLock(lockKey)) {
-      acquired = true;
+    const lease = await tryAcquireLock(lockKey);
+    if (lease) {
+      acquired = lease;
       break;
     }
     await sleep(POLL_MS);
@@ -79,6 +82,6 @@ export async function withSettlementOperationLock<T>(
   try {
     return await fn();
   } finally {
-    await releaseLock(lockKey);
+    await releaseLock(lockKey, acquired);
   }
 }
