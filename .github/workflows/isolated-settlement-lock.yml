@@ -31,9 +31,27 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm ci
       - run: npm run setup
+      - name: Prove old owner cleanup fails against real PostgreSQL
+        run: |
+          python3 - <<'PY'
+          import pathlib, subprocess, re
+          source = pathlib.Path("app/services/settlementLock.server.ts")
+          fixed = source.read_bytes()
+          try:
+              source.write_bytes(subprocess.check_output(["git", "show", "8cf81df715901f686b8c52a740c52c7f76a02138:app/services/settlementLock.server.ts"]))
+              result = subprocess.run(["node", "--test", "--test-reporter=tap", "--test-name-pattern=RECEIPT-LOCK-OWNER-001", "tests/settlement-lock.pg-acceptance.mjs"], capture_output=True, text=True)
+              print(result.stdout)
+              if result.returncode != 1 or "old owner's finally must retain the successor row" not in result.stdout or not re.search(r"# fail 1\\b", result.stdout):
+                  raise SystemExit("Baseline failed for an unexpected reason")
+              print("BASELINE_EXPECTED_OWNER_FAILURE=1")
+          finally:
+              source.write_bytes(fixed)
+          assert source.read_bytes() == fixed
+          PY
       - run: node --test --test-concurrency=1 --test-reporter=tap tests/isolated-pg-guard.test.mjs tests/settlement-lock.pg-acceptance.mjs
