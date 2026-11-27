@@ -89,7 +89,8 @@ test("RECEIPT-CALLER-RECORD-0600: existing extension caller connects accepted ou
     globalThis.fetch=async(url,init)=>{
       const target=new URL(String(url));assert.equal(target.origin,base);assert.equal(target.pathname,"/api/print/printed");
       assert.equal(init.method,"POST");assert.deepEqual(JSON.parse(init.body),{kind:"receipt",id});recordPosts++;
-      return oldFetch(url,init);
+      const response=await oldFetch(url,{...init,headers:{...init.headers,origin:"https://synthetic-pos.invalid","user-agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36"}});
+      assert.equal(response.status,200,"Existing normal browser host envelope must reach the printed action");return response;
     };
     globalThis.shopify={session:{getSessionToken:async()=>normalToken(a)},printing:{
       getPrinters:async()=>mode==="dialog"?[]:[printer],
