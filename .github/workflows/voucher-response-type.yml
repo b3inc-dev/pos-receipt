@@ -1,0 +1,58 @@
+name: Scoped voucher GraphQL type compatibility
+on:
+  pull_request:
+    paths:
+      - 'app/services/voucherCartEntry.server.ts'
+      - '.github/workflows/voucher-response-type.yml'
+permissions:
+  contents: read
+jobs:
+  voucher-type:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SHOPIFY_API_KEY: synthetic-voucher-type
+      SHOPIFY_API_SECRET: synthetic-voucher-type-only
+      SHOPIFY_APP_URL: https://voucher-type.invalid
+      DATABASE_URL: postgresql://fixture:fixture@127.0.0.1:5432/isolated_typecheck
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - run: npx react-router typegen
+      - name: Prove type-only change emits exactly the same JavaScript
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+          import {execFileSync} from 'node:child_process';
+          import ts from 'typescript';
+          const path='app/services/voucherCartEntry.server.ts';
+          const old=execFileSync('git',['show','ee6038a8070b77075d16e34378f7c43f50c35798:'+path],{encoding:'utf8'});
+          const current=readFileSync(path,'utf8');
+          const emit=s=>ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+          assert.equal(emit(current),emit(old),'A type correction must not change execution statements');
+          console.log('VOUCHER_EMITTED_JS_UNCHANGED=1');
+          JS
+      - name: Run existing voucher business regressions
+        run: node --import tsx --experimental-test-module-mocks --test app/services/voucherCartEntry.test.ts
+      - name: Count the whole strict TypeScript outcome and reject any remaining voucher diagnostics
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {spawnSync} from 'node:child_process';
+          const r=spawnSync('node_modules/.bin/tsc',['--noEmit','--pretty','false'],{encoding:'utf8'});
+          const errors=(r.stdout+'\n'+r.stderr).split('\n').filter(line=>/error TS\d+:/.test(line));
+          const target=errors.filter(line=>line.startsWith('app/services/voucherCartEntry.server.ts('));
+          assert.equal(target.length,0,JSON.stringify(target));
+          assert.equal(r.status,2,'Existing other type debt is expected and must stay reported');
+          assert.ok(errors.length>0,'Do not turn partial clearance into whole quality acceptance');
+          console.log(JSON.stringify({voucherDiagnostics:target.length,totalTypeDiagnostics:errors.length,typecheckExit:r.status,wholeQualityGreen:false,realStoreAccepted:false}));
+          JS
