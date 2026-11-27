@@ -1,0 +1,41 @@
+name: Printed production framework PostgreSQL
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      DATABASE_URL: postgresql://postgres@localhost:5432/postgres
+      ISOLATED_PG_ACCEPTANCE_URL: postgresql://postgres@localhost:5432/postgres
+      ISOLATED_PG_ACCEPTANCE: "1"
+      SHOPIFY_API_KEY: "0123456789abcdef0123456789abcdef"
+      SHOPIFY_API_SECRET: "synthetic-print-record-0325"
+      SHOPIFY_APP_URL: "https://synthetic-app.invalid"
+      APP_DISTRIBUTION: "public"
+      SALES_SUMMARY_WEBHOOK_QUEUE: "0"
+      SALES_SUMMARY_FILL_QUEUE: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run setup
+      - run: npm run build
+      - run: node --test --test-reporter=tap tests/printed-framework.pg-acceptance.mjs
