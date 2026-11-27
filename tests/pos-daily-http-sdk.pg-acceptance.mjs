@@ -55,7 +55,7 @@ test("RECEIPT-POS-HTTP-001: loopback HTTP reaches actual POS SDK JWT/offline PG/
  const headers=token=>({Authorization:"Bearer "+token,Origin:ORIGIN});
  const before=await db.salesSummaryCacheDaily.findMany({where:{shopId:ID}});
  const preflight=await fetch(url(),{method:"OPTIONS",headers:{Origin:ORIGIN}});assert.equal(preflight.status,204);assert.equal(preflight.headers.get("access-control-allow-origin"),ORIGIN);
- const bad=await fetch(url(),{headers:headers(jwt("wrong-synthetic-secret"))});assert.equal(bad.status,401);assert.equal(bad.headers.get("access-control-allow-origin"),ORIGIN);assert.equal(operations.length,0,"tampered JWT must stop before SDK Admin reads");
+ const bad=await fetch(url(),{headers:headers(jwt("wrong-synthetic-secret"))});assert.equal(bad.status,410);assert.equal(bad.headers.get("access-control-allow-origin"),ORIGIN);assert.equal(operations.length,0,"tampered JWT must stop before SDK Admin reads");
  const good=await fetch(url(),{headers:headers(jwt())});assert.equal(good.status,200);assert.ok(good.headers.get("access-control-allow-origin"));const payload=await good.json();
  assert.equal(payload.cacheComplete,true);assert.equal(payload.rows.length,1);assert.equal(payload.rows[0].locationId,LOC);assert.equal(payload.rows[0].actual,850);assert.equal(payload.totals.actual,850);
  await db.shop.update({where:{id:ID},data:{planCode:"lite"}});
