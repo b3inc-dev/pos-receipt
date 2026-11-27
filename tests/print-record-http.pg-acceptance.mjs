@@ -78,7 +78,7 @@ test("RECEIPT-PRINT-RECORD-HTTP-PG-001: accepted-print mark reaches actual HTTP/
   const rows = () => db.printRecord.findMany({ where: { shopId: { in: tenants.map((f) => f.id) } }, orderBy: [{ shopId: "asc" }, { kind: "asc" }, { targetId: "asc" }] });
   const issuesBefore = await db.receiptIssue.findMany({ where: { shopId: { in: tenants.map((f) => f.id) } }, orderBy: { id: "asc" } });
   const first = await post(a, "sales", "gid://shopify/Order/325"); assert.equal(first.status, 200); assert.equal((await first.json()).ok, true);
-  assert.equal(first.headers.get("access-control-allow-origin"), "https://synthetic-pos.invalid");
+  assert.equal(first.headers.get("access-control-allow-origin"), "*", "Existing normal SDK success response uses wildcard CORS; no product CORS change");
   const firstRow = (await rows())[0]; assert.equal(firstRow.targetId, "325"); assert.equal(firstRow.printCount, 1);
   assert.equal((await post(a, "sales", "325")).status, 200);
   let aSales = (await rows()).find((r) => r.shopId === a.id && r.kind === "sales");
