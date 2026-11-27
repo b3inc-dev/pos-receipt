@@ -52,10 +52,10 @@ after(async()=>{try{await db.shop.deleteMany({where:{id:ID}});await db.session.d
  finally{http?.closeAllConnections();if(http)await new Promise(resolve=>http.close(resolve));await vite?.close();await db.$disconnect();delete globalThis.prismaGlobal;globalThis.fetch=originalFetch;setAbstractFetchFunc(originalFetch);for(const k of envKeys){if(priorEnv[k]===undefined)delete process.env[k];else process.env[k]=priorEnv[k];}}});
 test("RECEIPT-POS-HTTP-001: loopback HTTP reaches actual POS SDK JWT/offline PG/plan/daily cache, rejects tamper and Lite, preserves CORS",{timeout:30000},async()=>{
  const url=()=>base+"/api/sales-summary/daily?targetDate="+DAY+"&cachedOnly=1&locationIds%5B%5D=2323";
- const headers=token=>({Authorization:"Bearer "+token,Origin:ORIGIN});
+ const headers=token=>({Authorization:"Bearer "+token,Origin:ORIGIN,"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36"});
  const before=await db.salesSummaryCacheDaily.findMany({where:{shopId:ID}});
  const preflight=await fetch(url(),{method:"OPTIONS",headers:{Origin:ORIGIN}});assert.equal(preflight.status,204);assert.equal(preflight.headers.get("access-control-allow-origin"),ORIGIN);
- const bad=await fetch(url(),{headers:headers(jwt("wrong-synthetic-secret"))});assert.equal(bad.status,410);assert.equal(bad.headers.get("access-control-allow-origin"),ORIGIN);assert.equal(operations.length,0,"tampered JWT must stop before SDK Admin reads");
+ const bad=await fetch(url(),{headers:headers(jwt("wrong-synthetic-secret"))});assert.equal(bad.status,401);assert.equal(bad.headers.get("access-control-allow-origin"),ORIGIN);assert.equal(operations.length,0,"tampered JWT must stop before SDK Admin reads");
  const good=await fetch(url(),{headers:headers(jwt())});assert.equal(good.status,200);assert.ok(good.headers.get("access-control-allow-origin"));const payload=await good.json();
  assert.equal(payload.cacheComplete,true);assert.equal(payload.rows.length,1);assert.equal(payload.rows[0].locationId,LOC);assert.equal(payload.rows[0].actual,850);assert.equal(payload.totals.actual,850);
  await db.shop.update({where:{id:ID},data:{planCode:"lite"}});
