@@ -104,6 +104,6 @@ test("RECEIPT-PRINTED-FRAMEWORK-PG-001: existing production server.js and compil
   assert.deepEqual(await db.receiptIssue.findMany({ where: { shopId: { in: tenants.map((f) => f.id) } }, orderBy: { id: "asc" } }), issuesBefore,
     "Print decoration records must not alter synthetic issued amounts or issue rows");
   assert.equal(await db.settlement.count({ where: { shopId: { in: tenants.map((f) => f.id) } } }), 0);
-  assert.ok(operations.length > 0); assert.ok(operations.every((c) => c.type === "read" && c.operation === "ShopPlan"));
+  assert.deepEqual(operations, [], "Both existing synthetic Shops are seeded: resolveShop returns before GraphQL; no external read or unexpected network is expected");
   console.log("RECEIPT_PRINTED_FRAMEWORK_PG_ACCEPTED=1");
 });
