@@ -1,0 +1,31 @@
+name: Standalone candidate type diagnostic
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/standalone-type-diagnostic.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SHOPIFY_API_KEY: synthetic-typecheck-key
+      SHOPIFY_API_SECRET: synthetic-typecheck-secret
+      SHOPIFY_APP_URL: https://typecheck.invalid
+      DATABASE_URL: postgresql://fixture:fixture@127.0.0.1:5432/isolated_typecheck
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - run: npx react-router typegen
+      - name: Standalone TypeScript check (strict outcome)
+        run: npx tsc --noEmit
