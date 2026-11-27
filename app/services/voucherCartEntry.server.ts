@@ -119,7 +119,7 @@ export async function registerVoucherFromCartEntry(
   const existing = await findExistingVoucherEvent(shopId, orderGid);
   if (existing) return existingResult(existing);
 
-  let order: {
+  type VoucherCartOrder = {
     id: string;
     name?: string | null;
     createdAt?: string | null;
@@ -127,9 +127,10 @@ export async function registerVoucherFromCartEntry(
     currencyCode?: string | null;
     customAttributes?: { key: string; value?: string | null }[] | null;
     retailLocation?: { id?: string | null } | null;
-  } | null = null;
+  };
+  let order: VoucherCartOrder | null = null;
   try {
-    const json = await adminGraphqlWithRetry<{ errors?: unknown[]; data?: { order?: typeof order } }>(
+    const json = await adminGraphqlWithRetry<{ errors?: unknown[]; data?: { order?: VoucherCartOrder | null } }>(
       admin as AdminGraphqlClient,
       ORDER_CART_ENTRY_QUERY,
       { variables: { id: orderGid } },
