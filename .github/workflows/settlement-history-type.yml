@@ -1,0 +1,58 @@
+name: Scoped settlement history Prisma type compatibility
+on:
+  pull_request:
+    paths:
+      - 'app/routes/api.settlements.print.tsx'
+      - '.github/workflows/settlement-history-type.yml'
+permissions:
+  contents: read
+jobs:
+  settlement-history-type:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SHOPIFY_API_KEY: synthetic-settlement-history-type
+      SHOPIFY_API_SECRET: synthetic-settlement-history-type-only
+      SHOPIFY_APP_URL: https://settlement-history-type.invalid
+      DATABASE_URL: postgresql://fixture:fixture@127.0.0.1:5432/isolated_typecheck
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - run: npx react-router typegen
+      - name: Prove type-only change emits the same JavaScript
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+          import {execFileSync} from 'node:child_process';
+          import ts from 'typescript';
+          const path='app/routes/api.settlements.print.tsx';
+          const old=execFileSync('git',['show','30392f29d5d85194e4618257187a055ce58a22a8:'+path],{encoding:'utf8'});
+          const current=readFileSync(path,'utf8');
+          const emit=s=>ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+          assert.equal(emit(current),emit(old),'A type correction must not change execution statements');
+          console.log('SETTLEMENT_HISTORY_EMITTED_JS_UNCHANGED=1');
+          JS
+      - name: Run existing settlement snapshot and superseded-state regressions
+        run: node --import tsx --experimental-test-module-mocks --test app/services/settlementPrintSnapshot.test.ts app/services/settlementConfirmedPure.test.ts
+      - name: Verify the target boundary and report remaining strict type debt
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {spawnSync} from 'node:child_process';
+          const r=spawnSync('node_modules/.bin/tsc',['--noEmit','--pretty','false'],{encoding:'utf8'});
+          const errors=(r.stdout+'\n'+r.stderr).split('\n').filter(line=>/error TS\d+:/.test(line));
+          const target=errors.filter(line=>line.startsWith('app/routes/api.settlements.print.tsx('));
+          assert.equal(target.length,0,JSON.stringify(target));
+          assert.equal(r.status,2,'Other strict type debt must remain visible');
+          assert.equal(errors.length,72,'Parent fixed SHA had 73 diagnostics; only this boundary is removed');
+          console.log(JSON.stringify({settlementHistoryDiagnostics:target.length,totalTypeDiagnostics:errors.length,typecheckExit:r.status,wholeQualityGreen:false,realStoreAccepted:false}));
+          JS
